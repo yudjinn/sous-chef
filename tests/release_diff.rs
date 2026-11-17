@@ -24,6 +24,8 @@ use sous_chef::workspace::kas::KasEnv;
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .args([
+            // Read-only commands (status on the live checkout) never refresh the index.
+            "--no-optional-locks",
             "-c",
             "user.name=test",
             "-c",
@@ -308,6 +310,10 @@ fn fixture(root: &Path) -> Fixture {
         ..Config::default()
     };
     config.bitbake.enabled = false;
+    fixture_from(config)
+}
+
+fn fixture_from(config: Config) -> Fixture {
     let workspace = Workspace::discover_in(&config, &KasEnv::default()).unwrap();
     let cache = tempfile::tempdir().unwrap();
     let mut index = Index::open_in(cache.path(), &workspace).unwrap();
@@ -445,7 +451,7 @@ async fn release_diff_text_and_json() {
             ("stable", "unchanged"),
             ("widget", "changed"),
             ("libfoo", "changed"),
-            ("recipes-core/shared/shared.inc", "changed"),
+            ("meta-mine:recipes-app/app/app_1.0.bb", "changed"),
         ]
     );
     let hello = &d.recipes[0];
@@ -696,4 +702,90 @@ async fn large_diff_goes_to_a_handle() {
         }
     }
     assert_eq!(lines.join("\n"), stored.trim_end_matches('\n'));
+}
+
+#[test]
+fn cli_writes_json_and_refuses_bad_revisions() {
+    let (tmp, root) = build_repo();
+    write(
+        &root.join("sous-chef.toml"),
+        "build_dir = \"build\"\nwritable_layers = [\"meta-mine\"]\n",
+    );
+    let cache = tmp.path().join("cache");
+    let run = |extra: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_sous-chef"))
+            .arg("diff")
+            .args(extra)
+            .current_dir(&root)
+            .env("XDG_CACHE_HOME", &cache)
+            .output()
+            .unwrap()
+    };
+    let out = run(&["meta-up", "v1", "HEAD", "--format", "json"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["schema"], "sous-chef-diff/1");
+    assert_eq!(v["summary"]["appends"]["no_longer_applies"], 1);
+    let text = run(&["meta-up", "v1", "HEAD"]);
+    assert_eq!(text.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&text.stdout).starts_with("recipe\tkind\t"));
+    let target = tmp.path().join("x");
+    let bad = run(&["meta-up", "--", &format!("--output={}", target.display())]);
+    assert_eq!(bad.status.code(), Some(2), "{bad:?}");
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("refused"));
+    assert!(!target.exists());
+}
+
+// ---------------------------------------------------------------------------------------
+// The live workspace (docs/live-environment.md); skipped unless SOUS_CHEF_LIVE is set.
+
+#[tokio::test]
+#[ignore = "needs SOUS_CHEF_LIVE (docs/live-environment.md)"]
+async fn live_openembedded_core_release_diff() {
+    let Some(live) = std::env::var_os("SOUS_CHEF_LIVE").map(PathBuf::from) else {
+        eprintln!("SOUS_CHEF_LIVE not set; skipped");
+        return;
+    };
+    let root = live.join("yocto-kiss");
+    let repo = root.join("openembedded-core");
+    let cfg = Config::load(&sous_chef::config::CliOverrides {
+        config: Some(live.join("scratch/sous-chef.toml")),
+        work_dir: root.clone(),
+        ..Default::default()
+    })
+    .unwrap();
+    let before = repo_state(&repo);
+    let f = fixture_from(cfg);
+    let started = std::time::Instant::now();
+    let d = diff::build(
+        &f.ctx,
+        &Options {
+            layer: "meta".into(),
+            from: "yocto-6.0".into(),
+            to: Some("HEAD".into()),
+            recipe: None,
+            all: true,
+        },
+    )
+    .await
+    .unwrap();
+    let secs = started.elapsed().as_secs_f64();
+    assert!(secs < 60.0, "{secs} s");
+    let text = diff::render_text(&d);
+    // Invariants: every recipe is on some side, pointers are into meta, seven cells a row,
+    // no absolute path, the counts add up, and the checkout is untouched.
+    let s = &d.summary;
+    assert!(s.compared > 500, "{}", s.line);
+    assert_eq!(s.compared, s.changed + s.added + s.removed + s.unchanged);
+    for r in d.recipes.iter().filter(|r| r.kind == "recipe") {
+        assert!(r.from_file.is_some() || r.to_file.is_some(), "{}", r.name);
+        for p in r.from_file.iter().chain(&r.to_file) {
+            assert!(p.starts_with("meta:"), "{p}");
+        }
+    }
+    for line in text.lines().take_while(|l| !l.starts_with("note: ")) {
+        assert_eq!(line.split('\t').count(), 7, "{line}");
+    }
+    assert!(!text.contains(&root.display().to_string()));
+    assert_eq!(repo_state(&repo), before);
 }

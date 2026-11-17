@@ -6,6 +6,7 @@
 //! - `lint`  -> `lint::cli`, arguments in `lint::LintCliArgs` (T4.1)
 //! - `hook`  -> `hook::handle` (T7.1)
 //! - `audit` -> `audit::cli`, arguments in `audit::AuditCliArgs` (T8.6)
+//! - `diff`  -> `diff::cli`, arguments in `diff::DiffCliArgs` (T8.4)
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -51,6 +52,9 @@ enum Command {
     Hook,
     /// Write one findings report for a whole build repository (every layer under ROOT).
     Audit(sous_chef::audit::AuditCliArgs),
+    /// Statement-level diff of a layer's recipes between two revisions of its repository,
+    /// and its effect on the bbappends of your writable layers. Read-only.
+    Diff(sous_chef::diff::DiffCliArgs),
 }
 
 /// The configuration for `audit`: discovery starts at ROOT, and the global flags are
@@ -127,6 +131,17 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 Ok(_) => Ok(ExitCode::SUCCESS),
                 Err(e) => {
                     eprintln!("sous-chef audit: {e:#}");
+                    Ok(ExitCode::from(2))
+                }
+            }
+        }
+        Command::Diff(args) => {
+            // Exit status: 0 the diff was produced (whatever it finds), 2 it could not be.
+            let result = load_config(&cli).and_then(|cfg| Ok(sous_chef::diff::cli(&cfg, args)?));
+            match result {
+                Ok(_) => Ok(ExitCode::SUCCESS),
+                Err(e) => {
+                    eprintln!("sous-chef diff: {e:#}");
                     Ok(ExitCode::from(2))
                 }
             }

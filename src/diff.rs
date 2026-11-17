@@ -53,6 +53,9 @@ use crate::workspace::{Layer, Workspace, resolve};
 /// The `schema` field of the JSON form; bumped when a field is renamed or removed.
 pub const SCHEMA: &str = "sous-chef-diff/1";
 
+/// The `kind` of a [`RecipeDiff`] for the files an own file requires from the layer.
+pub const INCLUDES_KIND: &str = "includes of your file";
+
 /// Longest value shown in a cell, in characters (each side of `old -> new`).
 const VALUE_CHARS: usize = 70;
 
@@ -198,9 +201,9 @@ pub struct PatchNote {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RecipeDiff {
-    /// `PN`, or the path of an included file.
+    /// `PN`, or the own file (`layer:path`) whose includes these are.
     pub name: String,
-    /// `recipe` or `included file`.
+    /// `recipe` or [`INCLUDES_KIND`].
     pub kind: &'static str,
     /// `changed`, `unchanged`, `added` or `removed`.
     pub status: &'static str,
@@ -251,7 +254,8 @@ pub struct ClassChange {
     pub statements: usize,
     /// Compared recipes that inherit it directly (at either revision).
     pub inherited_by: Vec<String>,
-    /// Own files that inherit it.
+    /// Own files that inherit it, directly (the `inherit` pointer) or through other files
+    /// (`file (through pointer)`), from the index.
     pub own_users: Vec<String>,
 }
 
@@ -1209,14 +1213,33 @@ fn items_of(tree: &Tree, layer: &str) -> Vec<Item> {
 
 /// Shortens a value for a cell: whitespace collapsed, quoted, cut at [`VALUE_CHARS`].
 fn short(s: &str) -> String {
-    let c = collapse(s);
-    let c = words::abbreviate(&c);
-    let n = c.chars().count();
-    if n <= VALUE_CHARS {
-        return format!("\"{c}\"");
+    let c = words::abbreviate(&collapse(s));
+    cut(&c, 0)
+}
+
+/// `s` (whitespace collapsed) quoted, from character `start` (`...` before it when it is
+/// not the start), cut at [`VALUE_CHARS`] with its length when cut.
+fn cut(s: &str, start: usize) -> String {
+    let n = s.chars().count();
+    let lead = if start > 0 { "..." } else { "" };
+    let rest: String = s.chars().skip(start).collect();
+    if rest.chars().count() <= VALUE_CHARS {
+        return format!("\"{lead}{rest}\"");
     }
-    let kept: String = c.chars().take(VALUE_CHARS - 3).collect();
-    format!("\"{}...\" ({n} chars)", kept.trim_end())
+    let kept: String = rest.chars().take(VALUE_CHARS - 3).collect();
+    format!("\"{lead}{}...\" ({n} chars)", kept.trim_end())
+}
+
+/// Both sides of a changed value, shortened so the difference shows: `${@...}` groups are
+/// abbreviated unless that hides the difference, and when the two share a long prefix
+/// the cells start shortly before the first differing character.
+fn short_pair(a: &str, b: &str) -> (String, String) {
+    let (ca, cb) = (collapse(a), collapse(b));
+    let (aa, ab) = (words::abbreviate(&ca), words::abbreviate(&cb));
+    let (x, y) = if aa != ab { (aa, ab) } else { (ca, cb) };
+    let common = x.chars().zip(y.chars()).take_while(|(p, q)| p == q).count();
+    let start = if common > 30 { common - 20 } else { 0 };
+    (cut(&x, start), cut(&y, start))
 }
 
 fn body_summary(
@@ -1230,13 +1253,13 @@ fn body_summary(
             let b: Vec<&str> = n.norm.lines().collect();
             let first = (0..a.len().max(b.len())).find(|i| a.get(*i) != b.get(*i));
             first.map(|i| {
-                let side = |l: Option<&&str>| l.map_or("(end)".to_string(), |l| short(l));
-                format!(
-                    "first difference at code line {}: {} -> {}",
-                    i + 1,
-                    side(a.get(i)),
-                    side(b.get(i))
-                )
+                let (x, y) = match (a.get(i), b.get(i)) {
+                    (Some(x), Some(y)) => short_pair(x, y),
+                    (Some(x), None) => (short(x), "(end)".into()),
+                    (None, Some(y)) => ("(end)".into(), short(y)),
+                    (None, None) => (String::new(), String::new()),
+                };
+                format!("first difference at code line {}: {x} -> {y}", i + 1)
             })
         }
         _ => None,
@@ -1255,7 +1278,13 @@ fn change_of(
         body_summary(o, n)
     } else {
         let show = |i: &Item| (!i.raw.is_empty()).then(|| short(&i.raw));
-        (o.and_then(show), n.and_then(show), None)
+        match (o, n) {
+            (Some(a), Some(b)) if !a.raw.is_empty() && !b.raw.is_empty() => {
+                let (x, y) = short_pair(&a.raw, &b.raw);
+                (Some(x), Some(y), None)
+            }
+            _ => (o.and_then(show), n.and_then(show), None),
+        }
     };
     Change {
         kind,
@@ -1460,9 +1489,9 @@ pub struct OwnFile {
     pub text: String,
     /// Absolute path of the file's directory.
     pub dir: PathBuf,
-    /// `require` / `include` targets in the diffed layer (layer-relative paths), from the
-    /// index.
-    pub includes: Vec<String>,
+    /// `require` / `include` targets in the diffed layer (layer-relative paths) with the
+    /// line of the statement, from the index.
+    pub includes: Vec<(String, u32)>,
 }
 
 impl OwnFile {
@@ -1492,9 +1521,12 @@ pub fn own_files(ctx: &Ctx, index: &crate::index::Index, target: &str) -> Result
             let includes = query::edges_from(index, f.id)?
                 .into_iter()
                 .filter(|e| e.kind == "require" || e.kind == "include")
-                .filter_map(|e| e.target)
-                .filter(|t| t.layer == target)
-                .map(|t| t.path.to_string_lossy().replace('\\', "/"))
+                .filter_map(|e| {
+                    let line = e.line.unwrap_or(1);
+                    e.target
+                        .filter(|t| t.layer == target)
+                        .map(|t| (t.path.to_string_lossy().replace('\\', "/"), line))
+                })
                 .collect();
             out.push(OwnFile {
                 layer: layer.name.clone(),
@@ -1597,7 +1629,40 @@ pub async fn build(ctx: &Ctx, opts: &Options) -> Result<Diff> {
         index.refresh(&ctx.workspace)?;
         own_files(ctx, &index, &opts.layer)?
     };
-    compute(&ctx.workspace, &own, opts)
+    let mut d = compute(&ctx.workspace, &own, opts)?;
+    // Own files that inherit a changed class, directly or through other files (the index's
+    // edges, as the workspace is now).
+    let own_layers: BTreeSet<&str> = ctx
+        .workspace
+        .layers
+        .iter()
+        .filter(|l| l.writable && l.name != d.layer)
+        .map(|l| l.name.as_str())
+        .collect();
+    let index = ctx.index.lock().await;
+    for c in &mut d.classes {
+        let name = file_name(&c.path).trim_end_matches(".bbclass");
+        let mut users = Vec::new();
+        for u in query::inheritors(&index, name, true)? {
+            if !own_layers.contains(u.file.layer.as_str()) {
+                continue;
+            }
+            users.push(if u.depth == 1 {
+                u.via.to_string()
+            } else {
+                format!(
+                    "{}:{} (through {})",
+                    u.file.layer,
+                    u.file.path.display(),
+                    u.via
+                )
+            });
+        }
+        users.sort();
+        users.dedup();
+        c.own_users = users;
+    }
+    Ok(d)
 }
 
 fn layer_or_error<'a>(ws: &'a Workspace, name: &str) -> Result<&'a Layer> {
@@ -1789,60 +1854,66 @@ pub fn compute(ws: &Workspace, own: &[OwnFile], opts: &Options) -> Result<Diff> 
         (a.severity, &a.recipe, &a.append).cmp(&(b.severity, &b.recipe, &b.append))
     });
 
-    // Files the own layers include from this layer (not for a single recipe).
-    let mut includes: BTreeMap<String, Vec<&OwnFile>> = BTreeMap::new();
+    // Per own file, the files it requires from this layer, as one tree (not for a single
+    // recipe): a statement moved between two of them is then a change, not a removal and
+    // an addition.
+    let mut included = Vec::new();
     if opts.recipe.is_none() {
         for f in own {
-            for inc in &f.includes {
-                if inc.ends_with(".bb") {
-                    continue;
-                }
-                includes.entry(inc.clone()).or_default().push(f);
-            }
-        }
-    }
-    let mut included = Vec::new();
-    for (path, users) in &includes {
-        let vars = users
-            .first()
-            .map(|u| NameVars::from_file(file_name(&u.path)))
-            .unwrap_or_default();
-        let t_old = if old.exists(path) {
-            build_tree(&mut old, &mut parses, &env, path, &vars)?
-        } else {
-            Tree::default()
-        };
-        let t_new = if new.exists(path) {
-            build_tree(&mut new, &mut parses, &env, path, &vars)?
-        } else {
-            Tree::default()
-        };
-        let reason = format!(
-            "required by {}",
-            users
+            let incs: Vec<&(String, u32)> = f
+                .includes
                 .iter()
-                .map(|u| loc_str(&u.layer, &u.path, LineSpan::line(1)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        let mut rd = tree_diff(
-            &layer.name,
-            path.clone(),
-            "included file",
-            reason,
-            &t_old,
-            &t_new,
-            (old.exists(path)).then(|| path.clone()),
-            (new.exists(path)).then(|| path.clone()),
-        );
-        rd.from_version = None;
-        rd.to_version = None;
-        trees.push((rd.name.clone(), t_old, t_new));
-        included.push(rd);
+                .filter(|(p, _)| !p.ends_with(".bb"))
+                .collect();
+            if incs.is_empty() {
+                continue;
+            }
+            let vars = NameVars::from_file(file_name(&f.path));
+            let mut t_old = Tree::default();
+            let mut t_new = Tree::default();
+            for (path, _) in &incs {
+                for (side, tree) in [(&mut old, &mut t_old), (&mut new, &mut t_new)] {
+                    if !side.exists(path) || tree.files.iter().any(|x| &x.path == path) {
+                        continue;
+                    }
+                    let t = build_tree(side, &mut parses, &env, path, &vars)?;
+                    for file in t.files {
+                        if !tree.files.iter().any(|x| x.path == file.path) {
+                            tree.files.push(file);
+                        }
+                    }
+                    tree.outside.extend(t.outside);
+                }
+            }
+            let reason = format!(
+                "requires {}",
+                incs.iter()
+                    .map(|(p, line)| format!("{p} (line {line})"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let name = loc_str(&f.layer, &f.path, LineSpan::line(1));
+            let name = name.trim_end_matches(":1").to_string();
+            let mut rd = tree_diff(
+                &layer.name,
+                name.clone(),
+                INCLUDES_KIND,
+                reason,
+                &t_old,
+                &t_new,
+                0,
+                Some(String::new()),
+                Some(String::new()),
+            );
+            rd.from_file = None;
+            rd.to_file = None;
+            trees.push((rd.name.clone(), t_old, t_new));
+            included.push(rd);
+        }
     }
 
     // Classes.
-    let classes = class_changes(&changed, &mut old, &mut new, &mut parses, &env, &trees, own)?;
+    let classes = class_changes(&changed, &mut old, &mut new, &mut parses, &env, &trees)?;
 
     // Order: own-appended recipes first, then the rest by name; unchanged recipes of an
     // `all` run are counted only.
@@ -1896,6 +1967,7 @@ fn tree_diff(
     reason: String,
     t_old: &Tree,
     t_new: &Tree,
+    skip_root: usize,
     from_file: Option<String>,
     to_file: Option<String>,
 ) -> RecipeDiff {
@@ -1911,13 +1983,13 @@ fn tree_diff(
     let old_paths: BTreeMap<&str, &TreeFile> = t_old
         .files
         .iter()
-        .skip(1)
+        .skip(skip_root)
         .map(|f| (f.path.as_str(), f))
         .collect();
     let new_paths: BTreeMap<&str, &TreeFile> = t_new
         .files
         .iter()
-        .skip(1)
+        .skip(skip_root)
         .map(|f| (f.path.as_str(), f))
         .collect();
     let gone: Vec<&TreeFile> = old_paths
@@ -2090,6 +2162,7 @@ fn recipe_diff(
         reason,
         &t_old,
         &t_new,
+        1,
         p.old.as_ref().map(|r| r.path.clone()),
         p.new.as_ref().map(|r| r.path.clone()),
     );
@@ -2497,8 +2570,20 @@ fn class_changes(
     parses: &mut Parses,
     env: &Env,
     trees: &[(String, Tree, Tree)],
-    own: &[OwnFile],
 ) -> Result<Vec<ClassChange>> {
+    // The classes each compared tree inherits directly, at either revision.
+    let inherit_sets: Vec<(&String, BTreeSet<String>)> = trees
+        .iter()
+        .map(|(n, a, b)| {
+            let set = items_of(a, &env.layer.name)
+                .into_iter()
+                .chain(items_of(b, &env.layer.name))
+                .filter(|i| i.kind == Kind::Inherit)
+                .map(|i| i.group)
+                .collect();
+            (n, set)
+        })
+        .collect();
     let mut out = Vec::new();
     for (path, change) in changed.iter().filter(|(p, _)| p.ends_with(".bbclass")) {
         let name = file_name(path).trim_end_matches(".bbclass");
@@ -2521,34 +2606,19 @@ fn class_changes(
             &items_of(&a, &env.layer.name),
             &items_of(&b, &env.layer.name),
         );
-        let inherits = |t: &Tree| {
-            items_of(t, &env.layer.name)
-                .iter()
-                .any(|i| i.kind == Kind::Inherit && i.group == name)
-        };
-        let mut inherited_by: Vec<String> = trees
+        let mut inherited_by: Vec<String> = inherit_sets
             .iter()
-            .filter(|(_, x, y)| inherits(x) || inherits(y))
-            .map(|(n, _, _)| n.clone())
+            .filter(|(_, set)| set.contains(name))
+            .map(|(n, _)| (*n).clone())
             .collect();
         inherited_by.sort();
         inherited_by.dedup();
-        let mut own_users: Vec<String> = Vec::new();
-        for f in own {
-            for st in &parse::parse(&f.text).statements {
-                if let StatementKind::Inherit { classes, .. } = &st.kind
-                    && words::words(classes).contains(&name)
-                {
-                    own_users.push(f.pointer(st.span.start));
-                }
-            }
-        }
         out.push(ClassChange {
             path: path.clone(),
             change,
             statements: c.len(),
             inherited_by,
-            own_users,
+            own_users: Vec::new(),
         });
     }
     Ok(out)
@@ -2604,10 +2674,10 @@ fn summary_line(d: &Diff) -> String {
         let changed = d
             .recipes
             .iter()
-            .filter(|r| r.kind == "included file" && r.status != "unchanged")
+            .filter(|r| r.kind == INCLUDES_KIND && r.status != "unchanged")
             .count();
         line.push_str(&format!(
-            "; included files your layers require: {}, {changed} changed",
+            "; your files requiring files of the layer: {}, {changed} with changes",
             s.included_files
         ));
     }
@@ -2747,7 +2817,7 @@ pub fn table(d: &Diff) -> Table {
         if !version.is_empty() {
             value.push(version);
         }
-        value.push(format!("{listed} statements differ"));
+        value.push(format!("{listed} changes listed"));
         if r.whitespace_only + r.cosmetic_files > 0 {
             value.push(format!(
                 "{} whitespace-only statements and {} comment-only files counted",
@@ -2805,6 +2875,9 @@ pub fn table(d: &Diff) -> Table {
     }
     for c in &d.classes {
         let mut v = format!("{} statements differ", c.statements);
+        if c.path.starts_with("classes-global/") {
+            v.push_str("; a global class (base or INHERIT): it can affect every recipe");
+        }
         if !c.inherited_by.is_empty() {
             v.push_str(&format!(
                 "; inherited directly by compared {}",
