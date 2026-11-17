@@ -11,7 +11,7 @@ use std::time::SystemTime;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::bitbake::BbEnv;
+use crate::bitbake::environment_state;
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::mcp::{Ctx, index_path};
@@ -82,6 +82,10 @@ pub struct BitbakeStatus {
     pub environment: bool,
     pub env_build_dir: Option<String>,
     pub init_script: Option<String>,
+    /// `init-script` or `initialised` (already set up when the server started).
+    pub env_mode: Option<String>,
+    /// Why no environment was found.
+    pub env_problem: Option<String>,
 }
 
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
@@ -112,8 +116,11 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     report.index.age_secs = age_secs(&path);
     report.index.path = Some(path.display().to_string());
 
-    if let Some(env) = BbEnv::detect(&ctx.config, &ctx.workspace) {
+    let state = environment_state(&ctx.config, &ctx.workspace);
+    report.bitbake.env_problem = state.problem;
+    if let Some(env) = state.env {
         report.bitbake.environment = true;
+        report.bitbake.env_mode = Some(env.mode().to_string());
         report.bitbake.env_build_dir = Some(env.build_dir.display().to_string());
         report.bitbake.init_script = env.init_script.map(|p| p.display().to_string());
     }
@@ -238,8 +245,17 @@ fn table(r: &Report) -> Table {
     rows.push(("refresh", refresh));
     let bitbake = match (r.bitbake.enabled, &r.bitbake.env_build_dir) {
         (false, _) => "disabled in sous-chef.toml".to_string(),
-        (true, Some(dir)) => format!("build environment found: {dir}"),
-        (true, None) => "no build environment found".to_string(),
+        (true, Some(dir)) => match (&r.bitbake.env_mode, &r.bitbake.init_script) {
+            (Some(mode), Some(script)) => {
+                format!("build environment found ({mode}): {dir}, init {script}")
+            }
+            (Some(mode), None) => format!("build environment found ({mode}): {dir}"),
+            _ => format!("build environment found: {dir}"),
+        },
+        (true, None) => match &r.bitbake.env_problem {
+            Some(p) => format!("no build environment found: {p}"),
+            None => "no build environment found".to_string(),
+        },
     };
     rows.push(("bitbake", bitbake));
     rows.push(("job", r.job.clone().unwrap_or_else(none)));
