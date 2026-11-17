@@ -1,4 +1,547 @@
-//! Shared classification helpers for rules (list-like variables, package-scoped variables,
-//! known overrides).
+//! Shared helpers for rules: variable classification (list-like, package-scoped), the
+//! known-override set from the index, release wording, and small conveniences for building
+//! findings.
 //!
-//! Stub (M0): owned by T4.1. Rule tasks ask for additions in their hand-off.
+//! Owned by T4.1. Rule tasks ask for additions in their hand-off, or keep a private helper in
+//! their own file.
+
+use std::collections::BTreeSet;
+
+use crate::error::Result;
+use crate::index::{Index, query};
+use crate::lint::{Finding, LintContext, Rule};
+use crate::parse::Statement;
+use crate::release::{Feature, Release};
+use crate::types::{LineSpan, Loc, VarRef};
+
+// ---------------------------------------------------------------------------------------
+// Findings
+
+/// A pointer into the context's file (or layer conf) at `lines`.
+pub fn loc_at(cx: &LintContext<'_>, lines: LineSpan) -> Loc {
+    Loc {
+        lines,
+        ..cx.loc.clone()
+    }
+}
+
+/// A finding of `rule` at its default severity, at `lines` of the context's file.
+pub fn finding(
+    rule: &dyn Rule,
+    cx: &LintContext<'_>,
+    lines: LineSpan,
+    message: impl Into<String>,
+) -> Finding {
+    Finding {
+        rule: rule.id(),
+        severity: rule.default_severity(),
+        loc: loc_at(cx, lines),
+        message: message.into(),
+    }
+}
+
+/// The source text of a statement (whole, continuation lines and body included); empty when
+/// the context has no source.
+pub fn statement_text<'a>(cx: &LintContext<'a>, stmt: &Statement) -> &'a str {
+    cx.source
+        .and_then(|s| s.get(stmt.bytes.clone()))
+        .unwrap_or("")
+}
+
+// ---------------------------------------------------------------------------------------
+// Releases
+
+/// `kirkstone`, `kirkstone and scarthgap`, `kirkstone, langdale and scarthgap`.
+pub fn release_list(releases: &[Release]) -> String {
+    let names: Vec<&str> = releases.iter().map(|r| r.codename()).collect();
+    match names.as_slice() {
+        [] => String::new(),
+        [one] => (*one).to_string(),
+        [init @ .., last] => format!("{} and {last}", init.join(", ")),
+    }
+}
+
+/// The releases of the context that do not have `feature`, oldest first.
+pub fn releases_lacking(cx: &LintContext<'_>, feature: Feature) -> Vec<Release> {
+    cx.releases
+        .iter()
+        .copied()
+        .filter(|r| !r.has(feature))
+        .collect()
+}
+
+/// The releases of the context that have `feature`, oldest first.
+pub fn releases_having(cx: &LintContext<'_>, feature: Feature) -> Vec<Release> {
+    cx.releases
+        .iter()
+        .copied()
+        .filter(|r| r.has(feature))
+        .collect()
+}
+
+/// The release range of a feature, for [`Rule::releases`]: `first()..=last()` (the newest
+/// release when it is still present).
+pub fn feature_range(feature: Feature) -> std::ops::RangeInclusive<Release> {
+    feature.first()..=feature.last().unwrap_or(Release::NEWEST)
+}
+
+// ---------------------------------------------------------------------------------------
+// Variable classification
+
+/// How a variable's value is structured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListKind {
+    /// Space-separated words (`DEPENDS`, `SRC_URI`, `IMAGE_INSTALL`): `:append` needs a
+    /// leading space.
+    Space,
+    /// Colon-separated (`FILESEXTRAPATHS`, `OVERRIDES`, `BBPATH`).
+    Colon,
+    /// A single value (`S`, `PV`, `SUMMARY`, a flag such as `SRC_URI[sha256sum]`).
+    Scalar,
+    /// Not known; rules should not report on it.
+    Unknown,
+}
+
+/// Well-known space-separated list variables (OE-core usage).
+const SPACE_LISTS: &[&str] = &[
+    "ASSUME_PROVIDED",
+    "BBCLASSEXTEND",
+    "BBFILES",
+    "BBFILES_DYNAMIC",
+    "BBLAYERS",
+    "BBMASK",
+    "CORE_IMAGE_EXTRA_INSTALL",
+    "CVE_CHECK_IGNORE",
+    "CVE_PRODUCT",
+    "CVE_STATUS_GROUPS",
+    "DEPENDS",
+    "DISTRO_FEATURES",
+    "DISTRO_FEATURES_BACKFILL_CONSIDERED",
+    "ERROR_QA",
+    "EXTRA_IMAGE_FEATURES",
+    "EXTRA_IMAGEDEPENDS",
+    "EXTRA_OECMAKE",
+    "EXTRA_OECONF",
+    "EXTRA_OEMAKE",
+    "EXTRA_OEMESON",
+    "EXTRA_OESCONS",
+    "EXTRA_USERS_PARAMS",
+    "FILES",
+    "IMAGE_CLASSES",
+    "IMAGE_FEATURES",
+    "IMAGE_FSTYPES",
+    "IMAGE_INSTALL",
+    "IMAGE_LINGUAS",
+    "INHERIT",
+    "INHIBIT_DEFAULT_DEPS",
+    "INITSCRIPT_PACKAGES",
+    "INSANE_SKIP",
+    "KERNEL_FEATURES",
+    "KERNEL_MODULE_AUTOLOAD",
+    "LIC_FILES_CHKSUM",
+    "MACHINE_ESSENTIAL_EXTRA_RDEPENDS",
+    "MACHINE_ESSENTIAL_EXTRA_RRECOMMENDS",
+    "MACHINE_EXTRA_RDEPENDS",
+    "MACHINE_EXTRA_RRECOMMENDS",
+    "MACHINE_FEATURES",
+    "MACHINE_FEATURES_BACKFILL_CONSIDERED",
+    "PACKAGECONFIG",
+    "PACKAGES",
+    "PACKAGES_DYNAMIC",
+    "PACKAGE_ARCHS",
+    "PACKAGE_CLASSES",
+    "PACKAGE_EXCLUDE",
+    "PROVIDES",
+    "RCONFLICTS",
+    "RDEPENDS",
+    "RPROVIDES",
+    "RRECOMMENDS",
+    "RREPLACES",
+    "RSUGGESTS",
+    "SDKIMAGE_FEATURES",
+    "SRC_URI",
+    "SYSTEMD_PACKAGES",
+    "SYSTEMD_SERVICE",
+    "TOOLCHAIN_HOST_TASK",
+    "TOOLCHAIN_TARGET_TASK",
+    "USERADD_PACKAGES",
+    "WARN_QA",
+    "CFLAGS",
+    "CXXFLAGS",
+    "CPPFLAGS",
+    "LDFLAGS",
+    "TARGET_CFLAGS",
+    "TARGET_CXXFLAGS",
+    "TARGET_LDFLAGS",
+    "BUILD_CFLAGS",
+    "BUILD_LDFLAGS",
+];
+
+/// Well-known colon-separated variables.
+const COLON_LISTS: &[&str] = &[
+    "BBPATH",
+    "DISTROOVERRIDES",
+    "FILESEXTRAPATHS",
+    "FILESOVERRIDES",
+    "FILESPATH",
+    "MACHINEOVERRIDES",
+    "OVERRIDES",
+    "PATH",
+];
+
+/// Well-known single-value variables.
+const SCALARS: &[&str] = &[
+    "AUTHOR",
+    "B",
+    "BPN",
+    "BP",
+    "COMPATIBLE_HOST",
+    "COMPATIBLE_MACHINE",
+    "D",
+    "DESCRIPTION",
+    "DISTRO",
+    "DISTRO_NAME",
+    "DISTRO_VERSION",
+    "HOMEPAGE",
+    "LICENSE",
+    "MACHINE",
+    "MAINTAINER",
+    "PE",
+    "PN",
+    "PR",
+    "PREFERRED_VERSION",
+    "PV",
+    "S",
+    "SECTION",
+    "SRCREV",
+    "SUMMARY",
+    "UNPACKDIR",
+    "WORKDIR",
+];
+
+/// Classifies a variable by its base name: the tables above, then a suffix heuristic
+/// (`*_FEATURES`, `*DEPENDS`, `*_INSTALL`, `*FLAGS`, `*_PACKAGES`, `EXTRA_OE*` are space
+/// lists; `*OVERRIDES` and `*PATH` / `*PATHS` colon lists; `*DIR`, `*_VERSION`, `*_NAME`
+/// scalars). A flag (`VAR[flag]`) is a scalar.
+pub fn list_kind(var: &VarRef) -> ListKind {
+    if var.flag.is_some() {
+        return ListKind::Scalar;
+    }
+    list_kind_of(&var.base)
+}
+
+/// [`list_kind`] for a plain base name.
+pub fn list_kind_of(base: &str) -> ListKind {
+    if SPACE_LISTS.contains(&base) {
+        return ListKind::Space;
+    }
+    if COLON_LISTS.contains(&base) {
+        return ListKind::Colon;
+    }
+    if SCALARS.contains(&base) {
+        return ListKind::Scalar;
+    }
+    let ends = |s: &[&str]| s.iter().any(|x| base.ends_with(x));
+    if ends(&["OVERRIDES", "PATH", "PATHS"]) {
+        return ListKind::Colon;
+    }
+    if ends(&[
+        "_FEATURES",
+        "DEPENDS",
+        "_INSTALL",
+        "FLAGS",
+        "_PACKAGES",
+        "RRECOMMENDS",
+    ]) || base.starts_with("EXTRA_OE")
+    {
+        return ListKind::Space;
+    }
+    if ends(&["DIR", "_VERSION", "_NAME"]) {
+        return ListKind::Scalar;
+    }
+    ListKind::Unknown
+}
+
+/// Whether a variable is known to be a space-separated list (`list_kind == Space`).
+pub fn is_space_list(var: &VarRef) -> bool {
+    list_kind(var) == ListKind::Space
+}
+
+/// Variables that only mean something per package: OE-core's `pkgvarcheck` QA check
+/// (`meta/classes-global/insane.bbclass`) reports each of these when set without a package
+/// override ("Variable %s is set as not being package specific"). Checked against OE-core
+/// master, 2026-11.
+pub const PACKAGE_ONLY_VARS: &[&str] = &[
+    "RDEPENDS",
+    "RRECOMMENDS",
+    "RSUGGESTS",
+    "RCONFLICTS",
+    "RPROVIDES",
+    "RREPLACES",
+    "FILES",
+    "pkg_preinst",
+    "pkg_postinst",
+    "pkg_prerm",
+    "pkg_postrm",
+    "ALLOW_EMPTY",
+];
+
+/// Variables that may carry a package override (`PACKAGEVARS` in
+/// `meta/classes-global/package.bbclass`, OE-core master 2026-11). Many of them (`SUMMARY`,
+/// `LICENSE`, `SECTION`) also have a recipe-wide meaning, so being in this list does not make
+/// a bare assignment wrong; see [`PACKAGE_ONLY_VARS`] for that.
+pub const PACKAGE_VARS: &[&str] = &[
+    "FILES",
+    "RDEPENDS",
+    "RRECOMMENDS",
+    "SUMMARY",
+    "DESCRIPTION",
+    "RSUGGESTS",
+    "RPROVIDES",
+    "RCONFLICTS",
+    "PKG",
+    "ALLOW_EMPTY",
+    "pkg_postinst",
+    "pkg_postrm",
+    "pkg_postinst_ontarget",
+    "INITSCRIPT_NAME",
+    "INITSCRIPT_PARAMS",
+    "DEBIAN_NOAUTONAME",
+    "ALTERNATIVE",
+    "PKGE",
+    "PKGV",
+    "PKGR",
+    "USERADD_PARAM",
+    "GROUPADD_PARAM",
+    "USERMOD_PARAM",
+    "CONFFILES",
+    "SYSTEMD_SERVICE",
+    "LICENSE",
+    "SECTION",
+    "pkg_preinst",
+    "pkg_prerm",
+    "RREPLACES",
+    "SYSTEMD_AUTO_ENABLE",
+    "SKIP_FILEDEPS",
+    "PRIVATE_LIBS",
+    "PACKAGE_ADD_METADATA",
+];
+
+/// Whether `base` only means something with a package override ([`PACKAGE_ONLY_VARS`]).
+pub fn is_package_only(base: &str) -> bool {
+    PACKAGE_ONLY_VARS.contains(&base)
+}
+
+/// Whether `base` may take a package override ([`PACKAGE_VARS`]).
+pub fn is_package_var(base: &str) -> bool {
+    PACKAGE_VARS.contains(&base)
+}
+
+// ---------------------------------------------------------------------------------------
+// Known overrides
+
+/// Override names that are always possible or are operators: they never make an override
+/// unknown. From OE-core's `OVERRIDES` (`meta/conf/bitbake.conf`, master 2026-11:
+/// `${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:
+/// ${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}:${TCOVERRIDE}${LIBCOVERRIDE}:
+/// forcevariable`): the target OS and the common architectures; machine and distro
+/// overrides come from the index.
+const BUILTIN_OVERRIDES: &[&str] = &[
+    "aarch64",
+    "aarch64-be",
+    "arm",
+    "armeb",
+    "i586",
+    "i686",
+    "mips",
+    "mips64",
+    "mipsel",
+    "powerpc",
+    "powerpc64",
+    "powerpc64le",
+    "riscv32",
+    "riscv64",
+    "x86",
+    "x86-64",
+    "append",
+    "prepend",
+    "remove",
+    "forcevariable",
+    "class-target",
+    "class-native",
+    "class-nativesdk",
+    "class-cross",
+    "class-crosssdk",
+    "class-cross-canadian",
+    "linux",
+    "linux-gnu",
+    "linux-musl",
+    "libc-glibc",
+    "libc-musl",
+];
+
+/// Prefixes of overrides that are generated per recipe, layer, task, toolchain or variant
+/// (`pn-<pn>`, `layer-<layer>`, `task-<task>`, `class-<variant>`, `toolchain-gcc`,
+/// `virtclass-multilib-<lib>`, `libc-<libc>`).
+const DYNAMIC_PREFIXES: &[&str] = &[
+    "pn-",
+    "layer-",
+    "task-",
+    "class-",
+    "toolchain-",
+    "virtclass-",
+    "libc-",
+];
+
+/// The overrides the workspace can produce, as far as the index shows them statically.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KnownOverrides {
+    /// `conf/machine/<name>.conf` stems.
+    pub machines: BTreeSet<String>,
+    /// `conf/distro/<name>.conf` stems.
+    pub distros: BTreeSet<String>,
+    /// `<name>.bbclass` stems (an inherited class is not itself an override; rules decide
+    /// whether a class name counts).
+    pub classes: BTreeSet<String>,
+    /// Static words of `OVERRIDES`, `MACHINEOVERRIDES` and `DISTROOVERRIDES` assignments
+    /// (split on `:`, words containing `${` dropped), and `class-<variant>` for every
+    /// `BBCLASSEXTEND` word.
+    pub declared: BTreeSet<String>,
+}
+
+impl KnownOverrides {
+    /// Collects the set from the index.
+    pub fn from_index(index: &Index) -> Result<KnownOverrides> {
+        let mut out = KnownOverrides::default();
+        let mut st = index
+            .conn()
+            .prepare("SELECT path, kind FROM files WHERE kind IN ('conf', 'bbclass')")?;
+        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        for row in rows {
+            let (path, kind) = row?;
+            let p = std::path::Path::new(&path);
+            let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let parent = p
+                .parent()
+                .map(|d| d.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if kind == "bbclass" {
+                out.classes.insert(stem.to_string());
+            } else if parent.ends_with("conf/machine") {
+                out.machines.insert(stem.to_string());
+            } else if parent.ends_with("conf/distro") {
+                out.distros.insert(stem.to_string());
+            }
+        }
+        let scope = query::StatementFilter {
+            kinds: vec!["assign".into()],
+            ..query::StatementFilter::default()
+        };
+        for base in ["OVERRIDES", "MACHINEOVERRIDES", "DISTROOVERRIDES"] {
+            for s in query::statements_by_base(index, base, &scope)? {
+                let value = s.value.unwrap_or_default();
+                for w in value.split(':').map(str::trim) {
+                    if !w.is_empty() && !w.contains("${") && !w.contains(char::is_whitespace) {
+                        out.declared.insert(w.to_string());
+                    }
+                }
+            }
+        }
+        for s in query::statements_by_base(index, "BBCLASSEXTEND", &scope)? {
+            for w in s.value.unwrap_or_default().split_whitespace() {
+                if !w.contains("${") {
+                    let variant = w.split(':').next().unwrap_or(w);
+                    out.declared.insert(format!("class-{variant}"));
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Whether `o` is a machine, a distro, a declared override, a built-in one, a generated
+    /// one (`pn-*`, `task-*`, ...), or contains `${` (cannot be known statically).
+    pub fn contains(&self, o: &str) -> bool {
+        o.contains("${")
+            || self.machines.contains(o)
+            || self.distros.contains(o)
+            || self.declared.contains(o)
+            || BUILTIN_OVERRIDES.contains(&o)
+            || DYNAMIC_PREFIXES.iter().any(|p| o.starts_with(p))
+    }
+
+    /// Whether `o` is a machine or distro name: the legacy-syntax test for `VAR_<o>`.
+    pub fn is_machine_or_distro(&self, o: &str) -> bool {
+        self.machines.contains(o) || self.distros.contains(o)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn var(base: &str, flag: Option<&str>) -> VarRef {
+        VarRef {
+            base: base.into(),
+            overrides: vec![],
+            flag: flag.map(str::to_string),
+            legacy_syntax: false,
+        }
+    }
+
+    #[test]
+    fn list_kinds() {
+        assert_eq!(list_kind(&var("DEPENDS", None)), ListKind::Space);
+        assert_eq!(
+            list_kind(&var("SRC_URI", Some("sha256sum"))),
+            ListKind::Scalar
+        );
+        assert_eq!(list_kind(&var("FILESEXTRAPATHS", None)), ListKind::Colon);
+        assert_eq!(list_kind(&var("S", None)), ListKind::Scalar);
+        assert_eq!(list_kind(&var("MY_FEATURES", None)), ListKind::Space);
+        assert_eq!(list_kind(&var("EXTRA_OEQMAKE", None)), ListKind::Space);
+        assert_eq!(list_kind(&var("FOO_PATH", None)), ListKind::Colon);
+        assert_eq!(list_kind(&var("FOO_DIR", None)), ListKind::Scalar);
+        assert_eq!(list_kind(&var("SOMETHING", None)), ListKind::Unknown);
+        assert!(is_space_list(&var("IMAGE_INSTALL", None)));
+    }
+
+    #[test]
+    fn package_vars() {
+        assert!(is_package_only("RDEPENDS"));
+        assert!(!is_package_only("SUMMARY"));
+        assert!(is_package_var("SUMMARY"));
+        assert!(PACKAGE_ONLY_VARS.iter().all(|v| is_package_var(v)));
+    }
+
+    #[test]
+    fn release_wording() {
+        assert_eq!(release_list(&[]), "");
+        assert_eq!(release_list(&[Release::Kirkstone]), "kirkstone");
+        assert_eq!(
+            release_list(&[Release::Kirkstone, Release::Scarthgap, Release::Wrynose]),
+            "kirkstone, scarthgap and wrynose"
+        );
+        assert_eq!(
+            feature_range(Feature::WorkdirAsSourceDir),
+            Release::Kirkstone..=Release::Scarthgap
+        );
+        assert_eq!(
+            feature_range(Feature::InheritDefer),
+            Release::Scarthgap..=Release::NEWEST
+        );
+    }
+
+    #[test]
+    fn known_override_contains() {
+        let mut k = KnownOverrides::default();
+        k.machines.insert("qemux86".into());
+        assert!(k.contains("qemux86"));
+        assert!(k.contains("pn-foo"));
+        assert!(k.contains("class-native"));
+        assert!(k.contains("${PN}"));
+        assert!(!k.contains("nosuchmachine"));
+        assert!(k.is_machine_or_distro("qemux86"));
+    }
+}

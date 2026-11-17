@@ -38,8 +38,8 @@ use sha2::{Digest, Sha256};
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::index::{Index, RefreshReport};
-use crate::lint::{Finding, LintContext, Scope};
-use crate::types::{FileKind, LineSpan};
+use crate::lint::Finding;
+use crate::types::LineSpan;
 use crate::workspace::{Layer, Workspace};
 
 /// What a generator returns. Nothing is written until the engine applies it.
@@ -634,53 +634,34 @@ pub trait PostWriteLint: Sync {
     fn lint(&self, target: &LintTarget<'_>) -> Result<Vec<Finding>>;
 }
 
-/// Runs every file-scope rule of the catalogue (minus `[lint] disable`) on each written
-/// file. Recipe- and layer-scope rules need the evaluator and a refreshed index, and the
-/// lint engine (T4.1) that builds their contexts; they are not run here yet.
+/// Runs the lint engine ([`crate::lint::run`]) on exactly the written files: file-scope
+/// rules on each, recipe-scope rules on each `.bb`, and layer-scope rules for their layers,
+/// keeping only findings located in the written files. `[lint] disable`, `[lint.severity]`
+/// and inline suppression apply. Files of a new layer are not in the workspace until
+/// `bblayers.conf` lists it, so they are not linted.
 pub struct RuleLint;
 
 impl PostWriteLint for RuleLint {
     fn lint(&self, t: &LintTarget<'_>) -> Result<Vec<Finding>> {
-        let rules: Vec<_> = crate::lint::all_rules()
+        let files: Vec<PathBuf> = t
+            .files
             .iter()
-            .filter(|r| r.scope() == Scope::File)
-            .filter(|r| !disabled(t.config, r.id()))
+            .filter(|p| t.ws.loc_for(p, LineSpan::line(1)).is_some())
+            .cloned()
             .collect();
-        let mut out = Vec::new();
-        for path in t.files {
-            let source = String::from_utf8_lossy(&fs::read(path)?).into_owned();
-            let parsed = crate::parse::parse(&source);
-            let lines = u32::try_from(source.lines().count().max(1)).unwrap_or(u32::MAX);
-            let Some(loc) = t.ws.loc_for(path, LineSpan::new(1, lines)) else {
-                // A file of a new layer: not in the workspace until bblayers.conf lists it.
-                continue;
-            };
-            let cx = LintContext {
-                file: Some(&parsed),
-                source: Some(&source),
-                kind: FileKind::from_path(path),
-                data: None,
-                layer: None,
-                index: t.index,
-                ws: t.ws,
-                loc,
-            };
-            for r in &rules {
-                r.check(&cx, &mut out);
-            }
+        if files.is_empty() {
+            return Ok(Vec::new());
         }
-        Ok(out)
+        let target = crate::lint::Target::Files { files, lines: None };
+        let report = crate::lint::run(
+            t.ws,
+            t.index,
+            t.config,
+            &target,
+            &crate::lint::Options::default(),
+        )?;
+        Ok(report.findings)
     }
-}
-
-/// `[lint] disable` lists rule ids or groups (`org`, `org/`).
-fn disabled(config: &Config, id: &str) -> bool {
-    let group = id.split('/').next().unwrap_or(id);
-    config
-        .lint
-        .disable
-        .iter()
-        .any(|d| d == id || d.trim_end_matches('/') == group)
 }
 
 /// Result of [`execute`].
@@ -789,14 +770,5 @@ mod tests {
     #[test]
     fn lexical_pops_parent() {
         assert_eq!(lexical(Path::new("/a/b/../c/./d")), PathBuf::from("/a/c/d"));
-    }
-
-    #[test]
-    fn disable_matches_ids_and_groups() {
-        let mut c = Config::default();
-        c.lint.disable = vec!["org".into(), "hygiene/tabs".into()];
-        assert!(disabled(&c, "org/recipe-path"));
-        assert!(disabled(&c, "hygiene/tabs"));
-        assert!(!disabled(&c, "hygiene/autorev"));
     }
 }
