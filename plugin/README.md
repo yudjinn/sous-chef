@@ -154,8 +154,10 @@ hand-written events in `tests/fixtures/hooks/`:
 - **Read of a file that ends in a newline**: `content` keeps the final `\n`, and `numLines`
   and `totalLines` count the empty line after it (10 for the 9-line `hello_1.1.bb`, 21 for
   the 20-line `hello.inc`). The hand-written events have no final newline and count 9 and
-  20. Effect seen: the whole-recipe note says `read of ...hello_1.1.bb:1-10`, one line past
-  the end; the note is otherwise right.
+  20. Effect seen in the first run: the whole-recipe note said `read of
+  ...hello_1.1.bb:1-10`, one line past the end. Fixed: the handler now takes the number of
+  lines from `content` and clamps the range to the lines of the file on disk (`numLines`
+  and `totalLines` are not trusted); the captured events are in `tests/hook_grep_read.rs`.
 - Common fields: the same set as the hand-written events (`session_id`, `prompt_id`,
   `transcript_path`, `cwd`, `permission_mode`, `effort`, `hook_event_name`, `tool_name`,
   `tool_input`, `tool_response`, `tool_use_id`, `duration_ms`); no `scratchpad_dir` in this

@@ -152,6 +152,65 @@ fn whole_recipe_read_lists_the_other_contributors() {
     );
 }
 
+/// Captured from Claude Code 2.1.326: the content keeps the file's final newline and
+/// `numLines` / `totalLines` say 10 for the 9-line recipe. The range is the file's 9 lines.
+#[test]
+fn captured_whole_recipe_read_names_the_real_lines() {
+    let cache = indexed_cache(&ws_root());
+    let ev = event("captured/read_whole_recipe");
+    let v: Value = serde_json::from_str(&ev).unwrap();
+    assert_eq!(v["tool_response"]["file"]["numLines"], 10);
+    let ctx = context_of(&run_hook(ev.as_bytes(), cache.path()));
+    assert_eq!(
+        ctx,
+        "sous-chef index context for this read of meta-core:recipes-core/hello/hello_1.1.bb:1-9:\n\
+         hello_1.1.bb is not the whole recipe; these files also contribute: \
+         meta-core:recipes-core/hello/hello.inc (require), \
+         meta-vendor:recipes-core/hello/hello_%.bbappend (bbappend), \
+         meta-mine:recipes-core/hello/hello_1.1.bbappend (bbappend)."
+    );
+}
+
+/// Captured: `offset: 10, limit: 6`, `startLine` 10 (1-based): lines 10 to 15, the last
+/// one opening `do_install:append`.
+#[test]
+fn captured_read_with_an_offset() {
+    let cache = indexed_cache(&ws_root());
+    let ctx = context_of(&run_hook(
+        event("captured/read_offset").as_bytes(),
+        cache.path(),
+    ));
+    assert_eq!(
+        ctx,
+        "sous-chef index context for this read of meta-core:recipes-core/hello/hello.inc:10-15:\n\
+         The read ends at line 15 inside [do_install:append 15-18], which ends at line 18 \
+         (meta-core:recipes-core/hello/hello.inc:15-18)."
+    );
+}
+
+/// The captured offset read moved to the end of the file, in the captured shape (final
+/// newline kept, one phantom line counted): the range stops at the file's last line, 20.
+#[test]
+fn a_read_to_the_end_of_the_file_stops_at_its_last_line() {
+    let cache = indexed_cache(&ws_root());
+    let mut v: Value = serde_json::from_str(&event("captured/read_offset")).unwrap();
+    let inc =
+        std::fs::read_to_string(ws_root().join("meta-core/recipes-core/hello/hello.inc")).unwrap();
+    let tail: Vec<&str> = inc.lines().skip(15).collect();
+    v["tool_input"]["offset"] = Value::from(16);
+    v["tool_input"]["limit"] = Value::from(100);
+    v["tool_response"]["file"]["content"] = Value::String(format!("{}\n", tail.join("\n")));
+    v["tool_response"]["file"]["startLine"] = Value::from(16);
+    v["tool_response"]["file"]["numLines"] = Value::from(6);
+    let ctx = context_of(&run_hook(v.to_string().as_bytes(), cache.path()));
+    assert_eq!(
+        ctx,
+        "sous-chef index context for this read of meta-core:recipes-core/hello/hello.inc:16-20:\n\
+         The read starts at line 16 inside [do_install:append 15-18], which begins at line 15 \
+         (meta-core:recipes-core/hello/hello.inc:15-18)."
+    );
+}
+
 #[test]
 fn reads_with_nothing_to_add_are_silent() {
     let cache = indexed_cache(&ws_root());
@@ -167,8 +226,12 @@ fn reads_with_nothing_to_add_are_silent() {
         &app_c.display().to_string(),
     );
     assert_noop(&run_hook(ev.as_bytes(), cache.path()));
-    // A read whose last line ends an item.
+    // A read whose last line ends an item (the line count comes from `content`).
     let mut v: Value = serde_json::from_str(&event("read_cut")).unwrap();
+    let inc =
+        std::fs::read_to_string(ws_root().join("meta-core/recipes-core/hello/hello.inc")).unwrap();
+    let first18: Vec<&str> = inc.lines().take(18).collect();
+    v["tool_response"]["file"]["content"] = Value::String(first18.join("\n"));
     v["tool_response"]["file"]["numLines"] = Value::from(18);
     assert_noop(&run_hook(v.to_string().as_bytes(), cache.path()));
     // A non-text Read result.

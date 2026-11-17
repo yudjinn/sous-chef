@@ -331,17 +331,42 @@ fn grep(cx: &mut Ctx<'_>, ev: &Event) -> Result<Option<Response>> {
 // ---- Read ----
 
 /// The parts of a Read `tool_response` the handler uses.
+///
+/// Real Read events (Claude Code 2.1.326, `tests/fixtures/hooks/captured/`) keep the final
+/// `\n` of a file that ends in one in `content`, and count the empty "line" after it in
+/// `numLines` and `totalLines` (10 for a 9-line file). So the number of lines returned is
+/// taken from `content` (its `\n`-separated parts; `numLines` only when `content` is
+/// absent), and the handler clamps the range to the lines the file on disk really has
+/// ([`line_count`], [`ReadRange::end_in`]). `totalLines` is not used.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadRange {
     pub path: PathBuf,
-    /// First line returned, 1-based.
+    /// First line returned, 1-based (confirmed with a captured event).
     pub start: u32,
-    /// Lines returned.
+    /// Lines returned: the `\n`-separated parts of `content`, one more than the file has
+    /// when the read reached a final newline ([`ReadRange::end_in`] clamps it).
     pub lines: u32,
-    /// Lines in the file.
-    pub total: u32,
     /// The whole-file read was cut to the first page by the token cap.
     pub truncated: bool,
+}
+
+impl ReadRange {
+    /// The last line returned, given that the file has `total` lines; `None` when the read
+    /// returned no line of the file.
+    pub fn end_in(&self, total: u32) -> Option<u32> {
+        if self.lines == 0 || self.start > total {
+            return None;
+        }
+        Some(self.start.saturating_add(self.lines - 1).min(total))
+    }
+}
+
+/// Lines in a file's bytes, as BitBake and an editor number them: a final `\n` ends the
+/// last line, it does not start another.
+pub fn line_count(bytes: &[u8]) -> u32 {
+    let newlines = bytes.iter().filter(|b| **b == b'\n').count();
+    let partial = usize::from(bytes.last().is_some_and(|b| *b != b'\n'));
+    u32::try_from(newlines + partial).unwrap_or(u32::MAX)
 }
 
 /// The range of a text Read, or `None` for other results (images, PDFs, notebooks) and
@@ -362,11 +387,16 @@ pub fn read_range(ev: &Event) -> Option<ReadRange> {
         .and_then(Value::as_str)
         .or_else(|| ev.input_str("file_path"))
         .and_then(|p| ev.abs_path(p))?;
+    let lines = match file.get("content") {
+        Some(Value::String(c)) if c.is_empty() => 0,
+        Some(Value::String(c)) => u32::try_from(c.split('\n').count()).ok()?,
+        Some(_) => return None,
+        None => num("numLines")?,
+    };
     Some(ReadRange {
         path,
         start: num("startLine")?.max(1),
-        lines: num("numLines")?,
-        total: num("totalLines")?,
+        lines,
         truncated: file
             .get("truncatedByTokenCap")
             .and_then(Value::as_bool)
@@ -385,7 +415,12 @@ fn read(cx: &mut Ctx<'_>, ev: &Event) -> Result<Option<Response>> {
     let Some(file) = env.fresh_file(&r.path)? else {
         return Ok(None);
     };
-    let end = r.start.saturating_add(r.lines - 1);
+    // `fresh_file` checked that the bytes on disk are the indexed ones, so this line count
+    // is the one the index's spans refer to.
+    let total = line_count(&std::fs::read(env.ws.confine(&r.path)?)?);
+    let Some(end) = r.end_in(total) else {
+        return Ok(None);
+    };
     let mut out = Vec::new();
     if r.start > 1
         && let Some(item) = multiline_item(&env, file.id, r.start)?
@@ -397,7 +432,7 @@ fn read(cx: &mut Ctx<'_>, ev: &Event) -> Result<Option<Response>> {
             r.start, item.loc.lines.start, item.loc
         ));
     }
-    if end < r.total
+    if end < total
         && let Some(item) = multiline_item(&env, file.id, end)?
         && item.loc.lines.end > end
         && let Some(label) = bracket(&item)
@@ -407,7 +442,7 @@ fn read(cx: &mut Ctx<'_>, ev: &Event) -> Result<Option<Response>> {
             item.loc.lines.end, item.loc
         ));
     }
-    let whole = r.start == 1 && end >= r.total && !r.truncated;
+    let whole = r.start == 1 && end >= total && !r.truncated;
     if whole && file.kind == FileKind::Recipe {
         env.check_budget()?;
         let mut parts = Vec::new();
@@ -517,9 +552,28 @@ mod tests {
                 path: "/a/x.bb".into(),
                 start: 5,
                 lines: 2,
-                total: 9,
                 truncated: false
             })
         );
+    }
+
+    #[test]
+    fn lines_come_from_the_content_not_the_phantom_count() {
+        // A whole 3-line file that ends in a newline, as Claude Code 2.1.326 reports it.
+        let e = ev(
+            r#"{"hook_event_name":"PostToolUse","tool_name":"Read","cwd":"/w",
+            "tool_input":{"file_path":"/w/x.bb"},
+            "tool_response":{"type":"text","file":{"filePath":"x.bb","content":"a\nb\nc\n","numLines":4,"startLine":1,"totalLines":4}}}"#,
+        );
+        let r = read_range(&e).unwrap();
+        assert_eq!(r.path, PathBuf::from("/w/x.bb"));
+        assert_eq!(r.lines, 4);
+        assert_eq!(r.end_in(line_count(b"a\nb\nc\n")), Some(3));
+        // A read whose last line is an empty line inside the file is not clamped.
+        assert_eq!(r.end_in(5), Some(4));
+        assert_eq!(r.end_in(0), None);
+        assert_eq!(line_count(b""), 0);
+        assert_eq!(line_count(b"a"), 1);
+        assert_eq!(line_count(b"a\n\n"), 2);
     }
 }
