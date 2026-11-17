@@ -1,0 +1,6 @@
+# init-build-env wrapper created by bitbake-setup
+cd {{LIVE}}/yocto-kiss/openembedded-core
+set {{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/build
+. ./oe-init-build-env
+set --
+

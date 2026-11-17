@@ -1,0 +1,38 @@
+NOTE: Bitbake-setup is using {{LIVE}}/bitbake-builds as top directory.
+{{LIVE}}/bitbake-builds looks like a new top directory. If you would like to use a different directory, answer "n" below and either:
+	1) Change the default bitbake-setup settings:
+		bitbake-setup settings set default top-dir-prefix <PATH>
+		bitbake-setup settings set default top-dir-name <NAME>
+	2) Pass one or more options on the command line to change the top level directory in that invocation only:
+		bitbake-setup --setting default top-dir-prefix <PATH> ...
+		bitbake-setup --setting default top-dir-name <NAME> ...
+
+A common site.conf file will be created, please check it is correct before running builds
+    {{LIVE}}/bitbake-builds/site.conf
+
+NOTE: Reading configuration from local file
+    {{LIVE}}/yocto-kiss/yocto-kiss.conf.json
+NOTE: Run 'bitbake-setup init --non-interactive {{LIVE}}/yocto-kiss/yocto-kiss.conf.json dogbonedark' to select this configuration non-interactively.
+
+Initializing a setup directory in
+    {{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark
+Fetching layer/tool repositories into {{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/layers
+Making a symbolic link {{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/layers/bitbake pointing to {{LIVE}}/yocto-kiss/bitbake
+Making a symbolic link {{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/layers/openembedded-core pointing to {{LIVE}}/yocto-kiss/openembedded-core
+    meta-yocto
+Making a symbolic link {{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/layers/meta-arm pointing to {{LIVE}}/yocto-kiss/meta-arm
+Making a symbolic link {{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/layers/meta-kiss pointing to {{LIVE}}/yocto-kiss
+    meta-openembedded
+    meta-xilinx
+        
+Setting up bitbake configuration in
+    {{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/build
+
+ERROR: Execution of 'bash -c '. {{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/build/init-build-env && bitbake-config-build enable-fragment distro/kiss machine/dogbonedark'' failed with exit code 1:
+A fictitious product which in reality implements the BeagleBone Black
+NOTE: Starting bitbake server...
+ERROR: The following required tools (as specified by HOSTTOOLS) appear to be unavailable in PATH, please install them in order to proceed:
+  chrpath diffstat rpcgen
+ERROR: The following required tools (as specified by HOSTTOOLS) appear to be unavailable in PATH, please install them in order to proceed:
+  chrpath diffstat rpcgen
+

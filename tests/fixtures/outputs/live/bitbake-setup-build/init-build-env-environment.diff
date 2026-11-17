@@ -1,0 +1,13 @@
+0a1,3
+> BB_ENV_PASSTHROUGH_ADDITIONS=ALL_PROXY BBPATH_EXTRA BB_LOGCONFIG BB_NO_NETWORK BB_NUMBER_THREADS BB_SETSCENE_ENFORCE BB_SRCREV_POLICY DISTRO FTPS_PROXY FTP_PROXY GIT_PROXY_COMMAND HTTPS_PROXY HTTP_PROXY MACHINE NO_PROXY PARALLEL_MAKE SCREENDIR SDKMACHINE SOCKS5_PASSWD SOCKS5_USER SSH_AGENT_PID SSH_AUTH_SOCK STAMPS_DIR TCLIBC TCMODE all_proxy ftp_proxy ftps_proxy http_proxy https_proxy no_proxy 
+> BBPATH={{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/build
+> BUILDDIR={{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/build
+2,3c5,9
+< PATH=/usr/bin:/bin
+< PWD={{LIVE}}/yocto-kiss
+---
+> OE_ADDED_PATHS={{LIVE}}/yocto-kiss/openembedded-core/scripts:{{LIVE}}/yocto-kiss/bitbake/bin:
+> OLDPWD={{LIVE}}/yocto-kiss/openembedded-core
+> PATH={{LIVE}}/yocto-kiss/openembedded-core/scripts:{{LIVE}}/yocto-kiss/bitbake/bin:/usr/bin:/bin
+> PWD={{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/build
+> PYTHONPATH={{LIVE}}/yocto-kiss/bitbake/lib:
