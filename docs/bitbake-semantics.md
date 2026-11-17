@@ -593,8 +593,10 @@ evaluation addressed to it by path (`layer:path`) adds the note "not matched by 
 BBFILES" (`ReplayNotes::target_notes`). A file `BBMASK` masks would be another value of the
 same column (not implemented: `BBMASK` is evaluated configuration). The
 `item` and `search` tools add the same note for a hit in such a file, and
-`query::files_in_layer_in(.., FileSet::COLLECTED)` lists a layer's files without them (lint's
-engine uses `files_in_layer`, which still includes them).
+`query::files_in_layer_in(.., FileSet::COLLECTED)` lists a layer's files without them. Lint
+(w6) runs no file- or recipe-scope rule on such a file and reports it once
+(`query::uncollected_recipe_files`; `org/recipe-path` for a `.bb`, `org/layer-conf` for a
+`.bbappend`).
 
 ### Data files
 

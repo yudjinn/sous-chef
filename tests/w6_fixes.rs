@@ -204,6 +204,69 @@ async fn var_shows_the_rewrite_as_a_rewrite() {
     assert!(rewrite.starts_with("applied\trewrite\t"), "{out}");
     assert!(rewrite.contains("rewritten after parsing"), "{out}");
     let _ = &fx.root;
+}
+
+// ---------------------------------------------------------------------------------------
+// Item 2: files BitBake does not collect are told about once and otherwise left alone
+// ---------------------------------------------------------------------------------------
+
+/// A `.bb` with a legacy override (an `override/legacy-syntax` error) and a tab.
+const BAD_BB: &str = "LICENSE = \"CLOSED\"\nRDEPENDS_${PN} = \"x\"\nFOO = \"\t1\"\n";
+
+fn uncollected_files(root: &Path) {
+    write(root, "meta-mine/lib/templates/example.bb", BAD_BB);
+    write(root, "meta-mine/recipes-app/deep/sub/deep_1.0.bb", BAD_BB);
+    write(root, "meta-mine/stray/x_1.0.bbappend", BAD_BB);
+}
+
+#[test]
+fn uncollected_recipe_files_get_one_finding_and_no_other_rule() {
+    let fx = modified(uncollected_files);
+    let found = lint_all(&fx, &[]);
+    let in_file = |p: &str| -> Vec<&Finding> {
+        found
+            .iter()
+            .filter(|f| f.loc.layer == "meta-mine" && f.loc.path == Path::new(p))
+            .collect()
+    };
+    let t = in_file("lib/templates/example.bb");
+    assert_eq!(t.len(), 1, "{t:#?}");
+    assert_eq!(t[0].rule, "org/recipe-path");
+    assert_eq!(t[0].severity, lint::Severity::Info);
+    assert!(
+        t[0].message.contains("BitBake does not collect")
+            && t[0].message.contains("${LAYERDIR}/recipes-*/*/*.bb"),
+        "{}",
+        t[0].message
+    );
+    let d = in_file("recipes-app/deep/sub/deep_1.0.bb");
+    assert_eq!(d.len(), 1, "{d:#?}");
+    assert_eq!(d[0].rule, "org/recipe-path");
+    assert_eq!(d[0].severity, lint::Severity::Warning);
+    // The bbappend: no file finding; org/layer-conf reports it once, at BBFILES.
+    assert!(in_file("stray/x_1.0.bbappend").is_empty(), "{found:#?}");
+    let conf: Vec<&Finding> = found
+        .iter()
+        .filter(|f| f.rule == "org/layer-conf" && f.message.contains("stray/x_1.0.bbappend"))
+        .collect();
+    assert_eq!(conf.len(), 1, "{found:#?}");
+    assert!(
+        !found
+            .iter()
+            .any(|f| f.rule == "org/recipe-path" && f.message.contains("x_1.0.bbappend")),
+        "{found:#?}"
+    );
     let _ = query::all_files(&fx.idx).unwrap();
-    let _ = write;
+}
+
+#[test]
+fn a_collected_recipe_keeps_every_check() {
+    let fx = modified(|r| write(r, "meta-mine/recipes-app/bad/bad_1.0.bb", BAD_BB));
+    let found = lint_all(&fx, &[]);
+    let rules: Vec<&str> = found
+        .iter()
+        .filter(|f| f.loc.path == Path::new("recipes-app/bad/bad_1.0.bb"))
+        .map(|f| f.rule)
+        .collect();
+    assert!(rules.contains(&"override/legacy-syntax"), "{rules:?}");
 }

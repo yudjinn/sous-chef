@@ -12,7 +12,10 @@
 //! 3. **Units.** File scope: every file of the target. Recipe scope: every `.bb` of the
 //!    target, with the [`DataStore`] the evaluator ([`Evaluate`]) returns for exactly that
 //!    file (target `layer:path`); a recipe that cannot be evaluated gets a note and its
-//!    recipe-scope rules are skipped. A test seam may report no evaluator at all, which skips
+//!    recipe-scope rules are skipped. A `.bb` / `.bbappend` BitBake does not collect
+//!    (`files.not_collected`: no `BBFILES` glob, an inactive `BBFILES_DYNAMIC` entry,
+//!    `BBMASK`) is no unit at all: layer-scope rules report it once (`org/recipe-path`,
+//!    `org/layer-conf`). A test seam may report no evaluator at all, which skips
 //!    every recipe-scope rule with one note. Layer scope: every layer
 //!    of the target (for a recipe or file target, the layers the files are in, and only the
 //!    findings located in those files are kept).
@@ -503,6 +506,14 @@ pub fn run_with(
         .copied()
         .filter(|r| r.scope() == Scope::Recipe)
         .collect();
+    // `.bb` / `.bbappend` files BitBake does not collect (no `BBFILES` glob, an inactive
+    // `BBFILES_DYNAMIC` entry, `BBMASK`): never evaluated, no file rule runs on them. They
+    // are told about once, by a layer-scope rule (`org/recipe-path` for a `.bb`,
+    // `org/layer-conf` for a `.bbappend`).
+    let uncollected: HashSet<(String, PathBuf)> = query::uncollected_recipe_files(index)?
+        .into_iter()
+        .map(|(f, _)| (f.layer, f.path))
+        .collect();
 
     for abs in &plan.files {
         let Some(loc0) = ws.loc_for(abs, LineSpan::line(1)) else {
@@ -513,6 +524,9 @@ pub fn run_with(
             continue;
         };
         let key = (loc0.layer.clone(), loc0.path.clone());
+        if uncollected.contains(&key) {
+            continue;
+        }
         let entry = match sources.load(ws, &key, Some(abs)) {
             Ok(e) => e,
             Err(e) => {

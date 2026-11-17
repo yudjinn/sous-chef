@@ -157,6 +157,22 @@ CREATE TABLE IF NOT EXISTS meta(
 /// `files.not_collected` of a `.bb` / `.bbappend` that no layer's `BBFILES` glob matches.
 pub const NOT_COLLECTED_BBFILES: &str = "bbfiles";
 
+/// `files.not_collected` of a `.bb` / `.bbappend` that only a `BBFILES_DYNAMIC` glob matches,
+/// whose condition does not hold (the named collection is absent, or for `!<collection>`
+/// present), so BitBake does not add the glob to `BBFILES`.
+pub const NOT_COLLECTED_DYNAMIC: &str = "dynamic";
+
+/// `files.not_collected` of a `.bb` / `.bbappend` a `BBFILES` glob collects but a `BBMASK`
+/// regex masks (`cooker.py` `collect_bbfiles`).
+pub const NOT_COLLECTED_BBMASK: &str = "bbmask";
+
+/// The `files.not_collected` values of a `.bb` / `.bbappend` BitBake does not collect.
+pub const NOT_COLLECTED_RECIPE_REASONS: &[&str] = &[
+    NOT_COLLECTED_BBFILES,
+    NOT_COLLECTED_DYNAMIC,
+    NOT_COLLECTED_BBMASK,
+];
+
 /// `files.not_collected` of a `.conf`, `.inc` or `.bbclass` that is not BitBake metadata: a
 /// data file (`wpa_supplicant.conf` in a recipe's `<pn>/` directory, `files/wic/*.wks.inc`),
 /// see `scan.rs` ("Data files").
