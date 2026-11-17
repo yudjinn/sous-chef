@@ -762,9 +762,10 @@ Checked 2026-11-17 against OE-core `wrynose` (`meta/lib/bblayers/create.py`,
   `LAYERDEPENDS_<id> = "core"` and `LAYERSERIES_COMPAT_<id>`; it writes `README` and
   `COPYING.MIT` and an example recipe. The generator differs where M6 says so: compat from
   the core layer's own `LAYERSERIES_COMPAT` (equal to `LAYERSERIES_CORENAMES` in OE-core),
-  `README.md`, `COPYING.MIT` and `recipes-example/` only when asked. It adds the layer with
-  `BBLAYERS += "<path>"` appended to `bblayers.conf` (`bitbake-layers add-layer` edits the
-  `BBLAYERS` assignment instead; the result is the same list).
+  `README.md`, `COPYING.MIT` and `recipes-example/` only when asked. It adds the new path inside
+  the last plain `BBLAYERS` assignment of `bblayers.conf` (as `${TOPDIR}/../<dir>` when the
+  layer is beside the build directory's parent), falling back to an appended
+  `BBLAYERS += "<path>"`; how `bitbake-layers add-layer` edits the file was not checked.
 - **Tasks a class may override without `addtask`:** `base.bbclass` has `addtask fetch`,
   `unpack after do_fetch`, `configure after do_patch`, `compile after do_configure`,
   `install after do_compile`, `build after do_populate_sysroot` (and others), and

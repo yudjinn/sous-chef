@@ -43,10 +43,8 @@ BBLAYERS ?= " \
   ${LAYERS_ROOT}/meta-core \
   ${TOPDIR}/../meta-vendor \
   ${TOPDIR}/../meta-mine \
+  ${TOPDIR}/../meta-new \
   "
-
-# Added by sous-chef scaffold.
-BBLAYERS += "${TOPDIR}/../meta-new"
 note: the layer is created in <ws>: a new layer must go in a directory that already holds a workspace layer (or the one `path` names), outside every existing layer
 note: BBLAYERS in build:conf/bblayers.conf gets the new layer (a separate change in this plan)
 note: to scaffold into meta-new later, list it in writable_layers in sous-chef.toml; sous-chef sees the layer once the workspace is discovered again (restart the server)

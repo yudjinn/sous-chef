@@ -268,7 +268,12 @@ fn refusals() {
 #[test]
 fn appending_to_a_recipe_of_the_same_layer_is_noted() {
     let mut env = Env::new();
-    let req = append("app", json!({"set": {"EXTRA_OEMAKE:append": "V=1"}}));
+    // The `recipe` option names the recipe instead of `name`.
+    let mut req = append(
+        "ignored",
+        json!({"recipe": "app", "set": {"EXTRA_OEMAKE:append": "V=1"}}),
+    );
+    req.name = None;
     let text = env.show(&req);
     assert!(
         text.starts_with("--- create meta-mine:recipes-app/app/app_%.bbappend\n"),

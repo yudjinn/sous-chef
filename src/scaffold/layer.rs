@@ -22,7 +22,9 @@ use std::path::{Path, PathBuf};
 use super::recipe::{check_parses, invalid, opt_text, opt_words, quote};
 use super::{FileAction, GenContext, Generator, Kind, Plan, PlannedFile, file_sha256};
 use crate::error::Result;
+use crate::parse::{StatementKind, parse};
 use crate::release::Release;
+use crate::types::AssignOp;
 use crate::workspace::Workspace;
 
 /// Every option `layer` accepts.
@@ -241,11 +243,7 @@ fn plan(cx: &GenContext<'_>) -> Result<Plan> {
                 Some(rel) => format!("${{TOPDIR}}/../{}", rel.display()),
                 None => root.display().to_string(),
             };
-            let mut content = old.clone();
-            if !content.is_empty() && !content.ends_with('\n') {
-                content.push('\n');
-            }
-            content.push_str(&format!("\n# Added by sous-chef scaffold.\nBBLAYERS += {}\n", quote(&entry)?));
+            let content = add_to_bblayers(&old, &entry)?;
             check_parses("conf/bblayers.conf", &content)?;
             files.push(PlannedFile {
                 path: conf.clone(),
@@ -274,6 +272,47 @@ fn plan(cx: &GenContext<'_>) -> Result<Plan> {
         notes,
         new_layer: Some(root),
     })
+}
+
+/// `bblayers.conf` with `entry` added to `BBLAYERS`:
+/// inside the last plain assignment of `BBLAYERS` (a new continuation line before a closing
+/// quote that stands on its own line, else a word before the closing quote). Without such
+/// an assignment, `BBLAYERS += "<entry>"` is appended.
+fn add_to_bblayers(old: &str, entry: &str) -> Result<String> {
+    let last = parse(old)
+        .statements
+        .into_iter()
+        .rev()
+        .find(|s| {
+            matches!(&s.kind, StatementKind::Assign { var, op, .. }
+                if var.base == "BBLAYERS" && var.overrides.is_empty() && var.flag.is_none()
+                    && matches!(op, AssignOp::Set | AssignOp::Default | AssignOp::WeakDefault | AssignOp::Append))
+        });
+    if let Some(stmt) = last
+        && let Some(text) = old.get(stmt.bytes.clone())
+        && let Some(q) = text.trim_end().rfind('"')
+    {
+        let at = stmt.bytes.start + q;
+        let line_start = old[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let mut out = String::with_capacity(old.len() + entry.len() + 8);
+        if old[line_start..at].trim().is_empty() && line_start > stmt.bytes.start {
+            // `  "` on its own line: add `  <entry> \` above it.
+            out.push_str(&old[..line_start]);
+            out.push_str(&format!("  {entry} \\\n"));
+            out.push_str(&old[line_start..]);
+        } else {
+            out.push_str(old[..at].trim_end_matches(' '));
+            out.push_str(&format!(" {entry}"));
+            out.push_str(&old[at..]);
+        }
+        return Ok(out);
+    }
+    let mut out = old.to_string();
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&format!("BBLAYERS += {}\n", quote(entry)?));
+    Ok(out)
 }
 
 /// `conf/layer.conf`, as the `bitbake-layers create-layer` template lays it out.
@@ -318,4 +357,38 @@ fn readme(name: &str, depends: &[String], compat: &[String]) -> String {
         "Run `bitbake-layers add-layer <path to {name}>`, or add its path to `BBLAYERS` in\n`conf/bblayers.conf`.\n"
     ));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn add(old: &str) -> Option<String> {
+        add_to_bblayers(old, "/b").ok()
+    }
+
+    #[test]
+    fn bblayers_entry_goes_inside_the_assignment() {
+        assert_eq!(
+            add("BBLAYERS ?= \" \\\n  /a \\\n  \"\n").as_deref(),
+            Some("BBLAYERS ?= \" \\\n  /a \\\n  /b \\\n  \"\n")
+        );
+        assert_eq!(
+            add("BBPATH = \"${TOPDIR}\"\nBBLAYERS = \"/a /c\"\n").as_deref(),
+            Some("BBPATH = \"${TOPDIR}\"\nBBLAYERS = \"/a /c /b\"\n")
+        );
+        assert_eq!(
+            add("BBLAYERS ?= \"/a \\\n  /c\"\n").as_deref(),
+            Some("BBLAYERS ?= \"/a \\\n  /c /b\"\n")
+        );
+        assert_eq!(
+            add("BBPATH = \"x\"").as_deref(),
+            Some("BBPATH = \"x\"\nBBLAYERS += \"/b\"\n")
+        );
+        // Only a plain assignment is edited, the last one.
+        assert_eq!(
+            add("BBLAYERS = \"/a\"\nBBLAYERS:append = \" /z\"\n").as_deref(),
+            Some("BBLAYERS = \"/a /b\"\nBBLAYERS:append = \" /z\"\n")
+        );
+    }
 }

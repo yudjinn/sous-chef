@@ -86,12 +86,12 @@ fn layer_with_every_option_snapshot() {
 fn a_written_layer_is_discovered() {
     let mut env = Env::new();
     let req = request(Kind::Layer, "meta-new", None, json!({"priority": "8"}));
-    let o = env.run(&req, true).unwrap();
-    assert!(o.written);
-    assert!(matches!(o.lint, Some(Ok(_))), "{:?}", o.lint);
+    // The bblayers.conf change is linted (it is in the build directory); nothing at
+    // warning or above.
+    let o = env.write_clean(&req);
     let bblayers = fs::read_to_string(env.path("build/conf/bblayers.conf")).unwrap();
     assert!(
-        bblayers.ends_with("BBLAYERS += \"${TOPDIR}/../meta-new\"\n"),
+        bblayers.contains("  ${TOPDIR}/../meta-mine \\\n  ${TOPDIR}/../meta-new \\\n  \"\n"),
         "{bblayers}"
     );
 
