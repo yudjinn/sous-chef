@@ -1,0 +1,82 @@
+---
+source: tests/scaffold_where.rs
+expression: all
+---
+## upstream recipe, variable, existing bbappend
+where: meta-mine:recipes-core/hello/hello_1.1.bbappend (the existing bbappend)
+why: meta-core:recipes-core/hello/hello_1.1.bb is in meta-core, which is not writable (an update of the layer overwrites edits there, org/upstream-edit); a bbappend in a writable layer changes it from outside, and one exists already: add to it rather than a second one
+scaffold: scaffold kind=bbappend name=hello layer=meta-mine options={"set":{"EXTRA_OECONF:append":" --enable-x"}}
+note: meta-vendor:recipes-core/hello/hello_%.bbappend also applies to meta-core:recipes-core/hello/hello_1.1.bb
+now: EXTRA_OECONF is set last at meta-mine:recipes-core/hello/hello_1.1.bbappend:6 (`EXTRA_OECONF:append =`)
+
+## upstream recipe, add-patch, no bbappend in the writable layer
+where: a new bbappend in meta-mine: recipes-core/libfoo/libfoo_2.0.bbappend
+why: meta-core:recipes-core/libfoo/libfoo_2.0.bb is in meta-core, which is not writable (an update of the layer overwrites edits there, org/upstream-edit); a bbappend in a writable layer changes it from outside
+scaffold: scaffold kind=bbappend name=libfoo layer=meta-mine options={"files":["<name>.patch"]}
+
+## upstream recipe, machine-specific variable
+where: a new bbappend in meta-mine: recipes-core/libfoo/libfoo_%.bbappend
+why: meta-core:recipes-core/libfoo/libfoo_2.0.bb is in meta-core, which is not writable (an update of the layer overwrites edits there, org/upstream-edit); a bbappend in a writable layer changes it from outside
+scaffold: scaffold kind=bbappend name=libfoo layer=meta-mine options={"machine":"boardx","set":{"EXTRA_OECONF:append":" ..."}}
+now: EXTRA_OECONF is set last at meta-core:conf/bitbake.conf:42 (`EXTRA_OECONF ?=`)
+note: a value for every recipe on that machine belongs in its machine conf (conf/machine/boardx.conf); a value for libfoo alone is the `:boardx` override above
+
+## upstream recipe, task
+where: meta-mine:recipes-core/hello/hello_1.1.bbappend (the existing bbappend)
+why: meta-core:recipes-core/hello/hello_1.1.bb is in meta-core, which is not writable (an update of the layer overwrites edits there, org/upstream-edit); a bbappend in a writable layer changes it from outside, and one exists already: add to it rather than a second one
+by hand: add `do_install:append() { ... }` (or `:prepend`) to the bbappend; scaffold kind=bbappend writes variables only (`scaffold kind=bbappend name=hello layer=meta-mine options={"set": ...}` creates the file)
+note: meta-vendor:recipes-core/hello/hello_%.bbappend also applies to meta-core:recipes-core/hello/hello_1.1.bb
+now: do_install is made of meta-core:classes-recipe/autotoolsish.bbclass:30, meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10
+note: do_install comes from a class; `do_install:append()` / `:prepend()` changes it for hello only; the same change in several recipes belongs in a bbclass of your own (scaffold kind=class)
+
+## recipe in the writable layer, change-config
+where: meta-mine:recipes-app/app/app_0.1.bb
+why: meta-mine:recipes-app/app/app_0.1.bb is in meta-mine, which is writable: change the recipe itself (a bbappend to your own recipe only scatters it)
+by hand: edit the file
+now: EXTRA_OEMAKE is set last at meta-mine:recipes-app/app/app_0.1.bb:9 (`EXTRA_OEMAKE =`)
+
+## recipe only
+where: a new bbappend in meta-mine: recipes-core/libfoo/libfoo_%.bbappend
+why: meta-core:recipes-core/libfoo/libfoo_2.0.bb is in meta-core, which is not writable (an update of the layer overwrites edits there, org/upstream-edit); a bbappend in a writable layer changes it from outside
+scaffold: scaffold kind=bbappend name=libfoo layer=meta-mine options={"set":{"<VARIABLE>:append":" ..."}}
+
+## distro policy variable
+where: a distro of your own in meta-mine: conf/distro/<new-distro>.conf with `require conf/distro/testdistro.conf`, then DISTRO = "<new-distro>" in local.conf
+why: DISTRO_FEATURES is distro policy (org/policy-in-recipe): it belongs in the distro conf, not in a recipe or bbappend; meta-core:conf/distro/testdistro.conf is in meta-core, which is not writable
+by hand: no scaffold kind writes distro confs; add `DISTRO_FEATURES:append = " <feature>"` there
+now: DISTRO_FEATURES is set last at build:conf/local.conf:13 (`DISTRO_FEATURES +=`)
+note: `DISTRO_FEATURES` in local.conf only for a developer-local trial: local.conf is not part of any layer
+
+## pin-version
+where: a distro of your own in meta-mine: conf/distro/<new-distro>.conf with `require conf/distro/testdistro.conf`, then DISTRO = "<new-distro>" in local.conf
+why: PREFERRED_VERSION_hello is distro policy (org/policy-in-recipe): it belongs in the distro conf, not in a recipe or bbappend; meta-core:conf/distro/testdistro.conf is in meta-core, which is not writable
+by hand: no scaffold kind writes distro confs; add `PREFERRED_VERSION_hello = "..."` there
+now: hello 1.1 is used (preferred by layer priority and version)
+note: versions of hello: 1.1 (meta-core), 1.0 (meta-core)
+note: `PREFERRED_VERSION_hello` in local.conf only for a developer-local trial: local.conf is not part of any layer
+
+## change-provider
+where: a distro of your own in meta-mine: conf/distro/<new-distro>.conf with `require conf/distro/testdistro.conf`, then DISTRO = "<new-distro>" in local.conf
+why: PREFERRED_PROVIDER_virtual/foo is distro policy (org/policy-in-recipe): it belongs in the distro conf, not in a recipe or bbappend; meta-core:conf/distro/testdistro.conf is in meta-core, which is not writable
+by hand: no scaffold kind writes distro confs; add `PREFERRED_PROVIDER_virtual/foo = "..."` there
+now: virtual/foo comes from libfoo-alt, set at meta-core:conf/distro/testdistro.conf:8 (providers: libfoo-alt, libfoo)
+note: `PREFERRED_PROVIDER_virtual/foo` in local.conf only for a developer-local trial: local.conf is not part of any layer
+
+## provider of the kernel: machine conf
+where: a machine of your own in meta-mine: conf/machine/<new-machine>.conf with `require conf/machine/boardx.conf`, then MACHINE = "<new-machine>" in local.conf
+why: PREFERRED_PROVIDER_virtual/kernel picks hardware support: by OE convention it is set in the machine conf; meta-core:conf/machine/boardx.conf is in meta-core, which is not writable
+by hand: no scaffold kind writes machine confs; add `PREFERRED_PROVIDER_virtual/kernel = "..."` there
+note: no recipe in the indexed layers provides virtual/kernel
+note: `PREFERRED_PROVIDER_virtual/kernel` in local.conf only for a developer-local trial: local.conf is not part of any layer
+
+## set-machine-feature
+where: a machine of your own in meta-mine: conf/machine/<new-machine>.conf with `require conf/machine/qemux86.conf`, then MACHINE = "<new-machine>" in local.conf
+why: MACHINE_FEATURES is hardware description (machine conf, org/policy-in-recipe); meta-core:conf/machine/qemux86.conf is in meta-core, which is not writable
+by hand: no scaffold kind writes machine confs; e.g. `MACHINE_FEATURES:append = " <feature>"`
+note: a value for one recipe on qemux86 is a `:qemux86` override in that recipe's bbappend (scaffold kind=bbappend with the `machine` option); local.conf only for a developer-local trial
+
+## add-package-to-image without an image recipe
+where: the image recipe that should contain libfoo (or a bbappend to it); pass it as `image`
+why: image content belongs to the image (org/policy-in-recipe), not to the package's recipe or local.conf
+note: no image recipe (one inheriting image or core-image) is in the indexed layers; an image of your own is a recipe that inherits core-image
+note: `IMAGE_INSTALL:append = " libfoo"` in local.conf only for a developer-local trial: it is not part of any layer and changes every image (org/recipe-change-in-local-conf)
