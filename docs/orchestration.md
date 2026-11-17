@@ -118,7 +118,7 @@ Every agent prompt contains, in this order:
 | 0 | **done** (commit `2879e75` on `dev`, gate passes) | See "Wave 0 hand-off notes" below. |
 | 1 | **done** (all five streams merged, gate passes, 170 tests) | Integrated on branch `worktree-orchestrator`; `dev` must be fast-forwarded to it before wave 2 (`git merge --ff-only worktree-orchestrator`). Paused here at the user's request; wave 2 not launched. See "Wave 1 hand-off notes" below. |
 | 2 | **done** (five streams and T1.6 merged, gate passes, 418 tests) | Integrated on branch `worktree-w2-integration`; `dev` must be fast-forwarded to it before wave 3 (`git merge --ff-only worktree-w2-integration`). Wave 3 not launched. See "Wave 2 hand-off notes" below. |
-| 3 | not started | |
+| 3 | **done** (five streams plus `w3-cleanup` and `w3-docs` merged, gate passes, 548 tests) | Integrated on branch `worktree-w2-integration`. See "Wave 3 hand-off notes" below. |
 | 4 | not started | |
 | 5 | not started | |
 
@@ -330,3 +330,127 @@ Open items and gaps (not resolved in wave 2):
   limits are not in `Config`; `tests/fixtures/README.md` does not mention `fakebb/` or
   `outputs/`; the milestone and fixture README disagreements with BitBake listed in the
   wave 1 notes.
+
+## Wave 3 hand-off notes (for whoever launches wave 4)
+
+State: T3.4, T2.6, T2.7, T4.1, T4.5, T5.4, T7.1 and T7.2 are merged (branches `w3-a` ..
+`w3-e`, one `--no-ff` merge each, gate after each, no conflicts) on the integration branch
+`worktree-w2-integration`, which was `dev` at the start of the wave (`2a4b7c6`). Two
+follow-up branches were merged after the streams: `w3-cleanup` (code) and `w3-docs`
+(`docs/mcp-tools.md`, `docs/lint-rules.md`, "As implemented in wave 3" in
+`docs/architecture.md`). Read that section before briefing wave 4. `dev` must be
+fast-forwarded again (`git merge --ff-only worktree-w2-integration` in the main checkout).
+
+How wave 3 was run: as wave 2. The orchestrating session wrote no feature code; follow-up
+work found at integration went to agents.
+
+Resolved in wave 3:
+
+- **Diagnostic severity and the `.conf` grammar** (open since wave 1): settled inside
+  `hygiene/parse-error` by classifying parser diagnostics, with no parser contract change.
+  The `addtask` quirk is a warning; whitespace after a trailing `\` is left to
+  `hygiene/continuation`; statements BitBake rejects in `.conf` files are errors.
+- **Fixture README *verify* items** (open since wave 0): base class before `INHERIT`
+  classes, `FILE_LAYERNAME`, and bbappend order were checked in the BitBake source by T3.4.
+- **Release gating in lint** and `[lint.severity]`: implemented and tested (T4.1).
+- `log job=...`, the `job` line of `status`, and the work directory layout asking
+  `Feature::PrInWorkdir`: connected by T5.4.
+
+Things wave 4 briefs must say:
+
+- **Stream A (T3.5 `var`, T3.6 `overrides`, T3.7 `deps`):** `eval::evaluate(index, ws,
+  target)`; refresh the index first. `Target.recipe` takes a name, an absolute path or
+  `layer:path`; `None` evaluates the configuration only. Read `DataStore::replay()`: warn
+  when `anonymous` is not empty, and more strongly for an entry with `opaque: true`.
+  `unset` is not in `history()`; read `unsets()` too. Functions are stored as pointer
+  lines; use `DataStore::function(name)`. `recipe show=summary` still shows static values
+  and says so; switching it to evaluated values is part of this stream if the brief allows
+  an edit in `recipe.rs`.
+- **Streams B, C, D (lint rules T4.2, T4.3, T4.4):** the `Rule` trait has `releases()` and
+  `default_enabled()`. Use `lint::check_text` for fixture tests and the helpers in
+  `src/lint/helpers.rs` (`finding`, `releases_lacking`, `feature_range`, `list_kind`,
+  `is_package_only`, `KnownOverrides`); ask for helper additions in the hand-off instead of
+  editing that file. **T4.4 must set `default_enabled` to false in
+  `hygiene_variable_order.rs`**, declare the release range of `hygiene/workdir-s` with
+  `feature_range(Feature::WorkdirAsSourceDir)`, and add the new rule
+  `hygiene/release-syntax` (file, registry entry, row in lint-rules.md). The fixture
+  workspace is Wrynose and `meta-mine` claims `kirkstone scarthgap wrynose`; some fixture
+  recipes (`libfoo`, `app_0.1.bb`) use pre-Styhead `WORKDIR` conventions, which the new
+  rules will report. A rule's own fixtures live under `tests/fixtures/lint/<rule-id>/`;
+  **do not change the shared fixture workspace**, because other streams' snapshots depend
+  on it. If a rule fires on it, report the finding in the hand-off; the snapshot of the
+  `lint` tool is updated at integration.
+- **Stream D also (T7.3 Bash hook, T7.4 edit hook):** fill `handle` in `src/hook/bash.rs`
+  and `src/hook/edit.rs`; the trait and registry exist. The Claude Code docs confirm a hook
+  may replace Bash output (`updatedToolOutput`), so a digest can be substituted.
+  `bitbake::logs::detect` is the failure detector. **T7.4 needs `Index::refresh_file(ws,
+  abs)`, which does not exist**: the brief must allow that addition in `src/index/`.
+- **Stream E (T6.2, T6.3 generators):** register with a one-line edit in
+  `scaffold::generator()`. Generated files follow `ws.release` and must lint clean through
+  the real engine, which `RuleLint` now calls. Files of a new layer are not linted after
+  the write, because they are not in the workspace yet.
+
+What `w3-cleanup` did (it is not in "As implemented in wave 3", which was written at the
+same time):
+
+- New in `index::query`: `all_files`, `files_by_kind`, `files_in_layer`,
+  `recipe_names_like`, `class_names_like`. No file outside `src/index/` runs SQL on the
+  index any more.
+- The lint engine passes `layer:path` as `Target.recipe`, so it evaluates the file being
+  linted and not the preferred recipe of the same name.
+- `workspace::resolve::{ClassDir, class_dir}`: on a release without `SplitClassDirs`, a
+  file under `classes-recipe/` or `classes-global/` is indexed but never ranked, never an
+  edge target and never part of a shadowing group.
+- `eval::RefProblem::NotInRelease(Feature)`: the replay records `inherit_defer` on a
+  release without it and inherits nothing. Any exhaustive `match` on `RefProblem` needs
+  this arm.
+- The two recipe walkers were **not** unified: `walk_recipe` in `recipe.rs` (static, used
+  by `recipe`, `item`, `search`) and the replay. They agree on the fixture recipes (a test
+  asserts it) and differ in the cases listed in the module doc of
+  `src/mcp/tools/recipe.rs`, mainly include paths that need a variable.
+
+Open items and gaps (not resolved in wave 3):
+
+- **Decision for the user: non-writable layers and multi-release lint.** A layer that is
+  not writable is checked against the workspace release alone, even when it is named
+  explicitly or when no layer is writable. The decision recorded in overview.md says
+  "every supported release it claims".
+- **Stale index after a release change.** Changing only `release` in `sous-chef.toml` does
+  not rebuild edges; the index keeps edges resolved for the old release until a file
+  changes. Fixing it needs the release stored in the index (a schema change).
+- **`BB_DEFER_BBCLASSES`** is honoured by the replay on every release; it is absent from
+  BitBake 2.8 to 2.12 and present on master. It needs a `Feature` once the first release
+  that has it is checked.
+- **Kirkstone:** the static walk still treats `inherit_defer` as a deferred inherit; the
+  `class` tool still shows a class that exists only in `classes-recipe/` (marked as not on
+  the search path).
+- `--rule style` selects nothing once `hygiene/variable-order` is off by default (only the
+  exact id or the alias does). The module doc of `src/bitbake/jobs.rs` says `status` calls
+  `settle`; it does not. `validate_name` also rejects `%`.
+- **Hook events were not captured from a live session.** The recorded events in
+  `tests/fixtures/hooks/` were written by hand from the Claude Code 2.1.326 docs. The exact
+  text of Grep's `content` output and whether Read's `startLine` is 1-based are unverified;
+  check both against a real session before T7.5 ships the plugin.
+- **Hook timing** is 2 to 8 ms per call on the fixture workspace; not measured on a real
+  poky checkout. A file edited since the last refresh gets no annotation.
+- **Jobs:** no MCP progress notifications (a client polls with `op: status`); one job of
+  any kind at a time; a finished job's output becomes a handle only when the `bitbake` or
+  `log` tool is next called; output files of a crashed server are never cleaned up;
+  `devtool modify` cannot take a source tree.
+- **Replay:** `addtask`, `deltask` and `addhandler` are not replayed; anonymous python
+  flags only variables written with a literal `d.setVar`-family call; `BBCLASSEXTEND`
+  variants and `BBFILES_DYNAMIC` are not reproduced; `LAYERDIR` is the canonical layer
+  root, not the `BBLAYERS` text.
+- **Lookup tools:** `class users` does not report the implicit global inheritance of
+  `base` beyond a note. BitBake treats a bbappend that matches no recipe as fatal
+  (`cooker.py`, `show_appends_with_no_recipes`); whether `BB_DANGLINGAPPENDS_WARNONLY`
+  still exists was not confirmed, and the rule is not in bitbake-semantics.md yet.
+- **Lint:** an unknown id in a suppression comment is ignored silently; the note about
+  skipped upstream layers says "pass --all" in the MCP tool too, which has no such argument.
+- **Unverified BitBake behaviour**, carried forward: bbappend order against real
+  `bitbake-layers show-appends` output; whether the BitBake server leaves the process group
+  on a cancel; whether a second client waits or fails on the lock; the Wrynose
+  `bitbake-setup` environment; the `bitbake -e` layout `slice var=` expects.
+- Still open from earlier waves: the CI workflow has never run on GitHub; handle retention
+  limits are not in `Config`; `validate_name` rejects `:` (a T5.5 decision); python in
+  `OVERRIDES` (check on a real poky checkout in T8.1).
