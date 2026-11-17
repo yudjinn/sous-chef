@@ -124,6 +124,22 @@ Re-run on 2026-11-17 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
   for `kiss`. What stops them is python only; `ti33x`, which the naive split used to find by
   accident, is no longer claimed.
 
+## Status after the fix rounds (2026-11-17)
+
+All four bugs of the first measurement and the `is_function` observation are fixed, and the
+`@default` probe has no bug left (12 -> 0): see the two sections above. On the sample with
+the build's machine and distro, static evaluation equalled BitBake for **656 of 1019 values
+(64%)**; the other 363 differed and said so (336 carried a python or unresolved flag) or
+were the documented `LAYERDIR` spelling gap (27); **no value differed without a flag or a
+documented cause**. Since w5-fix-eval2 no flagged value lists `TCOVERRIDE` (156 -> 0) and
+20 flagged values (was 22) differ even outside their unevaluated parts.
+
+Open, as documented gaps rather than bugs: `BBCLASSEXTEND` variants (`gmp-native`,
+`nativesdk-zlib` are refused, not evaluated); `LAYERDIR` is the canonical path, not the
+`BBLAYERS` text; anonymous python and python in `OVERRIDES` (behind most flags); the task
+`depends` flags and the whitespace of an unchanged `DEPENDS` in the virtual-provider rewrite.
+Not measured: other machines, distros and releases; functions and flags.
+
 **The test fails only on what the milestone names:** a value classified **bug** on a tracked
 variable (`SRC_URI`, `DEPENDS`, `RDEPENDS:*`, `FILES:*`, `PACKAGECONFIG`, `EXTRA_OECONF`,
 `EXTRA_OECMAKE`, `S`, `B`, `PV`, `LICENSE`, `OVERRIDES`, `FILESPATH`, `PREFERRED_PROVIDER_*`)

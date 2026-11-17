@@ -1,7 +1,7 @@
 # Test fixtures
 
-Synthetic BitBake metadata for tests. No real poky checkout is used anywhere except the
-opt-in M8 tests. Helpers are in `tests/common/mod.rs` (`fixture_path`, `fixture_ws`,
+Synthetic BitBake metadata for tests, plus recorded real output. No real poky checkout is
+used anywhere except the opt-in live tests (`SOUS_CHEF_LIVE`, docs/live-environment.md). Helpers are in `tests/common/mod.rs` (`fixture_path`, `fixture_ws`,
 `fixture_config`, `temp_ws`, `files_under`).
 
 Rules for changing fixtures:
@@ -20,11 +20,12 @@ Layout:
 fixtures/
   ws/        a complete synthetic workspace (build dir + four layers)
   syntax/    one small file per statement form, plus malformed files (parser tests)
-  lint/      per-rule bad/good fixtures, filled by M4 (see lint/README.md)
+  lint/      per-rule bad/good fixtures (see lint/README.md)
+  kas/       a kas project and what kas checkout adds to it
+  fakebb/    fake bitbake, devtool, bitbake-layers, kas and init scripts (runner and job tests)
+  outputs/   recorded build output: hand-written logs, live/ (real output), envdump/
+  hooks/     Claude Code hook events, hand-written, and captured/ (real events)
 ```
-
-Statements marked *verify* below describe BitBake behaviour that the task implementing it
-must confirm (see docs/bitbake-semantics.md); the fixture content itself is fixed.
 
 ---
 
@@ -294,3 +295,36 @@ create `.git` in the copy, so `project/` is the repository root kas uses.
 `fakebb/kasbin/kas` is the fake kas (see its header); `lint/org/generated-conf-edit/` holds
 the rule's `good` (the generated files) and `bad` fixtures; `hooks/bash_kas_build.json` is a
 hand-written `kas build` event.
+
+---
+
+## `fakebb/`: a fake BitBake
+
+Never a real BitBake. `bin/bitbake` prints its program name, working directory, `BUILDDIR`
+and argv, then behaves as the `FAKEBB_*` variables say (`FAKEBB_OUTPUT` a file to print,
+`FAKEBB_STDERR`, `FAKEBB_SLEEP`, `FAKEBB_PIDFILE`, `FAKEBB_IGNORE_TERM`, `FAKEBB_EXIT`; see
+its header); `bitbake-layers`, `bitbake-getvar`, `devtool` and `oe-pkgdata-util` link to
+it. `oe-init-build-env` sets `BUILDDIR`; `init-with-env` also reads per-test settings from
+`$BUILDDIR/fakebb.env`; `init-build-env` is a fake bitbake-setup script ending in `set --`,
+like the real one; `kasbin/kas` is a fake kas (see its header). Used by
+`tests/bitbake_env.rs`, `bitbake_jobs.rs`, `bitbake_kas.rs` and `var_authoritative.rs`.
+
+## `outputs/`: recorded output
+
+- Top level: hand-written task logs, run files and console output in the shapes of
+  docs/bitbake-semantics.md "Build output" (`log.do_<task>.<pid>`, `run.do_compile.48213`,
+  `bitbake-*.out`), for `bitbake::logs` and the `log` tool.
+- `envdump/`: a trimmed real `bitbake -e curl` from the live environment, for the
+  `bitbake -e` parser and authoritative `var` (its README says how it was trimmed).
+- `live/`: real output recorded on the live environment (kas, bitbake-setup, the
+  verification's fetches, hook events built for real files, the differential report), with
+  the live prefix replaced by `{{LIVE}}`; its README lists every file and command.
+
+## `hooks/`: hook events
+
+One `PostToolUse` event per file, hand-written for the handlers' tests (`hook_*.rs`):
+Grep and Read events on `ws/` files, Bash events (a large bitbake failure, `kas build`,
+`grep -rn` / `rg -n` and the forms the grep handler must skip, another command), Edit and
+Write, an unknown tool. `captured/` holds real events from a Claude Code session (Grep
+content mode and Read only; its README says how they were captured). No Bash or Edit event
+has been captured from a live session.

@@ -115,6 +115,20 @@ it still notices every changed, added and removed file. The per-directory
 `conf/bblayers.conf` check in the walk was measured by limiting it to `conf` directories:
 no difference (19 ms either way), so it was kept as it is.
 
+## Status after the fix rounds (2026-11-17)
+
+The numbers measured by the fix agents, the table above being the first measurement: a
+no-change refresh **104 ms -> 19 ms**; `var SRC_URI recipe=curl` warm **118 ms -> 29 ms**
+(the target, under 100 ms, is met); every lookup tool about 85 ms faster (`layers` 105 ->
+21 ms, `item` 109 -> 24 ms, `search` 110 -> 25 ms); `lint --all` on the bitbake-setup build
+unchanged in time (14.8 s), with 1745 files instead of 1784 (data files are no longer
+linted). The kas build of the live environment, re-run for this document at `8f66f94`
+without BitBake: `sous-chef lint` on the writable layers 0.14 s wall time (13 files),
+`lint --all` 14.3 s (1719 files, 647 findings).
+
+Not measured yet: meta-openembedded scale, a disk-cold run, authoritative `var`, the
+`bitbake`, `log`, `slice` and `scaffold` tools, the edit hook on a new file.
+
 ## Against the targets
 
 - **Full index under 30 s: met** (1.3 s). Not checked at meta-openembedded scale.

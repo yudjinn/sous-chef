@@ -5,17 +5,28 @@ Common to every tool:
 - `budget_tokens` (default 600) and `format` (`"text"` default, or `"json"`).
 - Output is a tab-separated table through `render.rs`; see the output rules in
   [architecture.md](architecture.md). Notes follow the table.
-- Each call that reads the index starts with `Index::refresh` (`bitbake` does not read it;
-  `log` refreshes only to point at the task definition). Freshness is reported only if
-  something changed.
+- Each call that reads the index starts with `Index::refresh` (`bitbake` and `slice` do not
+  read it; `log` refreshes only to point at the task definition; `scaffold` refreshes before
+  it plans). A refresh with nothing changed stats every file: 19 ms on the 1784-file live
+  workspace (performance.md), which is most of a lookup tool's time. Freshness is reported
+  only if something changed.
+- Files BitBake never parses stay indexed but are marked: a `.bb` / `.bbappend` that no
+  layer's `BBFILES` glob matches is no recipe, no provider and no bbappend, and a tool that
+  shows one says so in a note; a data file (a `.conf` / `.inc` / `.bbclass` a recipe
+  installs, bitbake-semantics.md "Data files") is shown by `item` with a note and left out of
+  `search`, file listings and lint.
 - Recipe arguments accept `pn`, `pn_pv` or a pointer. A name that is no recipe's exact `pn`
   is an error listing up to 20 recipe names that contain it. In `recipe`, `var`,
   `overrides`, `deps`, `item`, `search` and the `scaffold` `bbappend` kind a bare `pn`
   names the file BitBake would use, through provider selection (`PREFERRED_VERSION`,
   `DEFAULT_PREFERENCE`, layer priority, version; see "Providers and versions" in
   bitbake-semantics.md).
-- `machine` and `distro`, where a tool takes them, default to the values in `local.conf`
-  when a build directory exists.
+- `machine` and `distro`, where a tool takes them, default to what the evaluated
+  configuration sets (`local.conf`, and OE configuration fragments such as bitbake-setup's
+  `OE_FRAGMENTS` in `conf/toolcfg.conf`). In a kas project whose build directory does not
+  exist yet, the kas files' `machine` / `distro` (else kas's defaults) are used, with a note
+  naming where they came from. When nothing sets `MACHINE`, every evaluated view ends with
+  `note: no MACHINE is set (...)`: machine-specific values are not applied.
 
 The first six are always loaded. The rest are deferred (short descriptions, loaded on demand).
 
@@ -46,6 +57,13 @@ listing them.
   evaluated)` when so); `SRC_URI` and `DEPENDS` as the number of words of the final value
   and the number of applied and inactive operations. A note names the machine and distro;
   another warns when the recipe has anonymous python, which is not run.
+
+Every view notes a file that no layer's `BBFILES` glob matches (only a pointer reaches one):
+`note: <file> is not matched by any layer's BBFILES: BitBake does not collect it, so no
+recipe name or provider resolves to it and no bbappend applies`. The evaluated views
+(`sources`, `tasks`, `packages`, and `var`, `overrides`, `deps`) also print the
+evaluation's notes on where the machine and distro came from (a kas project without a build
+directory) and `no MACHINE is set`; `summary` names only the machine and distro it used.
 - `tree`: the files of the recipe in parse order, statically: the `.bb` and what it pulls in
   where it pulls it in, then each bbappend in application order the same way, then deferred
   inherits. Rows `depth kind name file via state`; `state` is `-`, `unresolved` (missing, or
@@ -191,8 +209,14 @@ differ: an override decision it depends on is uncertain because OVERRIDES has un
 X)` when the text is complete but an override variant or a conditional `:append` /
 `:prepend` / `:remove` of the variable, or of one it references, was judged inactive while
 part of `OVERRIDES` is unknown (a value with no conditional operation in its history never
-carries it); a note for each reference followed with an uncertain value (`inherit_defer
-toolchain/${TOOLCHAIN}` while `OVERRIDES` holds python); a warning per anonymous python function that changes the variable by name, and
+carries it), or `(may differ: depends on unresolved X)` when a statement the replay could
+not apply may set it (`MACHINE` when the `addfragments` list does not expand); the
+evaluation's notes (see `recipe`: an uncollected file, the machine's source, no `MACHINE`);
+a count of references not followed (python, undefined variables, missing files); a note for
+each reference followed although its value is uncertain (``note: `inherit_defer
+toolchain/${TOOLCHAIN}` ... was followed as "toolchain/gcc", but it depends on python or on
+overrides that are not all known; values its files set are flagged``); a warning per
+anonymous python function that changes the variable by name, and
 one for each that is opaque (changes variables through computed names or hands `d` to other
 code), since anonymous python is never run; a count of the other anonymous functions;
 `note: global configuration only (no recipe)` without a recipe; the python note when the
@@ -241,7 +265,9 @@ instead of the static evaluator:
   `source: BitBake (bitbake -e curl), handle h:...` with the `slice` call for the raw
   block, the status note, and a count of dump lines the parser did not recognise.
 
-`FILE_LAYERNAME` of `curl` (live environment, BitBake 2.18.0):
+`FILE_LAYERNAME` of `curl` (the `bitbake -e curl` dump recorded on the live environment,
+BitBake 2.18.0, `tests/fixtures/outputs/envdump/`, as `tests/var_authoritative.rs` checks it;
+the handle id differs per run):
 
 ```
 status	op	override	loc	snippet
@@ -526,8 +552,8 @@ note: 1 bbappend matches no recipe; BitBake stops with a fatal error on these (c
 | `kind` | `"build"` (default), `"runtime"`, `"packageconfig"`, `"reverse"`, `"providers"` |
 | `depth` | default 1, at most 5; used by `build` and `reverse` only (a note says so otherwise) |
 
-There is no `machine` or `distro` argument: the recipe is evaluated for the values in
-`local.conf`. `PACKAGECONFIG` additions to `DEPENDS` and `RDEPENDS:${PN}` are made by
+There is no `machine` or `distro` argument: the recipe is evaluated for the configuration's
+machine and distro (see the common section). `PACKAGECONFIG` additions to `DEPENDS` and `RDEPENDS:${PN}` are made by
 OE-core's `base.bbclass` with anonymous python, which is never run, so they are listed from
 the flags of the selected options, with a note.
 
@@ -632,9 +658,8 @@ error	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:5-6	function do_b
 | `options` | an object of kind-specific options (below); any other key is refused, listing the valid ones |
 | `write` | default false: dry run returning the paths and full content |
 
-`inc_split` and `where` are not implemented yet (T6.4, T6.5, wave 5): they return an error
-and write nothing. `where` will write nothing: given a recipe and a variable or intent, it
-will recommend where the change belongs. See M6.
+`where` plans no files (it gives advice in the notes); the other kinds plan files and write
+them with `write: true`.
 
 Before a generator plans, the index is refreshed. The plan is checked in both modes:
 absolute paths that pass the confinement check and lie in a writable layer, `create`
@@ -827,6 +852,106 @@ note: classes/ because meta-mine claims kirkstone, which does not search classes
 note: use it with `inherit widget_docs` in a recipe (meta-mine:classes/widget_docs.bbclass)
 ```
 
+`inc_split`: moves what every version of a recipe shares into `<pn>.inc` beside the `.bb`
+files and makes each `.bb` `require` it (the `.inc` is created, each `.bb` modified). The
+recipe is the `recipe` option or `name`; its versions are its `.bb` files in the target
+layer, so the recipe must be in a writable layer.
+
+| Option | Notes |
+|---|---|
+| `recipe` | the recipe (default: `name`) |
+| `versions` | the versions to split (default: all versions in the layer); at least two. An unknown one is an error listing the versions there |
+
+What moves: the statements common to all chosen versions (same name, operator and value for
+an assignment, same lines for a function, same normalised text otherwise), in the same
+relative order (a longest common subsequence, newest version first). Never moved: version
+data (`PV`, `PR`, `PE`, `SRCREV*`, `LIC_FILES_CHKSUM`, `SRC_URI` checksum flags) and
+`require` / `include` lines. A comment block directly above a moved statement moves with
+it. Each `.bb` keeps the rest in its order, with `require <pn>.inc` where the first moved
+statement was. Notes list what each version keeps and name other versions of the recipe
+that are not changed.
+
+The plan is refused (no files; the notes say why) when the move could change what BitBake
+parses: a statement that stays in a `.bb` would come after a moved one it does not commute
+with (they set a common variable or flag, or one expands immediately, with `:=` or in
+`inherit` / `include`, what the other sets, the classes and files an `inherit` / `require`
+pulls in counted as part of it), or a moved statement expands `FILE`, `PN`, `PV`, `BPN`,
+`BP`, `P` or `PF` immediately (inside the `.inc`, `FILE` is the `.inc`). Also refused:
+versions in different directories, an existing `<pn>.inc`, a version that does not parse
+cleanly, versions with nothing in common. This check is static (the order of statements and
+what they reference); the result is not evaluated to confirm the values are unchanged.
+
+Two versions of `greet` (`tests/snapshots/scaffold_inc_split__inc_split_clean.snap`; the
+`.inc` and `greet_1.1.bb` cut here):
+
+```
+--- modify meta-mine:recipes-app/greet/greet_1.0.bb
+# Copyright example.org
+# SPDX-License-Identifier: MIT
+
+require greet.inc
+
+LIC_FILES_CHKSUM = "file://COPYING;md5=0835ade698e0bcf8506ecda2f7b4f302"
+
+SRC_URI[sha256sum] = "1111111111111111111111111111111111111111111111111111111111111111"
+note: 11 statements shared by greet_1.1.bb and greet_1.0.bb move into meta-mine:recipes-app/greet/greet.inc; each version requires it
+note: greet_1.1.bb keeps LIC_FILES_CHKSUM, SRC_URI, SRC_URI[sha256sum], PACKAGECONFIG and PACKAGECONFIG[greeting]
+note: greet_1.0.bb keeps LIC_FILES_CHKSUM and SRC_URI[sha256sum]
+```
+
+Refused (`inc_split_refused_order.snap`):
+
+```
+note: nothing planned: the split is not safe or not possible
+note: the split would change what BitBake parses for greet_1.1.bb and greet_1.0.bb:
+note: meta-mine:recipes-app/greet/greet_1.1.bb:20 `GREET_FLAGS +=` would move into the .inc, ahead of meta-mine:recipes-app/greet/greet_1.1.bb:19 `GREET_FLAGS =`, which stays in the .bb: both set GREET_FLAGS
+note: meta-mine:recipes-app/greet/greet_1.0.bb:19 `GREET_FLAGS +=` would move into the .inc, ahead of meta-mine:recipes-app/greet/greet_1.0.bb:18 `GREET_FLAGS =`, which stays in the .bb: both set GREET_FLAGS
+note: make these statements the same in every version, or reorder them by hand, then re-run
+```
+
+`where`: placement advice; plans and writes nothing. Give a recipe (`name` or the `recipe`
+option; `version` picks a version) and a `variable`, a `task` or an `intent`; with only a
+recipe the advice is for changing that recipe in general. Without an `intent` it is taken
+from the variable (`PREFERRED_VERSION_*`, `PREFERRED_PROVIDER_*`, distro policy, machine
+features, image content, else a recipe change).
+
+| Option | Notes |
+|---|---|
+| `recipe` | the recipe (default: `name`) |
+| `variable` | the variable to change (overrides allowed); not with `task` |
+| `task` | the task to change (`do_install`) |
+| `intent` | `add-patch`, `change-config`, `add-package-to-image`, `set-machine-feature`, `pin-version` or `change-provider` |
+| `machine` | the change is for one machine |
+| `image`, `package` | for `add-package-to-image`: the image recipe (default: the recipe when it is an image) and the package (default: the recipe when it is not) |
+| `item` | for `change-provider`: the provided name (`virtual/kernel`); default from a `PREFERRED_PROVIDER_<name>` variable |
+| `value` | the value, put into the suggested `scaffold` call |
+
+The answer is in the notes, one line each: `where:` the file (an existing one as a
+pointer, or the path to create), `why:` the convention as the `org` rules encode it,
+`scaffold:` the call that makes the change, or `by hand:` when no generator writes that
+file, then facts with pointers (`now:` where the value is set now, other bbappends that
+apply, how the layer was chosen). The conventions: a recipe in a layer that is not writable
+is changed through a bbappend in a writable layer (the existing one when there is one); a
+recipe in a writable layer is edited directly; hardware values go in the machine conf (or a
+`:<machine>` override in the bbappend for one recipe); policy (`DISTRO_FEATURES`,
+`PREFERRED_PROVIDER_*`, `PREFERRED_VERSION_*`) in the distro conf (machine conf for the
+kernel and bootloader providers); image content in the image recipe; `local.conf` only as a
+developer-local trial. The writable layer is the `layer` argument when it is writable, else
+the only writable layer, else the one holding related content, else the highest priority
+one, with a note.
+
+A variable of an upstream recipe that a bbappend in the writable layer already changes
+(`tests/snapshots/scaffold_where__where_table.snap`, first case; `options: {"variable":
+"EXTRA_OECONF", "value": " --enable-x"}`):
+
+```
+where: meta-mine:recipes-core/hello/hello_1.1.bbappend (the existing bbappend)
+why: meta-core:recipes-core/hello/hello_1.1.bb is in meta-core, which is not writable (an update of the layer overwrites edits there, org/upstream-edit); a bbappend in a writable layer changes it from outside, and one exists already: add to it rather than a second one
+scaffold: scaffold kind=bbappend name=hello layer=meta-mine options={"set":{"EXTRA_OECONF:append":" --enable-x"}}
+note: meta-vendor:recipes-core/hello/hello_%.bbappend also applies to meta-core:recipes-core/hello/hello_1.1.bb
+now: EXTRA_OECONF is set last at meta-mine:recipes-core/hello/hello_1.1.bbappend:6 (`EXTRA_OECONF:append =`)
+```
+
 ### `bitbake`
 | Arg | Notes |
 |---|---|
@@ -856,6 +981,18 @@ Destructive operations (`cleansstate`, `cleanall`, `devtool reset`, `devtool fin
 error names the setting. Every user-supplied name (target, task, layer) is validated before
 anything runs: letters, digits and `_ . + - /` only, not starting with `-`, so `;`, `$(...)`,
 backticks, spaces and `:` are rejected.
+
+Commands run in the build environment, found in this order (`status` prints the mode):
+`[bitbake] enabled = false` turns it off; `init_script` from `sous-chef.toml` (`init-script`
+mode, or `bitbake-setup` when the file is named `init-build-env`); an environment the server
+was started in (`BUILDDIR` or `BBPATH` set and `bitbake` on `PATH`: `initialised`, the
+program is run directly); a kas project with `kas` on `PATH` and an existing kas build
+directory (`kas`: every command is `kas shell --keep-config-unchanged <files> -c '<command>'`
+in kas's work directory, so kas does not rewrite `conf/` first); a build directory holding
+bitbake-setup's `init-build-env` (`bitbake-setup`); an `oe-init-build-env` in a layer root,
+a layer root's parent or the build directory's parent (`init-script`). The init script is
+sourced and the program run by a wrapper that takes every name as argv; in `kas` mode the
+command string is made only of validated words, each single-quoted.
 
 Every operation except `status` and `cancel` starts a background job and returns at once
 with `job:<n>`. One job of any kind runs at a time: a second request of any operation starts
@@ -914,7 +1051,9 @@ their own; names are exact.
 No arguments. Workspace roots, the release (`release`, e.g. `wrynose (LAYERSERIES_CORENAMES)`),
 layer count, file counts by kind, index path and age, whether a build directory and a usable
 bitbake environment were found, and the running job if any (`job`, e.g.
-`job:1 task hello running 1s`).
+`job:1 task hello running 1s`). Layers are named by their directory (`meta`,
+`meta-arm-toolchain`) in every tool and pointer; BitBake 2.18's `bitbake-layers
+show-layers` prints the collection name instead (`core`, `arm-toolchain`).
 
 In a kas project (and only then) it adds `kas` (the files as kas takes them and how they
 were found, e.g. `kas/kiss.yaml:kas/dogbonedark.yaml (from kas in sous-chef.toml)`),
@@ -927,7 +1066,8 @@ JSON, a `kas` object with the same fields. The `bitbake` row's mode is `init-scr
 
 ## MCP resources
 
-- `sous-chef://help`: this document, condensed.
+- `sous-chef://help`: this document condensed, generated from the tool registry and the
+  argument schemas (each tool's description and arguments).
 - `sous-chef://rules`: the lint rule catalogue, rows `id severity scope flags`. `severity`
   is the effective one (`[lint.severity]` applied); `flags` is the description from
   lint-rules.md, prefixed with `[releases A to B]` for a rule limited to some releases and

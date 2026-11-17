@@ -12,16 +12,19 @@ src/
   lib.rs               module declarations only
   types.rs             shared types (below)
   error.rs             Error, Result
-  config.rs            sous-chef.toml and workspace discovery
+  config.rs            sous-chef.toml and command-line overrides
+  release.rs           Release, Feature, release detection
   parse/
     mod.rs             pub fn parse(src) -> ParsedFile
     lexer.rs           logical lines, continuation, comments
     ast.rs             Statement and friends
     parser.rs
+    words.rs           splitting list values with ${...} kept whole
   workspace/
-    mod.rs             Workspace, Layer
+    mod.rs             Workspace, Layer, discovery
     layers.rs          bblayers.conf and layer.conf
     resolve.rs         BBPATH lookup, class lookup, bbappend matching
+    kas.rs             kas projects (detection, reading, the kas-file edit for scaffold)
   index/
     mod.rs             Index
     schema.rs          DDL and migrations
@@ -45,7 +48,8 @@ src/
   lint/
     mod.rs             engine, Rule trait, registry
     helpers.rs         shared classification helpers (owned by T4.1)
-    rules/mod.rs       registry (`ALL`), complete since M0
+    rules/mod.rs       registry (`ALL`); complete since M0 except `org/generated-conf-edit`
+                       (added in M9)
     rules/<group>_<name>.rs   one file per rule; id with `/` and `-` replaced by `_`
   scaffold/
     mod.rs             engine (dry run, confinement)
@@ -56,7 +60,7 @@ src/
     tools/<name>.rs    one file per tool (plus var_authoritative.rs, filled by T5.5)
   hook.rs              Claude Code hook entry and dispatch
   hook/
-    grep_read.rs  bash.rs  edit.rs     one file per handler
+    grep_read.rs  bash.rs  bash_grep.rs  edit.rs     one file per handler
 tests/
   fixtures/            synthetic layers (see M0)
   *.rs                 integration tests
@@ -79,6 +83,7 @@ adding them; do not rely on memory, especially for `rmcp`.
 | `regex` | Search, slices |
 | `clap` (derive) | CLI |
 | `toml` | Config |
+| `yaml-rust2` | kas project files (added in M9) |
 | `thiserror`, `anyhow` | Errors (`thiserror` in the library, `anyhow` only in `main.rs`) |
 | `tempfile`, `insta` (dev) | Tests and snapshots |
 
@@ -86,7 +91,8 @@ Pinned by M0 (Cargo.toml): rmcp 3.10 (features `server`, `macros`, `transport-io
 (`rt-multi-thread`, `macros`, `process`, `io-util`, `io-std`, `time`, `sync`, `signal`), serde 1
 (`derive`), serde_json 1, schemars 1.2 (same major as rmcp's, so `JsonSchema` derives are
 compatible), rusqlite 0.43 (`bundled`), sha2 0.11, ignore 0.4, regex 1.13, clap 4.6 (`derive`),
-toml 1.2, thiserror 2, anyhow 1; dev: tempfile 3.27, insta 1.49.
+toml 1.2, thiserror 2, anyhow 1, yaml-rust2 `=0.13.0` (an exact pin, added by T9.3); dev:
+tempfile 3.27, insta 1.49.
 
 ## Shared types (`src/types.rs`)
 
@@ -154,6 +160,7 @@ pub enum StatementKind {
     DelTask  { name: String },
     AddHandler { name: String },
     ExportFunctions { names: Vec<String> },
+    AddFragments { rest: String },                    // `addfragments` with 3+ arguments (M9)
     Unknown  { text: String },
 }
 
@@ -172,6 +179,8 @@ The types are in `parse/ast.rs` and re-exported from `parse`.
 pub struct Workspace {
     pub build_dir: Option<PathBuf>,
     pub layers: Vec<Layer>,              // in BBLAYERS order
+    pub release: ReleaseInfo,            // T1.6, see "Release contract"
+    pub kas: Option<kas::KasProject>,    // M9, see "As implemented in wave 5 and M9"
 }
 
 pub struct Layer {
@@ -187,6 +196,7 @@ pub struct Layer {
 
 impl Workspace {
     pub fn discover(cfg: &Config) -> Result<Workspace>;
+    pub fn discover_in(cfg: &Config, kas_env: &kas::KasEnv) -> Result<Workspace>;   // tests
     pub fn loc_for(&self, abs: &Path, lines: LineSpan) -> Option<Loc>;
     pub fn abs_path(&self, loc: &Loc) -> Option<PathBuf>;
     pub fn confine(&self, path: &Path) -> Result<PathBuf>;   // resolves symlinks; Err(Confined)
@@ -222,8 +232,8 @@ impl Release {
 
 /// One variant per behaviour that differs between supported releases. Each has a row in the
 /// "Releases" table of bitbake-semantics.md: first release, last release, source checked.
-pub enum Feature { /* e.g. SplitClassDirs, InheritDefer, IncludeAll, UnpackDir,
-                      WorkdirAsSourceDir, PrInWorkdir */ }
+pub enum Feature { SplitClassDirs, InheritDefer, IncludeAll, UnpackDir, WorkdirAsSourceDir,
+                   PrInWorkdir, AddFragments, BuiltinFragments, RecipeVirtualProviders }
 
 pub struct ReleaseInfo { pub release: Release, pub source: ReleaseSource, pub note: Option<String> }
 pub enum ReleaseSource { Config, CoreNames, LayerCompat, Assumed }
@@ -250,8 +260,9 @@ listing the supported names. `Release::{ALL, NEWEST, is_older_than_floor}`,
 read (`layers::read_layer_confs_with_corenames`, `read_corenames`). The features are
 `SplitClassDirs` (from Langdale), `InheritDefer` (from Scarthgap), `IncludeAll` (from
 Walnascar), `UnpackDir` (from Styhead), `WorkdirAsSourceDir` (until Scarthgap) and
-`PrInWorkdir` (until Mickledore); all are verified, with sources in the "Releases" section
-of bitbake-semantics.md. `find_class` / `class_candidates` honour `SplitClassDirs`.
+`PrInWorkdir` (until Mickledore); M9 and the wave 5 fixes added `AddFragments` and
+`RecipeVirtualProviders` (from Walnascar) and `BuiltinFragments` (from Whinlatter). All are
+verified, with sources in the "Releases" section of bitbake-semantics.md. `find_class` / `class_candidates` honour `SplitClassDirs`.
 `Config.release: Option<String>`, `LintConfig.severity: BTreeMap<String, Severity>`.
 
 `Layer::lint_releases(&self, ws: &Workspace) -> Vec<Release>`: the supported releases in the
@@ -283,17 +294,21 @@ Who reads it:
   go through `Feature`.
 - **Scaffold.** Generated files follow `ws.release` (the `LAYERSERIES_COMPAT` value, `S` /
   `UNPACKDIR` conventions) and must lint clean for it.
-- **BitBake backend.** How the build environment is initialised may differ per release
-  (*verify* for Wrynose).
+- **BitBake backend.** How the build environment is initialised differs between build
+  setups, not releases: a Wrynose bitbake-setup build has its own `init-build-env` (the
+  `bitbake-setup` mode of the runner); see "Build environments" in bitbake-semantics.md.
 
 ## Index contract (`src/index`)
 
 Location: `$XDG_CACHE_HOME/sous-chef/<sha256 of workspace roots, 16 hex>/index.sqlite`.
-The index is derived: any schema change bumps `user_version` and rebuilds from scratch. The
-index also records the workspace release (table `meta`, key `release`; `SCHEMA_VERSION` is
-2), and every edge is recomputed when the release changes (a new `release` in
-`sous-chef.toml`), by `Index::refresh` and by `Index::refresh_file`.
-`query::indexed_release(&Index)` reads it.
+The index is derived: any schema change bumps `user_version` and rebuilds from scratch
+(`SCHEMA_VERSION` is 3). The table `meta` records facts about the whole index: `release`,
+the release the edges were resolved for (every edge is recomputed when it changes, as with a
+new `release` in `sous-chef.toml`, by `Index::refresh` and by `Index::refresh_file`;
+`query::indexed_release` reads it), and `edges`, the version of the edge step
+(`schema::EDGES_VERSION`, `data-files-1`; an index with another value gets its edges and file
+marks recomputed on the next refresh, without a schema change;
+`query::indexed_edges_version`).
 
 ```sql
 layers(id INTEGER PK, name TEXT UNIQUE, root TEXT, priority INT, collections TEXT,
@@ -303,12 +318,13 @@ files(id INTEGER PK, layer_id INT, path TEXT,        -- relative to layer root
       kind TEXT,                                      -- bb | bbappend | inc | bbclass | conf
       mtime INT, size INT, sha256 TEXT,
       pn TEXT, pv TEXT,                               -- from the file name, bb and bbappend only
+      not_collected TEXT NULL,                        -- 'bbfiles' | 'data' | NULL (schema 3)
       UNIQUE(layer_id, path))
 
 statements(id INTEGER PK, file_id INT, ord INT,      -- order within the file
       kind TEXT,                                      -- assign | function | pydef | inherit | include |
                                                       -- addtask | deltask | addhandler | export_functions |
-                                                      -- export | unset | unknown
+                                                      -- export | unset | addfragments | unknown
       name TEXT,                                      -- full left-hand side as written
       base TEXT,                                      -- VarRef.base
       overrides TEXT,                                 -- ":"-joined
@@ -318,7 +334,8 @@ statements(id INTEGER PK, file_id INT, ord INT,      -- order within the file
       snippet TEXT)                                   -- first line, trimmed to 120 chars
   INDEX(base), INDEX(file_id, ord), INDEX(kind, name)
 
-edges(id INTEGER PK, src_file INT, kind TEXT,        -- require | include | include_all | inherit | bbappend
+edges(id INTEGER PK, src_file INT, kind TEXT,        -- require | include | include_all | inherit |
+                                                      -- bbappend | addfragments (never resolved)
       target_text TEXT,                               -- as written
       target_file INT NULL,                           -- resolved, NULL if unresolved or variable
       line INT)
@@ -335,6 +352,7 @@ handles(id TEXT PK,                                  -- "h:" + 10 hex
         command TEXT, bytes INT,
         created INT)                                 -- seconds since the Unix epoch
   INDEX(created)
+meta(key TEXT PK, value TEXT)                        -- 'release', 'edges'
 ```
 
 As implemented in `index/schema.rs` (T2.1), which is the authority for the exact DDL:
@@ -601,12 +619,13 @@ Evaluator core (T3.1 to T3.3, `eval::{datastore, expand, overrides}`):
 
 Environment runner (T5.3, `bitbake`): `BbEnv::detect`, `detect_in(cfg, ws, &HostEnv)`,
 `probe(..) -> Result<BbEnv, String>` (the reason when nothing is found), `mode()`
-(`init-script` or `initialised`), `command(program, args)`, `output(program, args, timeout)
+(`init-script` or `initialised` in wave 2; `bitbake-setup` and `kas` since M9), `command(program, args)`, `output(program, args, timeout)
 -> CommandOutput`, `Supervised` (`spawn`, `child_mut`, `group`, `wait(timeout, cancel) ->
 Finish { Exited, TimedOut, Cancelled }`), `environment_state(cfg, ws) -> EnvState`.
 `validate_arg` accepts a name or a plain option; **callers must run `validate_name` on a
 user-supplied target themselves**, because `command()` cannot tell a target from a flag.
-`validate_name` rejects `:`, so a variable name like `FILES:${PN}` cannot be passed yet.
+`validate_name` rejects `:`; authoritative `var` never passes a variable name to a
+command (it looks the name up in the parsed dump), so `FILES:${PN}` needs no relaxation.
 Unix only. The fake BitBake for tests is `tests/fixtures/fakebb/` (`FAKEBB_*` variables).
 
 `slice` (T5.2): one selector per call; the cap is 8 KB or `budget_tokens * 4` when smaller;
@@ -638,7 +657,9 @@ pub fn execute(ws, config, &mut index, &request, write, generator_override, &dyn
 A generator task registers itself by replacing `None` with `Some(&<file>::<Struct>)` in
 its kind's arm of `scaffold::generator()` (an edit in `src/scaffold/mod.rs`, outside the
 generator's own file). Paths must be absolute, pass `Workspace::confine` and lie in a
-writable layer; a plan with `new_layer` may also modify `<build>/conf/bblayers.conf`.
+writable layer; a plan with `new_layer` may also modify `<build>/conf/bblayers.conf`, or,
+in a kas project, a kas file the project read (not a lock file) inside the project root
+(`kas_file` in `scaffold/mod.rs`, since M9).
 `RuleLint` calls `lint::run` on exactly the written files that are BitBake metadata
 (patches and other files a bbappend adds are skipped; default options, so
 `[lint] disable`, `[lint.severity]` and inline suppression apply); files of a new layer are
@@ -740,7 +761,9 @@ writes nothing or one `hookSpecificOutput` object; the Grep / Read and edit hand
 `plugin/README.md`. `Handler` (`name`, `events`, `tools`, `handle(&mut Ctx, &Event) ->
 Result<Option<Response>>`), `HANDLERS` and `handler_for` (`grep_read::GrepRead` for Grep and
 Read; `bash::BashDigest` for Bash and `edit::EditFollowUp` for Edit, Write and MultiEdit,
-stubs in wave 3 that T7.3 and T7.4 filled in), `Event` (`parse`, `input_str`, `abs_path`),
+stubs in wave 3 that T7.3 and T7.4 filled in; a fourth handler, `Handler::switch` and
+`handlers_for` came later, see "As implemented in wave 5 and M9"), `Event` (`parse`,
+`input_str`, `abs_path`),
 `Response` (`context` caps the text at `CONTEXT_CAP`, 9,000 bytes; `to_json`), `Ctx` (`env`,
 `elapsed`, `over_budget`, `check_budget`, `note`), `Env { ws, index }` with
 `fresh_file(abs)` (the index row only for a Yocto file inside the workspace whose bytes on
@@ -771,10 +794,10 @@ python }`; `preferred_recipe(index, ws, pn, version, machine, distro)`;
 `recipes_using(index, &FileRow)` (the recipes a `.bb`, bbappend, include or class is part
 of). **A recipe name in `Target` is now resolved through provider selection after the
 configuration pass, so `REQUIRED_VERSION`, `PREFERRED_VERSION` and `DEFAULT_PREFERENCE` are
-honoured; a path target is resolved before it. The doc comment of `eval::evaluate` still
-says "preferred by layer priority and version" and is out of date.** `query::preferred_recipe`
-(layer priority and version only, no configuration) is still what `item`, `search`, the
-`bbappend` generator and `bitbake::logs` use. Not handled by provider selection:
+honoured; a path target is resolved before it.** `query::preferred_recipe` (layer priority
+and version only, no configuration) was still what `item`, `search` and the `bbappend`
+generator used after wave 4; since wave 5 they use `recipe::resolve_selected` (provider
+selection), and `bitbake::logs` is the remaining user. Not handled by provider selection:
 `BBCLASSEXTEND` variants (`-native` names find no provider), `BBMASK`, `SKIP_RECIPE` and
 `COMPATIBLE_*`.
 
@@ -789,13 +812,14 @@ is passed to the evaluator as a name; a `pn_pv`, a pointer or an inexact name go
 about anonymous python and unfollowed references), `status_str`, `op_snippet`,
 `override_str`, `MAX_FINAL_CHARS` (600). **All three warn about anonymous python through
 `replay_notes`, as wave 3 required.** `recipe` summary key values come from `eval::evaluate`
-of the chosen file, and a bare `pn` is resolved with `providers::preferred_recipe`.
+of the chosen file, and a bare `pn` is resolved through provider selection (since wave 5 by
+`recipe::resolve_selected`).
 `overrides` with `show: dead` evaluates the configuration once per machine conf and once
 per distro conf of the workspace (cached by `ConfigCache`). `deps` has no machine or distro
 argument; `reverse` is static (index `depends` table).
 
 Lint rules (T4.2, T4.3, T4.4, `lint::rules`): the 38 rules are filled in; no rule id was
-added or removed. Public items besides the rule structs: `org_upstream_edit::{TIMEOUT,
+added or removed (M9 added the 39th, `org/generated-conf-edit`). Public items besides the rule structs: `org_upstream_edit::{TIMEOUT,
 MAX_FINDINGS}` (5 s, 20). `hygiene/variable-order` returns false from `default_enabled`.
 Engine changes: an alias group (`style`) selected with `--rule` counts as naming its rules
 by exact id, so it runs rules that are off by default or disabled; a recipe target is
@@ -826,7 +850,8 @@ removes a blob the server is writing).
 - **Bash** (`BashDigest`, `runs_bitbake(command)`, `MIN_BYTES` 3 KiB, `TAIL_LINES` 10):
   for a `bitbake`, `devtool` or `bitbake-layers` command (the first word of any command in
   the line, after variable assignments and `sudo`, `time`, `env`, `nice`, `exec`,
-  `command`, `nohup`) whose stdout plus stderr is over 3 KiB, the hook stores the full output
+  `command`, `nohup`; since M9 also `kas build`, `kas-container build` and a `kas shell` /
+  `kas-container shell` whose `-c` command runs one of them) whose stdout plus stderr is over 3 KiB, the hook stores the full output
   under a `build` handle and **replaces** the output with `updatedToolOutput`: `stdout`
   becomes one line naming the handle and size, then the log digest (`bitbake::logs`) when a
   failure is detected, else the last 10 lines, then a `slice` hint; `stderr` is emptied; the
@@ -845,13 +870,166 @@ removes a blob the server is writing).
 Scaffold (T6.2, T6.3, `scaffold::{recipe, append, layer, class}`): the four generators
 are registered in `scaffold::generator()` (`RecipeGen`, `AppendGen`, `LayerGen`,
 `ClassGen`), each with its `OPTIONS`; `class::{DEFAULT_AFTER, DEFAULT_BEFORE}` (`do_install`,
-`do_build`). `inc_split` and `where` are still `None` (wave 5). The shared helpers
+`do_build`). `inc_split` and `where` were `None` until wave 5 (see "As implemented in wave 5
+and M9"). The shared helpers
 (`opt_words`, `quote`, `check_parses`, `assign_list`...) are `pub(crate)` in `recipe.rs`.
 **`execute` refreshes the index before a generator plans, so `GenContext.index` is
 current.** The post-write lint skips files that are not BitBake metadata. Generators read
 the target layer's releases with `Layer::lint_releases`. A layer created by `layer` is not
 part of the running server's workspace until it discovers the workspace again (restart),
 so its files are not linted after the write and cannot be a scaffold target until then.
+
+### As implemented in wave 5 and M9
+
+As for wave 4: the additions each stream made, including the fix rounds after the live
+verification; the module docs in the named files are the detailed reference,
+docs/mcp-tools.md describes the tools, docs/lint-rules.md the rules and
+docs/bitbake-semantics.md the BitBake rules behind them.
+
+`bitbake -e` parser (T5.5, `bitbake::envdump`): `parse(reader) -> io::Result<EnvDump>`,
+`parse_str`, `parse_filtered(reader, keep)` (keeps only the entries `keep` accepts),
+`for_each_entry` / `for_each_line_entry` (hands over each variable or function as its block
+ends, so a caller can stream a 2 MB dump), `Parser::push`. `EnvDump { variables, functions,
+includes, stats: ParseStats }`; `Variable { name, span, ops: Vec<EnvOp>, pre_expansion,
+value, export: Export, no_history, error }` with `value_ops`, `flag_ops`, `flag_names`,
+`flag_value`; `EnvOp { kind: OpKind, raw, overrides, condition, file, line, func, flag,
+value }`; `OpKind` (the statement operators, the override operators, `Exported`, `Del`,
+`DelFlag`, `RenameFrom`, `RenameTo`, `FromEnv`, `EnvExport`, `Other`); `Function { name,
+python, file, line, body }`. `compare(ds, dump, names) -> Vec<Comparison>` and
+`compare_target` set a static evaluation against a dump; `Agreement` classifies each value
+(`Equal`, whitespace only, static python, static unresolved, not printed, only one side, a
+mismatch). The parser never panics; an unrecognised line is counted (`ParseStats::skipped`).
+The differential test (T8.1) reads its dumps with it.
+
+Authoritative `var` (T5.5, `mcp::tools::var_authoritative`): `bitbake -e [<recipe>]` runs
+as a job of the server's `JobTable` (operation `env`, visible to `bitbake op=status` /
+`op=cancel`); the tool waits up to `WAIT` (120 s). Its output becomes an `env` handle; the
+handle per recipe is cached in `<cache dir>/env-cache.json` (`CACHE_FILE`) under
+`tree_key(index, recipe)`, a sha256 over the recipe name and the indexed sha256 of every
+`.conf`, `.bbclass` and `.inc` of the workspace and of the recipe's `.bb` files and
+bbappends. **While another job runs, the tool starts nothing: it answers from the cached
+dump when the key matches, else returns an error naming the job; its own job still running
+after `WAIT` is returned as a job id, and the next call for the same key waits for it.**
+Only the recipe name reaches the command line.
+
+kas projects (T9.3, `workspace::kas`): `detect(cfg, &KasEnv) -> Result<Option<KasProject>>`
+(the config key `kas`, then `.config.yaml` in the kas work directory, then the only kas file
+next to a build directory kas generated; `KasSource { Config, MenuConfig, Found, Ambiguous
+}`), `load(files, source, work_dir, build_dir) -> KasProject` (lock files and includes
+merged as kas merges them; `repos`, `layers` in kas's `BBLAYERS` order, `machine`,
+`distro`, `target`, `task`, the two conf headers, `problems`, and `not_in_bblayers` /
+`not_in_kas` filled by discovery), `KasEnv { work_dir, build_dir }` (`KAS_WORK_DIR`,
+`KAS_BUILD_DIR`; `from_process`), `plan_add_layer(project, layer_root) -> LayerEdit {
+Modify { file, content }, Manual { lines, why } }` (one inserted line under the project's
+own repository, accepted only when the result still parses to the old content plus the new
+key), and the generated-file helpers `is_kas_build_dir`, `looks_generated_local_conf`,
+`looks_generated_bblayers`, `KasProject::{header_text, header_line_source,
+file_for_header}`, `is_kas_trailer_line`. `Workspace.kas` holds the project;
+`Workspace::discover_in(cfg, &KasEnv)` is `discover` with an explicit kas environment. With
+a build directory, `bblayers.conf` stays the authority for the layer list; without one, the
+kas layers that are on disk are the layers; with `writable_layers` empty, the project's own
+layers are writable. Nothing in it runs kas or git. Config key `kas = ["a.yaml", ...]`
+(relative to the config file). YAML is read with `yaml-rust2`.
+
+Environment runner (T5.3, M9, `bitbake::env`): `BbEnv::mode()` is `init-script`,
+`bitbake-setup`, `kas` or `initialised`. `probe` tries, in order: `[bitbake] enabled =
+false`; a configured `init_script` (`bitbake-setup` mode when the file is named
+`init-build-env`); an initialised environment (`BUILDDIR` or `BBPATH`, `bitbake` on
+`PATH`); a kas project with kas files, `kas` on `PATH` and an existing kas build directory
+(`KasRun { program, files, work_dir }`: `kas shell --keep-config-unchanged <files> -c
+'<command>'`, `KAS_SHELL_ARGS`, `kas_command_string`, `kas_files_arg`); bitbake-setup's
+`init-build-env` in the build directory; an `oe-init-build-env` near the layers.
+**`kas_command_string` is the one place that builds shell text: only allowlisted programs
+and arguments that passed `validate_arg`, each single-quoted.** `WRAPPER` and
+`SETUP_WRAPPER` save the argv in an array before sourcing, so a script ending in `set --`
+does not lose the program (live bug B7).
+
+Scaffold (T6.4, T6.5, `scaffold::{inc_split, placement}`): `IncSplitGen` (`OPTIONS`
+`recipe`, `versions`) and `PlacementGen` (`OPTIONS` `recipe`, `variable`, `task`,
+`intent`, `machine`, `image`, `package`, `item`, `value`; `INTENTS`) are registered, so
+every arm of `scaffold::generator()` is `Some`. `where` returns a plan with no files and the
+advice in `notes`. The `.inc` split's safety check is static (statement order, references,
+`FILE`-derived names); **it does not evaluate the result to compare values**. The
+`recipe` generator notes an existing recipe of the same `PN` in another layer and which
+file BitBake would then build.
+
+Recipe views and shared resolution (T8.3, `mcp::tools::{recipe, layers}`): `recipe`
+`show` `sources`, `tasks`, `packages` (in `recipe.rs` `views`, on `eval::evaluate` of the
+chosen file); `query::tasks_in(index, file) -> Vec<TaskRow>` (the `addtask` rows, line
+order); `layers show=compat` calls `lint::rules::org_layer_conf::layer_problems(ws, index,
+name) -> Vec<LayerProblem>`, the rule's own checks, so the view and the rule agree.
+`recipe::resolve_selected(index, ws, name, version) -> (RecipeRow, Option<String>)`:
+`resolve_recipe`, then provider selection for a bare `pn` (the reason as the second
+value). **`recipe`, `item`, `search` and the `bbappend` generator resolve a recipe name only
+through it, so a bare `pn` names the same file everywhere.**
+
+Hooks (T7.5, M9, `hook`): four handlers in `HANDLERS`, in dispatch order: `GrepRead`
+(Grep, Read), `BashDigest` (Bash: bitbake output, kas commands included), `BashGrep` (Bash:
+`grep -n` / `rg -n` annotated like Grep; `hook/bash_grep.rs`), `EditFollowUp` (Edit,
+Write, MultiEdit). `handlers_for(event, tool)` lists every matching handler; `run` tries
+each switched-on one in order until one returns a response or an error (a handler with
+nothing to add passes to the next). `Handler::switch()` names the `[hooks]` key
+(`grep_read`, `bash`, `edit`; default the handler's name; `BashGrep` follows `grep_read`);
+`config::HooksConfig { grep_read, bash, edit }` (all on by default) and its `enabled(key)`.
+`Ctx::load_config()` loads `sous-chef.toml` from the event's `cwd` without discovering the
+workspace, so a switched-off handler costs no index access. The debug log line names the
+switched-off handlers. The upstream-edit hint of the edit hook is a `scaffold kind=where`
+call.
+
+Index (w5 fixes, `index`): `SCHEMA_VERSION` is 3. `files.not_collected` is `bbfiles` for a
+`.bb` / `.bbappend` that no layer's `BBFILES` glob matches and `data` for a data file (a
+`.conf` / `.inc` / `.bbclass` that is not metadata, decided by place and by the edges,
+`scan::mark_data`; see "Data files" in bitbake-semantics.md); both are set with the edges,
+on `refresh` and for one file's edges on `refresh_file`. `meta.edges` versions that step.
+`query::FileSet { data, uncollected_recipes }` with `DEFAULT` (no data files; what
+`all_files`, `files_by_kind` and `files_in_layer` return), `ALL` and `COLLECTED`, and the
+`*_in` variants that take one (`all_files_in`, `files_by_kind_in`, `files_in_layer_in`);
+`query::not_collected(index, id)` gives the reason as text. Recipe lookups
+(`find_recipes`, `recipe_names_like`, `files_providing`, `providers::recipes_using`) and
+`bbappend` edges leave uncollected files out. **Lint's file list is `files_in_layer`
+(`FileSet::DEFAULT`), so lint still checks a `.bb` no `BBFILES` glob matches.** A
+no-change refresh no longer canonicalises every path component (`Workspace::confine` tries
+one `realpath` of the whole path first): 104 ms to 19 ms on the live workspace.
+
+Parser (w5 fixes, `parse`): `StatementKind::AddFragments { rest }` for `addfragments` with
+three or more arguments (`Statement::add_fragments() -> Option<AddFragments>`,
+`AddFragments::groups(n)` applies the release's regular expression); `addpylib` is still an
+`Unknown` statement with a "not modelled" diagnostic. `parse::words`: `words`,
+`colon_parts`, `comma_fields`, `split_outside`, `split_keep_whitespace`, `known_words`,
+`is_unevaluated`, `abbreviate`: a `${...}` group is never split and a word holding one is
+unevaluated. **Every place that splits a list or colon-separated value must use
+`parse::words`.** The evaluator, the index, `overrides` and `deps` do; the lint rules still
+split values with their own code.
+
+Evaluator (w5 fixes, `eval`): the replay follows `addfragments` (`Feature::AddFragments`,
+`BuiltinFragments`: built-in fragments set `MACHINE` / `DISTRO`, named ones are included);
+`BBPATH` starts as the build directory, as BitBake's does from the environment; at the end
+of a recipe the `DEPENDS` words in `BB_RECIPE_VIRTUAL_PROVIDERS` are replaced
+(`Feature::RecipeVirtualProviders`; the new value is recorded as an assignment located at the
+`PREFERRED_PROVIDER_*` used, with a note); a reference whose text expands completely but
+whose value is uncertain (`inherit_defer toolchain/${TOOLCHAIN}`) is followed and what its
+files set is flagged. `RefProblem` gained `NotInRelease(Feature)` and `Fatal(String)` (a
+statement BitBake stops on; the replay skips it and goes on). `ReplayNotes` gained
+`target_notes` (an uncollected recipe file, where the machine came from, "no MACHINE is
+set"), `var_notes` (per base name), `unresolved_vars` (variables a statement the replay could
+not apply would have set), `uncertain_references` and `uncertain_vars`.
+`DataStore::is_function(name)` also knows names a function statement wrote (BitBake's
+`func` flag is lost by `renameVar`); `DataStore::override_entries()` lists every `OVERRIDES`
+entry with whether it is unevaluated, and `overrides()` only the known ones. The default
+machine and distro are what the configuration sets, fragments included; in a kas project
+without a build directory the kas files' values (else kas's defaults) are set as weak
+defaults after the layer confs and before `conf/bitbake.conf`, **not at `local.conf`'s
+place as kas writes them**, with a target note.
+
+Release (`release`): `Feature::{AddFragments, BuiltinFragments, RecipeVirtualProviders}`
+(`Feature::ALL` has nine). `LintReach { Target, Sweep }` and `Layer::lint_releases_as`
+decide which releases a layer is linted for (see "Release contract").
+
+Lint (M9, w5 fixes): the 39th rule, `org/generated-conf-edit` (kas-generated `local.conf` /
+`bblayers.conf`); `org/recipe-change-in-local-conf` names the kas file in a kas project;
+`org/layer-conf` reports a copied `LAYERSERIES_COMPAT` as an error (a warning on Kirkstone
+and Langdale workspaces). The fix rounds changed what several rules report (lint-rules.md,
+"On a real workspace").
 
 ## Errors
 
@@ -865,7 +1043,8 @@ what to do next (for example, list the candidates for an ambiguous recipe name).
 
 ## Configuration (`sous-chef.toml`, optional)
 
-Looked up in the working directory, then given by `--config`.
+Looked up in the working directory, then given by `--config`. Unknown keys are an error.
+Relative paths are relative to the file's directory.
 
 ```toml
 build_dir = "build"                       # where conf/bblayers.conf lives; optional
@@ -873,6 +1052,7 @@ layers = ["../meta-extra"]                # extra layer roots, used when there i
 writable_layers = ["meta-mycompany"]      # scaffold may write only here
 init_script = "poky/oe-init-build-env"    # sourced before any bitbake command
 release = "scarthgap"                     # optional; overrides detection
+kas = ["kas/base.yaml", "kas/board.yaml"] # optional; a kas project's files, in kas order
 
 [bitbake]
 enabled = true
@@ -886,18 +1066,27 @@ disable = ["style/variable-order"]
 
 [output]
 budget_tokens = 600
+
+[hooks]                                   # Claude Code hooks; all on by default
+grep_read = true                          # Grep / Read annotation, and grep -n / rg -n through Bash
+bash = true                               # digest of large bitbake output from Bash
+edit = true                               # reindex and lint after Edit / Write / MultiEdit
 ```
 
 In code (`src/config.rs`): `Config { build_dir, layers, writable_layers, init_script,
-bitbake: BitbakeConfig { enabled, allow_destructive }, lint: LintConfig { disable, severity },
-output: OutputConfig { budget_tokens }, work_dir }` (`work_dir` is not read from the file),
+release, kas, bitbake: BitbakeConfig { enabled, allow_destructive }, lint: LintConfig {
+disable, severity }, output: OutputConfig { budget_tokens }, hooks: HooksConfig { grep_read,
+bash, edit }, work_dir }` (`work_dir` is not read from the file),
 `Config::load(&CliOverrides) -> Result<Config>`, `Config::from_toml(text, origin)`,
-`Config::validate(&Workspace)`. `CliOverrides { build_dir, config, layers, work_dir }` carries
+`Config::validate(&Workspace)` (also checks that each `kas` file exists),
+`HooksConfig::enabled(key)`. `CliOverrides { build_dir, config, layers, work_dir }` carries
 the global flags `--build-dir`, `--config`, `--layer` (repeatable).
 
 With no config and no `--build-dir`, discovery walks up from the working directory looking
-for `conf/bblayers.conf`, then falls back to treating directories containing `conf/layer.conf`
-under the working directory as layers.
+for `conf/bblayers.conf`, then uses a kas project's build directory if it has one, then
+falls back to treating directories containing `conf/layer.conf` under the working directory
+as layers (or, in a kas project, the kas layers that are on disk). The kas project itself is
+detected first (see "As implemented in wave 5 and M9").
 
 ## Conventions
 
