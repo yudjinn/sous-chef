@@ -2,7 +2,8 @@
 //! extends `FILESEXTRAPATHS`.
 //!
 //! See docs/lint-rules.md. In a `.bbappend`, any assignment to `SRC_URI` (any operator or
-//! override, no flag) whose value has a `file://` entry, when no statement of the append, and
+//! override except `:remove`, no flag) whose value has a `file://` entry, when no statement
+//! of the append, and
 //! of no file it requires or includes (index tree), touches `FILESEXTRAPATHS`. `file://`
 //! entries are looked up along `FILESPATH`, which without `FILESEXTRAPATHS` holds only the
 //! recipe's own directories (bitbake-semantics.md, "Files and patches").
@@ -10,7 +11,9 @@
 //! Severity: **error** when a named file exists below the append's directory (so it is
 //! meant to come from this layer and will not be found); **warning** when none does (the
 //! file may come from the recipe's own `files/` directory, which needs no extra path).
-//! Entries whose name needs expansion (`${...}`) are ignored.
+//! Entries whose name needs expansion (`${...}`) are ignored. An append in the same
+//! directory as a recipe it applies to is not reported: the recipe's own `FILESPATH`
+//! directories are next to it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -90,6 +93,20 @@ fn extended_in_includes(cx: &LintContext<'_>) -> bool {
         })
 }
 
+/// Whether the append sits in the directory of a recipe it applies to: the recipe's own
+/// `FILESPATH` directories (`${BP}`, `${BPN}`, `files` next to it) are then the append's too.
+fn next_to_recipe(cx: &LintContext<'_>) -> bool {
+    let Ok(Some(row)) = query::file_by_path(cx.index, &cx.loc.layer, &cx.loc.path) else {
+        return false;
+    };
+    query::edges_from(cx.index, row.id)
+        .unwrap_or_default()
+        .iter()
+        .filter(|e| e.kind == "bbappend")
+        .filter_map(|e| e.target.as_ref())
+        .any(|t| t.layer == row.layer && t.path.parent() == row.path.parent())
+}
+
 impl Rule for OrgAppendMissingFilesextrapaths {
     fn id(&self) -> &'static str {
         "org/append-missing-filesextrapaths"
@@ -118,7 +135,9 @@ impl Rule for OrgAppendMissingFilesextrapaths {
                     return;
                 }
                 StatementKind::Assign { var, value, .. }
-                    if var.base == "SRC_URI" && var.flag.is_none() =>
+                    if var.base == "SRC_URI"
+                        && var.flag.is_none()
+                        && !var.overrides.iter().any(|o| o == "remove") =>
                 {
                     let names = file_names(value);
                     if !names.is_empty() {
@@ -132,7 +151,7 @@ impl Rule for OrgAppendMissingFilesextrapaths {
                 _ => {}
             }
         }
-        if uses.is_empty() || extended_in_includes(cx) {
+        if uses.is_empty() || extended_in_includes(cx) || next_to_recipe(cx) {
             return;
         }
         let dir = cx

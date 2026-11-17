@@ -707,7 +707,7 @@ fn append_missing_filesextrapaths() {
     let found = bad_and_good(
         &OrgAppendMissingFilesextrapaths,
         "append-missing-filesextrapaths",
-        &[],
+        &["base-layer"],
     );
     assert_eq!(
         rows(&found),
