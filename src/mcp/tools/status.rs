@@ -46,6 +46,9 @@ pub struct Report {
     /// `wrynose (LAYERSERIES_CORENAMES)`. `None` when the workspace could not be loaded.
     pub release: Option<String>,
     pub layers: Vec<LayerStatus>,
+    /// The kas project, when the workspace is one (left out of the JSON otherwise).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kas: Option<KasStatus>,
     /// Files on disk by kind (`bb`, `bbappend`, `inc`, `bbclass`, `conf`), across the layers
     /// and `build/conf`.
     pub files: BTreeMap<String, u32>,
@@ -62,6 +65,30 @@ pub struct LayerStatus {
     pub root: String,
     pub priority: i32,
     pub writable: bool,
+}
+
+/// What `status` shows about a kas project (`workspace::kas::KasProject`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct KasStatus {
+    /// The kas files as kas takes them (`kas/a.yaml:kas/b.yaml`, relative to the kas work
+    /// directory); empty when they are not known.
+    pub files: String,
+    /// How they were found (`KasSource::describe`).
+    pub source: String,
+    pub work_dir: String,
+    pub build_dir: String,
+    /// `machine`, `distro` and targets, kas's defaults when the files set none.
+    pub machine: String,
+    pub distro: String,
+    pub target: Vec<String>,
+    /// Layers the kas files name, and those not on disk yet (paths).
+    pub layers: usize,
+    pub missing: Vec<String>,
+    /// In the kas files but not in `bblayers.conf` (paths), and the reverse (layer names).
+    pub not_in_bblayers: Vec<String>,
+    pub not_in_kas: Vec<String>,
+    pub lock_files: Vec<String>,
+    pub problems: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -185,6 +212,40 @@ fn fill_workspace(report: &mut Report, ws: &Workspace) {
         })
         .collect();
     report.files = count_files(ws);
+    report.kas = ws.kas.as_ref().map(kas_status);
+}
+
+fn kas_status(k: &crate::workspace::kas::KasProject) -> KasStatus {
+    let show = |p: &Path| {
+        p.strip_prefix(&k.work_dir)
+            .unwrap_or(p)
+            .display()
+            .to_string()
+    };
+    KasStatus {
+        files: k.files_arg(&k.work_dir),
+        source: k.source.describe(),
+        work_dir: k.work_dir.display().to_string(),
+        build_dir: k.build_dir.display().to_string(),
+        machine: k.machine_or_default().to_string(),
+        distro: k.distro_or_default().to_string(),
+        target: k
+            .targets_or_default()
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        layers: k.layers.len(),
+        missing: k
+            .layers
+            .iter()
+            .filter(|l| !l.present)
+            .map(|l| show(&l.path))
+            .collect(),
+        not_in_bblayers: k.not_in_bblayers.iter().map(|p| show(p)).collect(),
+        not_in_kas: k.not_in_kas.clone(),
+        lock_files: k.lock_files.iter().map(|p| show(p)).collect(),
+        problems: k.problems.clone(),
+    }
 }
 
 fn output(
@@ -232,6 +293,58 @@ fn table(r: &Report) -> Table {
                 l.name, l.priority, l.writable, l.root
             ),
         ));
+    }
+    if let Some(k) = &r.kas {
+        let files = if k.files.is_empty() {
+            "files not known".to_string()
+        } else {
+            k.files.clone()
+        };
+        rows.push(("kas", format!("{files} ({})", k.source)));
+        if !k.files.is_empty() {
+            rows.push((
+                "kas_defaults",
+                format!(
+                    "machine {}, distro {}, target {}",
+                    k.machine,
+                    k.distro,
+                    k.target.join(" ")
+                ),
+            ));
+            let mut layers = format!("{} in the kas files", k.layers);
+            if !k.missing.is_empty() {
+                layers.push_str(&format!("; not checked out yet: {}", k.missing.join(", ")));
+            }
+            rows.push(("kas_layers", layers));
+        }
+        if !k.lock_files.is_empty() {
+            rows.push(("kas_lock", k.lock_files.join(", ")));
+        }
+        if !k.not_in_bblayers.is_empty() || !k.not_in_kas.is_empty() {
+            let mut parts = Vec::new();
+            if !k.not_in_bblayers.is_empty() {
+                parts.push(format!(
+                    "in the kas files but not in bblayers.conf: {}",
+                    k.not_in_bblayers.join(", ")
+                ));
+            }
+            if !k.not_in_kas.is_empty() {
+                parts.push(format!(
+                    "in bblayers.conf but not in the kas files: {}",
+                    k.not_in_kas.join(", ")
+                ));
+            }
+            rows.push((
+                "kas_mismatch",
+                format!(
+                    "{}; bblayers.conf is used until kas checkout regenerates it",
+                    parts.join("; ")
+                ),
+            ));
+        }
+        for p in &k.problems {
+            rows.push(("kas_problem", p.clone()));
+        }
     }
     let files = if r.files.is_empty() {
         none()
@@ -432,6 +545,80 @@ mod tests {
         ] {
             assert!(text.contains(field), "{field}");
         }
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap() {
+            let e = e.unwrap();
+            let dest = to.join(e.file_name());
+            if e.file_type().unwrap().is_dir() {
+                copy_dir(&e.path(), &dest);
+            } else {
+                std::fs::copy(e.path(), dest).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn kas_rows_and_json_field() {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/kas");
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("project");
+        copy_dir(&fixtures.join("project"), &root);
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let root = root.canonicalize().unwrap();
+        let cfg = Config {
+            kas: vec![root.join("kas/base.yaml"), root.join("kas/board.yaml")],
+            work_dir: root.clone(),
+            ..Config::default()
+        };
+        let ws = Workspace::discover_in(&cfg, &crate::workspace::kas::KasEnv::default()).unwrap();
+        let mut r = base(&cfg);
+        fill_workspace(&mut r, &ws);
+        let args = Args {
+            budget_tokens: Some(5000),
+            format: None,
+        };
+        let text = output(&r, None, &args, 600).unwrap();
+        let row = |name: &str| {
+            text.lines()
+                .find(|l| l.split_whitespace().next() == Some(name))
+                .unwrap_or_else(|| panic!("no {name} row in {text}"))
+                .to_string()
+        };
+        assert!(
+            row("kas").contains("kas/base.yaml:kas/board.yaml (from kas in sous-chef.toml)"),
+            "{text}"
+        );
+        assert!(
+            row("kas_defaults").contains("machine board1, distro projdistro, target proj-image"),
+            "{text}"
+        );
+        assert!(
+            row("kas_layers").contains(
+                "4 in the kas files; not checked out yet: meta-vendor, openembedded-core/meta"
+            ),
+            "{text}"
+        );
+        assert!(row("kas_lock").contains("kas/base.lock.yaml"), "{text}");
+        let json = Args {
+            budget_tokens: None,
+            format: Some(Format::Json),
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&output(&r, None, &json, 600).unwrap()).unwrap();
+        assert_eq!(v["kas"]["machine"], "board1");
+        assert_eq!(v["kas"]["files"], "kas/base.yaml:kas/board.yaml");
+
+        // Without kas: no rows, no JSON key.
+        let mut r = base(&Config::default());
+        fill_workspace(&mut r, &fixture_ws());
+        let text = output(&r, None, &args, 600).unwrap();
+        assert!(!text.lines().any(|l| l.starts_with("kas")), "{text}");
+        let v: serde_json::Value =
+            serde_json::from_str(&output(&r, None, &json, 600).unwrap()).unwrap();
+        assert!(v.get("kas").is_none());
     }
 
     #[test]

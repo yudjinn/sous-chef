@@ -2,7 +2,9 @@
 //!
 //! Trigger: `PostToolUse` on `Bash` whose `tool_input.command` runs `bitbake`, `devtool` or
 //! `bitbake-layers` (the first word of any command in it, after variable assignments and
-//! `sudo` / `time` / `env` / `nice` / `exec`), and whose output (`tool_response.stdout`
+//! `sudo` / `time` / `env` / `nice` / `exec`; also `kas build`, `kas-container build` and a
+//! `kas shell` / `kas-container shell` whose `-c` command runs one of them, see
+//! [`runs_bitbake`]), and whose output (`tool_response.stdout`
 //! plus `stderr`) is larger than [`MIN_BYTES`]. Anything else passes through untouched.
 //!
 //! **Mechanism: the output is replaced** (`hookSpecificOutput.updatedToolOutput`). The
@@ -64,30 +66,83 @@ const DIGEST_TOKENS: usize = 400;
 /// `PostToolUse` on `Bash`.
 pub struct BashDigest;
 
+/// kas front ends: `kas` and the `kas-container` wrapper script.
+const KAS_PROGRAMS: &[&str] = &["kas", "kas-container"];
+
+/// Options before the kas or kas-container subcommand that take a value (kas 5.5
+/// `kas.py` and the `kas-container` script).
+const KAS_VALUE_OPTIONS: &[&str] = &[
+    "-l",
+    "--log-level",
+    "--runtime-args",
+    "--docker-args",
+    "--ssh-dir",
+    "--aws-dir",
+    "--git-credential-store",
+    "--git-credential-socket",
+];
+
 /// Whether a shell command line runs one of [`PROGRAMS`]: the first word of any simple
 /// command in it (split on `;`, `&`, `|`, newlines, parentheses and backquotes), after
-/// `NAME=value` assignments and [`WRAPPERS`], compared by file name.
+/// `NAME=value` assignments and [`WRAPPERS`], compared by file name. Also `kas build` /
+/// `kas-container build` (kas runs BitBake), and `kas shell ... -c '<command>'` /
+/// `kas-container shell ... -c ...` when the command runs one of them; other kas
+/// subcommands (`checkout`, `dump`, `lock`, ...) do not count.
 pub fn runs_bitbake(command: &str) -> bool {
     command
         .split([';', '&', '|', '\n', '(', ')', '`', '{', '}'])
         .any(|segment| {
-            let first = segment
+            let words: Vec<&str> = segment
                 .split_whitespace()
                 .map(|w| w.trim_matches(|c| c == '"' || c == '\''))
-                .find(|w| {
-                    !(WRAPPERS.contains(w)
-                        || (w.contains('=') && !w.starts_with('-'))
-                        || w.starts_with('-') // options of a wrapper (`nice -n 5`)
-                        || w.chars().all(|c| c.is_ascii_digit()))
-                });
-            first.is_some_and(|w| {
-                let name = Path::new(w)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or(w);
-                PROGRAMS.contains(&name)
-            })
+                .collect();
+            let Some(pos) = words.iter().position(|w| {
+                !(WRAPPERS.contains(w)
+                    || (w.contains('=') && !w.starts_with('-'))
+                    || w.starts_with('-') // options of a wrapper (`nice -n 5`)
+                    || w.chars().all(|c| c.is_ascii_digit()))
+            }) else {
+                return false;
+            };
+            let w = words[pos];
+            let name = Path::new(w)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(w);
+            if PROGRAMS.contains(&name) {
+                return true;
+            }
+            KAS_PROGRAMS.contains(&name) && kas_runs_bitbake(&words[pos + 1..], segment)
         })
+}
+
+/// After `kas` / `kas-container`: whether the subcommand builds, or is a `shell` whose
+/// `-c` / `--command` runs BitBake. `segment` is the raw text, to read the quoted command.
+fn kas_runs_bitbake(words: &[&str], segment: &str) -> bool {
+    let mut i = 0;
+    while let Some(w) = words.get(i) {
+        if !w.starts_with('-') {
+            break;
+        }
+        i += if KAS_VALUE_OPTIONS.contains(w) { 2 } else { 1 };
+    }
+    match words.get(i) {
+        Some(&"build") => true,
+        Some(&"shell") => {
+            let Some(at) = segment.find("shell") else {
+                return false;
+            };
+            let rest = &segment[at + "shell".len()..];
+            [" -c ", " --command ", " --command="]
+                .iter()
+                .filter_map(|opt| rest.find(opt).map(|p| &rest[p + opt.len()..]))
+                .any(|cmd| {
+                    let cmd = cmd.trim_start().trim_start_matches(['"', '\'']);
+                    runs_bitbake(cmd)
+                })
+        }
+        _ => false,
+    }
 }
 
 /// stdout, then stderr (on a new line) when there is any.
@@ -242,6 +297,40 @@ mod tests {
             "echo bitbake",
             "bitbake-getvar -r hello S",
             "ls bitbake",
+        ] {
+            assert!(!runs_bitbake(c), "{c}");
+        }
+    }
+
+    #[test]
+    fn kas_commands_that_run_bitbake() {
+        for c in [
+            "kas build kas/kiss.yaml:kas/dogbonedark.yaml",
+            "kas build kas/kiss.yaml --target kiss-image -c fetch 2>&1 | tail",
+            "kas -l debug build kas.yml",
+            "~/.venv/bin/kas build kas.yml",
+            "kas-container build kas/kiss.yaml",
+            "kas-container --ssh-dir ~/.ssh build kas.yml",
+            "kas shell kas/kiss.yaml:kas/dogbonedark.yaml -c 'bitbake -p'",
+            "kas shell kas.yml -c \"bitbake -e curl\" | grep ^S=",
+            "kas shell -k kas.yml --command 'bitbake-layers show-layers'",
+            "kas shell kas.yml --command='devtool status'",
+            "kas-container shell kas.yml -c 'bitbake -p'",
+            "cd yocto-kiss && kas build kas/kiss.yaml",
+        ] {
+            assert!(runs_bitbake(c), "{c}");
+        }
+        for c in [
+            "kas checkout kas/kiss.yaml:kas/dogbonedark.yaml",
+            "kas dump kas/kiss.yaml",
+            "kas dump --lock --inplace kas/kiss.yaml",
+            "kas lock kas.yml",
+            "kas shell kas.yml -c 'runqemu'",
+            "kas shell kas.yml",
+            "kas-container checkout kas.yml",
+            "kas --version",
+            "pip install kas",
+            "echo kas build",
         ] {
             assert!(!runs_bitbake(c), "{c}");
         }
