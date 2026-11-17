@@ -200,7 +200,7 @@ Notes:
   | no `BBFILE_COLLECTIONS` | W |
   | a collection another layer of the workspace also adds | E |
   | `LAYERSERIES_COMPAT_<c>` not set or empty | W |
-  | `LAYERSERIES_COMPAT_<c>` copies `${LAYERSERIES_COMPAT_...}` (expands to nothing) | W |
+  | `LAYERSERIES_COMPAT_<c>` copies `${LAYERSERIES_COMPAT_...}`: BitBake 2.4 (Mickledore) and later delete each layer's value after its `layer.conf`, so the reference stays literal and BitBake stops; the message lists the release names to write | E (W when the workspace release is Kirkstone or Langdale, whose BitBake 2.0 / 2.2 expands the copy and accepts the layer) |
   | shares no name with the core layer's `LAYERSERIES_CORENAMES` | E |
   | no core layer in the workspace, and the compat does not name the workspace release, unless that release was only assumed | W |
   | names a release older than Kirkstone | I |

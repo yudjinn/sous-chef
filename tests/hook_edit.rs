@@ -177,11 +177,51 @@ fn an_edit_in_an_upstream_layer_yields_the_warning() {
         .unwrap()
         .replace("--disable-nls", "--disable-nls --enable-x");
     let ctx = context_of(&f.edit("Edit", rel, &text));
+    // hello.inc belongs to one recipe (both hello versions require it): the hint is a call
+    // that can be run as written.
     assert_eq!(
         ctx,
         "meta-core is not a writable layer: this edits upstream metadata, which an update of \
          the layer overwrites; put the change in a bbappend in a writable layer \
-         (`scaffold kind=where` says where)."
+         (`scaffold kind=where name=hello` says where)."
+    );
+}
+
+#[test]
+fn the_upstream_hint_names_the_recipe_of_a_recipe_or_bbappend() {
+    let f = fx();
+    for (rel, pn) in [
+        ("meta-core/recipes-core/hello/hello_1.1.bb", "hello"),
+        ("meta-vendor/recipes-core/hello/hello_%.bbappend", "hello"),
+        (
+            "meta-vendor/recipes-vendor/libfoo-alt/libfoo-alt_1.0.bb",
+            "libfoo-alt",
+        ),
+    ] {
+        let text = format!(
+            "{}\n# touched\n",
+            fs::read_to_string(f.root.join(rel)).unwrap()
+        );
+        let ctx = context_of(&f.edit("Edit", rel, &text));
+        assert!(
+            ctx.ends_with(&format!("(`scaffold kind=where name={pn}` says where).")),
+            "{rel}: {ctx}"
+        );
+    }
+}
+
+#[test]
+fn the_upstream_hint_is_general_for_a_file_of_no_one_recipe() {
+    let f = fx();
+    let rel = "meta-core/conf/machine/boardx.conf";
+    let text = format!(
+        "{}\n# touched\n",
+        fs::read_to_string(f.root.join(rel)).unwrap()
+    );
+    let ctx = context_of(&f.edit("Edit", rel, &text));
+    assert!(
+        ctx.ends_with("in a writable layer (`scaffold kind=where` says where)."),
+        "{ctx}"
     );
 }
 

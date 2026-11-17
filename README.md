@@ -84,8 +84,9 @@ release = "scarthgap"                 # optional; detected from the core layer o
 
 Other keys: `layers` (extra layer roots, for a workspace without a build directory),
 `init_script` (sourced before any bitbake command), `[bitbake] enabled` and
-`allow_destructive`, `[lint] disable` and `[lint.severity]`, `[output] budget_tokens`. See
-"Configuration" in [docs/architecture.md](docs/architecture.md).
+`allow_destructive`, `[lint] disable` and `[lint.severity]`, `[output] budget_tokens`,
+`[hooks] grep_read`, `bash` and `edit` (see [Hooks](#hooks)). See "Configuration" in
+[docs/architecture.md](docs/architecture.md).
 
 ## A short tour
 
@@ -181,11 +182,28 @@ means no output and the tool result unchanged.
 - **Grep, Read**: hits in Yocto files get their enclosing item (`[do_install:append
   41-58]`) and, for a recipe, the bbappends and includes that also contribute; a Read that
   stops inside a function says where it ends. The output itself is not changed.
+- **grep through Bash**: on Linux and macOS Claude Code has no Grep tool by default and
+  searches with `grep` or `rg` through Bash. A single `grep -n` / `grep -rn` / `rg -n`
+  command (no pipeline, line numbers asked for explicitly: `rg` prints none off a
+  terminal) whose output is `<path>:<line>:<text>` gets the same annotations as context,
+  for the first 200 hits (the context says when it stopped there). The output is not
+  changed; any other command is left alone.
 - **Bash**: the output of a `bitbake`, `devtool` or `bitbake-layers` command over 3 KiB is
   stored under a handle and replaced by a digest and a `slice` hint.
 - **Edit, Write**: the edited file is reindexed and linted, and up to five findings at
   warning level or above are added; an edit in a layer that is not writable gets a line
-  suggesting a bbappend.
+  suggesting a bbappend, with the `scaffold kind=where name=<recipe>` call to run when the
+  file belongs to one recipe.
+
+Each can be switched off in `sous-chef.toml` (all default `true`); a switched-off hook
+exits 0 with no output:
+
+```toml
+[hooks]
+grep_read = false  # the Grep / Read annotation and the grep-through-Bash annotation
+bash = false       # the BitBake output digest
+edit = false       # the reindex and lint after an edit
+```
 
 ## Limits
 
@@ -226,7 +244,9 @@ The decisions and non-goals are in [docs/overview.md](docs/overview.md).
   (or use any tool) first. A file edited since the last refresh gets no Grep / Read
   annotation until the next one. Check `hook.log`, and run `claude --debug=hooks`.
   On Linux and macOS Claude Code leaves the Grep tool out by default and searches with
-  `grep` through Bash, which the hooks do not annotate.
+  `grep` through Bash: only a plain `grep -n` / `rg -n` command is annotated (see
+  [Hooks](#hooks)); a pipeline, `rg` without `-n` or a one-file `grep -n` (no file name in
+  its output) is not. Check `[hooks]` in `sous-chef.toml`.
 - **Server not connected.** `sous-chef` must be on the `PATH` Claude Code sees
   (`claude mcp list` shows `Failed to connect` otherwise). A server that starts but cannot
   load the configuration still runs, and `status` reports the error.

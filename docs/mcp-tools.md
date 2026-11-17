@@ -704,8 +704,11 @@ note: copy 0001-fix-build.patch to meta-mine:recipes-core/libfoo/libfoo/0001-fix
 or collection already in use is refused. Creates `<path>/<name>/conf/layer.conf` and
 `README.md`, and adds the layer to `BBLAYERS` in `conf/bblayers.conf` of the build directory
 as a second change of the same plan (as `${TOPDIR}/../<dir>` when the layer is beside the
-build directory's parent). The tool's `layer` argument is not used (if given, it must
-still name a writable layer).
+build directory's parent). In a kas project the second change is to the kas file instead
+(one inserted entry under the project's own repo; `bblayers.conf`, which kas generates, is
+left alone), shown relative to the kas project root; the engine accepts that `Modify` only
+for a file kas read, not a lock file, inside the project root. The tool's `layer` argument
+is not used (if given, it must still name a writable layer).
 
 | Option | Notes |
 |---|---|

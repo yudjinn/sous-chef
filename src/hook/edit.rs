@@ -15,7 +15,8 @@
 //!    at warning level or above, after `[lint.severity]` and suppression comments, are
 //!    added as context: at most [`MAX_FINDINGS`], then `+N more`.
 //! 3. If the file is in a layer that is not writable, one line says so and suggests a
-//!    bbappend (`scaffold kind=where`).
+//!    bbappend, with the placement call to run: `scaffold kind=where name=<pn>` when the
+//!    file belongs to one recipe ([`recipe_of`]), else `scaffold kind=where` in general.
 //!
 //! No findings and a writable layer: no output. The context is an addition; the tool output
 //! is never replaced.
@@ -24,10 +25,13 @@ use std::time::Duration;
 
 use super::{Ctx, Event, Handler, POST_TOOL_USE, Response, is_yocto_path};
 use crate::error::{Error, Result};
+use crate::index::query;
 use crate::index::{FileRefresh, Index};
 use crate::lint::{self, Options, Scope, Severity, Target};
+use crate::types::FileKind;
 use crate::types::LineSpan;
 use crate::workspace::BUILD_LAYER;
+use crate::workspace::Workspace;
 
 /// Findings listed before `+N more`.
 pub const MAX_FINDINGS: usize = 5;
@@ -132,10 +136,14 @@ impl Handler for EditFollowUp {
         let upstream =
             loc.layer != BUILD_LAYER && ws.layer(&loc.layer).is_some_and(|l| !l.writable);
         if upstream {
+            let hint = match recipe_of(&index, ws, &abs)? {
+                Some(pn) => format!("`scaffold kind=where name={pn}` says where"),
+                None => "`scaffold kind=where` says where".to_string(),
+            };
             lines.push(format!(
                 "{} is not a writable layer: this edits upstream metadata, which an update of \
                  the layer overwrites; put the change in a bbappend in a writable layer \
-                 (`scaffold kind=where` says where).",
+                 ({hint}).",
                 loc.layer
             ));
         }
@@ -144,4 +152,40 @@ impl Handler for EditFollowUp {
         }
         Ok(Some(Response::context(lines.join("\n"))))
     }
+}
+
+/// The one recipe (`PN`) the file at `abs` belongs to: a `.bb` itself, the recipes a
+/// `.bbappend` applies to, the recipes that `require` / `include` / `include_all` an
+/// `.inc` directly. `None` when there is no such recipe or there are several names, or a
+/// recipe has no `PN` in the index.
+pub fn recipe_of(index: &Index, ws: &Workspace, abs: &std::path::Path) -> Result<Option<String>> {
+    let Some(file) = query::file_by_abs(index, ws, abs)? else {
+        return Ok(None);
+    };
+    let recipes: Vec<query::FileRow> = match file.kind {
+        FileKind::Recipe => vec![file],
+        FileKind::Append => query::edges_from(index, file.id)?
+            .into_iter()
+            .filter(|e| e.kind == "bbappend")
+            .filter_map(|e| e.target)
+            .collect(),
+        FileKind::Include => query::edges_to(index, file.id)?
+            .into_iter()
+            .filter(|e| matches!(e.kind.as_str(), "require" | "include" | "include_all"))
+            .map(|e| e.src)
+            .filter(|f| f.kind == FileKind::Recipe)
+            .collect(),
+        _ => Vec::new(),
+    };
+    let mut names: Vec<String> = Vec::new();
+    for r in recipes {
+        let Some(pn) = r.pn else { return Ok(None) };
+        if !names.contains(&pn) {
+            names.push(pn);
+        }
+    }
+    Ok(match names.as_slice() {
+        [one] => Some(one.clone()),
+        _ => None,
+    })
 }

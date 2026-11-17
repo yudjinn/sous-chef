@@ -30,10 +30,16 @@
 //!   the one writer: it reindexes the edited file through its own read-write connection.
 //! - **Yocto files inside the workspace only** ([`is_yocto_path`], [`Env::fresh_file`]).
 //!
-//! Adding a handler (T7.3, T7.4): implement [`Handler`] in its file and keep its entry in
-//! [`HANDLERS`]; the stubs for both are already registered.
+//! - **Switches.** `[hooks]` in `sous-chef.toml` (`grep_read`, `bash`, `edit`, default on)
+//!   turns handlers off by [`Handler::switch`]; a switched-off handler is not run, and with
+//!   none left the call exits 0 with no output. The grep-through-Bash handler
+//!   (`bash_grep.rs`) follows `grep_read`, the BitBake digest `bash`.
+//!
+//! Adding a handler: implement [`Handler`] in its file and add it to [`HANDLERS`]. Several
+//! handlers may take the same tool (`Bash`); they are tried in order.
 
 pub mod bash;
+pub mod bash_grep;
 pub mod edit;
 pub mod grep_read;
 
@@ -243,8 +249,13 @@ fn cap_text(text: String, cap: usize) -> String {
 
 /// One hook handler. Handlers are stateless; per-call state is in [`Ctx`].
 pub trait Handler: Sync {
-    /// Short name for the debug log (and, from T7.5, the `[hooks]` config key).
+    /// Short name for the debug log.
     fn name(&self) -> &'static str;
+    /// The `[hooks]` key in `sous-chef.toml` that switches this handler
+    /// (`config::HooksConfig::enabled`); by default its [`Handler::name`].
+    fn switch(&self) -> &'static str {
+        self.name()
+    }
     /// The `hook_event_name` values handled.
     fn events(&self) -> &'static [&'static str];
     /// The `tool_name` values handled (exact match).
@@ -253,16 +264,31 @@ pub trait Handler: Sync {
     fn handle(&self, cx: &mut Ctx<'_>, ev: &Event) -> Result<Option<Response>>;
 }
 
-/// Every handler, in dispatch order. The first whose event and tool match handles the call.
-pub static HANDLERS: &[&dyn Handler] =
-    &[&grep_read::GrepRead, &bash::BashDigest, &edit::EditFollowUp];
+/// Every handler, in dispatch order. Each switched-on handler whose event and tool match
+/// is tried in turn until one returns a response or an error; the rest are not run. Two
+/// handle `Bash`: the BitBake digest (switch `bash`) and the grep annotation (switch
+/// `grep_read`); they act on disjoint commands.
+pub static HANDLERS: &[&dyn Handler] = &[
+    &grep_read::GrepRead,
+    &bash::BashDigest,
+    &bash_grep::BashGrep,
+    &edit::EditFollowUp,
+];
 
-/// The handler for an event and tool name, if any.
+/// The first handler for an event and tool name, if any.
 pub fn handler_for(event: &str, tool: &str) -> Option<&'static dyn Handler> {
+    handlers_for(event, tool).next()
+}
+
+/// Every handler for an event and tool name, in dispatch order.
+pub fn handlers_for<'a>(
+    event: &'a str,
+    tool: &'a str,
+) -> impl Iterator<Item = &'static dyn Handler> + 'a {
     HANDLERS
         .iter()
         .copied()
-        .find(|h| h.events().contains(&event) && h.tools().contains(&tool))
+        .filter(move |h| h.events().contains(&event) && h.tools().contains(&tool))
 }
 
 /// `.bb`, `.bbappend`, `.inc`, `.bbclass` or `.conf`.
@@ -410,15 +436,15 @@ impl<'o> Ctx<'o> {
     }
 
     /// The configuration the workspace was discovered with (`sous-chef.toml` and the hook's
-    /// flags), once [`Ctx::env`] has opened it.
+    /// flags), once [`Ctx::env`] or [`Ctx::load_config`] has loaded it.
     pub fn config(&self) -> Option<&Config> {
         self.cfg.as_ref()
     }
 
-    /// Discovers the workspace (kept even when the index is missing, so the log lands in
-    /// the workspace cache directory), then opens the index.
-    fn open(&mut self) -> Result<()> {
-        if self.ws.is_none() {
+    /// Loads the configuration (`sous-chef.toml` from the event's `cwd`, and the hook's
+    /// flags) once; no workspace discovery.
+    pub fn load_config(&mut self) -> Result<&Config> {
+        if self.cfg.is_none() {
             let Some(cwd) = self.cwd.clone() else {
                 return Err(Error::Invalid {
                     msg: "event has no absolute cwd".into(),
@@ -430,8 +456,19 @@ impl<'o> Ctx<'o> {
                 layers: self.opts.layers.clone(),
                 work_dir: cwd,
             })?;
-            self.ws = Some(Workspace::discover(&cfg)?);
             self.cfg = Some(cfg);
+        }
+        self.cfg.as_ref().ok_or_else(|| Error::Invalid {
+            msg: "no configuration".into(),
+        })
+    }
+
+    /// Discovers the workspace (kept even when the index is missing, so the log lands in
+    /// the workspace cache directory), then opens the index.
+    fn open(&mut self) -> Result<()> {
+        if self.ws.is_none() {
+            let cfg = self.load_config()?.clone();
+            self.ws = Some(Workspace::discover(&cfg)?);
         }
         let Some(ws) = &self.ws else {
             return Err(Error::Invalid {
@@ -476,32 +513,58 @@ pub fn run(event_json: &str, opts: &Options) -> Option<String> {
             return None;
         }
     };
-    let Some(handler) = handler_for(&ev.hook_event_name, &ev.tool_name) else {
+    let handlers: Vec<&dyn Handler> = handlers_for(&ev.hook_event_name, &ev.tool_name).collect();
+    if handlers.is_empty() {
         // The common case for a broad matcher: say nothing, log nothing.
         return None;
-    };
+    }
     let mut cx = Ctx::new(opts, ev.cwd.clone());
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        handler.handle(&mut cx, &ev)
-    }));
-    let (out, outcome) = match result {
-        Ok(Ok(Some(_))) if cx.over_budget() => (
-            None,
-            format!("dropped: over budget ({} ms)", cx.elapsed().as_millis()),
-        ),
-        Ok(Ok(Some(resp))) => match resp.to_json(&ev.hook_event_name) {
-            Some(json) => (Some(json), "context added".to_string()),
-            None => (None, "nothing to add".to_string()),
-        },
-        Ok(Ok(None)) => (None, "nothing to add".to_string()),
-        Ok(Err(e)) => (None, format!("failed open: {e}")),
-        Err(_) => (None, "failed open: handler panicked".to_string()),
+    let mut out = None;
+    let mut ran: Option<(&dyn Handler, String)> = None;
+    let mut off: Vec<&str> = Vec::new();
+    for handler in handlers {
+        // `[hooks]` switches. A configuration that cannot be loaded switches nothing off;
+        // the handler then fails open on it if it needs the workspace.
+        let on = cx
+            .load_config()
+            .map(|c| c.hooks.enabled(handler.switch()))
+            .unwrap_or(true);
+        if !on {
+            if !off.contains(&handler.switch()) {
+                off.push(handler.switch());
+            }
+            continue;
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handler.handle(&mut cx, &ev)
+        }));
+        let (o, outcome, done) = match result {
+            Ok(Ok(Some(_))) if cx.over_budget() => (
+                None,
+                format!("dropped: over budget ({} ms)", cx.elapsed().as_millis()),
+                true,
+            ),
+            Ok(Ok(Some(resp))) => match resp.to_json(&ev.hook_event_name) {
+                Some(json) => (Some(json), "context added".to_string(), true),
+                None => (None, "nothing to add".to_string(), false),
+            },
+            Ok(Ok(None)) => (None, "nothing to add".to_string(), false),
+            Ok(Err(e)) => (None, format!("failed open: {e}"), true),
+            Err(_) => (None, "failed open: handler panicked".to_string(), true),
+        };
+        out = o;
+        ran = Some((handler, outcome));
+        if done {
+            break;
+        }
+    }
+    let mut line = match &ran {
+        Some((h, outcome)) => format!("{} {} ms: {outcome}", h.name(), cx.elapsed().as_millis()),
+        None => format!("- {} ms: nothing run", cx.elapsed().as_millis()),
     };
-    let mut line = format!(
-        "{} {} ms: {outcome}",
-        handler.name(),
-        cx.elapsed().as_millis()
-    );
+    if !off.is_empty() {
+        line.push_str(&format!("; switched off by [hooks] {}", off.join(", ")));
+    }
     for n in std::mem::take(&mut cx.log) {
         line.push_str("; ");
         line.push_str(&n);
@@ -605,6 +668,17 @@ mod tests {
             handler_for(POST_TOOL_USE, "Edit").map(|h| h.name()),
             Some("edit")
         );
+        let bash: Vec<(&str, &str)> = handlers_for(POST_TOOL_USE, "Bash")
+            .map(|h| (h.name(), h.switch()))
+            .collect();
+        assert_eq!(bash, [("bash", "bash"), ("bash_grep", "grep_read")]);
+        for h in HANDLERS {
+            assert!(
+                ["grep_read", "bash", "edit"].contains(&h.switch()),
+                "{} has no [hooks] key",
+                h.name()
+            );
+        }
         assert!(handler_for(POST_TOOL_USE, "WebFetch").is_none());
         assert!(handler_for("PreToolUse", "Read").is_none());
     }

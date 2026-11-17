@@ -438,17 +438,80 @@ fn layer_conf() {
         "{m}"
     );
 
+    // BitBake 2.4 and later delete each layer's LAYERSERIES_COMPAT_<c> after its
+    // layer.conf, so the copy stays literal and BitBake stops: an error that says so and
+    // names the releases to write (the referenced layer's own).
     let copy = e.lint(&OrgLayerConf, "copy-layer");
     assert_eq!(
         rows(&copy),
-        ["warning copy-layer:conf/layer.conf:11"],
+        ["error copy-layer:conf/layer.conf:11"],
         "{}",
         messages(&copy)
     );
+    assert_eq!(
+        copy[0].message,
+        "LAYERSERIES_COMPAT_copy = \"${LAYERSERIES_COMPAT_core}\" copies another layer's \
+         LAYERSERIES_COMPAT; BitBake deletes every layer's LAYERSERIES_COMPAT_<collection> \
+         right after reading its layer.conf and sets them again only after the last one, so \
+         the reference is undefined when this value is expanded, stays literal and names no \
+         release, and BitBake stops with \"Layer copy is not compatible with the core \
+         layer\"; write the release names themselves: LAYERSERIES_COMPAT_copy = \"wrynose\" \
+         (the releases this layer is tested with)"
+    );
+    // Scarthgap's BitBake (2.8) deletes them too.
+    let sg = env_with(
+        "layer-conf",
+        &["core-layer", "copy-layer"],
+        &[],
+        Some("scarthgap"),
+        |_| {},
+    );
+    let found = sg.lint(&OrgLayerConf, "copy-layer");
+    assert_eq!(rows(&found), ["error copy-layer:conf/layer.conf:11"]);
+    // Kirkstone's BitBake 2.0 deletes nothing and expands the copy when it checks: the
+    // layer is accepted there, so a warning about the newer releases.
+    let ks = env_with(
+        "layer-conf",
+        &["core-layer", "copy-layer"],
+        &[],
+        Some("kirkstone"),
+        |_| {},
+    );
+    let found = ks.lint(&OrgLayerConf, "copy-layer");
+    assert_eq!(
+        rows(&found),
+        ["warning copy-layer:conf/layer.conf:11"],
+        "{}",
+        messages(&found)
+    );
     assert!(
-        copy[0]
+        found[0].message.contains(
+            "the BitBake of kirkstone still expands it to that layer's value, but BitBake 2.4 \
+             (mickledore) and later delete"
+        ),
+        "{}",
+        found[0].message
+    );
+    // Without the referenced layer, the core layer's names are suggested.
+    let alone = env_with("layer-conf", &["copy-layer"], &[], Some("wrynose"), |_| {});
+    // (LAYERDEPENDS_copy = "core", line 10, is then an error of its own.)
+    let found = alone.lint(&OrgLayerConf, "copy-layer");
+    assert_eq!(
+        rows(&found),
+        [
+            "error copy-layer:conf/layer.conf:10",
+            "error copy-layer:conf/layer.conf:11"
+        ]
+    );
+    assert!(
+        found[1]
             .message
-            .contains("copies another layer's LAYERSERIES_COMPAT")
+            .contains("LAYERSERIES_COMPAT_copy = \"wrynose\"")
+            && found[1]
+                .message
+                .contains("BitBake stops with \"No core layer found to work with layer 'copy'\""),
+        "{}",
+        found[1].message
     );
 
     // No core layer: the configured release is the reference.

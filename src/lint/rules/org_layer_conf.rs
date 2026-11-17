@@ -13,8 +13,15 @@
 //! - **`LAYERSERIES_COMPAT_<c>`** (first collection only, as `Layer::compat`):
 //!   - not set, or empty (warning): BitBake warns on every run ("should set
 //!     LAYERSERIES_COMPAT_<c>") and accepts the layer;
-//!   - copies another layer's value (`${LAYERSERIES_COMPAT_...}`, warning): BitBake deletes
-//!     each layer's value after its `layer.conf`, so the copy expands to nothing;
+//!   - copies another layer's value (`${LAYERSERIES_COMPAT_...}`, error): BitBake 2.4
+//!     (Mickledore) and later delete each layer's `LAYERSERIES_COMPAT_<c>` right after
+//!     reading its `layer.conf` and set them again only after the last one (`cookerdata.py`,
+//!     commit 6709aedcc "cookerdata: Ensure layers use LAYERSERIES_COMPAT fairly", 2022-12),
+//!     so the reference is undefined when the copy is expanded, is left as written
+//!     (`data_smart.py` `var_sub`), names no release, and BitBake stops ("Layer <c> is not
+//!     compatible with the core layer", or "No core layer found" without one). BitBake 2.0
+//!     (Kirkstone) and 2.2 (Langdale) delete nothing and expand the copy at the check, so
+//!     the layer is accepted there: a warning when the workspace release is one of those;
 //!   - shares no name with `LAYERSERIES_CORENAMES` of the core layer (error): BitBake stops
 //!     ("Layer <c> is not compatible with the core layer");
 //!   - with no core layer in the workspace (no `LAYERSERIES_CORENAMES`): when it does not
@@ -52,6 +59,10 @@ use crate::types::{FileKind, LineSpan, Loc};
 use crate::workspace::{Layer, Workspace, layers, resolve};
 
 pub struct OrgLayerConf;
+
+/// The first release whose BitBake (2.4) deletes each layer's `LAYERSERIES_COMPAT_<c>`
+/// after its `layer.conf` (BitBake commit 6709aedcc; not in its `2.0` or `2.2` branches).
+pub const COMPAT_DELETED_FROM: Release = Release::Mickledore;
 
 /// Which check of `org/layer-conf` found a problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -232,19 +243,50 @@ impl Conf<'_> {
         let stmt = self.stmt(&var);
         let line = stmt.map_or(1, |s| s.loc.lines.start);
         let ws_release = self.ws.release.release.codename();
-        if stmt
+        if let Some(raw) = stmt
             .and_then(|s| s.value.as_deref())
-            .is_some_and(|v| v.contains("${LAYERSERIES_COMPAT_"))
+            .filter(|v| v.contains("${LAYERSERIES_COMPAT_"))
         {
+            let names = self.copied_names(raw).join(" ");
+            // cookerdata.py: with no LAYERSERIES_CORENAMES the fatal error is "No core layer
+            // found", else "not compatible with the core layer".
+            let stop = if core_names(self.ws).is_empty() {
+                format!("\"No core layer found to work with layer '{c}'\"")
+            } else {
+                format!("\"Layer {c} is not compatible with the core layer\"")
+            };
+            let (severity, effect) = if self.ws.release.release >= COMPAT_DELETED_FROM {
+                (
+                    Severity::Error,
+                    format!(
+                        "BitBake deletes every layer's LAYERSERIES_COMPAT_<collection> right \
+                         after reading its layer.conf and sets them again only after the last \
+                         one, so the reference is undefined when this value is expanded, stays \
+                         literal and names no release, and BitBake stops with {stop}"
+                    ),
+                )
+            } else {
+                (
+                    Severity::Warning,
+                    format!(
+                        "the BitBake of {ws_release} still expands it to that layer's value, but \
+                         BitBake 2.4 ({}) and later delete every layer's \
+                         LAYERSERIES_COMPAT_<collection> after reading its layer.conf, so there \
+                         the reference stays literal, names no release, and BitBake stops with \
+                         {stop}",
+                        COMPAT_DELETED_FROM.codename()
+                    ),
+                )
+            };
             self.push(
                 out,
                 LayerCheck::CompatCopied,
-                Severity::Warning,
+                severity,
                 line,
                 format!(
-                    "{var} copies another layer's LAYERSERIES_COMPAT, which BitBake deletes once \
-                     that layer.conf is read, so it expands to nothing; list the release names \
-                     this layer supports, e.g. {var} = \"{ws_release}\""
+                    "{var} = \"{raw}\" copies another layer's LAYERSERIES_COMPAT; {effect}; \
+                     write the release names themselves: {var} = \"{names}\" (the releases \
+                     this layer is tested with)"
                 ),
             );
             return;
@@ -336,6 +378,38 @@ impl Conf<'_> {
             };
             self.push(out, check, Severity::Info, line, message);
         }
+    }
+
+    /// The release names to suggest in place of a copied `LAYERSERIES_COMPAT`: the
+    /// referenced collections' own names when the workspace knows them, else the core
+    /// layer's `LAYERSERIES_CORENAMES`, else the workspace release.
+    fn copied_names(&self, raw: &str) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for part in raw.split("${LAYERSERIES_COMPAT_").skip(1) {
+            let Some((referenced, _)) = part.split_once('}') else {
+                continue;
+            };
+            let Some(l) = self
+                .ws
+                .layers
+                .iter()
+                .find(|l| l.collections.first().is_some_and(|c| c == referenced))
+            else {
+                continue;
+            };
+            for w in &l.compat {
+                if !w.contains("${") && !names.contains(w) {
+                    names.push(w.clone());
+                }
+            }
+        }
+        if names.is_empty() {
+            names = core_names(self.ws);
+        }
+        if names.is_empty() {
+            names.push(self.ws.release.release.codename().to_string());
+        }
+        names
     }
 
     fn depends(&self, out: &mut Vec<LayerProblem>) {

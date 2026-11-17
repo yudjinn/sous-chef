@@ -54,8 +54,16 @@ from a real session give the expected context; the skill's tool names are all re
   `Write` and `NotebookEdit`, not `MultiEdit`. A matcher of letters and `|` compares exact
   names, so the extra name never matches on a current client and costs nothing, and the edit
   handler still handles it for an older client.
-- **Every hook is `PostToolUse`.** The Grep / Read and edit hooks add `additionalContext`;
-  the Bash hook replaces the output with `updatedToolOutput` (see below).
+- **Every hook is `PostToolUse`.** The Grep / Read and edit hooks, and the grep-through-Bash
+  annotation, add `additionalContext`; the Bash digest replaces the output of a large
+  bitbake command with `updatedToolOutput` (see below).
+- **`[hooks]` switches.** `sous-chef.toml` may set `[hooks] grep_read`, `bash` and `edit`
+  (booleans, default `true`). Each handler names its switch (`Handler::switch`, by default
+  its `name()`); a switched-off handler is not run and, with no other handler for the
+  tool, the call exits 0 with no output. The grep-through-Bash annotation (handler
+  `bash_grep`) follows **`grep_read`**, because it is the Grep annotation; the BitBake
+  digest (handler `bash`) follows `bash`. A `sous-chef.toml` that does not load (an
+  unknown key, say) switches nothing off; the handlers then fail open on it.
 - **No `license` in the manifest.** The repository has no license yet; `claude plugin
   validate` passes, but its directory-submission check reports `LICENSE_MISSING`. Set
   `license` (or add a `LICENSE`) when one is chosen. No icon either (a directory warning
@@ -154,8 +162,10 @@ hand-written events in `tests/fixtures/hooks/`:
 - **Read of a file that ends in a newline**: `content` keeps the final `\n`, and `numLines`
   and `totalLines` count the empty line after it (10 for the 9-line `hello_1.1.bb`, 21 for
   the 20-line `hello.inc`). The hand-written events have no final newline and count 9 and
-  20. Effect seen: the whole-recipe note says `read of ...hello_1.1.bb:1-10`, one line past
-  the end; the note is otherwise right.
+  20. Effect seen in the first run: the whole-recipe note said `read of
+  ...hello_1.1.bb:1-10`, one line past the end. Fixed: the handler now takes the number of
+  lines from `content` and clamps the range to the lines of the file on disk (`numLines`
+  and `totalLines` are not trusted); the captured events are in `tests/hook_grep_read.rs`.
 - Common fields: the same set as the hand-written events (`session_id`, `prompt_id`,
   `transcript_path`, `cwd`, `permission_mode`, `effort`, `hook_event_name`, `tool_name`,
   `tool_input`, `tool_response`, `tool_use_id`, `duration_ms`); no `scratchpad_dir` in this
@@ -241,8 +251,25 @@ older client still works).
 for 2.1.326): Claude searches with `grep` and `find` through the Bash tool (embedded `ugrep`
 and `bfs`), and those calls reach hooks as `Bash`. Grep comes back when `--tools` or
 `--allowedTools` names it, when Bash is removed, or in a subagent that lists Grep without
-Bash. So in a default session the `Grep|Read` hook fires for Read only, and a `grep -n` run
-through Bash gets no annotation: the Bash handler acts on bitbake commands only.
+Bash. So in a default session the `Grep|Read` hook fires for Read only. To cover that, the
+`Bash` hook also annotates a search run through Bash (`src/hook/bash_grep.rs`): one simple
+command (no pipeline, list, redirection other than a trailing `2>/dev/null`, substitution
+or assignment) running `grep` or `rg` with `-n` / `--line-number` and only options that
+keep the `<path>:<line>:<text>` shape. Its `stdout` is read with the Grep handler's parser
+and annotated by the same code (`grep_read::annotate_hits`), as `additionalContext`, for at
+most 200 hits (the context says when the cap was reached); the output is not changed.
+`rg` without `-n` is left alone: ripgrep 15.2.0's `--help` says line numbers are on by
+default only when stdout is a tty and off otherwise, so its output in the Bash tool would be
+`<path>:<text>`. A one-file `grep -n` prints `<line>:<text>` (GNU grep 3.12 and ugrep 7.8.4:
+the file name is shown by default only when more than one file is searched) and is skipped:
+the handler does not guess the file. The Bash events used in the tests are hand-written in
+the documented shape, with the real output of GNU grep 3.12 and ripgrep 15.2.0 on the
+fixture; no Bash event was captured live. The shell snapshot of a Claude Code 2.1.326 Bash
+session defines `grep` as a function that runs the embedded ugrep (`ARGV0=ugrep <claude
+binary> -G --ignore-files --hidden -I ...`, falling back to the system `grep` for some
+options such as `-Z` and `--null`) and defines no `rg`; ugrep 7.8.4 (`grep --version` in
+that shell) prints the same `<path>:<line>:<text>` and `<path>-<line>-<text>` forms
+(checked on the fixture).
 
 ### MCP tool hooks (`type: "mcp_tool"`)
 
@@ -258,8 +285,19 @@ milliseconds (measured below), so a process per event fits the budget.
 ## How `sous-chef hook` uses it
 
 - Dispatch on `hook_event_name` and `tool_name` (`src/hook.rs`, `HANDLERS`). Only
-  `PostToolUse` on `Grep`, `Read` (T7.2), `Bash` (T7.3) and `Edit` / `Write` /
-  `MultiEdit` (T7.4) have handlers; everything else is a no-op.
+  `PostToolUse` on `Grep`, `Read` (T7.2), `Bash` (T7.3: the digest, then the grep
+  annotation) and `Edit` / `Write` / `MultiEdit` (T7.4) have handlers; everything else is
+  a no-op. Several handlers may take one tool: the switched-on ones are tried in order
+  until one returns a response or an error.
+- Grep `content` lines: a line is a hit only when exactly one of its
+  `<prefix>:<n>:` / `<prefix>-<n>-` splits names an existing Yocto file (a relative path
+  tried against `cwd` and the search directory) and that split is a match (`:`). Context
+  lines, lines no split explains and lines two splits explain are skipped, never
+  attributed elsewhere. `numFiles` is never read (it is 0 in content mode), nor
+  `filenames` in content mode.
+- Read ranges: the number of lines comes from `content`, and the range is clamped to the
+  lines of the file on disk; `numLines` and `totalLines` (one too many for a file that ends
+  in a newline) are not trusted.
 - The workspace is discovered from the event's `cwd` (its `sous-chef.toml`, or the global
   flags `--build-dir`, `--config`, `--layer` given in the hook command line, relative to
   `cwd`). The index must already exist (`sous-chef index`, or the MCP server, builds it);
@@ -281,16 +319,31 @@ read-only index open, handler, exit), on the development machine, 2026-11-17:
 | Read, cut item | 3.8 ms | 5.0 ms |
 | Read, whole recipe | 3.0 ms | 5.3 ms |
 | Bash (stub, no workspace lookup) | 1.8 ms | 2.6 ms |
+| Bash `grep -rn`, 400 hit lines (200 looked at, 5 files) | 10.1 ms | 28.0 ms |
+
+The last row was measured later (same machine, 2026-11-17, median of 50 whole-process
+runs, after the grep-through-Bash handler was added); the handler itself logged 24 ms in
+the debug build. `tests/hook_bash_grep.rs` runs it against the 150 ms budget.
 
 The handler itself (as logged in `hook.log`) takes 0 to 4 ms. A real poky workspace has
 more layers to discover; not measured yet (M8 scale check).
 
 ## Not verified
 
-- The format of Grep's context lines (`-A`, `-B`, `-C`) in `content` mode. Assumed: ripgrep's
-  `<path>-<line>-<text>`. Hit lines (`<path>:<line>:<text>`, paths relative to `cwd` for a
-  relative `path`) and the empty `filenames` were confirmed by the captured event (see
-  "Real events"); `<line>:<text>` when `path` is a single file was not captured.
+- The format of Grep's context lines (`-A`, `-B`, `-C`) in `content` mode was not
+  captured. The handler follows ripgrep's documented `--field-context-separator` (`-`,
+  `<path>-<line>-<text>`, confirmed with ripgrep 15.2.0) and skips such lines; whatever
+  their real form, a line that is not certainly a hit is skipped, not misattributed.
+  `<line>:<text>` when `path` is a single file was not captured either (ripgrep's `--help`:
+  no file name is the default when it is told to search one file); the handler reads both
+  that and `<path>:<line>:<text>` for a one-file search. Hit lines (`<path>:<line>:<text>`,
+  paths relative to `cwd` for `path: "."`) and the empty `filenames` were confirmed by the
+  captured event (see "Real events"); for another relative `path`, whether paths are
+  relative to `cwd` or to it was not captured, so both are tried and an ambiguous line is
+  skipped.
+- Whether Claude Code's Bash tool runs commands with a tty. Assumed not (then `rg` prints
+  no line numbers unless given `-n`, and no headings). With a tty, `rg -n` would print
+  headings and `<line>:<text>`, which the Bash grep handler skips.
 - The Bash and Edit / Write events have not been captured from a live session; their
   recorded events under `tests/fixtures/hooks/` are still the hand-written ones. Read's
   `startLine` is now confirmed 1-based.
