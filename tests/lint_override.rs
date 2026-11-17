@@ -364,6 +364,41 @@ fn missing_package() {
     assert_eq!(lines(&env, r, "good.bb"), []);
 }
 
+#[test]
+fn missing_package_empty_values_and_classes_without_packages() {
+    // B10: `FILES = ""` (good.bb) and image.bbclass (good-nopackages.bbclass) are not
+    // findings; a class that keeps or refills PACKAGES is, and `+=` of nothing stores a
+    // space.
+    let env = Env::new();
+    let r = &OverrideMissingPackage;
+    let at = |name: &str, path: &str| -> Vec<u32> {
+        check_at(&env, r, &fixture("missing-package", name), path)
+            .iter()
+            .map(|f| f.loc.lines.start)
+            .collect()
+    };
+    assert_eq!(at("bad.bbclass", "classes-recipe/bad.bbclass"), [2, 6]);
+    assert_eq!(
+        at("good-nopackages.bbclass", "classes-recipe/image.bbclass"),
+        [] as [u32; 0]
+    );
+    assert_eq!(
+        at("good-nopackages.bbclass", "classes-recipe/nopkgs.bbclass"),
+        [] as [u32; 0]
+    );
+    let inherits = "inherit core-image\nRDEPENDS += \"x\"\n";
+    assert_eq!(
+        check_at(&env, r, inherits, "classes-recipe/my-rootfs.bbclass"),
+        []
+    );
+    // The name alone does not empty PACKAGES.
+    let named = "RDEPENDS += \"x\"\n";
+    assert_eq!(
+        check_at(&env, r, named, "classes-recipe/kernel-fit-image.bbclass").len(),
+        1
+    );
+}
+
 /// The fixture workspace plus `lint/override/missing-package/no-packages`: its recipes in
 /// `meta-mine/recipes-images/imgs/`, and (with `classes`) its stand-in classes in
 /// `meta-core/classes-recipe/`.

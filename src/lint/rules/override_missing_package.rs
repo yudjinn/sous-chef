@@ -19,16 +19,31 @@
 //! reported in a file when every recipe it belongs to (a `.bb` itself; the recipes a
 //! `.bbappend` applies to; the recipes that `require` / `include` an `.inc`, through other
 //! `.inc` files and bbappends) statically has an empty `PACKAGES` ([`packages_empty`]). A
-//! file that belongs to no recipe, a class, or an `.inc` also pulled in by a class or a
-//! `.conf` keeps its findings.
+//! file that belongs to no recipe, or an `.inc` also pulled in by a class or a `.conf`,
+//! keeps its findings.
+//!
+//! **Empty values.** The check is `if d.getVar(var, False):` (insane.bbclass, Wrynose
+//! `33a6bd6c`, the `python ()` after "virtual/ is meaningless"), so a variable whose value
+//! is empty is never reported: `FILES = ""` (OE-core's `bitbake.conf:336`), or any `=`,
+//! `:=`, `?=`, `??=`, `.=`, `=.`, `:append` or `:prepend` of an empty value adds nothing and
+//! is not a finding. `+=` / `=+` of an empty value store a space, which is not empty, and
+//! stay reported.
+//!
+//! **Classes.** A class is not reported when it is `image` or `core-image`, inherits one of
+//! them directly, or itself sets an unconditional `PACKAGES = ""` (or `:=`) and nothing else in it gives
+//! `PACKAGES` a value: its package variables are meant for recipes without packages
+//! (OE-core's `image.bbclass:31-35`, `PACKAGES = ""` then `RDEPENDS +=`). A recipe that
+//! inherits such a class and fills `PACKAGES` again would be checked by OE-core; that is
+//! missed. Other classes keep their findings, `*-image` classes included: the name alone
+//! does not empty `PACKAGES` (`kernel-fit-image.bbclass` sets `FILES:${PN}`).
 
 use std::collections::HashSet;
 
 use crate::index::{Index, query};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
-use crate::parse::StatementKind;
-use crate::types::{FileKind, LineSpan, VarRef};
+use crate::parse::{ParsedFile, StatementKind};
+use crate::types::{AssignOp, FileKind, LineSpan, VarRef};
 
 pub struct OverrideMissingPackage;
 
@@ -49,9 +64,20 @@ impl Rule for OverrideMissingPackage {
         let Some(file) = cx.file else { return };
         // Asked of the index only when there is something to report.
         let mut without_packages: Option<bool> = None;
+        if cx.kind == Some(FileKind::Class) && class_without_packages(cx, file) {
+            return;
+        }
         for s in &file.statements {
             let (var, is_fn) = match &s.kind {
-                StatementKind::Assign { var, .. } => (var, false),
+                StatementKind::Assign { var, op, value, .. } => {
+                    if value.trim().is_empty()
+                        && !matches!(op, AssignOp::Append | AssignOp::Prepend)
+                    {
+                        // Gives the variable no value: pkgvarcheck's getVar is falsy.
+                        continue;
+                    }
+                    (var, false)
+                }
                 StatementKind::Function {
                     name: Some(var), ..
                 } => (var, true),
@@ -79,6 +105,48 @@ impl Rule for OverrideMissingPackage {
             ));
         }
     }
+}
+
+/// Whether the linted class is for recipes without packages: `image` or `core-image`, a
+/// class that inherits one of them directly, or one that sets an unconditional empty `PACKAGES`
+/// (`=` / `:=`) and gives it no value anywhere else.
+fn class_without_packages(cx: &LintContext<'_>, file: &ParsedFile) -> bool {
+    let stem = cx
+        .loc
+        .path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let empties = |c: &str| matches!(c, "image" | "core-image");
+    if empties(stem) {
+        return true;
+    }
+    let mut emptied = false;
+    for s in &file.statements {
+        match &s.kind {
+            StatementKind::Inherit { classes, .. } if classes.split_whitespace().any(empties) => {
+                return true;
+            }
+            StatementKind::Assign { var, op, value, .. }
+                if var.base == "PACKAGES" && var.flag.is_none() =>
+            {
+                let empty = value.trim().is_empty();
+                if var.overrides.is_empty()
+                    && matches!(op, AssignOp::Set | AssignOp::Immediate)
+                    && empty
+                {
+                    emptied = true;
+                } else if !empty
+                    && !matches!(op, AssignOp::Default | AssignOp::WeakDefault)
+                    && var.overrides.first().is_none_or(|o| o != "remove")
+                {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    emptied
 }
 
 /// Whether the linted file belongs to at least one recipe and every recipe it belongs to has

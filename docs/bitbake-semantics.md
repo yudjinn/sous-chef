@@ -1291,7 +1291,12 @@ Checked by the wave 4 lint tasks against OE-core master (2026-11) unless marked:
   `PACKAGES` is not empty, for each listed variable (`RDEPENDS`, `RRECOMMENDS`,
   `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `pkg_preinst`,
   `pkg_postinst`, `pkg_prerm`, `pkg_postrm`, `ALLOW_EMPTY`), `if d.getVar(var, False):`
-  reports it as set without a package. `override/missing-package` follows it.
+  reports it as set without a package. `override/missing-package` follows it. Confirmed
+  for B10 on OE-core Wrynose `33a6bd6c` (`insane.bbclass:1586-1591`): `getVar(var, False)`
+  is the unexpanded final value, so an empty one (`bitbake.conf:336 FILES = ""`) is never
+  reported, and `+=` of an empty value (which stores a space) is. `image.bbclass:31` sets
+  `PACKAGES = ""`, so its own `RDEPENDS +=` / `RRECOMMENDS +=` (lines 34-35) are never
+  checked.
 - **`populate_lic_qa_checksum`** (`insane.bbclass`): `if lic == "CLOSED": return`, then
   `if not lic_files and d.getVar('SRC_URI')` is an error. So `LIC_FILES_CHKSUM` is required
   only when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (`hygiene/missing-metadata`).

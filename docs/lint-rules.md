@@ -80,7 +80,7 @@ workspace). Findings hidden by `--severity` never fail the run.
 | `override/dead` | W/I | recipe | An override element of an inactive operation in the recipe's own files (the `.bb`, its `.inc` files, its bbappends) that is no entry of the recipe's `OVERRIDES`, no machine, distro, class or declared override of the workspace, and no word of any `*OVERRIDES` assignment. Suggests the closest known name. Info instead of warning when the override list is only partly known. Never checks package names, `${...}` elements or legacy names. |
 | `override/shadowed` | I | recipe | A `NAME =` / `NAME :=` in the recipe's own files that the evaluation marks shadowed, when a later `=` / `:=` of exactly the same name follows. Not flagged: functions; a later assignment in a bbappend other than the earlier one's; any `NAME` that something in the tree could read first (a `:=` mentioning it, an `inherit` / `include` / `require` with `${NAME}`). |
 | `override/weak-after-default` | I | file | `??=` after a `=`, `:=` or `?=` of exactly the same name (overrides and flag included) earlier in the same file; an `unset` in between starts over. |
-| `override/missing-package` | E | file | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `ALLOW_EMPTY` and the `pkg_*` functions set without a package override (`:${PN}`), in recipes that produce packages. Also `VAR:append`, `VAR:append:<cond>` and a function `pkg_postinst()`. Not flagged: flags, `:remove` alone, legacy names (`override/legacy-syntax`). |
+| `override/missing-package` | E | file | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `ALLOW_EMPTY` and the `pkg_*` functions set to a value without a package override (`:${PN}`), in recipes that produce packages. Also `VAR:append`, `VAR:append:<cond>` and a function `pkg_postinst()`. Not flagged: an empty value (`FILES = ""`; but `+=` / `=+` store a space and are flagged), flags, `:remove` alone, legacy names (`override/legacy-syntax`), the classes `image` and `core-image`, a class that inherits one of them or itself empties `PACKAGES`. |
 | `override/append-vs-plus-equals` | I | file | An unconditional `VAR:append =` in a `.bb` after a plain `VAR =` / `VAR :=` in the same file, where `+=` (or `.=`) would do. Not flagged when a later statement of the file assigns `VAR` again or is an `inherit`, `require` or `include`, after an `unset VAR`, or outside `.bb` files (in bbappends and classes `:append` is usually right). |
 | `override/plus-equals-on-default` | W | file | `VAR +=` (and `=+`, `.=`, `=.`) on a plain name in a conf file, when a `?=` of the same name is parsed later and nothing gave `VAR` a value before: the default is lost. Suggest `:append`. Parse order comes from the evaluated configuration; nothing is reported when the order cannot be told. |
 | `override/filesextrapaths` | E | file | `FILESEXTRAPATHS` replaced instead of extended (any operator but `=.` / `.=` without `:prepend` / `:append`; `=.` / `.=` on a conditional name or in a `.conf`), a prepend (`:prepend`, `=.`) without the trailing colon or an append (`:append`, `.=`) without the leading one, or no `:=` when the value uses `${THISDIR}`, `${FILE_DIRNAME}` or `${FILE}` outside the `.bb` itself and outside an `.inc` that only `.bb` files of its own directory include. Not flagged: `:remove`, a `?=` / `??=` in a `.conf` (the default's definition), and a value whose end in question is a `${NAME}` the file does not set to a literal value (python never). |
@@ -119,8 +119,12 @@ Notes:
   a file is not reported when every recipe it belongs to statically has an empty
   `PACKAGES`: an unconditional `PACKAGES = ""`, or `inherit image` / `core-image`, and
   nothing that could give `PACKAGES` a value. Packagegroups are checked
-  (`packagegroup.bbclass` sets `PACKAGES = "${PN}"`). A file reached from a class or a
-  `.conf`, or from no recipe, keeps its findings.
+  (`packagegroup.bbclass` sets `PACKAGES = "${PN}"`). The check tests `if d.getVar(var,
+  False)`, so an empty value is never a finding. A class is exempt when it is `image` or
+  `core-image`, inherits one of them directly, or sets an unconditional `PACKAGES = ""` and
+  gives `PACKAGES` no other value (OE-core's `image.bbclass`: `PACKAGES = ""` then
+  `RDEPENDS +=`); other classes (a `*-image` name alone does not count), a file reached from
+  a class or a `.conf`, or from no recipe, keep their findings.
 - **`plus-equals-on-default`.** A `?=` in a recipe, bbappend, recipe class or
   non-configuration `.inc` is always parsed after every `.conf`; a `?=` later in the same
   file is after by line; between `.conf` files the order is the history of the evaluated
