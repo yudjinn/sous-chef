@@ -25,7 +25,8 @@
 //! Accuracy: when `OVERRIDES` contains unevaluated python or undefined variables, its real
 //! entries are unknown. A value whose override decisions could change because of that (an
 //! override was consulted and found inactive, or more than one variant was active) carries
-//! `unevaluated_python` and the unresolved names of `OVERRIDES`.
+//! `unevaluated_python` and the unresolved names of `OVERRIDES`. When `OVERRIDES` is unstable,
+//! every value that consulted an override carries `"OVERRIDES"` in `unresolved`.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -93,8 +94,9 @@ impl OverrideState {
         cond.is_none_or(|c| c.split(':').all(|p| self.has(p)))
     }
 
+    /// Some entries are unknown (python or undefined variables).
     fn uncertain(&self) -> bool {
-        self.python || !self.unresolved.is_empty() || self.unstable
+        self.python || !self.unresolved.is_empty()
     }
 }
 
@@ -147,7 +149,8 @@ impl Eval<'_> {
     fn finalise(&self, name: &str, exp: &mut Expander, trace: &mut Trace) -> Option<Value> {
         let c = self.compose(name, true, exp, trace, 0);
         let mut v = c.parsed?;
-        if trace.consulted && (trace.inactive_seen || trace.multi_active) && self.ovr.uncertain() {
+        let unknown_entries = (trace.inactive_seen || trace.multi_active) && self.ovr.uncertain();
+        if trace.consulted && (self.ovr.unstable || unknown_entries) {
             if self.ovr.python {
                 v.unevaluated_python = true;
             }

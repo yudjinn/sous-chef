@@ -549,13 +549,15 @@ impl DataStore {
             if op.var.flag.as_deref() != flag {
                 continue;
             }
-            let full = self.expanded_name(op);
-            let hit = match flag {
-                Some(_) => full == name,
-                None => full == name || full.starts_with(&format!("{name}:")),
-            };
             // For a base name every assignment recorded under it belongs to it.
-            if hit || (!name.contains(':') && flag.is_none()) {
+            let hit = (flag.is_none() && !name.contains(':')) || {
+                let full = self.expanded_name(op);
+                match flag {
+                    Some(_) => full == name,
+                    None => full == name || full.starts_with(&format!("{name}:")),
+                }
+            };
+            if hit {
                 out.push((*seq, op.clone()));
             }
         }
