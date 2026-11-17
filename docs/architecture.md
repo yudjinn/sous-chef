@@ -7,13 +7,17 @@ with an explicit note in your hand-off.
 
 ```
 src/
-  main.rs              CLI entry (clap): serve | index | lint | hook; each calls one library
-                       function (mcp::serve, mcp::index_command, lint::cli, hook::run)
+  main.rs              CLI entry (clap): serve | index | lint | hook | audit | diff; each calls
+                       one library function (mcp::serve, mcp::index_command, lint::cli,
+                       hook::run, audit::cli, diff::cli)
   lib.rs               module declarations only
   types.rs             shared types (below)
   error.rs             Error, Result
   config.rs            sous-chef.toml and command-line overrides
   release.rs           Release, Feature, release detection
+  gitcmd.rs            the one way sous-chef runs git (read-only, argv only, timeouts)
+  audit.rs             workspace audit report (T8.6)
+  diff.rs              release diff (T8.4)
   parse/
     mod.rs             pub fn parse(src) -> ParsedFile
     lexer.rs           logical lines, continuation, comments
@@ -37,6 +41,8 @@ src/
     overrides.rs       finalisation
     replay.rs          file order
     providers.rs       PROVIDES / PREFERRED_PROVIDER / PREFERRED_VERSION selection
+    overlay.rs         files replaced in memory for one evaluation (the .inc split)
+    license.rs         OE-core license expressions, for the INCOMPATIBLE_LICENSE note
   bitbake/
     mod.rs
     env.rs             run a command in the build environment
@@ -234,7 +240,8 @@ impl Release {
 /// One variant per behaviour that differs between supported releases. Each has a row in the
 /// "Releases" table of bitbake-semantics.md: first release, last release, source checked.
 pub enum Feature { SplitClassDirs, InheritDefer, IncludeAll, UnpackDir, WorkdirAsSourceDir,
-                   PrInWorkdir, AddFragments, BuiltinFragments, RecipeVirtualProviders }
+                   PrInWorkdir, AddFragments, BuiltinFragments, RecipeVirtualProviders,
+                   AddPyLib }
 
 pub struct ReleaseInfo { pub release: Release, pub source: ReleaseSource, pub note: Option<String> }
 pub enum ReleaseSource { Config, CoreNames, LayerCompat, Assumed }
@@ -262,7 +269,8 @@ read (`layers::read_layer_confs_with_corenames`, `read_corenames`). The features
 `SplitClassDirs` (from Langdale), `InheritDefer` (from Scarthgap), `IncludeAll` (from
 Walnascar), `UnpackDir` (from Styhead), `WorkdirAsSourceDir` (until Scarthgap) and
 `PrInWorkdir` (until Mickledore); M9 and the wave 5 fixes added `AddFragments` and
-`RecipeVirtualProviders` (from Walnascar) and `BuiltinFragments` (from Whinlatter). All are
+`RecipeVirtualProviders` (from Walnascar) and `BuiltinFragments` (from Whinlatter), and w7
+`AddPyLib` (from Mickledore, BitBake 2.4). All are
 verified, with sources in the "Releases" section of bitbake-semantics.md. `find_class` / `class_candidates` honour `SplitClassDirs`.
 `Config.release: Option<String>`, `LintConfig.severity: BTreeMap<String, Severity>`.
 
@@ -303,11 +311,11 @@ Who reads it:
 
 Location: `$XDG_CACHE_HOME/sous-chef/<sha256 of workspace roots, 16 hex>/index.sqlite`.
 The index is derived: any schema change bumps `user_version` and rebuilds from scratch
-(`SCHEMA_VERSION` is 3). The table `meta` records facts about the whole index: `release`,
+(`SCHEMA_VERSION` is 4). The table `meta` records facts about the whole index: `release`,
 the release the edges were resolved for (every edge is recomputed when it changes, as with a
 new `release` in `sous-chef.toml`, by `Index::refresh` and by `Index::refresh_file`;
 `query::indexed_release` reads it), and `edges`, the version of the edge step
-(`schema::EDGES_VERSION`, `data-files-1`; an index with another value gets its edges and file
+(`schema::EDGES_VERSION`, `inc-context-1` since w9; an index with another value gets its edges and file
 marks recomputed on the next refresh, without a schema change;
 `query::indexed_edges_version`).
 
@@ -325,7 +333,8 @@ files(id INTEGER PK, layer_id INT, path TEXT,        -- relative to layer root
 statements(id INTEGER PK, file_id INT, ord INT,      -- order within the file
       kind TEXT,                                      -- assign | function | pydef | inherit | include |
                                                       -- addtask | deltask | addhandler | export_functions |
-                                                      -- export | unset | addfragments | unknown
+                                                      -- export | unset | addfragments | addpylib |
+                                                      -- unknown
       name TEXT,                                      -- full left-hand side as written
       base TEXT,                                      -- VarRef.base
       overrides TEXT,                                 -- ":"-joined
@@ -340,8 +349,10 @@ edges(id INTEGER PK, src_file INT, kind TEXT,        -- require | include | incl
       target_text TEXT,                               -- as written
       target_file INT NULL,                           -- resolved, NULL if unresolved or variable
       line INT,
-      context TEXT NULL)                              -- inherit in a classes/ class: recipe |
-                                                      -- global | both (w7, schema version 4)
+      context TEXT NULL)                              -- an inherit searched in both class contexts
+                                                      -- (in a classes/ class, w7; in an .inc both
+                                                      -- reach, w9): recipe | global | both
+                                                      -- (schema version 4)
   INDEX(src_file), INDEX(target_file)
 
 tasks(file_id INT, name TEXT, before TEXT, after TEXT, line INT)
@@ -407,6 +418,8 @@ pub struct Target {
 }
 
 pub fn evaluate(index: &Index, ws: &Workspace, target: &Target) -> Result<DataStore>;
+pub fn evaluate_with_overlay(index: &Index, ws: &Workspace, target: &Target,
+                             overlay: &Overlay) -> Result<DataStore>;   // w8, see "As implemented after wave 5"
 
 pub struct VarOp {
     pub var: VarRef, pub op: AssignOp, pub value: String,
@@ -713,8 +726,9 @@ parent's chain plus the statement; a bbappend's statements get the recipe file (
 `layer.conf` gets the chain of the last applied `BBLAYERS` operation plus that operation; an
 `INHERIT` class gets the chain of the first applied `INHERIT` operation naming it plus that
 operation; `conf/bblayers.conf`, `conf/bitbake.conf` and `base` get none. A `FileVisit.loc` spans line 1 to the
-end of the file's last statement. Not replayed: `addtask`, `deltask`, `addhandler`; event
-handlers and anonymous python never run.
+end of the file's last statement. Not replayed: `addhandler`; `addtask` and `deltask` only
+keep the task list (`__BBTASKS`, `DataStore::tasks`, since w8); event handlers and anonymous
+python never run.
 
 Lint engine (T4.1, `lint`): `Rule` keeps `id`, `scope`, `default_severity`, `check` and
 gains two methods with defaults: `releases() -> RangeInclusive<Release>` (default: every
@@ -751,7 +765,8 @@ Succeeded, Failed, Cancelled }`, `Started { Started, AlreadyRunning }` (these fi
 re-exported from `bitbake`), `tail`, `tail_of`. One job of any kind runs at a time. A job's output goes to
 `<cache dir>/jobs/<pid>-<n>.out`; **a finished job's output becomes a handle only when
 `settle` is next called, which the `bitbake` tool does on every call and `log` does with
-`job`.** Cancellation terminates the process group (SIGTERM, SIGKILL after `KILL_GRACE`).
+`job`.** Cancellation terminates the process group (SIGTERM, SIGKILL after `KILL_GRACE`;
+since w8 it then waits up to `GROUP_EXIT_WAIT` until the group is empty).
 Tool side: `Op`, `plan(config, ws, &Args) -> Plan { spec, destructive }` (the allowlisted
 argv; validates every name with `validate_name`), `check_destructive`, `status::job_line`.
 `logs::meta_from_path_in(path, ws)` reads the version directory of a work directory for the
@@ -801,8 +816,10 @@ honoured; a path target is resolved before it.** `query::preferred_recipe` (laye
 and version only, no configuration) was still what `item`, `search` and the `bbappend`
 generator used after wave 4; since wave 5 they use `recipe::resolve_selected` (provider
 selection), and `bitbake::logs` is the remaining user. Not handled by provider selection:
-`BBCLASSEXTEND` variants (`-native` names find no provider), `BBMASK`, `SKIP_RECIPE` and
-`COMPATIBLE_*`.
+`BBCLASSEXTEND` variants (`-native` names find no provider; since w6 the error names the
+base recipe), `SKIP_RECIPE`, `COMPATIBLE_*` and `INCOMPATIBLE_LICENSE` (since w6 / w8 only a
+note on the evaluation). A file a static `BBMASK` masks is no candidate since w6 (the
+index's `not_collected` mark).
 
 Query layer (T3.7, `index::query`): `DependRow { file, kind, pkg, target, line }`,
 `files_providing(index, name)`, `provides_of(index, file_id)`, `depends_on(index, target)`
@@ -940,7 +957,9 @@ false`; a configured `init_script` (`bitbake-setup` mode when the file is named
 `init-build-env`); an initialised environment (`BUILDDIR` or `BBPATH`, `bitbake` on
 `PATH`); a kas project with kas files, `kas` on `PATH` and an existing kas build directory
 (`KasRun { program, files, work_dir }`: `kas shell --keep-config-unchanged <files> -c
-'<command>'`, `KAS_SHELL_ARGS`, `kas_command_string`, `kas_files_arg`); bitbake-setup's
+'<command>'`, `KAS_SHELL_ARGS`, `kas_command_string`, `kas_files_arg`; since w8 not used
+when a kas file includes another repository's file, see "As implemented after wave 5");
+bitbake-setup's
 `init-build-env` in the build directory; an `oe-init-build-env` near the layers.
 **`kas_command_string` is the one place that builds shell text: only allowlisted programs
 and arguments that passed `validate_arg`, each single-quoted.** `WRAPPER` and
@@ -951,8 +970,9 @@ Scaffold (T6.4, T6.5, `scaffold::{inc_split, placement}`): `IncSplitGen` (`OPTIO
 `recipe`, `versions`) and `PlacementGen` (`OPTIONS` `recipe`, `variable`, `task`,
 `intent`, `machine`, `image`, `package`, `item`, `value`; `INTENTS`) are registered, so
 every arm of `scaffold::generator()` is `Some`. `where` returns a plan with no files and the
-advice in `notes`. The `.inc` split's safety check is static (statement order, references,
-`FILE`-derived names); **it does not evaluate the result to compare values**. The
+advice in `notes`. The `.inc` split's safety check was static (statement order, references,
+`FILE`-derived names) and did not evaluate the result; since w8 it also evaluates every
+version before and after through an overlay (see "As implemented after wave 5"). The
 `recipe` generator notes an existing recipe of the same `PN` in another layer and which
 file BitBake would then build.
 
@@ -979,7 +999,7 @@ workspace, so a switched-off handler costs no index access. The debug log line n
 switched-off handlers. The upstream-edit hint of the edit hook is a `scaffold kind=where`
 call.
 
-Index (w5 fixes, `index`): `SCHEMA_VERSION` is 3. `files.not_collected` is `bbfiles` for a
+Index (w5 fixes, `index`): `SCHEMA_VERSION` was 3 (4 since w7). `files.not_collected` is `bbfiles` for a
 `.bb` / `.bbappend` that no layer's `BBFILES` glob matches and `data` for a data file (a
 `.conf` / `.inc` / `.bbclass` that is not metadata, decided by place and by the edges,
 `scan::mark_data`; see "Data files" in bitbake-semantics.md); both are set with the edges,
@@ -989,8 +1009,10 @@ on `refresh` and for one file's edges on `refresh_file`. `meta.edges` versions t
 `*_in` variants that take one (`all_files_in`, `files_by_kind_in`, `files_in_layer_in`);
 `query::not_collected(index, id)` gives the reason as text. Recipe lookups
 (`find_recipes`, `recipe_names_like`, `files_providing`, `providers::recipes_using`) and
-`bbappend` edges leave uncollected files out. **Lint's file list is `files_in_layer`
-(`FileSet::DEFAULT`), so lint still checks a `.bb` no `BBFILES` glob matches.** A
+`bbappend` edges leave uncollected files out. Lint's file list is `files_in_layer`
+(`FileSet::DEFAULT`); since w6 the engine evaluates no `.bb` / `.bbappend` BitBake does not
+collect and runs no file- or recipe-scope rule on it, and `org/recipe-path` (a `.bb`) or
+`org/layer-conf` (a `.bbappend`) reports it once (lint-rules.md, "Running lint"). A
 no-change refresh no longer canonicalises every path component (`Workspace::confine` tries
 one `realpath` of the whole path first): 104 ms to 19 ms on the live workspace.
 
@@ -1002,8 +1024,8 @@ below). `parse::words`: `words`,
 `colon_parts`, `comma_fields`, `split_outside`, `split_keep_whitespace`, `known_words`,
 `is_unevaluated`, `abbreviate`: a `${...}` group is never split and a word holding one is
 unevaluated. **Every place that splits a list or colon-separated value must use
-`parse::words`.** The evaluator, the index, `overrides` and `deps` do; the lint rules still
-split values with their own code.
+`parse::words`.** The evaluator, the index, `overrides` and `deps` do, and since w6 so does
+every lint rule that splits a list value.
 
 Evaluator (w5 fixes, `eval`): the replay follows `addfragments` (`Feature::AddFragments`,
 `BuiltinFragments`: built-in fragments set `MACHINE` / `DISTRO`, named ones are included);
@@ -1023,11 +1045,12 @@ not apply would have set), `uncertain_references` and `uncertain_vars`.
 entry with whether it is unevaluated, and `overrides()` only the known ones. The default
 machine and distro are what the configuration sets, fragments included; in a kas project
 without a build directory the kas files' values (else kas's defaults) are set as weak
-defaults after the layer confs and before `conf/bitbake.conf`, **not at `local.conf`'s
-place as kas writes them**, with a target note.
+defaults with a target note. Until w8 they were set after the layer confs and before
+`conf/bitbake.conf`; since w8 they are set where `bitbake.conf` includes `conf/local.conf`,
+as kas writes them (see "As implemented after wave 5").
 
 Release (`release`): `Feature::{AddFragments, BuiltinFragments, RecipeVirtualProviders}`
-(`Feature::ALL` has nine). `LintReach { Target, Sweep }` and `Layer::lint_releases_as`
+(`Feature::ALL` had nine; ten since w7's `AddPyLib`). `LintReach { Target, Sweep }` and `Layer::lint_releases_as`
 decide which releases a layer is linted for (see "Release contract").
 
 Lint (M9, w5 fixes): the 39th rule, `org/generated-conf-edit` (kas-generated `local.conf` /
@@ -1036,43 +1059,189 @@ Lint (M9, w5 fixes): the 39th rule, `org/generated-conf-edit` (kas-generated `lo
 and Langdale workspaces). The fix rounds changed what several rules report (lint-rules.md,
 "On a real workspace").
 
-### After wave 6 (w7 fixes)
+### As implemented after wave 5
 
-Parser: `StatementKind::AddPyLib { libdir, namespace }` for `addpylib` with two or more
-arguments (the groups of `addpylib\s+(.+)\s+(.+)`, unexpanded; no diagnostic); with fewer it
-is `Unknown` with an "unparsed line" diagnostic. The index records it as statement kind
-`addpylib` (`name` = the directory, `value` = the namespace) and makes **no edge**: it adds a
-python library directory, not a metadata file. `hygiene/parse-error` judges where it is
-(base configuration only) and the release (`Feature::AddPyLib`, BitBake 2.4 on;
-`Feature::ALL` has ten). The `.inc` split treats it as opaque.
+As for wave 5: the additions of the rounds after it (w6: `w6-audit`, `w6-fix`; w7:
+`w7-diff`, `w7-fix`; w8: `w8-tools`, `w8-eval`; w9: `w9-final`); the module docs in the
+named files are the detailed reference. Two tools were added (`audit`, `diff`, both
+deferred, so `TOOLS` has 16 rows: 6 always loaded, 10 deferred), each also a CLI subcommand.
 
-Index (schema version 4): an `inherit` in a class under `classes/` (context-neutral, on a
-release with `Feature::SplitClassDirs`) is resolved in recipe and in global context; it is
-resolved when either finds the class, `edges.context` (and `EdgeRow::context`) records
-`recipe`, `global` or `both`, and when the two find different files there is an edge for
-each. An `inherit` in `classes-recipe/` stays recipe-only, in `classes-global/` or a `.conf`
-global-only; every other edge has no context. The replay is unchanged (it follows
-`__bbclasstype` as BitBake does).
+Audit report (T8.6, `audit`): `build(ctx, &Options) -> Result<Audit>` (async),
+`render_markdown`, `render_json` (`SCHEMA` = `sous-chef-audit/1`), `cli(cfg,
+&AuditCliArgs)`, `find_layers(root, ws) -> Vec<FoundLayer>` (every `conf/layer.conf` at
+most `SCAN_DEPTH` = 5 below the root, also below `.gitmodules` paths and the kas
+repositories), `strip_credentials`, `at_pin`. It adds no analysis: it calls
+`org_layer_conf::layer_problems`, `layers::order_problems`, `layers::append_rows`,
+`query::shadowed`, `query::orphan_appends`, `lint::run` with `all`, and the index's parse
+queries (`query::unresolved_include_edges`, `unresolved_inherit_edges`, the unknown
+statements, the files not collected), and assembles them. Git facts come from `gitcmd`.
+Read-only; the index is refreshed in the cache directory as for every tool. mcp-tools.md
+(`audit`) describes the report.
 
-`gitcmd` (new module): `gitcmd::git(dir, args) -> Option<Vec<u8>>`,
-`gitcmd::git_text(dir, args) -> Option<String>`, `gitcmd::TIMEOUT` (5 s). The one way
-sous-chef runs git: argv only, stdin closed, no prompts, `--no-optional-locks`,
-`-c core.fsmonitor=false`, the `GIT_DIR` family and `GIT_CONFIG*` removed, killed after the
-timeout. `org/upstream-edit` and the audit both use it (`audit::git` is gone;
-`org_upstream_edit::TIMEOUT` and `audit::GIT_TIMEOUT` are `gitcmd::TIMEOUT`).
+Release diff (T8.4, `diff`): `validate_revision(rev)` (no leading `-`, no whitespace or
+control character, no `:`, no `..`, at most 200 characters), then `git rev-parse --verify
+--end-of-options <rev>^{commit}`; `build(ctx, &Options) -> Result<Diff>` (the own files
+from the index, then `compute`), `compute(ws, own, &Options)`, `own_files`, `table`,
+`render_text`, `render_json` (`SCHEMA` = `sous-chef-diff/1`), `cli(cfg, &DiffCliArgs)`. A
+revision's files are read with `git ls-tree` and one `gitcmd::cat_file_batch`, the working
+tree from disk; each revision's `.bb` files are those its own `conf/layer.conf` `BBFILES`
+words match (the current `BBFILES`, with a note, when the text cannot decide it), plus the
+active `BBFILES_DYNAMIC` globs; statements are parsed with the real parser and compared as
+written (`parse::words` for `SRC_URI`). Nothing is checked out or fetched.
 
-`mcp::tools::layers::order_problems(index, ws) -> Result<Vec<OrderProblem>>` (`OrderProblem
-{ layer, severity: Severity, message, loc }`, all public): the `BBLAYERS` order checks, the
-`order` rows of `layers show=compat`. The audit calls it instead of reading those rows
-back from the view's JSON (it still reads `layers show=appends` that way).
+`gitcmd` (w7, extended in w8): the one way sous-chef runs git. `run(dir, args, input:
+Option<Vec<u8>>, timeout) -> Result<Vec<u8>, String>` (stdout when git exits 0, else a
+one-line reason: git missing, the first stderr line of a non-zero exit, a timeout);
+`git(dir, args) -> Option<Vec<u8>>` and `git_text` (stdin closed, `TIMEOUT` = 5 s, `None`
+on any failure); `cat_file_batch(dir, oids, timeout)` (blobs through one `git cat-file
+--batch` fed on stdin; `None` for a missing object or a non-blob); `nul_fields`. Every
+call: argv only, never a shell; stdin closed unless input is given; `GIT_TERMINAL_PROMPT=0`;
+`--no-optional-locks` and `GIT_OPTIONAL_LOCKS=0` (so `git status` never rewrites
+`.git/index` in someone else's checkout); `-c core.fsmonitor=false` (no fsmonitor daemon,
+no hook program the repository names); the variables that point git at another
+repository, index, object store or configuration (`GIT_DIR`, `GIT_WORK_TREE`, ...,
+`GIT_CONFIG_PARAMETERS`) or name a program for it (`GIT_EXTERNAL_DIFF`, `GIT_PAGER`)
+removed; `LC_ALL=C`; killed after the timeout. `org/upstream-edit`, the audit and the diff
+use it (`org_upstream_edit::TIMEOUT` and `audit::GIT_TIMEOUT` are `gitcmd::TIMEOUT`).
 
-`BBFILES_DYNAMIC` (w7): `workspace::layers::read_bbfiles_dynamic(build_dir, roots) ->
-Result<Vec<DynamicWord>>` (`DynamicWord { word, layer: Option<usize> }`) reads the value with
-discovery's datastore (includes, overrides, every operator); `resolve::bbfiles_dynamic` uses
-it. A word without `:` (or with an empty collection) is BitBake's fatal error and an
-`Error::Config` from discovery (`read_layer_confs*`), with BitBake's message. Words that
-cannot be decided statically are `Collection::unusable`, said by `layers show=appends` and
-the audit's structure notes.
+Overlay (w8, `eval::overlay`): `Overlay::{new, insert(ws, abs, text), is_empty, paths,
+lines(ws, loc)}`; `eval::evaluate_with_overlay(index, ws, target, &overlay)` and
+`replay::evaluate_overlay_with(cache, ...)`. Wherever the replay reads a file's statements
+(`Replay::visit`, the resolver's known files, the body of anonymous python), an overlay path
+is read from the overlay; an overlay path that is not indexed counts as an existing file.
+The rows are built by the scanner's own conversion, `index::scan::statement_rows` (public
+since w9; the overlay's copy is gone). **Cache rule:** the cached configuration pass is used
+only when no overlay path could have changed it (no `.conf` or `.bbclass` path, no file the
+cached pass visited, no path it probed for an `include` / `require` / `include_all` without
+finding a file); otherwise the configuration is replayed with the overlay and never cached.
+The overlay replaces contents, not the collection: bbappends, `not_collected` and the
+provider choice come from the index (the module doc says why the `.inc` split never needs
+more). The `.inc` split (`scaffold::inc_split`) evaluates every version before and after
+its plan and refuses on any difference in final values, flags, functions, anonymous python
+or the `addtask` / `deltask` / `addhandler` statements, naming each variable that would
+change; its static check runs first and on its own refuses only what evaluation cannot see
+(python reading `FILE`, files it cannot read).
+
+Licenses (w8, `eval::license`, private): `flatten` (OE-core's `LicenseVisitor` /
+`FlattenVisitor` on the plain grammar, an error for anything else), `fnmatch`,
+`expand_wildcards`; used by `replay::license_skip` for `INCOMPATIBLE_LICENSE`
+(bitbake-semantics.md, "What the static evaluator cannot do").
+
+Evaluator, other (w6, w8): `OpKind { Statement, VirtualProviderRewrite }` on `VarOp::kind`
+(`OpKind::label`: `rewrite` in a history row) is BitBake's rewrite of the virtual providers
+at the end of a recipe (`ast.handleVirtRecipeProviders`): on `DEPENDS` (always stored with
+single spaces; an unset `DEPENDS` becomes `""`) and, since w8, on the `depends` flag of
+every task in `__BBTASKS` (`DataStore::tasks()`: the tasks `addtask` added, `do_`
+prefixed, that `deltask` did not remove, in order; tasks added by anonymous python are not
+seen). A rewrite replaces nothing: earlier operations keep their status, and
+`override/shadowed` does not read it as an assignment. Target notes
+(`ReplayNotes::target_notes`), each a `note: ...` line every evaluated view shows:
+`BitBake would skip this recipe: ...` (`SKIP_RECIPE[<pn>]`, `COMPATIBLE_MACHINE`,
+`COMPATIBLE_HOST`, `INCOMPATIBLE_LICENSE`, decided on static values;
+`replay::skip_reasons`, `license_skip`), `BitBake may skip this recipe: ...` (the check
+fails on what is known but unknown values could still decide it; names them), `BitBake
+would stop parsing this recipe: ...` (the license check's fatal cases), `BBMASK is set but
+sous-chef does not apply it (...)`, and, for an evaluation with an explicit `machine` or
+`distro`, `BBMASK for this machine and distro differs from the one the index applied
+(...)` (`replay::bbmask_note`: the files it would also mask and those it would not).
+`eval::bbmask(ds) -> BbMask { None, Static(Regex), Unusable(why) }`. An `inherit` in a
+`.conf` is `RefProblem::Fatal` and not followed (BitBake's `ConfHandler` has no `inherit`);
+an `inherit` in an `.inc` is searched in the class type of the parse that reaches it
+(`__bbclasstype`), as BitBake does.
+
+Parser (w7): `StatementKind::AddPyLib { libdir, namespace }` for `addpylib` with two or
+more arguments (the groups of `addpylib\s+(.+)\s+(.+)`, unexpanded; no diagnostic); with
+fewer it is `Unknown` with an "unparsed line" diagnostic. The index records it as statement
+kind `addpylib` (`name` = the directory, `value` = the namespace) and makes **no edge**: it
+adds a python library directory, not a metadata file. `hygiene/parse-error` judges where it
+is (base configuration only) and the release (`Feature::AddPyLib`, BitBake 2.4 on;
+`Feature::ALL` has ten). The `.inc` split treats it as opaque; the release diff compares it
+as a directive. `search`'s `kind` filter knows it (`search::KINDS`, public since w8: every
+kind the scanner stores, tested against a file with each).
+
+Index (w6, w7, w9; schema version 4, `EDGES_VERSION` `inc-context-1`):
+
+- `files.not_collected`: `bbfiles` (no `BBFILES` glob matches the `.bb` / `.bbappend`),
+  `dynamic` (only an inactive `BBFILES_DYNAMIC` glob does), `bbmask` (a static `BBMASK`,
+  from the configuration with the default machine and distro, masks it;
+  `scan::apply_bbmask`, run after every full edge rebuild and after a `.conf` is
+  reindexed), `data` (a `.conf` / `.inc` / `.bbclass` that is no metadata). The first three
+  are `schema::NOT_COLLECTED_RECIPE_REASONS`: no recipe, no provider, no `bbappend` edge,
+  not evaluated or linted (a `bbfiles` file gets one layer-scope finding, below).
+- `BBFILES_DYNAMIC` is folded into the collection (`resolve::collect`, `collect_masked`):
+  an active entry's glob collects like a `BBFILES` glob.
+  `workspace::layers::read_bbfiles_dynamic(build_dir, roots) -> Result<Vec<DynamicWord>>`
+  (`DynamicWord { word, layer: Option<usize> }`) reads the value with discovery's datastore
+  (the layer confs' includes, overrides, every operator); `resolve::bbfiles_dynamic` uses
+  it. A word without `:` (or with an empty collection) is BitBake's fatal error and an
+  `Error::Config` from discovery, with BitBake's message. Words that cannot be decided
+  statically are `Collection::unusable`, said by `layers show=appends` and the audit.
+- `edges.context` (`EdgeRow::context`): an `inherit` in a class under `classes/` (on a
+  release with `Feature::SplitClassDirs`) is resolved in recipe and in global context
+  (`neutral_inherit_edges`); it is resolved when either finds the class, `context` records
+  `recipe`, `global` or `both`, and when the two find different files there is an edge for
+  each. An `inherit` in `classes-recipe/` is recipe-only, in `classes-global/`
+  global-only. **Since w9** an `inherit` in an `.inc` follows what reaches the `.inc`
+  through any chain of `require` / `include` / `include_all` edges
+  (`insert_inc_inherit_edges`): global when a `.conf` or a `classes-global/` class reaches
+  it, recipe when a recipe, a bbappend or a `classes-recipe/` class does, both (with
+  `context`, as above) when both do or a `classes/` class does, recipe when nothing does; a
+  one-file refresh recomputes every `.inc` `inherit` edge. An `inherit` written in a
+  `.conf` gets no edge (BitBake rejects the line; `hygiene/parse-error` reports it). Every
+  other edge has no context.
+
+Lint (w6, w7): every list value a rule splits goes through `parse::words`. The engine
+leaves a `.bb` / `.bbappend` BitBake does not collect alone (no evaluation, no file- or
+recipe-scope rule), and `org/recipe-path` (a `.bb` no `BBFILES` glob matches) or
+`org/layer-conf` (such a `.bbappend`) reports it once. `hygiene/parse-error` judges
+`addpylib` by place and release. lint-rules.md has the per-rule changes.
+
+Lookup helpers (w6 to w8, `mcp::tools`): `layers::order_problems(index, ws) ->
+Result<Vec<OrderProblem>>` (`OrderProblem { layer, severity, message, loc }`): the
+`BBLAYERS` order checks, the `order` rows of `layers show=compat`.
+`layers::append_rows(index, ws) -> Result<(Vec<AppendRow>, Vec<String>)>` (`AppendRow {
+bbappend, priority, matches, state: AppendState { Applies, NoMatch, NotCollected(why) },
+via_dynamic }`, and the notes): the `appends` view as typed rows. The view and the audit
+both use these two; the audit reads no view's JSON.
+`recipe::class_extend_hint(index, name) -> Result<Option<String>>`: for a name that is no
+recipe, whether it is the `<pn>-native`, `nativesdk-<pn>` or `<variant>-<pn>` variant of a
+recipe whose `BBCLASSEXTEND` lists the class; every tool that resolves a recipe name, and
+lint's target, give it as the error.
+
+kas (w8, `workspace::kas`):
+
+- `KAS_MACHINE`, `KAS_DISTRO`, `KAS_TARGET`, `KAS_TASK` from the environment sous-chef was
+  started in override the kas files as in kas 5.5 (`KasEnv::overrides`,
+  `KasProject::env: KasOverrides`; a set variable wins even when empty, `KAS_TARGET` only
+  with a word): `machine_or_default`, `distro_or_default`, `targets_or_default`,
+  `task_or_default`, `env_overrides() -> Vec<EnvOverride>` (`status` shows one `kas_env`
+  row each), `setting_source(machine)` (`the environment variable KAS_MACHINE`, `the kas
+  file <file:line>` or `kas's default (...)`; the evaluator's target note uses it).
+- `KasProject::repo_includes`: the repositories a `{repo, file}` include names. With one,
+  `BbEnv::probe` does not use kas mode and tries the modes after it, keeping the reason,
+  because kas fetches and checks out such repositories on every `kas shell`, even with
+  `--keep-config-unchanged` (its `repo_setup_loop` is not among the steps `-k` skips;
+  bitbake-semantics.md, "kas").
+- Also settled from the kas 5.5 source: `layers: null` / `{}` as kas reads them, YAML 1.1
+  `false` / `0` layer values and merge keys, and a hint when `bblayers.conf` names
+  `kas-container` paths (the kas files' repository is `/repo` there).
+- Defaults: in a kas project without a build directory, `MACHINE ??=` / `DISTRO ??=` from
+  `machine_or_default` / `distro_or_default` are applied where `bitbake.conf` includes
+  `conf/local.conf` (`Replay::apply_kas_local`), as kas writes them; when there is no
+  `bitbake.conf` (before `kas checkout`) they are applied at once. A target note names the
+  source.
+
+Jobs (w8, w9, `bitbake::jobs`): cancelling or timing out a job terminates its process group
+(SIGTERM, SIGKILL after `KILL_GRACE`, then a wait of up to `GROUP_EXIT_WAIT` until the group
+is empty) before the job is recorded as cancelled. Output files `<pid>-<n>.out` of a server
+that is gone (pid not alive, last written more than `STALE_AFTER` = 24 h ago) are removed by
+`remove_stale_outputs`. Since w9 `Ctx::open` starts that sweep of `Ctx::jobs_dir()` (`<cache
+dir>/jobs`, now its one definition) on a thread of its own
+(`JobTable::sweep_in_background`); the first `JobTable::start` in a directory sweeps it
+only when that did not happen (no thread could be started, or another directory).
+
+Hooks: unchanged since wave 5: four handlers (`GrepRead`, `BashDigest`, `BashGrep`,
+`EditFollowUp`) and the `[hooks]` switches `grep_read`, `bash`, `edit`.
 
 ## Errors
 
