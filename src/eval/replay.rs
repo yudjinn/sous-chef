@@ -68,7 +68,8 @@ use sha2::{Digest, Sha256};
 
 use super::datastore::{Content, OpKind, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
-use super::{DataStore, FileVisit, OpStatus, Target, VarOp};
+use super::license;
+use super::{DataStore, FileVisit, OpStatus, Overlay, Target, VarOp};
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
 use crate::index::{self, Index};
@@ -128,6 +129,14 @@ pub struct ReplayNotes {
     /// Names with `${...}` that `expand_keys` could not expand (python or undefined
     /// variables); they stay under their written name.
     pub incomplete_keys: Vec<String>,
+    /// Paths probed for an `include` / `require` / `include_all` that held no file (absolute,
+    /// normalised): a file created there would have been read. See [`super::Overlay`].
+    #[serde(skip)]
+    pub(crate) probed_missing: BTreeSet<PathBuf>,
+    /// `__BBTASKS`: the tasks `addtask` added and `deltask` did not remove, in order (see
+    /// [`DataStore::tasks`]).
+    #[serde(skip)]
+    pub(crate) tasks: Vec<String>,
     /// `__inherit_cache`: class files already parsed (absolute paths).
     #[serde(skip)]
     pub(crate) inherit_cache: Vec<PathBuf>,
@@ -272,6 +281,14 @@ impl DataStore {
         split_keyword(name).is_some_and(|(base, _, _)| self.notes.functions.contains(&base))
     }
 
+    /// `__BBTASKS`: the tasks `addtask` statements added (`do_` prefixed, the names not
+    /// expanded, as `AddTaskNode.eval` does) and `deltask` statements (names expanded) did
+    /// not remove, in the order first added (BitBake 2.18.0 `lib/bb/build.py` `addtask`,
+    /// `deltask`). Tasks added by anonymous python (`bb.build.addtask`) are not seen.
+    pub fn tasks(&self) -> &[String] {
+        &self.notes.tasks
+    }
+
     /// The composed pieces of a function, in order (override variant, `:append`,
     /// `:prepend` applied as for any variable). `None` if `name` has no value; lines that
     /// are not pointers are skipped.
@@ -347,25 +364,176 @@ pub fn evaluate_with(
     ws: &Workspace,
     target: &Target,
 ) -> Result<DataStore> {
+    evaluate_inner(cache, index, ws, target, None)
+}
+
+/// [`evaluate_with`] with some files replaced by in-memory contents ([`Overlay`]): wherever
+/// the replay reads a file's statements, an overlay path is read from the overlay instead,
+/// and an overlay path that is not indexed counts as an existing file. Nothing is written;
+/// the index is only read; `cache` is used for the configuration pass only when no overlay
+/// path could have changed it (see [`Overlay`]), and is never filled from an overlay
+/// evaluation.
+///
+/// A recipe target must still name an indexed recipe (its contents may be replaced). For a
+/// recipe *name*, the version is chosen without the overlay (`providers.rs`), then the chosen
+/// file is evaluated with it. bbappends are the indexed ones of the recipe.
+pub fn evaluate_overlay_with(
+    cache: &ConfigCache,
+    index: &Index,
+    ws: &Workspace,
+    target: &Target,
+    overlay: &Overlay,
+) -> Result<DataStore> {
+    evaluate_inner(cache, index, ws, target, Some(overlay))
+}
+
+fn evaluate_inner(
+    cache: &ConfigCache,
+    index: &Index,
+    ws: &Workspace,
+    target: &Target,
+    overlay: Option<&Overlay>,
+) -> Result<DataStore> {
+    let overlay = overlay.filter(|o| !o.is_empty());
     let files = Files::load(index, ws)?;
+    let config = |cache: &ConfigCache| -> Result<DataStore> {
+        let mut c = configuration(cache, index, ws, &files, target, overlay)?;
+        if target.machine.is_some() || target.distro.is_some() {
+            bbmask_note(index, ws, &mut c)?;
+        }
+        Ok(c)
+    };
     let Some(name) = &target.recipe else {
-        return configuration(cache, index, ws, &files, target);
+        return config(cache);
     };
     // A path is resolved before the configuration pass; a recipe name needs it, because
     // the choice of file reads PREFERRED_VERSION (providers.rs).
     if let Some(r) = find_recipe_file(index, ws, name)? {
-        let config = configuration(cache, index, ws, &files, target)?;
-        return recipe_pass(index, ws, &files, &config, &r);
+        let config = config(cache)?;
+        return recipe_pass(index, ws, &files, &config, &r, overlay);
     }
-    let config = configuration(cache, index, ws, &files, target)?;
+    let config = config(cache)?;
     let version = target.version.as_deref();
     let chosen = super::providers::Providers::with_config(cache, index, ws, target, config.fork())?
         .best_version(name, version)?
         .ok_or_else(|| recipe_not_found(name, version))?;
-    recipe_pass(index, ws, &files, &config, &chosen.recipe.file)
+    recipe_pass(index, ws, &files, &config, &chosen.recipe.file, overlay)
 }
 
+/// Most files listed by name in the `BBMASK` note.
+const MAX_MASK_LISTED: usize = 10;
+
+/// For an evaluation with an explicit machine or distro: when the `BBMASK` of this
+/// configuration masks a different set of files than the one the index was marked with
+/// (the default machine and distro, `files.not_collected = 'bbmask'`), a target note naming
+/// the files it would additionally mask and those it would unmask. The candidates are the
+/// files the index collects plus those it marked as masked (the `BBFILES` collection before
+/// masking); `re.search` on their workspace paths, as the index does. A mask sous-chef
+/// cannot apply already has its own note (`config_pass`).
+fn bbmask_note(index: &Index, ws: &Workspace, config: &mut DataStore) -> Result<()> {
+    let mask = match super::bbmask(config) {
+        super::BbMask::Static(re) => Some(re),
+        super::BbMask::None => None,
+        super::BbMask::Unusable(_) => return Ok(()),
+    };
+    let masked_now: Vec<FileRow> = query::uncollected_recipe_files(index)?
+        .into_iter()
+        .filter(|(_, why)| why == crate::index::schema::NOT_COLLECTED_BBMASK)
+        .map(|(f, _)| f)
+        .collect();
+    if mask.is_none() && masked_now.is_empty() {
+        return Ok(());
+    }
+    let hit = |f: &FileRow| -> bool {
+        let Some(re) = &mask else { return false };
+        ws.abs_path(&f.loc(LineSpan::line(1)))
+            .is_some_and(|p| re.is_match(&p.to_string_lossy()))
+    };
+    let label = |f: &FileRow| format!("{}:{}", f.layer, f.path.display());
+    let more: Vec<String> = match &mask {
+        None => Vec::new(),
+        Some(_) => query::files_by_kind_in(
+            index,
+            &[FileKind::Recipe, FileKind::Append],
+            query::FileSet::COLLECTED,
+        )?
+        .iter()
+        .filter(|f| hit(f))
+        .map(label)
+        .collect(),
+    };
+    let fewer: Vec<String> = masked_now.iter().filter(|f| !hit(f)).map(label).collect();
+    if more.is_empty() && fewer.is_empty() {
+        return Ok(());
+    }
+    let list = |v: &[String]| -> String {
+        let mut s = v
+            .iter()
+            .take(MAX_MASK_LISTED)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        if v.len() > MAX_MASK_LISTED {
+            s.push_str(&format!(" (+{} more)", v.len() - MAX_MASK_LISTED));
+        }
+        s
+    };
+    let mut parts = Vec::new();
+    if !more.is_empty() {
+        parts.push(format!(
+            "it would also mask {} file{}: {}",
+            more.len(),
+            if more.len() == 1 { "" } else { "s" },
+            list(&more)
+        ));
+    }
+    if !fewer.is_empty() {
+        parts.push(format!(
+            "it would not mask {} file{} the index treats as masked: {}",
+            fewer.len(),
+            if fewer.len() == 1 { "" } else { "s" },
+            list(&fewer)
+        ));
+    }
+    Arc::make_mut(&mut config.notes).target_notes.push(format!(
+        "note: BBMASK for this machine and distro differs from the one the index applied (default machine and distro): {}; recipe names, providers and bbappends here still follow the index's mask",
+        parts.join("; ")
+    ));
+    Ok(())
+}
+
+/// The configuration pass: the cached one, unless an overlay path could have changed it
+/// (a `.conf` or `.bbclass`, a file it visited, a path it probed and found empty), in which
+/// case it is replayed with the overlay and not cached.
 fn configuration(
+    cache: &ConfigCache,
+    index: &Index,
+    ws: &Workspace,
+    files: &Files,
+    target: &Target,
+    overlay: Option<&Overlay>,
+) -> Result<DataStore> {
+    let config = cached_configuration(cache, index, ws, files, target)?;
+    let Some(o) = overlay else {
+        return Ok(config);
+    };
+    let touched = o.paths().any(|p| {
+        matches!(
+            FileKind::from_path(p),
+            Some(FileKind::Conf) | Some(FileKind::Class)
+        ) || config.notes.probed_missing.contains(p)
+            || config
+                .files()
+                .iter()
+                .any(|v| ws.abs_path(&v.loc).is_some_and(|a| normalize(&a) == p))
+    });
+    if !touched {
+        return Ok(config);
+    }
+    config_pass(index, ws, files, target, overlay)
+}
+
+fn cached_configuration(
     cache: &ConfigCache,
     index: &Index,
     ws: &Workspace,
@@ -383,7 +551,7 @@ fn configuration(
     {
         return Ok(e.ds.fork());
     }
-    let ds = config_pass(index, ws, files, target)?;
+    let ds = config_pass(index, ws, files, target, None)?;
     cache.passes.fetch_add(1, Ordering::Relaxed);
     let fingerprint = files.fingerprint(ds.files());
     cache.lock().insert(
@@ -430,6 +598,9 @@ fn find_recipe_file(index: &Index, ws: &Workspace, name: &str) -> Result<Option<
 // ---------------------------------------------------------------------------------------
 // Indexed files
 // ---------------------------------------------------------------------------------------
+
+/// `(layer, path, kind, statements)` of a file the replay reads.
+type FileStatements = (String, PathBuf, FileKind, Vec<StatementRow>);
 
 #[derive(Debug, Clone)]
 struct FileInfo {
@@ -526,7 +697,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// Lexical normalisation (`.` and `..` removed).
-fn normalize(p: &Path) -> PathBuf {
+pub(crate) fn normalize(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in p.components() {
         match c {
@@ -544,7 +715,13 @@ fn normalize(p: &Path) -> PathBuf {
 // The two passes
 // ---------------------------------------------------------------------------------------
 
-fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) -> Result<DataStore> {
+fn config_pass(
+    index: &Index,
+    ws: &Workspace,
+    files: &Files,
+    target: &Target,
+    overlay: Option<&Overlay>,
+) -> Result<DataStore> {
     let mut pins = Vec::new();
     if let Some(m) = &target.machine {
         pins.push(("MACHINE", m.clone()));
@@ -553,6 +730,7 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
         pins.push(("DISTRO", d.clone()));
     }
     let mut r = Replay::new(index, ws, files, DataStore::new(), true, false, pins);
+    r.overlay = overlay;
     for (name, value) in r.pins.clone() {
         put(&mut r.ds, name, &value);
     }
@@ -568,7 +746,7 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
             put(&mut r.ds, "BBPATH", &build.to_string_lossy());
         }
         let bblayers = normalize(&build.join("conf/bblayers.conf"));
-        if r.files.by_abs.contains_key(&bblayers) {
+        if r.exists(&bblayers) {
             r.visit(&bblayers, FileKind::Conf, Vec::new(), true)?;
         }
     }
@@ -577,7 +755,7 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
     let bblayers_via = r.via_of_word("BBLAYERS", None);
     for layer in &ws.layers {
         let conf = normalize(&layer.root.join("conf/layer.conf"));
-        if !r.files.by_abs.contains_key(&conf) {
+        if !r.exists(&conf) {
             continue;
         }
         let dir = layer.root.to_string_lossy().to_string();
@@ -591,33 +769,39 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
     remove_var(&mut r.ds, "LAYERDIR");
 
     // A kas project without a build directory: kas would write `MACHINE ??=` and
-    // `DISTRO ??=` from its files into the `local.conf` it generates, so they hold unless
-    // the configuration sets the variables.
+    // `DISTRO ??=` from its files into the `local.conf` it generates (kas 5.5 `libcmds.py`
+    // `WriteBBConfig._write_local_conf`), so they are applied where `bitbake.conf`
+    // includes `conf/local.conf` (`Replay::include_words`), with that operator.
     let kas = kas_defaults(ws);
-    for (name, value, _) in &kas {
-        r.ds.var_mut(name).default = Some(Content {
-            text: value.clone(),
-            src: Vec::new(),
-        });
-        r.ds.ovr_cache = OnceLock::new();
-    }
+    r.kas_local = kas.clone();
 
     // conf/bitbake.conf on BBPATH (ConfHandler.resolve_file: BBPATH only).
     let bitbake_conf = r
         .bbpath()
         .into_iter()
         .map(|e| normalize(&e.join("conf/bitbake.conf")))
-        .find(|p| r.files.by_abs.contains_key(p));
+        .find(|p| r.exists(p));
     match bitbake_conf {
         Some(p) => r.visit(&p, FileKind::Conf, Vec::new(), true)?,
-        None => r.issue(
-            None,
-            &[],
-            "conf",
-            "conf/bitbake.conf",
-            RefProblem::NotFound("conf/bitbake.conf".into()),
-        ),
+        None => {
+            r.issue(
+                None,
+                &[],
+                "conf",
+                "conf/bitbake.conf",
+                RefProblem::NotFound("conf/bitbake.conf".into()),
+            );
+            // Nothing to include local.conf (before `kas checkout` OE-core is not there):
+            // the kas values are still the best answer for the machine and distro.
+            r.apply_kas_local();
+        }
     }
+    // A bitbake.conf that never includes conf/local.conf: kas's local.conf is not read.
+    let kas: Vec<(String, String, String)> = if r.kas_local.is_empty() {
+        kas
+    } else {
+        Vec::new()
+    };
 
     // ["base"] + INHERIT, as global classes.
     let inherit = r.ds.value("INHERIT").map(|v| v.text).unwrap_or_default();
@@ -678,22 +862,34 @@ fn kas_defaults(ws: &Workspace) -> Vec<(String, String, String)> {
     if ws.build_dir.is_some() {
         return Vec::new();
     }
-    let from = |s: Option<&crate::workspace::kas::KasSetting>, what: &str| match s {
-        Some(s) => format!("the kas file {}", s.loc.display_in(&k.root)),
-        None => format!("kas's default (no {what} in the kas files)"),
-    };
     vec![
         (
             "MACHINE".to_string(),
             k.machine_or_default().to_string(),
-            from(k.machine.as_ref(), "machine"),
+            kas_origin(k, true),
         ),
         (
             "DISTRO".to_string(),
             k.distro_or_default().to_string(),
-            from(k.distro.as_ref(), "distro"),
+            kas_origin(k, false),
         ),
     ]
+}
+
+/// Where kas's machine (`machine`) or distro value comes from, for the target note
+/// ("`MACHINE = "x"` from <this>"). The one place that describes the origin: once
+/// `KasProject::setting_source` (which also knows the `KAS_MACHINE` / `KAS_DISTRO`
+/// environment overrides) is available, it should decide the text here.
+fn kas_origin(k: &crate::workspace::kas::KasProject, machine: bool) -> String {
+    let (setting, what) = if machine {
+        (k.machine.as_ref(), "machine")
+    } else {
+        (k.distro.as_ref(), "distro")
+    };
+    match setting {
+        Some(s) => format!("the kas file {}", s.loc.display_in(&k.root)),
+        None => format!("kas's default (no {what} in the kas files)"),
+    }
 }
 
 fn recipe_pass(
@@ -702,8 +898,10 @@ fn recipe_pass(
     files: &Files,
     config: &DataStore,
     recipe: &FileRow,
+    overlay: Option<&Overlay>,
 ) -> Result<DataStore> {
     let mut r = Replay::new(index, ws, files, config.fork(), false, true, Vec::new());
+    r.overlay = overlay;
     let recipe_loc = recipe.loc(LineSpan::line(1));
     let abs = ws
         .abs_path(&recipe_loc)
@@ -798,17 +996,22 @@ fn static_value(ds: &DataStore, name: &str) -> Option<Option<String>> {
     }
 }
 
-/// The reasons BitBake would skip the recipe, as `note:` lines, when they can be decided
-/// from static values. OE-core `classes-global/base.bbclass` (Wrynose) anonymous python:
+/// The reasons BitBake would, or may, skip the recipe, as `note:` lines. OE-core
+/// `classes-global/base.bbclass` (Wrynose `33a6bd6c`) anonymous python, in this order:
 /// `SKIP_RECIPE[<PN>]` non-empty raises `SkipRecipe("Recipe will be skipped because:
 /// <msg>")`; a non-empty `COMPATIBLE_MACHINE`, unless `PARSE_ALL_RECIPES` is true, must
-/// `re.match` (anchored at the start only) some entry of `MACHINEOVERRIDES.split(":")`,
-/// else "incompatible with machine <MACHINE> (not in COMPATIBLE_MACHINE)"; a non-empty
-/// `COMPATIBLE_HOST`, unless `SOURCE_MIRROR_FETCH` or `PARSE_ALL_RECIPES` is true, must
-/// `re.match` `HOST_SYS`, else "incompatible with host <HOST_SYS> (not in
-/// COMPATIBLE_HOST)". Nothing is said when a value involved holds python or undefined
-/// variables, anonymous python sets it by name, an `MACHINEOVERRIDES` entry is unknown
-/// and no known one matches, or the regular expression does not compile in Rust.
+/// `re.match` (anchored at the start only) some entry of `(MACHINEOVERRIDES or
+/// "").split(":")`, else "incompatible with machine <MACHINE> (not in COMPATIBLE_MACHINE)";
+/// unless `SOURCE_MIRROR_FETCH` or `PARSE_ALL_RECIPES` is true, a non-empty
+/// `COMPATIBLE_HOST` must `re.match` `HOST_SYS`, else "incompatible with host <HOST_SYS>
+/// (not in COMPATIBLE_HOST)", and `INCOMPATIBLE_LICENSE` is checked ([`license_skip`]).
+///
+/// Three answers, never a guess: "would skip" when every value involved is known and the
+/// check fails; nothing when the check passes on what is known (a `COMPATIBLE_MACHINE`
+/// that matches a known `MACHINEOVERRIDES` entry matches); "may skip" when it fails on what
+/// is known but values that are not known (python, undefined variables, anonymous python
+/// that sets them by name, a regular expression Rust cannot compile) could still decide it.
+/// `SKIP_RECIPE` is only said when its flag is static.
 fn skip_reasons(ds: &DataStore) -> Vec<String> {
     const TAIL: &str = "(decided from static values; anonymous python is not run)";
     let mut out = Vec::new();
@@ -824,48 +1027,380 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
             msg.text
         ));
     }
+    const MAY: &str = "note: BitBake may skip this recipe:";
     let anchored = |re: &str| regex::Regex::new(&format!("^(?:{re})")).ok();
-    if let Some(Some(need)) = static_value(ds, "COMPATIBLE_MACHINE")
-        && !need.is_empty()
-        && static_bool(ds, "PARSE_ALL_RECIPES") == Some(false)
-        && let Some(Some(mo)) = static_value(ds, "MACHINEOVERRIDES")
-        && let Some(re) = anchored(&need)
-    {
-        let entries = pwords::colon_parts(&mo);
-        let all_known = entries.iter().all(|e| !pwords::is_unevaluated(e));
-        let hit = entries
-            .iter()
-            .filter(|e| !pwords::is_unevaluated(e))
-            .any(|e| re.is_match(e));
-        if all_known && !hit {
-            let machine = ds.value("MACHINE").map(|v| v.text).unwrap_or_default();
-            out.push(format!(
-                "note: BitBake would skip this recipe: incompatible with machine {machine} (COMPATIBLE_MACHINE = \"{need}\" matches no entry of MACHINEOVERRIDES = \"{mo}\") {TAIL}"
+    let parse_all = static_bool(ds, "PARSE_ALL_RECIPES");
+    match static_value(ds, "COMPATIBLE_MACHINE") {
+        _ if parse_all == Some(true) => {}
+        Some(Some(need)) if need.is_empty() => {}
+        Some(None) => {}
+        None => out.push(format!(
+            "{MAY} COMPATIBLE_MACHINE is set but not known statically ({}), so whether it matches MACHINEOVERRIDES cannot be told",
+            unknown_why(ds, "COMPATIBLE_MACHINE")
+        )),
+        Some(Some(need)) => match anchored(&need) {
+            None => out.push(format!(
+                "{MAY} COMPATIBLE_MACHINE = \"{need}\" is a regular expression sous-chef cannot compile, so whether it matches MACHINEOVERRIDES cannot be told"
+            )),
+            Some(re) => {
+                let mo = ds.value("MACHINEOVERRIDES").unwrap_or_default();
+                let entries = pwords::colon_parts(&mo.text);
+                let known: Vec<&str> = entries
+                    .iter()
+                    .copied()
+                    .filter(|e| !pwords::is_unevaluated(e))
+                    .collect();
+                let unknown = entries.len() - known.len();
+                let by_python = ds.replay().python_vars.contains("MACHINEOVERRIDES");
+                let hit = known.iter().any(|e| re.is_match(e));
+                if hit {
+                    // A match on a known entry is a match: not skipped.
+                } else if unknown > 0 || by_python || parse_all.is_none() {
+                    let mut why = Vec::new();
+                    if unknown > 0 {
+                        why.push(format!(
+                            "{unknown} part{} of MACHINEOVERRIDES {} not evaluated",
+                            if unknown == 1 { "" } else { "s" },
+                            if unknown == 1 { "is" } else { "are" }
+                        ));
+                    }
+                    if by_python {
+                        why.push("anonymous python may change MACHINEOVERRIDES".into());
+                    }
+                    if parse_all.is_none() {
+                        why.push("PARSE_ALL_RECIPES is not known statically".into());
+                    }
+                    out.push(format!(
+                        "{MAY} COMPATIBLE_MACHINE = \"{need}\" matches none of the known machine overrides ({}); {}",
+                        if known.iter().all(|k| k.is_empty()) {
+                            "none is known".to_string()
+                        } else {
+                            known.join(":")
+                        },
+                        why.join("; ")
+                    ));
+                } else {
+                    let machine = ds.value("MACHINE").map(|v| v.text).unwrap_or_default();
+                    out.push(format!(
+                        "note: BitBake would skip this recipe: incompatible with machine {machine} (COMPATIBLE_MACHINE = \"{need}\" matches no entry of MACHINEOVERRIDES = \"{}\") {TAIL}",
+                        mo.text
+                    ));
+                }
+            }
+        },
+    }
+    let mirror = static_bool(ds, "SOURCE_MIRROR_FETCH");
+    let host_checked = match (parse_all, mirror) {
+        (Some(false), Some(false)) => Some(true),
+        (Some(true), _) | (_, Some(true)) => Some(false),
+        _ => None,
+    };
+    if host_checked == Some(false) {
+        return out;
+    }
+    let unsure_check = if host_checked.is_none() {
+        "; SOURCE_MIRROR_FETCH or PARSE_ALL_RECIPES is not known statically"
+    } else {
+        ""
+    };
+    match static_value(ds, "COMPATIBLE_HOST") {
+        Some(None) => {}
+        Some(Some(need)) if need.is_empty() => {}
+        None => out.push(format!(
+            "{MAY} COMPATIBLE_HOST is set but not known statically ({}), so whether it matches HOST_SYS cannot be told",
+            unknown_why(ds, "COMPATIBLE_HOST")
+        )),
+        Some(Some(need)) => match (anchored(&need), static_value(ds, "HOST_SYS")) {
+            (None, _) => out.push(format!(
+                "{MAY} COMPATIBLE_HOST = \"{need}\" is a regular expression sous-chef cannot compile, so whether it matches HOST_SYS cannot be told"
+            )),
+            (Some(_), None) => out.push(format!(
+                "{MAY} COMPATIBLE_HOST = \"{need}\"; HOST_SYS is not known statically ({})",
+                unknown_why(ds, "HOST_SYS")
+            )),
+            (Some(_), Some(None)) => out.push(format!(
+                "{MAY} COMPATIBLE_HOST = \"{need}\"; HOST_SYS is not set (BitBake's re.match would raise)"
+            )),
+            (Some(re), Some(Some(host))) => {
+                if !re.is_match(&host) {
+                    if host_checked.is_none() {
+                        out.push(format!(
+                            "{MAY} COMPATIBLE_HOST = \"{need}\" does not match HOST_SYS = \"{host}\"{unsure_check}"
+                        ));
+                    } else {
+                        out.push(format!(
+                            "note: BitBake would skip this recipe: incompatible with host {host} (COMPATIBLE_HOST = \"{need}\" does not match HOST_SYS) {TAIL}"
+                        ));
+                    }
+                }
+            }
+        },
+    }
+    out.extend(license_skip(ds, host_checked.is_none()));
+    out
+}
+
+/// Why `name`'s value is not static, for a note.
+fn unknown_why(ds: &DataStore, name: &str) -> String {
+    if ds.replay().python_vars.contains(name) {
+        return "anonymous python sets it".into();
+    }
+    match ds.value(name) {
+        Some(v) if v.unevaluated_python => "it holds python".into(),
+        Some(v) if !v.unresolved.is_empty() => {
+            format!("it uses undefined variables: {}", v.unresolved.join(", "))
+        }
+        _ => "not known".into(),
+    }
+}
+
+/// One package's outcome in `skip_incompatible_package_licenses`.
+enum PkgLicense {
+    /// Incompatible licenses: the package is skipped.
+    Skipped(Vec<String>),
+    Kept,
+    /// Cannot be told; why.
+    Unknown(String),
+}
+
+/// `INCOMPATIBLE_LICENSE` (OE-core Wrynose `33a6bd6c`, `classes-global/base.bbclass`
+/// anonymous python and `lib/oe/license.py` `skip_incompatible_package_licenses`,
+/// `incompatible_license`, `incompatible_pkg_license`, `expand_wildcard_licenses`,
+/// `apply_pkg_license_exception`, `canonical_license`). With `bad =
+/// INCOMPATIBLE_LICENSE.split()` and `pkgs = PACKAGES.split()`: nothing when `pkgs` is
+/// empty. A package is skipped when `incompatible_license(d, remaining, pkg)` is not empty,
+/// where `remaining` is `expand_wildcard_licenses(bad)` (`AGPL-3.0*`, `GPL-3.0*`,
+/// `LGPL-3.0*` become their `-only` / `-or-later` names; an obsolete name or another `*` is
+/// `bb.fatal`) without the `<pkg>:<lic>` entries of `INCOMPATIBLE_LICENSE_EXCEPTIONS`, and
+/// the license is `LICENSE:<pkg>` or else `LICENSE`, flattened choosing, at each `|`, the
+/// left side when all its licenses (mapped through `SPDXLICENSEMAP[lic]`) match no pattern
+/// (`fnmatchcase`), else the right. No package is skipped when `PN` starts with
+/// `nativesdk-` or `gcc-source-`, or ends with `-native`, `-cross-${TARGET_ARCH}`,
+/// `-cross-initial-${TARGET_ARCH}`, `-crosssdk-${SDK_SYS}`, `-crosssdk-initial-${SDK_SYS}`
+/// or `-cross-canadian-${TRANSLATED_TARGET_ARCH}`. The recipe is skipped only when every
+/// package is, with "it has incompatible license(s): <sorted, unique: the recipe's own
+/// incompatible licenses (against `bad` unexpanded) and every package's>".
+fn license_skip(ds: &DataStore, check_unsure: bool) -> Vec<String> {
+    const MAY: &str = "note: BitBake may skip this recipe:";
+    const TAIL: &str = "(decided from static values; anonymous python is not run)";
+    let may = |why: String| vec![format!("{MAY} {why}")];
+    let unsure = if check_unsure {
+        "; SOURCE_MIRROR_FETCH or PARSE_ALL_RECIPES is not known statically"
+    } else {
+        ""
+    };
+    let bad: Vec<String> = match static_value(ds, "INCOMPATIBLE_LICENSE") {
+        Some(v) => pwords::words(&v.unwrap_or_default())
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        None => {
+            return may(format!(
+                "INCOMPATIBLE_LICENSE is set but not known statically ({})",
+                unknown_why(ds, "INCOMPATIBLE_LICENSE")
             ));
         }
+    };
+    if bad.is_empty() {
+        return Vec::new();
     }
-    if let Some(Some(need)) = static_value(ds, "COMPATIBLE_HOST")
-        && !need.is_empty()
-        && static_bool(ds, "PARSE_ALL_RECIPES") == Some(false)
-        && static_bool(ds, "SOURCE_MIRROR_FETCH") == Some(false)
-        && let Some(Some(host)) = static_value(ds, "HOST_SYS")
-        && let Some(re) = anchored(&need)
-        && !re.is_match(&host)
-    {
-        out.push(format!(
-            "note: BitBake would skip this recipe: incompatible with host {host} (COMPATIBLE_HOST = \"{need}\" does not match HOST_SYS) {TAIL}"
+    let Some(Some(pn)) = static_value(ds, "PN") else {
+        return may("INCOMPATIBLE_LICENSE is set and PN is not known statically".into());
+    };
+    if pn.starts_with("nativesdk-") || pn.starts_with("gcc-source-") {
+        return Vec::new();
+    }
+    for t in [
+        "-native",
+        "-cross-${TARGET_ARCH}",
+        "-cross-initial-${TARGET_ARCH}",
+        "-crosssdk-${SDK_SYS}",
+        "-crosssdk-initial-${SDK_SYS}",
+        "-cross-canadian-${TRANSLATED_TARGET_ARCH}",
+    ] {
+        let e = ds.expand(t);
+        if e.unevaluated_python || !e.unresolved.is_empty() {
+            // The suffix is not known; only a PN that could end with it is in doubt.
+            let stem = t.split("${").next().unwrap_or(t);
+            if pn.contains(stem) {
+                return may(format!(
+                    "INCOMPATIBLE_LICENSE is set and whether {pn} ends with {t} (no license check) cannot be told"
+                ));
+            }
+            continue;
+        }
+        if pn.ends_with(&e.text) {
+            return Vec::new();
+        }
+    }
+    let expanded = match license::expand_wildcards(&bad) {
+        Ok(x) => x,
+        Err(fatal) => {
+            return vec![format!(
+                "note: BitBake would stop parsing this recipe: {fatal} {TAIL}"
+            )];
+        }
+    };
+    let exceptions: Vec<String> = match static_value(ds, "INCOMPATIBLE_LICENSE_EXCEPTIONS") {
+        Some(v) => pwords::words(&v.unwrap_or_default())
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        None => {
+            return may(format!(
+                "INCOMPATIBLE_LICENSE_EXCEPTIONS is not known statically ({})",
+                unknown_why(ds, "INCOMPATIBLE_LICENSE_EXCEPTIONS")
+            ));
+        }
+    };
+    for e in &exceptions {
+        let lic = e.split(':').nth(1).unwrap_or(e);
+        if license::OBSOLETE.contains(&lic) {
+            return vec![format!(
+                "note: BitBake would stop parsing this recipe: Obsolete license {lic} used in INCOMPATIBLE_LICENSE_EXCEPTIONS {TAIL}"
+            )];
+        }
+    }
+    let pkgs: Vec<String> = match static_value(ds, "PACKAGES") {
+        Some(v) => pwords::words(&v.unwrap_or_default())
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        None => {
+            return may(format!(
+                "INCOMPATIBLE_LICENSE is set and PACKAGES is not known statically ({})",
+                unknown_why(ds, "PACKAGES")
+            ));
+        }
+    };
+    if pkgs.is_empty() {
+        return Vec::new();
+    }
+    let mut skipped: Vec<(String, Vec<String>)> = Vec::new();
+    let mut unknown: Vec<String> = Vec::new();
+    for pkg in &pkgs {
+        let remaining: Vec<String> = expanded
+            .iter()
+            .filter(|l| !exceptions.contains(&format!("{pkg}:{l}")))
+            .cloned()
+            .collect();
+        match package_license(ds, Some(pkg), &remaining) {
+            PkgLicense::Kept => return Vec::new(),
+            PkgLicense::Skipped(l) => skipped.push((pkg.clone(), l)),
+            PkgLicense::Unknown(why) => unknown.push(why),
+        }
+    }
+    if !unknown.is_empty() {
+        let n = unknown.len();
+        unknown.sort();
+        unknown.dedup();
+        return may(format!(
+            "INCOMPATIBLE_LICENSE = \"{}\": {} of {} package{} have incompatible licenses; for the other {n} it cannot be told ({}){unsure}",
+            bad.join(" "),
+            skipped.len(),
+            pkgs.len(),
+            if pkgs.len() == 1 { "" } else { "s" },
+            unknown.join("; ")
         ));
     }
-    out
+    let mut all: Vec<String> = match package_license(ds, None, &bad) {
+        PkgLicense::Skipped(l) => l,
+        PkgLicense::Kept => Vec::new(),
+        PkgLicense::Unknown(why) => {
+            return may(format!(
+                "INCOMPATIBLE_LICENSE = \"{}\": every package has incompatible licenses, and the recipe's LICENSE cannot be read ({why}){unsure}",
+                bad.join(" ")
+            ));
+        }
+    };
+    for (_, l) in skipped {
+        all.extend(l);
+    }
+    all.sort();
+    all.dedup();
+    if check_unsure {
+        return may(format!(
+            "it has incompatible license(s): {} (INCOMPATIBLE_LICENSE = \"{}\"){unsure}",
+            all.join(" "),
+            bad.join(" ")
+        ));
+    }
+    vec![format!(
+        "note: BitBake would skip this recipe: it has incompatible license(s): {} (INCOMPATIBLE_LICENSE = \"{}\") {TAIL}",
+        all.join(" "),
+        bad.join(" ")
+    )]
+}
+
+/// `incompatible_license(d, dont_want, package)`: the incompatible licenses of
+/// `LICENSE:<package>` (or `LICENSE` when that is empty or `package` is `None`).
+fn package_license(ds: &DataStore, package: Option<&str>, dont_want: &[String]) -> PkgLicense {
+    let own = package.map(|p| format!("LICENSE:{p}"));
+    let name = match &own {
+        Some(n) => match static_value(ds, n) {
+            Some(Some(v)) if !v.is_empty() => n.as_str(),
+            Some(_) => "LICENSE",
+            None => return PkgLicense::Unknown(format!("{n}: {}", unknown_why(ds, n))),
+        },
+        None => "LICENSE",
+    };
+    let text = match static_value(ds, name) {
+        Some(v) => v.unwrap_or_default(),
+        None => return PkgLicense::Unknown(format!("{name}: {}", unknown_why(ds, name))),
+    };
+    // canonical_license: SPDXLICENSEMAP[lic] or lic. `None` when the flag is not static.
+    let canonical = |lic: &str| -> Option<String> {
+        match ds.flag("SPDXLICENSEMAP", lic) {
+            None => Some(lic.to_string()),
+            Some(v) if v.unevaluated_python || !v.unresolved.is_empty() => None,
+            Some(v) if v.text.is_empty() => Some(lic.to_string()),
+            Some(v) => Some(v.text),
+        }
+    };
+    let ok = |lic: &str| !dont_want.iter().any(|p| license::fnmatch(lic, p));
+    let unknown_map = std::cell::Cell::new(false);
+    let choose = |a: &[String], _: &[String]| -> bool {
+        a.iter().all(|l| match canonical(l) {
+            Some(c) => ok(&c),
+            None => {
+                unknown_map.set(true);
+                true
+            }
+        })
+    };
+    let lics = match license::flatten(&text, &choose) {
+        Ok(l) => l,
+        Err(e) => return PkgLicense::Unknown(format!("{name} = \"{text}\": {e}")),
+    };
+    let mut bad = Vec::new();
+    for l in &lics {
+        match canonical(l) {
+            Some(c) => {
+                if !ok(&c) {
+                    bad.push(c);
+                }
+            }
+            None => unknown_map.set(true),
+        }
+    }
+    if unknown_map.get() {
+        return PkgLicense::Unknown("SPDXLICENSEMAP is not known statically".into());
+    }
+    bad.sort();
+    if bad.is_empty() {
+        PkgLicense::Kept
+    } else {
+        PkgLicense::Skipped(bad)
+    }
 }
 
 /// `ast.handleVirtRecipeProviders` (BitBake 2.12 and later), on `DEPENDS`: each word listed
 /// in `BB_RECIPE_VIRTUAL_PROVIDERS` is replaced with the value of
 /// `PREFERRED_PROVIDER_<word>`, and the result is stored with a plain `setVar` (no more
-/// `:append` / override variants). Done only when a word is replaced (when none is, BitBake
-/// still stores the words joined with single spaces; the replay leaves the value as it is,
-/// so it may differ from BitBake's in whitespace only). The task `depends` flags BitBake
-/// rewrites the same way are not rewritten (the replay does not track `__BBTASKS`).
+/// `:append` / override variants), whether or not a word was replaced: the words joined
+/// with single spaces (done here when that changes a certain value), and `""` when
+/// `DEPENDS` is unset. An unset `BB_RECIPE_VIRTUAL_PROVIDERS` is an empty list. The task
+/// `depends` flags are rewritten the same way ([`task_depends`]).
 ///
 /// The new value keeps the flags of the old one: `unevaluated_python` (through
 /// `python_vars`) and `unresolved` (through `unresolved_vars`). A list that needs python or
@@ -874,7 +1409,8 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
 fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
     const DEPENDS: &str = "DEPENDS";
     const LIST: &str = "BB_RECIPE_VIRTUAL_PROVIDERS";
-    let Some(list) = ds.value(LIST) else { return };
+    // `(d.getVar("BB_RECIPE_VIRTUAL_PROVIDERS") or "").split()`: unset is an empty list.
+    let list = ds.value(LIST).unwrap_or_default();
     if list.unevaluated_python || !list.unresolved.is_empty() {
         let notes = Arc::make_mut(&mut ds.notes);
         if list.unevaluated_python {
@@ -892,8 +1428,25 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
         ds.ovr_cache = OnceLock::new();
         return;
     }
-    let virt: Vec<&str> = pwords::words(&list.text);
+    let virt: Vec<String> = pwords::words(&list.text)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    task_depends(ds, &virt, recipe);
+    let virt: Vec<&str> = virt.iter().map(String::as_str).collect();
     let Some(deps) = ds.value(DEPENDS) else {
+        // `(d.getVar("DEPENDS") or "").split()` then `setVar("DEPENDS", "")`.
+        ds.rewrite(
+            DEPENDS,
+            String::new(),
+            recipe.clone(),
+            OpKind::VirtualProviderRewrite,
+        );
+        Arc::make_mut(&mut ds.notes)
+            .var_notes
+            .entry(DEPENDS.to_string())
+            .or_default()
+            .push("note: DEPENDS was unset; BitBake sets it to \"\" at the end of parsing (handleVirtRecipeProviders)".to_string());
         return;
     };
     let mut words: Vec<String> = Vec::new();
@@ -909,14 +1462,8 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
             continue;
         }
         let pp = format!("PREFERRED_PROVIDER_{w}");
-        match ds.value(&pp).filter(|v| !v.text.is_empty()) {
-            Some(v) => {
-                let loc = ds
-                    .history(&pp)
-                    .into_iter()
-                    .filter(|(_, s)| *s == OpStatus::Applied)
-                    .map(|(op, _)| op.loc)
-                    .next_back();
+        match preferred_provider(ds, w) {
+            Some((v, loc)) => {
                 python |= v.unevaluated_python;
                 unresolved.extend(v.unresolved.iter().cloned());
                 words.push(v.text.clone());
@@ -939,10 +1486,26 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
             )),
         });
     }
+    let text = words.join(" ");
     if rewrites.is_empty() {
+        // `setVar("DEPENDS", " ".join(newdeps))` all the same: the words joined with single
+        // spaces. Done when that changes the text and the value is certain (an uncertain
+        // value is flagged anyway, and its words may not be the ones BitBake splits).
+        if text != deps.text && !python && unresolved.is_empty() {
+            ds.rewrite(
+                DEPENDS,
+                text,
+                recipe.clone(),
+                OpKind::VirtualProviderRewrite,
+            );
+            Arc::make_mut(&mut ds.notes)
+                .var_notes
+                .entry(DEPENDS.to_string())
+                .or_default()
+                .push("note: DEPENDS stored again at the end of parsing with its words joined by single spaces (BitBake handleVirtRecipeProviders; no BB_RECIPE_VIRTUAL_PROVIDERS word in it)".to_string());
+        }
         return;
     }
-    let text = words.join(" ");
     // setVar(DEPENDS, text) after parsing: the keyword lists and the override variants go.
     // Recorded as a rewrite, not a statement: what made the old value stays applied.
     let loc = rewrites
@@ -977,6 +1540,109 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
         "note: DEPENDS rewritten at the end of parsing (BB_RECIPE_VIRTUAL_PROVIDERS, BitBake handleVirtRecipeProviders): {line}"
     ));
     ds.ovr_cache = OnceLock::new();
+}
+
+/// `getVar("PREFERRED_PROVIDER_<word>")` when set and not empty, with the location of the
+/// last applied operation on it.
+fn preferred_provider(ds: &DataStore, word: &str) -> Option<(super::Value, Option<Loc>)> {
+    let pp = format!("PREFERRED_PROVIDER_{word}");
+    let v = ds.value(&pp).filter(|v| !v.text.is_empty())?;
+    let loc = ds
+        .history(&pp)
+        .into_iter()
+        .filter(|(_, s)| *s == OpStatus::Applied)
+        .map(|(op, _)| op.loc)
+        .next_back();
+    Some((v, loc))
+}
+
+/// The task half of `handleVirtRecipeProviders` (BitBake 2.18.0 `lib/bb/parse/ast.py`): for
+/// every task in `__BBTASKS` (see [`DataStore::tasks`]), `getVarFlag(task, "depends")`
+/// (expanded) is split on whitespace, each entry split with `entry.split(":")` into
+/// `r, t` (anything but exactly one `:` is a python `ValueError`, which fails the parse);
+/// an `r` listed in `BB_RECIPE_VIRTUAL_PROVIDERS` becomes `getVar("PREFERRED_PROVIDER_" +
+/// r)` (no check here: unset gives the text `None`), and the entries joined with single
+/// spaces are stored with `setVarFlag`. Recorded as an operation on the flag of kind
+/// [`OpKind::VirtualProviderRewrite`], when the text changes. Not reproduced: BitBake also
+/// stores `""` on a task without the flag (every reader treats unset and empty alike), and
+/// tasks or flags added by anonymous python are not seen; a flag whose value holds python
+/// or undefined variables is left as it is.
+fn task_depends(ds: &mut DataStore, virt: &[String], recipe: &Loc) {
+    const FLAG: &str = "depends";
+    for task in ds.notes.tasks.clone() {
+        let Some(v) = ds.flag(&task, FLAG) else {
+            continue;
+        };
+        if v.unevaluated_python || !v.unresolved.is_empty() {
+            continue;
+        }
+        let mut out: Vec<String> = Vec::new();
+        let mut rewrites: Vec<String> = Vec::new();
+        let mut at: Option<Loc> = None;
+        let mut failed = false;
+        for entry in v.text.split_whitespace() {
+            let parts: Vec<&str> = entry.split(':').collect();
+            let [r, t] = parts.as_slice() else {
+                Arc::make_mut(&mut ds.notes).references.push(RefIssue {
+                    loc: Some(recipe.clone()),
+                    via: Vec::new(),
+                    kind: "virtual_provider".into(),
+                    text: format!("{task}[{FLAG}]"),
+                    problem: RefProblem::Fatal(format!(
+                        "ValueError in handleVirtRecipeProviders: {task}[{FLAG}] entry {entry:?} is not `recipe:task`"
+                    )),
+                });
+                failed = true;
+                break;
+            };
+            if !virt.iter().any(|w| w == r) {
+                out.push(entry.to_string());
+                continue;
+            }
+            let (new, loc) = match preferred_provider(ds, r) {
+                Some((p, loc)) => (p.text, loc),
+                None => ("None".to_string(), None),
+            };
+            rewrites.push(match &loc {
+                Some(l) => format!("{r} -> {new} (PREFERRED_PROVIDER_{r} at {l})"),
+                None if new == "None" => {
+                    format!("{r} -> None (PREFERRED_PROVIDER_{r} is not set; BitBake writes the text None)")
+                }
+                None => format!("{r} -> {new} (PREFERRED_PROVIDER_{r})"),
+            });
+            at = at.or(loc);
+            out.push(format!("{new}:{t}"));
+        }
+        let text = out.join(" ");
+        if failed || text == v.text {
+            continue;
+        }
+        ds.apply(VarOp {
+            var: VarRef {
+                base: task.clone(),
+                overrides: Vec::new(),
+                flag: Some(FLAG.to_string()),
+                legacy_syntax: false,
+            },
+            op: AssignOp::Set,
+            value: text,
+            loc: at.unwrap_or_else(|| recipe.clone()),
+            via: Vec::new(),
+            kind: OpKind::VirtualProviderRewrite,
+        });
+        let line = if rewrites.is_empty() {
+            "its entries joined by single spaces".to_string()
+        } else {
+            rewrites.join(", ")
+        };
+        Arc::make_mut(&mut ds.notes)
+            .var_notes
+            .entry(task.clone())
+            .or_default()
+            .push(format!(
+                "note: {task}[{FLAG}] rewritten at the end of parsing (BB_RECIPE_VIRTUAL_PROVIDERS, BitBake handleVirtRecipeProviders): {line}"
+            ));
+    }
 }
 
 /// `FILE_LAYERNAME` (`CookerCollectFiles.get_layername`): the collection whose
@@ -1168,6 +1834,11 @@ struct Replay<'a> {
     resolver: Option<(Vec<PathBuf>, Resolver)>,
     /// Uncertain references being followed, innermost last.
     taint: Vec<Taint>,
+    /// Files replaced in memory (see [`Overlay`]).
+    overlay: Option<&'a Overlay>,
+    /// `(variable, value, origin)` kas would write into `local.conf` as `VAR ??= "value"`,
+    /// still to be applied (a kas project without a build directory; see `config_pass`).
+    kas_local: Vec<(String, String, String)>,
 }
 
 impl<'a> Replay<'a> {
@@ -1191,7 +1862,50 @@ impl<'a> Replay<'a> {
             pins,
             resolver: None,
             taint: Vec::new(),
+            overlay: None,
+            kas_local: Vec::new(),
         }
+    }
+
+    /// The `MACHINE ??=` / `DISTRO ??=` lines of the `local.conf` kas would generate,
+    /// applied now (a weak default: the last `??=` wins, any other assignment beats it).
+    /// Not recorded in the history: there is no file to point at.
+    fn apply_kas_local(&mut self) {
+        for (name, value, _) in std::mem::take(&mut self.kas_local) {
+            self.ds.var_mut(&name).default = Some(Content {
+                text: value,
+                src: Vec::new(),
+            });
+            self.ds.ovr_cache = OnceLock::new();
+        }
+    }
+
+    /// Whether `abs` is a file the replay can read: indexed, or in the overlay.
+    fn exists(&self, abs: &Path) -> bool {
+        self.files.by_abs.contains_key(abs) || self.overlay.is_some_and(|o| o.contains(abs))
+    }
+
+    /// `(layer, path, kind, statements)` of a file: from the overlay when it has the path,
+    /// else from the index. `None` when neither knows it.
+    fn file_statements(&self, abs: &Path) -> Result<Option<FileStatements>> {
+        if let Some(f) = self.overlay.and_then(|o| o.get(abs)) {
+            return Ok(Some((
+                f.layer.clone(),
+                f.path.clone(),
+                f.kind,
+                f.rows.clone(),
+            )));
+        }
+        let Some(info) = self.files.by_abs.get(abs) else {
+            return Ok(None);
+        };
+        let stmts = query::statements_in(self.index, info.id, &StatementFilter::default())?;
+        Ok(Some((
+            info.layer.clone(),
+            info.path.clone(),
+            info.kind,
+            stmts,
+        )))
     }
 
     // ----- files -----
@@ -1200,10 +1914,9 @@ impl<'a> Replay<'a> {
     /// statements. `restore`: put the previous `FILE` back afterwards (every file except
     /// the top-level recipe, which BitBake parses with `include == 0`).
     fn visit(&mut self, abs: &Path, kind: FileKind, via: Vec<Loc>, restore: bool) -> Result<()> {
-        let Some(info) = self.files.by_abs.get(abs).cloned() else {
+        let Some((layer, path, file_kind, stmts)) = self.file_statements(abs)? else {
             return Ok(());
         };
-        let stmts = query::statements_in(self.index, info.id, &StatementFilter::default())?;
         let end = stmts
             .iter()
             .map(|s| s.loc.lines.end)
@@ -1212,14 +1925,14 @@ impl<'a> Replay<'a> {
             .max(1);
         self.ds.record_visit(FileVisit {
             loc: Loc {
-                layer: info.layer.clone(),
-                path: info.path.clone(),
+                layer,
+                path,
                 lines: LineSpan::new(1, end),
             },
             kind,
             via: via.clone(),
         });
-        let is_class = info.kind == FileKind::Class;
+        let is_class = file_kind == FileKind::Class;
         let old_file = if is_class {
             None
         } else {
@@ -1358,7 +2071,22 @@ impl<'a> Replay<'a> {
             "inherit" => {
                 let text = st.name.clone().unwrap_or_default();
                 let deferred = st.op.as_deref() == Some("inherit_defer");
-                if deferred && !self.ws.release.release.has(Feature::InheritDefer) {
+                if FileKind::from_path(file) == Some(FileKind::Conf) {
+                    // A `.conf` is parsed by ConfHandler, which has no `inherit` /
+                    // `inherit_defer` (BitBake 2.18.0 `ConfHandler.feeder`): "unparsed line".
+                    // An `.inc` is parsed by BBHandler whoever includes it, so an `inherit`
+                    // there is followed, in the class type of the pass (`self.global`).
+                    self.issue(
+                        Some(&st.loc),
+                        via,
+                        if deferred { "inherit_defer" } else { "inherit" },
+                        &text,
+                        RefProblem::Fatal(
+                            "unparsed line: a .conf file is parsed by ConfHandler, which has no inherit"
+                                .into(),
+                        ),
+                    );
+                } else if deferred && !self.ws.release.release.has(Feature::InheritDefer) {
                     // BitBake before 2.8 has no such directive: the line falls through to
                     // ConfHandler.feeder and fails with "unparsed line" (bitbake-semantics.md,
                     // "Directives"). Recorded, and the class is not inherited.
@@ -1382,7 +2110,27 @@ impl<'a> Replay<'a> {
             "include" => self.include(st, via, file)?,
             "addfragments" => self.add_fragments(st, via)?,
             "export_functions" => self.export_functions(st, via, classname),
-            // addtask, deltask, addhandler: task and handler bookkeeping, not values.
+            // The task list only (`bb.build.addtask` / `deltask`); their `task` and `deps`
+            // flags are not stored.
+            "addtask" => {
+                let names = st.name.clone().unwrap_or_default();
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                for t in names.split_whitespace() {
+                    let t = task_name(t);
+                    if !notes.tasks.contains(&t) {
+                        notes.tasks.push(t);
+                    }
+                }
+            }
+            "deltask" => {
+                let names = self.ds.expand(st.name.as_deref().unwrap_or("")).text;
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                for t in names.split_whitespace() {
+                    let t = task_name(t);
+                    notes.tasks.retain(|x| *x != t);
+                }
+            }
+            // addhandler: handler bookkeeping, not values.
             _ => {}
         }
         Ok(())
@@ -1558,6 +2306,9 @@ impl<'a> Replay<'a> {
 
     /// The text of the lines `loc` covers, read from disk (the index has no bodies).
     fn body_text(&self, loc: &Loc) -> Option<String> {
+        if let Some(text) = self.overlay.and_then(|o| o.lines(self.ws, loc)) {
+            return Some(text);
+        }
         let abs = self.ws.abs_path(loc)?;
         let abs = self.ws.confine(&abs).ok()?;
         let text = fs::read_to_string(abs).ok()?;
@@ -1762,10 +2513,15 @@ impl<'a> Replay<'a> {
             self.resolver = None;
         }
         let files = self.files;
+        let overlay = self.overlay;
         &self
             .resolver
             .get_or_insert_with(|| {
-                let r = Resolver::with_bbpath(bbpath.clone()).with_known_files(files.known.clone());
+                let mut known = files.known.clone();
+                if let Some(o) = overlay {
+                    known.extend(o.paths().map(Path::to_path_buf));
+                }
+                let r = Resolver::with_bbpath(bbpath.clone()).with_known_files(known);
                 (bbpath, r)
             })
             .1
@@ -1806,6 +2562,12 @@ impl<'a> Replay<'a> {
         let mut child_via = via.to_vec();
         child_via.push(st.loc.clone());
         for word in words {
+            if word == "conf/local.conf" && !self.kas_local.is_empty() {
+                // kas's build directory, which is first on BBPATH, would hold the
+                // generated local.conf; it does not exist yet.
+                self.apply_kas_local();
+                continue;
+            }
             let ws = self.ws;
             let targets: Vec<PathBuf> = if mode == "include_all" {
                 self.resolver().include_all(ws, &word)
@@ -1815,6 +2577,7 @@ impl<'a> Replay<'a> {
                     .into_iter()
                     .collect()
             };
+            self.record_probed(&mode, &word, from, &targets);
             if targets.is_empty() && mode == "require" {
                 self.issue(
                     Some(&st.loc),
@@ -1833,6 +2596,41 @@ impl<'a> Replay<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Records the candidate paths an include of `word` looked at and found empty, in the
+    /// resolver's order (`Resolver::find_in_bbpath`: absolute as is, else the including
+    /// file's directory, then each `BBPATH` entry; `include_all`: every `BBPATH` entry),
+    /// up to the first one found. A file created at one of them would have been read.
+    fn record_probed(&mut self, mode: &str, word: &str, from: &Path, found: &[PathBuf]) {
+        if word.is_empty() {
+            return;
+        }
+        let p = Path::new(word);
+        let bbpath = self.bbpath();
+        let cands: Vec<PathBuf> = if p.is_absolute() {
+            vec![normalize(p)]
+        } else if mode == "include_all" {
+            bbpath.iter().map(|e| normalize(&e.join(p))).collect()
+        } else {
+            from.parent()
+                .map(Path::to_path_buf)
+                .into_iter()
+                .chain(bbpath)
+                .filter(|d| d.is_absolute())
+                .map(|d| normalize(&d.join(p)))
+                .collect()
+        };
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        for c in cands {
+            if found.contains(&c) {
+                if mode != "include_all" {
+                    break;
+                }
+                continue;
+            }
+            notes.probed_missing.insert(c);
+        }
     }
 
     /// `AddFragmentsNode.eval` (BitBake 2.18 `lib/bb/parse/ast.py`; 2.12 without the
@@ -2075,7 +2873,7 @@ impl<'a> Replay<'a> {
     fn find_fragment(&self, layerid: &str, rel: &str) -> Option<PathBuf> {
         for layer in &self.ws.layers {
             let cand = normalize(&layer.root.join(rel));
-            let exists = self.files.by_abs.contains_key(&cand) || cand.is_file();
+            let exists = self.exists(&cand) || cand.is_file();
             if exists && self.file_collection(&cand, &layer.collections).as_deref() == Some(layerid)
             {
                 return Some(cand);
@@ -2228,6 +3026,15 @@ impl<'a> Replay<'a> {
             }
             None => Vec::new(),
         }
+    }
+}
+
+/// `bb.build.ensure_task_prefix`.
+fn task_name(name: &str) -> String {
+    if name.starts_with("do_") {
+        name.to_string()
+    } else {
+        format!("do_{name}")
     }
 }
 

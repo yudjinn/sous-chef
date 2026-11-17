@@ -897,13 +897,54 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
   `PREFERRED_PROVIDER_*` assignment used (or the recipe when none has a location), it is
   `Applied`, and the operations that made the old value keep the status they had just
   before the rewrite (they are what was rewritten, not shadowed). A note names each
-  rewritten word (`ReplayNotes::var_notes`). Not reproduced: the task `depends` flags;
-  the whitespace normalisation when no word is replaced (the value then differs from
-  BitBake's in whitespace only); `DEPENDS` unset becoming `""`. A missing provider is a
-  reference issue (`RefProblem::Fatal`) and the word is kept.
+  rewritten word (`ReplayNotes::var_notes`). A missing provider is a reference issue
+  (`RefProblem::Fatal`) and the word is kept.
+
+  Read again for w8 (BitBake 2.18.0, `lib/bb/parse/ast.py` `handleVirtRecipeProviders`
+  lines 494-515, called from `finalize` with `tasklist = d.getVar('__BBTASKS', False) or
+  []`): the `setVar("DEPENDS", " ".join(newdeps))` runs **always**, so with no word
+  replaced the value is still stored with its words joined by single spaces, and an unset
+  `DEPENDS` becomes `""`; an unset `BB_RECIPE_VIRTUAL_PROVIDERS` is an empty list (`or
+  ""`). For **each task in `__BBTASKS`**: `taskdeps = (d.getVarFlag(task, "depends") or
+  "").split()` (expanded), each entry `r, t = entry.split(":")` (an entry without exactly
+  one `:` raises `ValueError`, which fails the parse), `r` in the list becomes
+  `d.getVar("PREFERRED_PROVIDER_" + r)` with **no** check (unset gives the text `None`, so
+  `None:do_x`; only `DEPENDS` has the `bb.fatal`), and `d.setVarFlag(task, "depends", "
+  ".join(remapped))` runs for every task, also one without the flag (it gets `""`). Nothing
+  else is rewritten (not `RDEPENDS`, `PROVIDES`, `RRECOMMENDS`, or the `depends` flag of a
+  name that is not in `__BBTASKS`). `__BBTASKS` is built by `bb.build.addtask` (from
+  `AddTaskNode.eval`: the names are **not** expanded, `ensure_task_prefix` adds `do_`, a
+  task already listed is not added again) and `bb.build.deltask` (`DelTaskNode.eval`
+  expands the names; the task is removed).
+
+  sous-chef (w8): the replay keeps `__BBTASKS` from `addtask` / `deltask` statements
+  (`DataStore::tasks`; tasks anonymous python adds are not seen). `DEPENDS` is stored again
+  with single spaces when that changes a certain value (an uncertain one is left flagged),
+  and set to `""` when unset, each as an `OpKind::VirtualProviderRewrite` operation at the
+  recipe with a note. Each task's `depends` flag is rewritten as above when its value is
+  certain and the text changes, recorded as a `VirtualProviderRewrite` operation on the flag
+  (at the `PREFERRED_PROVIDER_*` assignment used, else the recipe) with a note under the
+  task's name; an entry without one `:` is a `RefProblem::Fatal` issue and that flag is
+  left alone. Not reproduced: the `""` BitBake stores on a task without the flag (readers
+  treat unset and empty alike).
 - **Inherit** (`BBHandler.inherit`): the argument is expanded and split; a word listed in
   `BB_DEFER_BBCLASSES` is deferred (unless already deferred); a class file in
   `__inherit_cache` is not parsed again. Not found is a parse error.
+- **Which handler parses an included file, and the class type** (BitBake 2.18.0
+  `lib/bb/parse/__init__.py` `handle`: the first handler whose `supports` accepts the
+  name; `BBHandler.supports` = `.bb`, `.bbclass`, `.inc`; `ConfHandler.supports` =
+  `.conf`; `BBHandler.inherit` reads `d.getVar("__bbclasstype", False)`; `cookerdata.py`
+  sets it to `"global"` on the base datastore before the configuration is parsed and to
+  `"recipe"` on each multiconfig datastore after it): an `.inc` is always parsed by
+  BBHandler, whoever includes it, so its `inherit` works, and searches `classes-global/`
+  then `classes/` when the `.inc` is reached during the configuration (from a `.conf`, a
+  layer conf, a global class), `classes-recipe/` then `classes/` during a recipe. A `.conf`
+  is parsed by ConfHandler, whose `feeder` has no `inherit` / `inherit_defer` (an
+  "unparsed line" `ParseError`). sous-chef: the replay's class type is per pass (`global`
+  in the configuration pass, recipe in the recipe pass), which is exactly this; (w8) an
+  `inherit` in a `.conf` is a `RefProblem::Fatal` issue and is not followed. The index's
+  static edge for an `inherit` in an `.inc` is still resolved in recipe context only
+  (`index/scan.rs` `insert_ref_edges`), also for an `.inc` only `.conf` files include.
 - **When a deferred inherit's argument is expanded** (BitBake
   2.18.0 `lib/bb/parse/parse_py/BBHandler.py` `inherit_defer` and `inherit`, `lib/bb/parse/ast.py`
   `InheritDeferredNode.eval` and `finalize`): `inherit_defer` stores the argument **as
@@ -1523,15 +1564,21 @@ file name, the layer order. `src/workspace/kas.rs` implements what follows.
 - The build directory gets `CACHEDIR.TAG`, whose last line is `# kas build directory`
   (observed; the other lines are the cache-directory-tag signature and comments).
 - **Before the first checkout** (no build directory, so no `local.conf`) the evaluator
-  stands in for these two lines: after the layer
-  confs and before `conf/bitbake.conf` it gives `MACHINE` and `DISTRO` the weak defaults
-  `KasProject::machine_or_default` / `distro_or_default` (no history entry), so any value
-  the configuration sets wins, as over kas's `??=`; when the final value is that default,
-  the evaluation says so (`ReplayNotes::target_notes`: `MACHINE = "board1" from the kas file
-  kas/board.yaml:5 ...`). Placing it before `bitbake.conf` instead of at `local.conf`'s
-  place differs from kas only when a `??=` for them comes between the layer confs and
-  `local.conf` (a later `??=` beats an earlier one). With a build directory nothing is
-  added: kas wrote `local.conf`.
+  stands in for the `MACHINE ??=` and `DISTRO ??=` lines (kas 5.5 `libcmds.py`
+  `WriteBBConfig._write_local_conf`: the `local_conf_header` entries, then `MACHINE ??=
+  "{get_machine()}"`, `DISTRO ??= "{get_distro()}"`, `BBMULTICONFIG ?= "..."`): where
+  `conf/bitbake.conf` includes `conf/local.conf` (OE-core Wrynose `bitbake.conf:817`
+  `include conf/local.conf`; kas's build directory is first on `BBPATH`, so the generated
+  file is the one found), the replay gives `MACHINE` and `DISTRO` the weak defaults
+  `KasProject::machine_or_default` / `distro_or_default` (no history entry: there is no
+  file), with `??=` semantics: an earlier `??=` loses to them, a later one beats them, any
+  other assignment wins, and nothing parsed before the include sees them. When the final
+  value is that default, the evaluation says so (`ReplayNotes::target_notes`: `MACHINE =
+  "board1" from the kas file kas/board.yaml:5 ...`). When `conf/bitbake.conf` is not found
+  at all (before the checkout OE-core is not there) they are applied where it would have
+  been parsed; a `bitbake.conf` that never includes `conf/local.conf` gets nothing (BitBake
+  would not read kas's file). Not stood in for: the `local_conf_header` entries and
+  `BBMULTICONFIG ?=`. With a build directory nothing is added: kas wrote `local.conf`.
 
 **Directories and environment** (environment-variables page; `context.py`).
 
@@ -1770,6 +1817,16 @@ What `src/scaffold/inc_split.rs` relies on, all from rules already recorded abov
   against the sous-chef evaluator, which models flags the same way.
 - `addtask` / `deltask` are not replayed; their relative order is kept by the generator (all
   of them count as touching the task list).
+- (w8) The plan evaluates every version before and after the split, the planned files held
+  in memory (`eval::evaluate_with_overlay`; the configuration cache and the index are not
+  changed), and is refused when any final value, flag, function piece text, anonymous python
+  text or `addtask` / `deltask` / `addhandler` statement order differs; the notes name the
+  variables. The static order and `FILE` analysis above runs first: the cases it finds that
+  involve python (an immediate expansion that reaches `${@...}`, which the evaluator leaves
+  unexpanded both times) or a file it cannot read refuse the split on their own; the others
+  are only explanations, and a split they would have refused is made when the evaluation
+  shows no change (`:append` reordered past a version's own `=`: `:append` is applied at
+  the end of parsing, "Overrides").
 
 ## OE-core checks and defaults used by lint
 
@@ -1844,7 +1901,16 @@ in the live environment:
   are the workspace's canonical ones, not the `BBLAYERS` spelling (the `LAYERDIR` gap). A
   value with python or undefined variables, or a word Rust's `regex` cannot compile, is not
   applied and every evaluation says so (`note: BBMASK is set but sous-chef does not apply
-  it`).
+  it`). (w8) An evaluation for an explicit `machine` or `distro` compares its own static
+  `BBMASK` with the index's marks: the files the index collects plus those it marked
+  `bbmask` are searched with the evaluation's mask, and when the masked set differs the
+  evaluation gets `note: BBMASK for this machine and distro differs from the one the index
+  applied (...): it would also mask N files: ...; it would not mask N files the index
+  treats as masked: ...` (`replay::bbmask_note`); recipe names, providers and bbappends
+  still follow the index's mask. A `BBMASK` written with an override variant
+  (`BBMASK:boardx`) is often not static in the configuration pass, because `OVERRIDES`
+  holds `pn-${PN}` and `layer-${FILE_LAYERNAME}` there; it then gets the "does not apply"
+  note instead.
 - **Skipped recipes** (OE-core `classes-global/base.bbclass`, Wrynose, anonymous python):
   `SKIP_RECIPE[<PN>]` non-empty; `COMPATIBLE_MACHINE` set (and `PARSE_ALL_RECIPES` not
   true) that `re.match`es (anchored at the start only) no entry of
@@ -1852,9 +1918,49 @@ in the live environment:
   nor `PARSE_ALL_RECIPES` true) that does not `re.match` `HOST_SYS`. Nothing is hidden: when
   every value involved is static (no python, no undefined variable, not set by anonymous
   python by name) and the check fails, the evaluation gets `note: BitBake would skip this
-  recipe: ...` (`replay::skip_reasons`), shown by `recipe`, `var`, `deps`, `overrides`;
-  otherwise nothing is said. `INCOMPATIBLE_LICENSE` and the other checks of that function
-  are not modelled.
+  recipe: ...` (`replay::skip_reasons`), shown by `recipe`, `var`, `deps`, `overrides`.
+  (w8) When the check fails on what is known but unknown values could still decide it, the
+  note is `note: BitBake may skip this recipe: ...` naming them: `COMPATIBLE_MACHINE` that
+  matches none of the known entries of `MACHINEOVERRIDES` while some entries hold python or
+  undefined variables ("N parts of MACHINEOVERRIDES are not evaluated") or anonymous python
+  sets it by name; a `COMPATIBLE_MACHINE` / `COMPATIBLE_HOST` / `HOST_SYS` that is not
+  static, unset `HOST_SYS`, a regular expression Rust cannot compile. A match on a known
+  `MACHINEOVERRIDES` entry is a match (nothing said). On yocto-kiss `MACHINEOVERRIDES` is
+  `${@...}...${@...}dogbonedark` (the `soc-family.inc` and `arch-arm*.inc` `=.` python
+  glued to the machine name, no `:` outside the python), so no entry is known statically.
+  `SKIP_RECIPE` is said only when its flag is static.
+- **`INCOMPATIBLE_LICENSE`** (OE-core Wrynose `33a6bd6c`, `classes-global/base.bbclass`
+  anonymous python lines 591-621, only when neither `SOURCE_MIRROR_FETCH` nor
+  `PARSE_ALL_RECIPES` is true; `lib/oe/license.py` `skip_incompatible_package_licenses`,
+  `incompatible_license`, `incompatible_pkg_license`, `flattened_licenses` /
+  `FlattenVisitor` / `LicenseVisitor.get_elements`, `expand_wildcard_licenses`,
+  `apply_pkg_license_exception`, `canonical_license`, `license_ok`): `bad =
+  (INCOMPATIBLE_LICENSE or "").split()`; `pkgs = PACKAGES.split()`; when `pkgs` is empty
+  nothing is skipped. `skip_incompatible_package_licenses` returns nothing (so nothing is
+  skipped) when `bad` is empty or `PN` starts with `nativesdk-` or `gcc-source-` or ends
+  with `-native`, `-cross-${TARGET_ARCH}`, `-cross-initial-${TARGET_ARCH}`,
+  `-crosssdk-${SDK_SYS}`, `-crosssdk-initial-${SDK_SYS}`,
+  `-cross-canadian-${TRANSLATED_TARGET_ARCH}`; otherwise `bad` goes through
+  `expand_wildcard_licenses` (`AGPL-3.0*`, `GPL-3.0*`, `LGPL-3.0*` become their `-only` and
+  `-or-later` names; any name in `obsolete_license_list()` or any other `*` is `bb.fatal`,
+  for every recipe), an obsolete license in `INCOMPATIBLE_LICENSE_EXCEPTIONS` (the part
+  after `:`) is `bb.fatal`, and for each package the patterns left after removing
+  exceptions written `<pkg>:<lic>` are checked against `LICENSE:<pkg>`, or `LICENSE` when
+  that is empty: the license string is split on `&|() `, names are `[a-zA-Z0-9.+_\-]+`
+  (two in a row get `&`; anything else is `InvalidLicense`, `bb.fatal`), parsed as a Python
+  expression (`&` binds tighter than `|`), and flattened keeping, at each `|`, the left
+  side if every license in it, mapped through `SPDXLICENSEMAP[lic]`, matches no pattern
+  (`fnmatchcase`), else the right side; the package is skipped when a kept license matches
+  a pattern. The recipe is skipped only when **every** package is, with `SkipRecipe("it
+  has incompatible license(s): <sorted unique list>")`, the list being the recipe
+  `LICENSE`'s own incompatible licenses (against `bad` **unexpanded**, no exceptions) plus
+  every package's. sous-chef (w8, `replay::license_skip`, `eval/license.rs`) does this on
+  static values: "would skip" with BitBake's list when everything is known, nothing when
+  some package keeps a compatible license, "may skip" naming what is not known (a
+  `LICENSE` with python, undefined variables, or a form it does not parse such as `A (B)`,
+  `PACKAGES`, a non-static `SPDXLICENSEMAP` flag, `INCOMPATIBLE_LICENSE` itself), and
+  `note: BitBake would stop parsing this recipe: ...` for the fatal cases. On yocto-kiss
+  `INCOMPATIBLE_LICENSE` is not set.
 
 These are reported, never silently guessed. Authoritative mode (M5) covers them.
 

@@ -1,9 +1,12 @@
 ---
 source: tests/scaffold_inc_split.rs
+assertion_line: 284
 expression: text
 ---
 note: nothing planned: the split is not safe or not possible
 note: the split would change what BitBake parses for greet_1.1.bb and greet_1.0.bb:
+note: greet_1.1.bb: GREET_FLAGS would change from "--new --shared" to "--new"
+note: greet_1.0.bb: GREET_FLAGS would change from "--old --shared" to "--old"
 note: meta-mine:recipes-app/greet/greet_1.1.bb:20 `GREET_FLAGS +=` would move into the .inc, ahead of meta-mine:recipes-app/greet/greet_1.1.bb:19 `GREET_FLAGS =`, which stays in the .bb: both set GREET_FLAGS
 note: meta-mine:recipes-app/greet/greet_1.0.bb:19 `GREET_FLAGS +=` would move into the .inc, ahead of meta-mine:recipes-app/greet/greet_1.0.bb:18 `GREET_FLAGS =`, which stays in the .bb: both set GREET_FLAGS
 note: make these statements the same in every version, or reorder them by hand, then re-run

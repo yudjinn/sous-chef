@@ -20,8 +20,21 @@
 //! `require <pn>.inc` where the first of them was; everything else keeps its text and
 //! order.
 //!
-//! **Safety check.** The split changes the parse order in two ways, and the plan is refused
-//! (no files, the notes say why) when either could change a value:
+//! **Safety check: evaluation.** Every version is evaluated as it is and with the planned
+//! files in memory ([`crate::eval::evaluate_with_overlay`]: the new `.bb` texts and the new
+//! `.inc`, nothing written), and the two are compared exactly: every variable's final value
+//! (and whether it is certain) and flags, functions by the text of their pieces, anonymous
+//! python by its text in order, and the `addtask` / `deltask` / `addhandler` statements of
+//! the files visited, in order. Any difference refuses the plan (no files); the notes name
+//! each variable that would change, with both values, then what the static check found.
+//!
+//! **Safety check: static.** Run first. The evaluator does not run python, so it would see
+//! `${@...}` unchanged before and after even where BitBake's python reads `FILE` or a value
+//! the reordering changes; and it cannot see into a file it cannot read. Those cases (marked
+//! not [`Problem::decidable`]) refuse the split on their own. Everything else the static
+//! check finds is only listed as an explanation when the evaluation shows a change, and
+//! ignored (with a note) when it shows none. The static check finds, as possible problems,
+//! the two ways the split changes the parse order:
 //!
 //! - a statement that stays in a `.bb` after the first moved statement but before a later
 //!   one now comes after that later one. Each such pair must commute: they set no common
@@ -51,7 +64,7 @@ use regex::Regex;
 use super::recipe::{check_parses, check_pn, invalid, opt_text, opt_words, show};
 use super::{FileAction, GenContext, Generator, Kind, Plan, PlannedFile, sha256_hex};
 use crate::error::{Error, Result};
-use crate::eval::{self, DataStore, Target};
+use crate::eval::{self, DataStore, Overlay, Target};
 use crate::index::query::{self, RecipeRow};
 use crate::lint::helpers;
 use crate::parse::{Lang, Statement, StatementKind, parse};
@@ -102,6 +115,8 @@ struct Version {
     /// The file's lines, each with its line ending.
     lines: Vec<String>,
     stmts: Vec<Stmt>,
+    /// The evaluation of the version as it is (`None` when it failed).
+    ds: Option<DataStore>,
 }
 
 impl Version {
@@ -160,6 +175,9 @@ struct Effects {
     reads: BTreeSet<String>,
     /// An immediate expansion reaches python or too many names: reads anything.
     reads_any: bool,
+    /// An immediate expansion reaches python, which the evaluator does not run: the
+    /// before/after evaluation cannot see what it would give.
+    python: bool,
     /// Effects unknown (a file pulled in could not be read, or no evaluation).
     opaque: bool,
 }
@@ -169,8 +187,17 @@ impl Effects {
         self.writes.extend(o.writes);
         self.reads.extend(o.reads);
         self.reads_any |= o.reads_any;
+        self.python |= o.python;
         self.opaque |= o.opaque;
     }
+}
+
+/// One reason the static check gives against the split.
+struct Problem {
+    text: String,
+    /// The before/after evaluation decides it: the evaluator models everything involved
+    /// (no python, nothing opaque). When false the split is refused on this alone.
+    decidable: bool,
 }
 
 fn plan(cx: &GenContext<'_>) -> Result<Plan> {
@@ -231,22 +258,18 @@ fn plan(cx: &GenContext<'_>) -> Result<Plan> {
         )]));
     }
 
+    // The static check: what the evaluator cannot decide (python it does not run, files it
+    // cannot read) refuses the split on its own; the rest is decided by evaluating every
+    // version before and after.
     let problems = safety_problems(&versions, &common);
-    if !problems.is_empty() {
-        let mut notes = vec![format!(
-            "the split would change what BitBake parses for {}:",
-            names(&versions)
-        )];
-        let n = problems.len();
-        notes.extend(problems.into_iter().take(MAX_LISTED));
-        if n > MAX_LISTED {
-            notes.push(format!("+{} more", n - MAX_LISTED));
-        }
-        notes.push(
-            "make these statements the same in every version, or reorder them by hand, then re-run"
-                .into(),
-        );
-        return Ok(refused(notes));
+    let (decidable, undecidable): (Vec<Problem>, Vec<Problem>) =
+        problems.into_iter().partition(|p| p.decidable);
+    if !undecidable.is_empty() {
+        return Ok(refused(refusal_notes(
+            &versions,
+            Vec::new(),
+            undecidable.into_iter().map(|p| p.text).collect(),
+        )));
     }
 
     // The `.inc`, from the newest version.
@@ -293,6 +316,24 @@ fn plan(cx: &GenContext<'_>) -> Result<Plan> {
             },
         });
     }
+
+    // Every version, evaluated as it is and as it would be (the planned files in memory).
+    let changes = evaluation_changes(cx, &versions, &files)?;
+    if !changes.is_empty() {
+        return Ok(refused(refusal_notes(
+            &versions,
+            changes,
+            decidable.into_iter().map(|p| p.text).collect(),
+        )));
+    }
+    if !decidable.is_empty() {
+        notes.push(format!(
+            "the static check could not prove the split safe ({} possible problem{}); evaluating {} before and after the split gives the same values, flags, functions, anonymous python and task list",
+            decidable.len(),
+            if decidable.len() == 1 { "" } else { "s" },
+            names(&versions)
+        ));
+    }
     let others: Vec<RecipeRow> = query::find_recipes(cx.index, pn)?
         .into_iter()
         .filter(|r| !versions.iter().any(|v| v.recipe.file.id == r.file.id))
@@ -319,6 +360,177 @@ fn refused(why: Vec<String>) -> Plan {
         notes,
         new_layer: None,
     }
+}
+
+/// The notes of a refusal: what the evaluation saw change, then what the static check found
+/// (each list cut at [`MAX_LISTED`]).
+fn refusal_notes(versions: &[Version], changes: Vec<String>, problems: Vec<String>) -> Vec<String> {
+    let mut notes = vec![format!(
+        "the split would change what BitBake parses for {}:",
+        names(versions)
+    )];
+    for list in [changes, problems] {
+        let n = list.len();
+        notes.extend(list.into_iter().take(MAX_LISTED));
+        if n > MAX_LISTED {
+            notes.push(format!("+{} more", n - MAX_LISTED));
+        }
+    }
+    notes.push(
+        "make these statements the same in every version, or reorder them by hand, then re-run"
+            .into(),
+    );
+    notes
+}
+
+/// Evaluates every version with the planned files in memory ([`eval::Overlay`]) and
+/// compares the result with its evaluation as it is: every variable's final value and
+/// flags, functions by the text of their pieces, anonymous python by its text in order, and
+/// the `addtask` / `deltask` / `addhandler` statements of the files visited, in order. One
+/// note per difference, naming the variable; empty when nothing changes.
+fn evaluation_changes(
+    cx: &GenContext<'_>,
+    versions: &[Version],
+    planned: &[PlannedFile],
+) -> Result<Vec<String>> {
+    let mut overlay = Overlay::new();
+    for f in planned {
+        overlay.insert(cx.ws, &f.path, &f.content)?;
+    }
+    let mut out = Vec::new();
+    for v in versions {
+        let Some(before) = &v.ds else {
+            out.push(format!(
+                "{} could not be evaluated, so the split cannot be checked",
+                label(&v.recipe)
+            ));
+            continue;
+        };
+        let target = Target {
+            recipe: Some(label(&v.recipe)),
+            ..Target::default()
+        };
+        let after = match eval::evaluate_with_overlay(cx.index, cx.ws, &target, &overlay) {
+            Ok(ds) => ds,
+            Err(e) => {
+                out.push(format!(
+                    "{} could not be evaluated after the split ({e}), so the split cannot be checked",
+                    label(&v.recipe)
+                ));
+                continue;
+            }
+        };
+        let b = snapshot(cx.ws, None, before);
+        let a = snapshot(cx.ws, Some(&overlay), &after);
+        let keys: BTreeSet<&String> = b.keys().chain(a.keys()).collect();
+        for k in keys {
+            let (x, y) = (b.get(k), a.get(k));
+            if x == y {
+                continue;
+            }
+            let show = |s: Option<&String>| match s {
+                Some(s) => format!("\"{}\"", helpers::clip(&s.replace('\n', "\\n"))),
+                None => "unset".to_string(),
+            };
+            out.push(format!(
+                "{}: {k} would change from {} to {}",
+                v.file_name(),
+                show(x),
+                show(y)
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// Pseudo keys of [`snapshot`].
+const ANON_KEY: &str = "<anonymous python>";
+const TASKS_KEY: &str = "<addtask / deltask / addhandler>";
+
+/// What [`evaluation_changes`] compares, by name. Anonymous functions are left out by name
+/// (BitBake's name holds the file and line, which the split changes) and compared by text.
+fn snapshot(
+    ws: &Workspace,
+    overlay: Option<&Overlay>,
+    ds: &DataStore,
+) -> std::collections::BTreeMap<String, String> {
+    let text_of = |loc: &crate::types::Loc| -> String {
+        if let Some(t) = overlay.and_then(|o| o.lines(ws, loc)) {
+            return t;
+        }
+        let whole = ws
+            .abs_path(loc)
+            .and_then(|p| ws.confine(&p).ok())
+            .and_then(|p| std::fs::read(p).ok())
+            .map(|b| crate::parse::lexer::decode(&b).into_owned())
+            .unwrap_or_default();
+        whole
+            .lines()
+            .skip(loc.lines.start.saturating_sub(1) as usize)
+            .take((loc.lines.end + 1).saturating_sub(loc.lines.start) as usize)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let whole_file = |loc: &crate::types::Loc| -> Option<String> {
+        let all = crate::types::Loc {
+            lines: crate::types::LineSpan::new(1, u32::MAX - 1),
+            ..loc.clone()
+        };
+        let t = text_of(&all);
+        (!t.is_empty()).then_some(t)
+    };
+    let mut out = std::collections::BTreeMap::new();
+    for name in ds.names() {
+        if name.starts_with("__anon_") {
+            continue;
+        }
+        let value = if ds.is_function(&name) {
+            ds.function(&name)
+                .unwrap_or_default()
+                .iter()
+                .map(|p| format!("{} -> {:?}", text_of(&p.loc), p.calls))
+                .collect::<Vec<_>>()
+                .join("\n---\n")
+        } else {
+            match ds.value(&name) {
+                Some(v) if v.unevaluated_python || !v.unresolved.is_empty() => {
+                    format!("{} (not certain)", v.text)
+                }
+                Some(v) => v.text,
+                None => String::new(),
+            }
+        };
+        out.insert(name.clone(), value);
+        for f in ds.flag_names(&name) {
+            let v = ds.flag(&name, &f).map(|v| v.text).unwrap_or_default();
+            out.insert(format!("{name}[{f}]"), v);
+        }
+    }
+    let anon: Vec<String> = ds
+        .replay()
+        .anonymous
+        .iter()
+        .map(|a| text_of(&a.loc))
+        .collect();
+    out.insert(ANON_KEY.into(), anon.join("\n---\n"));
+    let mut tasks = Vec::new();
+    for visit in ds.files() {
+        let Some(text) = whole_file(&visit.loc) else {
+            continue;
+        };
+        for s in parse(&text).statements {
+            if matches!(
+                s.kind,
+                StatementKind::AddTask { .. }
+                    | StatementKind::DelTask { .. }
+                    | StatementKind::AddHandler { .. }
+            ) {
+                tasks.push(text.get(s.bytes).unwrap_or("").trim().to_string());
+            }
+        }
+    }
+    out.insert(TASKS_KEY.into(), tasks.join("\n"));
+    out
 }
 
 fn label(r: &RecipeRow) -> String {
@@ -457,6 +669,7 @@ fn load(
         sha,
         lines,
         stmts,
+        ds,
     }))
 }
 
@@ -541,6 +754,7 @@ fn refs(text: &str) -> BTreeSet<String> {
 fn immediate(text: &str, ds: Option<&DataStore>, eff: &mut Effects) {
     if text.contains("${@") {
         eff.reads_any = true;
+        eff.python = true;
         return;
     }
     let names = refs(text);
@@ -554,17 +768,31 @@ fn immediate(text: &str, ds: Option<&DataStore>, eff: &mut Effects) {
     let mut seeds = names;
     seeds.insert("OVERRIDES".to_string());
     match closure(ds, seeds) {
-        Some(all) => eff.reads.extend(all),
-        None => eff.reads_any = true,
+        Closure::Names(all) => eff.reads.extend(all),
+        Closure::Python => {
+            eff.reads_any = true;
+            eff.python = true;
+        }
+        Closure::TooMany => eff.reads_any = true,
     }
 }
 
+/// What [`closure`] found.
+enum Closure {
+    Names(BTreeSet<String>),
+    /// Python was reached.
+    Python,
+    /// No datastore, or past [`MAX_CLOSURE`] names.
+    TooMany,
+}
+
 /// `seeds` and every name their stored values (all assignments, override variants and
-/// appends included) reference, transitively. `None` when python is reached, when there is
-/// no datastore, or past [`MAX_CLOSURE`] names. `FILE`-derived and directory names are kept
+/// appends included) reference, transitively. `FILE`-derived and directory names are kept
 /// but not followed (their stored values are python that the replay computes).
-fn closure(ds: Option<&DataStore>, seeds: BTreeSet<String>) -> Option<BTreeSet<String>> {
-    let ds = ds?;
+fn closure(ds: Option<&DataStore>, seeds: BTreeSet<String>) -> Closure {
+    let Some(ds) = ds else {
+        return Closure::TooMany;
+    };
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut queue: VecDeque<String> = seeds.into_iter().collect();
     while let Some(name) = queue.pop_front() {
@@ -572,7 +800,7 @@ fn closure(ds: Option<&DataStore>, seeds: BTreeSet<String>) -> Option<BTreeSet<S
             continue;
         }
         if seen.len() > MAX_CLOSURE {
-            return None;
+            return Closure::TooMany;
         }
         if FILE_DERIVED.contains(&name.as_str()) || SAME_DIR.contains(&name.as_str()) {
             continue;
@@ -585,7 +813,7 @@ fn closure(ds: Option<&DataStore>, seeds: BTreeSet<String>) -> Option<BTreeSet<S
         texts.extend(ds.raw(&name));
         for t in texts {
             if t.contains("${@") {
-                return None;
+                return Closure::Python;
             }
             for r in refs(&t) {
                 if !seen.contains(&r) {
@@ -594,7 +822,7 @@ fn closure(ds: Option<&DataStore>, seeds: BTreeSet<String>) -> Option<BTreeSet<S
             }
         }
     }
-    Some(seen)
+    Closure::Names(seen)
 }
 
 /// `do_` prefixed, as `bb.build.ensure_task_prefix` does.
@@ -744,29 +972,38 @@ fn pulled_in(
     e
 }
 
-/// Why two statements do not commute, if they may not.
-fn conflict(a: &Effects, b: &Effects) -> Option<String> {
+/// Why two statements may not commute, if they may not, and whether the before/after
+/// evaluation can decide it (see [`Problem::decidable`]).
+fn conflict(a: &Effects, b: &Effects) -> Option<(String, bool)> {
     if a.opaque || b.opaque {
-        return Some("what one of them does is not known statically".into());
+        return Some((
+            "what one of them does is not known statically".into(),
+            false,
+        ));
     }
     for x in &a.writes {
         if let Some(y) = b.writes.iter().find(|y| keys_conflict(x, y)) {
-            return Some(format!(
-                "both set {}",
-                show_key(if x.ends_with("[*]") { y } else { x })
+            return Some((
+                format!(
+                    "both set {}",
+                    show_key(if x.ends_with("[*]") { y } else { x })
+                ),
+                true,
             ));
         }
     }
     for (r, w) in [(a, b), (b, a)] {
         if r.reads_any && !w.writes.is_empty() {
-            return Some(
+            return Some((
                 "one expands a value immediately that may depend on anything (python, or too many references)"
                     .into(),
-            );
+                !r.python,
+            ));
         }
         if let Some(n) = r.reads.iter().find(|n| w.writes.contains(*n)) {
-            return Some(format!(
-                "{n} is expanded immediately by one and set by the other"
+            return Some((
+                format!("{n} is expanded immediately by one and set by the other"),
+                true,
             ));
         }
     }
@@ -871,8 +1108,8 @@ fn common_statements(versions: &[Version]) -> Vec<Vec<usize>> {
     common
 }
 
-/// Everything that makes the split unsafe, one note each.
-fn safety_problems(versions: &[Version], common: &[Vec<usize>]) -> Vec<String> {
+/// Everything the static check finds against the split, one note each.
+fn safety_problems(versions: &[Version], common: &[Vec<usize>]) -> Vec<Problem> {
     let mut out = Vec::new();
     for (vi, v) in versions.iter().enumerate() {
         let moved = &common[vi];
@@ -881,23 +1118,32 @@ fn safety_problems(versions: &[Version], common: &[Vec<usize>]) -> Vec<String> {
             let s = &v.stmts[m];
             let e = &s.effects;
             if e.opaque {
-                out.push(format!(
-                    "{} `{}`: what it pulls in could not be read, so moving it cannot be checked",
-                    v.at(s),
-                    s.label
-                ));
+                out.push(Problem {
+                    text: format!(
+                        "{} `{}`: what it pulls in could not be read, so moving it cannot be checked",
+                        v.at(s),
+                        s.label
+                    ),
+                    decidable: false,
+                });
             } else if e.reads_any {
-                out.push(format!(
-                    "{} `{}` expands a value immediately that may depend on FILE (python, or too many references); inside the .inc FILE is the .inc",
-                    v.at(s),
-                    s.label
-                ));
+                out.push(Problem {
+                    text: format!(
+                        "{} `{}` expands a value immediately that may depend on FILE (python, or too many references); inside the .inc FILE is the .inc",
+                        v.at(s),
+                        s.label
+                    ),
+                    decidable: !e.python,
+                });
             } else if let Some(n) = e.reads.iter().find(|n| FILE_DERIVED.contains(&n.as_str())) {
-                out.push(format!(
-                    "{} `{}` expands {n} immediately; inside the .inc FILE is the .inc, so PN is defaultpkgname and PV 1.0 there",
-                    v.at(s),
-                    s.label
-                ));
+                out.push(Problem {
+                    text: format!(
+                        "{} `{}` expands {n} immediately; inside the .inc FILE is the .inc, so PN is defaultpkgname and PV 1.0 there",
+                        v.at(s),
+                        s.label
+                    ),
+                    decidable: true,
+                });
             }
         }
         // Statements that stay but now come after later moved ones.
@@ -910,14 +1156,17 @@ fn safety_problems(versions: &[Version], common: &[Vec<usize>]) -> Vec<String> {
             }
             for &c in moved.iter().filter(|&&c| c > ri) {
                 let cs = &v.stmts[c];
-                if let Some(why) = conflict(&r.effects, &cs.effects) {
-                    out.push(format!(
-                        "{} `{}` would move into the .inc, ahead of {} `{}`, which stays in the .bb: {why}",
-                        v.at(cs),
-                        cs.label,
-                        v.at(r),
-                        r.label
-                    ));
+                if let Some((why, decidable)) = conflict(&r.effects, &cs.effects) {
+                    out.push(Problem {
+                        text: format!(
+                            "{} `{}` would move into the .inc, ahead of {} `{}`, which stays in the .bb: {why}",
+                            v.at(cs),
+                            cs.label,
+                            v.at(r),
+                            r.label
+                        ),
+                        decidable,
+                    });
                 }
             }
         }

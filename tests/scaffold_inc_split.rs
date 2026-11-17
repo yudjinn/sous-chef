@@ -285,6 +285,13 @@ fn a_version_specific_assignment_before_a_shared_append_is_refused() {
     assert!(o.plan.files.is_empty(), "{text}");
     assert!(text.contains("nothing planned"), "{text}");
     assert!(text.contains("both set GREET_FLAGS"), "{text}");
+    // The evaluation of the split (planned files in memory) names what would change.
+    assert!(
+        text.contains(
+            "greet_1.0.bb: GREET_FLAGS would change from \"--old --shared\" to \"--old\""
+        ),
+        "{text}"
+    );
     // A write of an empty plan writes nothing.
     let w = env.run(&split(json!({})), true).unwrap();
     assert!(!w.written);
@@ -321,6 +328,11 @@ fn an_immediate_expansion_of_pn_is_not_moved_into_the_inc() {
     let text = env.render(&o);
     assert!(o.plan.files.is_empty(), "{text}");
     assert!(text.contains("expands PN immediately"), "{text}");
+    // The evaluation with the planned files sees PN = defaultpkgname inside the .inc.
+    assert!(
+        text.contains("FILESEXTRAPATHS would change") && text.contains("defaultpkgname"),
+        "{text}"
+    );
 
     // `${THISDIR}` alone is the same in the .inc: that one moves.
     let line = "FILESEXTRAPATHS:prepend := \"${THISDIR}/files:\"\n";
@@ -419,4 +431,70 @@ fn versions_in_different_directories_are_refused() {
         env.render(&o)
     );
     assert!(Path::new(&other).exists());
+}
+
+#[test]
+fn a_reorder_the_static_check_refuses_is_proposed_when_evaluation_shows_no_change() {
+    // GREET_FLAGS is set per version, then `:append`ed the same way in both: the static
+    // order check sees two statements on GREET_FLAGS change order and cannot prove it safe,
+    // but `:append` is applied at the end of parsing, so the value is the same. The
+    // before/after evaluation (planned files in memory) shows that, and the split is made.
+    let v10 = GREET_10.replace(
+        "inherit autotoolsish\n",
+        "inherit autotoolsish\n\nGREET_FLAGS = \"--old\"\nGREET_FLAGS:append = \" --shared\"\n",
+    );
+    let v11 = GREET_11.replace(
+        "inherit autotoolsish\n",
+        "inherit autotoolsish\n\nGREET_FLAGS = \"--new\"\nGREET_FLAGS:append = \" --shared\"\n",
+    );
+    let mut env = greet_env(&v10, &v11);
+    let o = env.plan(&split(json!({})));
+    let text = env.render(&o);
+    assert_eq!(o.plan.files.len(), 3, "{text}");
+    assert!(
+        o.plan.files[0]
+            .content
+            .contains("GREET_FLAGS:append = \" --shared\""),
+        "{text}"
+    );
+    assert!(
+        text.contains("the static check could not prove the split safe"),
+        "{text}"
+    );
+    assert!(text.contains("gives the same values"), "{text}");
+    // Planning wrote nothing.
+    assert!(!env.path(&format!("{DIR}/greet.inc")).exists());
+
+    // And on disk the values are indeed the same.
+    env.index.refresh(&env.ws).unwrap();
+    let before: Vec<BTreeMap<String, String>> = ["greet_1.0.bb", "greet_1.1.bb"]
+        .iter()
+        .map(|f| snapshot(&env, &evaluate(&env, f)))
+        .collect();
+    assert_eq!(before[0]["GREET_FLAGS"], "--old --shared");
+    env.write_clean(&split(json!({})));
+    env.index.refresh(&env.ws).unwrap();
+    for (i, f) in ["greet_1.0.bb", "greet_1.1.bb"].iter().enumerate() {
+        let after = snapshot(&env, &evaluate(&env, f));
+        assert_eq!(after, before[i], "{f}");
+    }
+}
+
+#[test]
+fn an_immediate_expansion_through_python_is_refused_without_evaluation() {
+    // The evaluator does not run python, so it would see `${@...}` unchanged before and
+    // after; inside the .inc BitBake's python would read FILE = the .inc. The static check
+    // refuses this on its own.
+    let line = "GREET_ID := \"${@d.getVar('PN')}\"\n";
+    let v10 = GREET_10.replace("DEPENDS =", &format!("{line}DEPENDS ="));
+    let v11 = GREET_11.replace("DEPENDS =", &format!("{line}DEPENDS ="));
+    let mut env = greet_env(&v10, &v11);
+    let o = env.plan(&split(json!({})));
+    let text = env.render(&o);
+    assert!(o.plan.files.is_empty(), "{text}");
+    assert!(
+        text.contains("`GREET_ID :=` expands a value immediately that may depend on FILE"),
+        "{text}"
+    );
+    assert!(!text.contains("would change from"), "{text}");
 }

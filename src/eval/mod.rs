@@ -6,14 +6,17 @@
 
 pub mod datastore;
 pub mod expand;
+mod license;
+pub mod overlay;
 pub mod overrides;
 pub mod providers;
 pub mod replay;
 
 pub use datastore::{DataStore, OpKind, OpStatus, UnsetRecord, VarOp};
+pub use overlay::Overlay;
 pub use replay::{
     AnonPython, ConfigCache, FunctionPiece, RefIssue, RefProblem, ReplayNotes, UncertainRef,
-    evaluate_with, global_cache,
+    evaluate_overlay_with, evaluate_with, global_cache,
 };
 
 use serde::Serialize;
@@ -67,6 +70,18 @@ pub struct FileVisit {
 /// [`DataStore::replay`].
 pub fn evaluate(index: &Index, ws: &Workspace, target: &Target) -> Result<DataStore> {
     replay::evaluate_with(replay::global_cache(), index, ws, target)
+}
+
+/// [`evaluate`] with some files replaced by in-memory contents (planned edits, files not
+/// created yet): see [`Overlay`] and [`evaluate_overlay_with`]. Writes nothing; the
+/// process-wide configuration cache is read, never filled from an overlay evaluation.
+pub fn evaluate_with_overlay(
+    index: &Index,
+    ws: &Workspace,
+    target: &Target,
+    overlay: &Overlay,
+) -> Result<DataStore> {
+    replay::evaluate_overlay_with(replay::global_cache(), index, ws, target, overlay)
 }
 
 /// `BBMASK` of an evaluated configuration, as `cooker.py` `collect_bbfiles` uses it.
