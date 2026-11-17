@@ -54,11 +54,25 @@ pub struct Args {
 
 /// The error blocks of a log, as 0-based, end-exclusive line ranges in order.
 ///
-/// The single place the failure detector is chosen: swap in T5.6's detector from
-/// `crate::bitbake::logs` here when it lands. Until then, every line containing `ERROR:`
-/// is its own block.
+/// The blocks come from the failure detector in `crate::bitbake::logs`. Output it does not
+/// recognise falls back to one block per line containing `ERROR:`, so a log with errors
+/// never comes back empty.
 pub fn failure_blocks(lines: &[&str]) -> Vec<Range<usize>> {
-    error_lines(lines)
+    let text = lines.join("\n");
+    let mut blocks: Vec<Range<usize>> = crate::bitbake::logs::detect(&text)
+        .iter()
+        .map(|f| {
+            let start = (f.span.start.max(1) as usize - 1).min(lines.len());
+            let end = (f.span.end as usize).clamp(start, lines.len());
+            start..end
+        })
+        .filter(|r| !r.is_empty())
+        .collect();
+    if blocks.is_empty() {
+        return error_lines(lines);
+    }
+    blocks.sort_by_key(|r| (r.start, r.end));
+    blocks
 }
 
 fn error_lines(lines: &[&str]) -> Vec<Range<usize>> {

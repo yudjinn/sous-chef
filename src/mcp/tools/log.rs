@@ -81,7 +81,11 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let meta = logs::meta_from_path(&resolved).or(logs::meta_from_text(&text));
     let definition = match (&meta.recipe, &meta.task) {
         (Some(r), Some(t)) => {
-            let index = ctx.index.lock().await;
+            let mut index = ctx.index.lock().await;
+            // A failed refresh only costs the pointer; the digest is still useful.
+            if let Err(e) = index.refresh(&ctx.workspace) {
+                notes.push(format!("index refresh failed, no definition pointer: {e}"));
+            }
             logs::task_definition(&index, &ctx.workspace, r, t)
         }
         _ => None,

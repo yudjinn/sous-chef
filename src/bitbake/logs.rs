@@ -31,7 +31,7 @@ use crate::error::{Error, Result};
 use crate::handles::Handle;
 use crate::index::Index;
 use crate::render::{self, Format, Table};
-use crate::types::{LineSpan, Loc};
+use crate::types::{FileKind, LineSpan, Loc};
 use crate::workspace::{BUILD_LAYER, Workspace};
 
 /// Upper bound on a rendered digest, in bytes. Context rows are dropped to stay under it.
@@ -1401,16 +1401,58 @@ pub async fn t_dir_from_bitbake(env: &BbEnv, recipe: &str) -> Result<PathBuf> {
     }
 }
 
-/// The task's definition in the layers, through the index.
+/// The task's definition in the layers, through the index: the function named `task` in
+/// the preferred recipe `recipe`, its bbappends, or the files they include and inherit.
 ///
-/// Seam: the read queries (`index/query.rs`, T2.3) are not merged and the architecture
-/// contract names no task query yet, so this returns `None` and the digest omits the
-/// `definition` row. Once `query.rs` offers a lookup of a recipe's task (the `tasks`
-/// table joined with the recipe's files and their include / inherit / bbappend edges),
-/// call it here; nothing else changes.
+/// A definition in the recipe or one of its bbappends is preferred to one in an included
+/// file or a class (the class default is what the recipe overrides); within each group the
+/// last one in parse order wins. Static resolution only: `None` when the index has no such
+/// recipe or no function of that name.
 pub fn task_definition(index: &Index, ws: &Workspace, recipe: &str, task: &str) -> Option<Loc> {
-    let _ = (index, ws, recipe, task);
-    None
+    use crate::index::query;
+    let _ = ws;
+    let row = query::preferred_recipe(index, recipe, None).ok()??;
+    let mut own: Vec<i64> = vec![row.file.id];
+    own.extend(
+        query::appends_for(index, row.file.id)
+            .ok()?
+            .iter()
+            .map(|f| f.id),
+    );
+    // Included and inherited files, with the name a class gives its default for the task
+    // (`EXPORT_FUNCTIONS`: `<class>_<task>`).
+    let mut pulled: Vec<(i64, Option<String>)> = Vec::new();
+    for root in &own {
+        for node in query::tree(index, *root).ok()? {
+            if let Some(f) = node.file
+                && !own.contains(&f.id)
+                && !pulled.iter().any(|(id, _)| *id == f.id)
+            {
+                let class_default = (f.kind == FileKind::Class)
+                    .then(|| f.path.file_stem().and_then(|s| s.to_str()))
+                    .flatten()
+                    .map(|class| format!("{class}_{task}"));
+                pulled.push((f.id, class_default));
+            }
+        }
+    }
+    let function = |file: i64, name: &str| -> Option<Loc> {
+        query::statement_by_name(index, file, name)
+            .ok()?
+            .into_iter()
+            .rfind(|s| s.kind == "function")
+            .map(|s| s.loc)
+    };
+    own.iter()
+        .rev()
+        .find_map(|id| function(*id, task))
+        .or_else(|| pulled.iter().rev().find_map(|(id, _)| function(*id, task)))
+        .or_else(|| {
+            pulled
+                .iter()
+                .rev()
+                .find_map(|(id, class_default)| function(*id, class_default.as_deref()?))
+        })
 }
 
 #[cfg(test)]
