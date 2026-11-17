@@ -260,6 +260,8 @@ fn append_no_space() {
         m[4]
     );
     assert_eq!(lines(&env, r, "good.bb"), []);
+    // B14: a reference is judged by the file's own value for it.
+    assert_eq!(lines(&env, r, "bad-ref.bb"), [(3, W), (5, W)]);
 }
 
 #[test]

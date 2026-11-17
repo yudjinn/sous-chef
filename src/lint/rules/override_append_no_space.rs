@@ -8,10 +8,18 @@
 //! assignments (function bodies are never checked), and not values that start with `${@`
 //! (python may supply the space). `+=` / `=+` on an `:append` / `:prepend` name add the
 //! space themselves and are skipped.
+//!
+//! A value that begins (`:append`) or ends (`:prepend`) with a `${NAME}` reference cannot
+//! be judged from the statement: `NAME`'s value may carry the space (OE-core's
+//! `no-static-libs.inc`: `DISABLE_STATIC ?= " --disable-static"`, then
+//! `EXTRA_OECONF:append = "${DISABLE_STATIC}"`). It is reported only when the file itself
+//! gives `NAME` (by `=`, `:=`, `?=` or `??=`, any condition) a non-empty literal value
+//! without the space; an empty value adds nothing and does not count. A python end
+//! (`${@...}` or anything ending in a `}` that is not a plain reference) is never judged.
 
-use crate::lint::helpers::{self, ListKind};
+use crate::lint::helpers::{self, ListKind, ValueEdge};
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
-use crate::parse::StatementKind;
+use crate::parse::{ParsedFile, StatementKind};
 use crate::types::{AssignOp, LineSpan};
 
 pub struct OverrideAppendNoSpace;
@@ -51,6 +59,10 @@ impl Rule for OverrideAppendNoSpace {
             else {
                 continue;
             };
+            let appends = kw == "append";
+            if kw != "remove" && !glued(file, value, appends) {
+                continue;
+            }
             let name = helpers::colon_name(var);
             let msg = match kw.as_str() {
                 "append" if !value.starts_with(char::is_whitespace) => format!(
@@ -74,5 +86,32 @@ impl Rule for OverrideAppendNoSpace {
                 msg,
             ));
         }
+    }
+}
+
+/// Whether the value lacks its separating space: at the start for an append, at the end
+/// for a prepend. Literal text decides; a `${NAME}` there decides only when this file gives
+/// `NAME` a literal value that starts (ends) without a space; python never.
+fn glued(file: &ParsedFile, value: &str, appends: bool) -> bool {
+    fn edge(s: &str, appends: bool) -> ValueEdge<'_> {
+        if appends {
+            helpers::leading_edge(s)
+        } else {
+            helpers::trailing_edge(s)
+        }
+    }
+    let spaced = |s: &str| {
+        if appends {
+            s.starts_with(char::is_whitespace)
+        } else {
+            s.ends_with(char::is_whitespace)
+        }
+    };
+    match edge(value, appends) {
+        ValueEdge::Literal => !spaced(value),
+        ValueEdge::Unknown => false,
+        ValueEdge::Ref(name) => helpers::plain_values(file, name)
+            .iter()
+            .any(|(_, v)| !v.is_empty() && edge(v, appends) == ValueEdge::Literal && !spaced(v)),
     }
 }
