@@ -68,3 +68,58 @@ pub struct FileVisit {
 pub fn evaluate(index: &Index, ws: &Workspace, target: &Target) -> Result<DataStore> {
     replay::evaluate_with(replay::global_cache(), index, ws, target)
 }
+
+/// `BBMASK` of an evaluated configuration, as `cooker.py` `collect_bbfiles` uses it.
+#[derive(Debug, Clone)]
+pub enum BbMask {
+    /// Unset or empty: nothing is masked.
+    None,
+    /// A static value: the regular expressions joined with `|`, to be searched for
+    /// (`re.search`, anywhere) in each collected file's path.
+    Static(regex::Regex),
+    /// Set, but sous-chef cannot apply it; the reason, for a note.
+    Unusable(String),
+}
+
+/// `BBMASK` (BitBake 2.18.0 `lib/bb/cooker.py` `CookerCollectFiles.collect_bbfiles`): the
+/// value is split on whitespace; a word starting with `|` loses it; each word is compiled on
+/// its own and one that does not compile is ignored (logged as critical); the rest are joined
+/// with `|` and `re.search`ed in the path of every file the `BBFILES` globs gave, before the
+/// `.bb` / `.bbappend` split, so a masked bbappend is not applied and a masked recipe is no
+/// recipe. Here a value with python or undefined variables, or a word Rust's `regex` cannot
+/// compile (Python's `re` may: lookaround, backreferences), is [`BbMask::Unusable`]: whether
+/// BitBake would ignore that word cannot be told.
+pub fn bbmask(ds: &DataStore) -> BbMask {
+    let Some(v) = ds.value("BBMASK") else {
+        return BbMask::None;
+    };
+    if v.text.trim().is_empty() {
+        return BbMask::None;
+    }
+    if v.unevaluated_python || !v.unresolved.is_empty() {
+        return BbMask::Unusable(if v.unevaluated_python {
+            "it holds python".to_string()
+        } else {
+            format!("it uses undefined variables ({})", v.unresolved.join(", "))
+        });
+    }
+    let mut parts = Vec::new();
+    for w in v.text.split_whitespace() {
+        let w = w.strip_prefix('|').unwrap_or(w);
+        if regex::Regex::new(w).is_err() {
+            return BbMask::Unusable(format!(
+                "sous-chef cannot compile its regular expression `{w}`"
+            ));
+        }
+        parts.push(w);
+    }
+    // `"|".join(bbmasks)`, and `if bbmask and ...`: an empty join masks nothing.
+    let joined = parts.join("|");
+    if joined.is_empty() {
+        return BbMask::None;
+    }
+    match regex::Regex::new(&joined) {
+        Ok(r) => BbMask::Static(r),
+        Err(_) => BbMask::Unusable("sous-chef cannot compile it".into()),
+    }
+}

@@ -515,7 +515,8 @@ Checked against BitBake master (commit `5495a547`, 2026-11-16), and reproduced b
   value).
 
 sous-chef differences: only files inside the workspace (layer roots and the build directory)
-are ever found; `BBMASK` is not applied by `recipe_files`.
+are ever found; `BBMASK` is not applied by `recipe_files` (the index applies a static one,
+see "What the static evaluator cannot do").
 
 Static expansion of reference arguments (`resolve::expand_with`): the scanner resolves
 `${VAR}` in `require` / `include` / `inherit` arguments only for values that follow from the
@@ -606,8 +607,8 @@ file in the index (`item`, `search`, `layers` show it) and marks it
 `query::find_recipes`, `recipe_names_like`, `files_providing` and
 `providers::recipes_using` leave it out, it takes part in no `bbappend` edge, and an
 evaluation addressed to it by path (`layer:path`) adds the note "not matched by any layer's
-BBFILES" (`ReplayNotes::target_notes`). A file `BBMASK` masks would be another value of the
-same column (not implemented: `BBMASK` is evaluated configuration). The
+BBFILES" (`ReplayNotes::target_notes`). A file a static `BBMASK` masks is `not_collected =
+'bbmask'` (w6), one only an inactive `BBFILES_DYNAMIC` entry matches `dynamic`. The
 `item` and `search` tools add the same note for a hit in such a file, and
 `query::files_in_layer_in(.., FileSet::COLLECTED)` lists a layer's files without them. Lint
 (w6) runs no file- or recipe-scope rule on such a file and reports it once
@@ -1698,6 +1699,39 @@ in the live environment:
 - anonymous python functions and event handlers
 - `d.setVar` / `d.appendVar` inside classes (e.g. `PACKAGECONFIG` processing in `base.bbclass`)
 - `inherit` / `require` whose argument depends on any of the above
+- **class-extended variants** (`BBCLASSEXTEND`): BitBake 2.18.0 `lib/bb/parse/ast.py`
+  `multi_finalize` makes a datastore per word (`ext.split(':', 2)`; a plain word sets
+  `PN = "<pn>-<word>"` and `inherit_defer`s the class); OE-core (Wrynose)
+  `nativesdk.bbclass` `nativesdk_virtclass_handler` renames `<pn>-nativesdk` to
+  `nativesdk-<pn>`, `classes/multilib.bbclass` sets `PN = "<variant>-<pn>"` for
+  `multilib:<variant>`. sous-chef evaluates the base recipe only. Reported (w6,
+  `recipe::class_extend_hint`): a name of the form `<pn>-native`, `nativesdk-<pn>` or
+  `<variant>-<pn>` whose base recipe's files list `native`, `nativesdk` or
+  `multilib:<variant>` in `BBCLASSEXTEND` (static words; `${...}` words and global
+  `BBCLASSEXTEND:append` from multilib configuration are not seen) is an error saying it is
+  that variant and naming the base recipe; other classes' naming was not checked and is not
+  claimed.
+- **`BBMASK`** (BitBake 2.18.0 `lib/bb/cooker.py` `CookerCollectFiles.collect_bbfiles`:
+  `BBMASK.split()`, a leading `|` dropped from a word, each word compiled alone and ignored
+  when invalid, the rest joined with `|` and `re.search`ed in the path of each file the
+  `BBFILES` globs gave): applied (w6) when the configuration's value (default machine and
+  distro) is static; masked files are `files.not_collected = 'bbmask'` (no recipe, no
+  provider, no bbappend edge, not linted). Recomputed after every full edge rebuild and
+  after a `.conf` is reindexed (not after an `.inc` a conf includes). The paths searched
+  are the workspace's canonical ones, not the `BBLAYERS` spelling (the `LAYERDIR` gap). A
+  value with python or undefined variables, or a word Rust's `regex` cannot compile, is not
+  applied and every evaluation says so (`note: BBMASK is set but sous-chef does not apply
+  it`).
+- **Skipped recipes** (OE-core `classes-global/base.bbclass`, Wrynose, anonymous python):
+  `SKIP_RECIPE[<PN>]` non-empty; `COMPATIBLE_MACHINE` set (and `PARSE_ALL_RECIPES` not
+  true) that `re.match`es (anchored at the start only) no entry of
+  `MACHINEOVERRIDES.split(":")`; `COMPATIBLE_HOST` set (and neither `SOURCE_MIRROR_FETCH`
+  nor `PARSE_ALL_RECIPES` true) that does not `re.match` `HOST_SYS`. Nothing is hidden: when
+  every value involved is static (no python, no undefined variable, not set by anonymous
+  python by name) and the check fails, the evaluation gets `note: BitBake would skip this
+  recipe: ...` (`replay::skip_reasons`), shown by `recipe`, `var`, `deps`, `overrides`;
+  otherwise nothing is said. `INCOMPATIBLE_LICENSE` and the other checks of that function
+  are not modelled.
 
 These are reported, never silently guessed. Authoritative mode (M5) covers them.
 

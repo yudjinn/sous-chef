@@ -470,10 +470,36 @@ pub struct Collection {
     /// {!}<collection name>:<filename pattern>") and words that cannot be expanded
     /// statically; both are left out.
     pub unusable: Vec<String>,
+    /// Files the globs gave that the `BBMASK` regex masks ([`collect_masked`]); not in
+    /// `files`.
+    pub masked: Vec<PathBuf>,
 }
 
-/// [`recipe_files`] with what the `BBFILES_DYNAMIC` entries did.
+/// [`recipe_files`] with what the `BBFILES_DYNAMIC` entries did. `BBMASK` is not applied.
 pub fn collect(ws: &Workspace) -> Collection {
+    collect_masked(ws, None)
+}
+
+/// [`collect`], then `BBMASK` (`cooker.py` `collect_bbfiles`: the combined regex is
+/// `re.search`ed in each path the globs gave; a match is dropped). The paths searched are the
+/// workspace's (canonical layer roots), not the `BBLAYERS` spelling BitBake globs with.
+pub fn collect_masked(ws: &Workspace, mask: Option<&regex::Regex>) -> Collection {
+    let mut c = collect_unmasked(ws);
+    if let Some(re) = mask {
+        let (masked, kept): (Vec<PathBuf>, Vec<PathBuf>) = c
+            .files
+            .into_iter()
+            .partition(|p| re.is_match(&p.to_string_lossy()));
+        c.files = kept;
+        for p in &masked {
+            c.via_dynamic.remove(p);
+        }
+        c.masked = masked;
+    }
+    c
+}
+
+fn collect_unmasked(ws: &Workspace) -> Collection {
     let (dynamic, unusable) = bbfiles_dynamic(ws);
     let mut globs: Vec<(i32, &str, bool)> = Vec::new();
     for l in &ws.layers {
@@ -518,6 +544,7 @@ pub fn collect(ws: &Workspace) -> Collection {
         inactive_dynamic,
         via_dynamic,
         unusable,
+        masked: Vec::new(),
     }
 }
 

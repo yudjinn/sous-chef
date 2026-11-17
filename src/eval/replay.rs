@@ -653,6 +653,13 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
                 .to_string(),
         );
     }
+    // A static BBMASK is applied by the index (`files.not_collected = 'bbmask'`); one the
+    // replay cannot expand or compile is said to be unapplied.
+    if let super::BbMask::Unusable(why) = super::bbmask(&r.ds) {
+        target_notes.push(format!(
+            "note: BBMASK is set but sous-chef does not apply it ({why}); recipes and bbappends it may mask are still treated as collected"
+        ));
+    }
     if !target_notes.is_empty() {
         Arc::make_mut(&mut r.ds.notes)
             .target_notes
@@ -755,7 +762,101 @@ fn recipe_pass(
     if ws.release.release.has(Feature::RecipeVirtualProviders) {
         virtual_recipe_providers(&mut r.ds, &recipe_loc);
     }
+    let skip = skip_reasons(&r.ds);
+    if !skip.is_empty() {
+        Arc::make_mut(&mut r.ds.notes).target_notes.extend(skip);
+    }
     Ok(r.ds)
+}
+
+/// `bb.utils.to_boolean` on a static value: `Some(true)` / `Some(false)`, `None` when it
+/// cannot be told (python, undefined variables, or a word BitBake rejects).
+fn static_bool(ds: &DataStore, name: &str) -> Option<bool> {
+    let Some(v) = ds.value(name) else {
+        return Some(false);
+    };
+    if v.unevaluated_python || !v.unresolved.is_empty() {
+        return None;
+    }
+    match v.text.trim().to_ascii_lowercase().as_str() {
+        "" | "no" | "n" | "false" | "f" | "off" | "0" => Some(false),
+        "yes" | "y" | "true" | "t" | "on" | "1" => Some(true),
+        _ => None,
+    }
+}
+
+/// A value with no python and no undefined reference, and no anonymous python that sets the
+/// variable by name.
+fn static_value(ds: &DataStore, name: &str) -> Option<Option<String>> {
+    if ds.replay().python_vars.contains(name) {
+        return None;
+    }
+    match ds.value(name) {
+        None => Some(None),
+        Some(v) if v.unevaluated_python || !v.unresolved.is_empty() => None,
+        Some(v) => Some(Some(v.text)),
+    }
+}
+
+/// The reasons BitBake would skip the recipe, as `note:` lines, when they can be decided
+/// from static values. OE-core `classes-global/base.bbclass` (Wrynose) anonymous python:
+/// `SKIP_RECIPE[<PN>]` non-empty raises `SkipRecipe("Recipe will be skipped because:
+/// <msg>")`; a non-empty `COMPATIBLE_MACHINE`, unless `PARSE_ALL_RECIPES` is true, must
+/// `re.match` (anchored at the start only) some entry of `MACHINEOVERRIDES.split(":")`,
+/// else "incompatible with machine <MACHINE> (not in COMPATIBLE_MACHINE)"; a non-empty
+/// `COMPATIBLE_HOST`, unless `SOURCE_MIRROR_FETCH` or `PARSE_ALL_RECIPES` is true, must
+/// `re.match` `HOST_SYS`, else "incompatible with host <HOST_SYS> (not in
+/// COMPATIBLE_HOST)". Nothing is said when a value involved holds python or undefined
+/// variables, anonymous python sets it by name, an `MACHINEOVERRIDES` entry is unknown
+/// and no known one matches, or the regular expression does not compile in Rust.
+fn skip_reasons(ds: &DataStore) -> Vec<String> {
+    const TAIL: &str = "(decided from static values; anonymous python is not run)";
+    let mut out = Vec::new();
+    if let Some(Some(pn)) = static_value(ds, "PN")
+        && !ds.replay().python_vars.contains("SKIP_RECIPE")
+        && let Some(msg) = ds.flag("SKIP_RECIPE", &pn)
+        && !msg.unevaluated_python
+        && msg.unresolved.is_empty()
+        && !msg.text.is_empty()
+    {
+        out.push(format!(
+            "note: BitBake would skip this recipe: SKIP_RECIPE[{pn}] = \"{}\" {TAIL}",
+            msg.text
+        ));
+    }
+    let anchored = |re: &str| regex::Regex::new(&format!("^(?:{re})")).ok();
+    if let Some(Some(need)) = static_value(ds, "COMPATIBLE_MACHINE")
+        && !need.is_empty()
+        && static_bool(ds, "PARSE_ALL_RECIPES") == Some(false)
+        && let Some(Some(mo)) = static_value(ds, "MACHINEOVERRIDES")
+        && let Some(re) = anchored(&need)
+    {
+        let entries = pwords::colon_parts(&mo);
+        let all_known = entries.iter().all(|e| !pwords::is_unevaluated(e));
+        let hit = entries
+            .iter()
+            .filter(|e| !pwords::is_unevaluated(e))
+            .any(|e| re.is_match(e));
+        if all_known && !hit {
+            let machine = ds.value("MACHINE").map(|v| v.text).unwrap_or_default();
+            out.push(format!(
+                "note: BitBake would skip this recipe: incompatible with machine {machine} (COMPATIBLE_MACHINE = \"{need}\" matches no entry of MACHINEOVERRIDES = \"{mo}\") {TAIL}"
+            ));
+        }
+    }
+    if let Some(Some(need)) = static_value(ds, "COMPATIBLE_HOST")
+        && !need.is_empty()
+        && static_bool(ds, "PARSE_ALL_RECIPES") == Some(false)
+        && static_bool(ds, "SOURCE_MIRROR_FETCH") == Some(false)
+        && let Some(Some(host)) = static_value(ds, "HOST_SYS")
+        && let Some(re) = anchored(&need)
+        && !re.is_match(&host)
+    {
+        out.push(format!(
+            "note: BitBake would skip this recipe: incompatible with host {host} (COMPATIBLE_HOST = \"{need}\" does not match HOST_SYS) {TAIL}"
+        ));
+    }
+    out
 }
 
 /// `ast.handleVirtRecipeProviders` (BitBake 2.12 and later), on `DEPENDS`: each word listed

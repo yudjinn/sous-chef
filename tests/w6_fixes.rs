@@ -499,3 +499,266 @@ fn rules_do_not_split_python_expressions() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------------------
+// Item 7: provider gaps, said in the output
+// ---------------------------------------------------------------------------------------
+
+fn class_extend(root: &Path) {
+    append_to(
+        root,
+        "meta-core/recipes-core/libfoo/libfoo_2.0.bb",
+        "BBCLASSEXTEND = \"native nativesdk multilib:lib32\"\n",
+    );
+}
+
+#[tokio::test]
+async fn class_extended_variants_are_named_as_such() {
+    use sous_chef::mcp::tools::{deps, item, recipe, var};
+    let fx = modified(class_extend);
+    let ctx = ctx_for(&fx);
+    let err = |r: sous_chef::error::Result<String>| match r {
+        Ok(out) => panic!("expected an error, got\n{out}"),
+        Err(e) => e.to_string(),
+    };
+    let rec = |name: &str| recipe::Args {
+        name: name.into(),
+        version: None,
+        show: recipe::Show::Summary,
+        budget_tokens: Some(4000),
+        format: None,
+    };
+    let e = err(recipe::run(&ctx, rec("libfoo-native")).await);
+    assert!(
+        e.contains("`libfoo-native` is the `native` variant of `libfoo`")
+            && e.contains("BBCLASSEXTEND")
+            && e.contains("sous-chef does not evaluate class-extended variants")
+            && e.contains("`recipe libfoo` shows the base recipe"),
+        "{e}"
+    );
+    let e = err(recipe::run(&ctx, rec("nativesdk-libfoo")).await);
+    assert!(e.contains("the `nativesdk` variant of `libfoo`"), "{e}");
+    let e = err(recipe::run(&ctx, rec("lib32-libfoo")).await);
+    assert!(
+        e.contains("the `lib32` multilib variant of `libfoo`"),
+        "{e}"
+    );
+    // A recipe whose BBCLASSEXTEND does not list the class: no claim.
+    let e = err(recipe::run(&ctx, rec("hello-native")).await);
+    assert!(!e.contains("variant"), "{e}");
+
+    let e = err(var::run(
+        &ctx,
+        var::Args {
+            name: "DEPENDS".into(),
+            recipe: Some("libfoo-native".into()),
+            machine: None,
+            distro: None,
+            authoritative: false,
+            flags: false,
+            budget_tokens: Some(4000),
+            format: None,
+        },
+    )
+    .await);
+    assert!(e.contains("`native` variant of `libfoo`"), "{e}");
+    let e = err(deps::run(
+        &ctx,
+        deps::Args {
+            recipe: "nativesdk-libfoo".into(),
+            kind: deps::Kind::default(),
+            depth: None,
+            budget_tokens: Some(4000),
+            format: None,
+        },
+    )
+    .await);
+    assert!(e.contains("`nativesdk` variant of `libfoo`"), "{e}");
+    let e = err(item::run(
+        &ctx,
+        item::Args {
+            loc: None,
+            recipe: Some("libfoo-native".into()),
+            file: None,
+            name: Some("DEPENDS".into()),
+            context: 0,
+            budget_tokens: Some(4000),
+            format: None,
+        },
+    )
+    .await);
+    assert!(e.contains("`native` variant of `libfoo`"), "{e}");
+    // Lint's target resolution says the same.
+    let e = lint::resolve_target(&fx.ws, &fx.idx, Some("libfoo-native"), &fx.root)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("`native` variant of `libfoo`"), "{e}");
+}
+
+#[test]
+fn a_static_bbmask_marks_files_not_collected() {
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "build/conf/local.conf",
+            "BBMASK = \"meta-mine/recipes-app/app/ |meta-mine/recipes-core/hello/hello_1\\.1\\.bbappend\"\n",
+        );
+    });
+    assert!(query::find_recipes(&fx.idx, "app").unwrap().is_empty());
+    let app = query::file_by_path(
+        &fx.idx,
+        "meta-mine",
+        Path::new("recipes-app/app/app_0.1.bb"),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        query::not_collected(&fx.idx, app.id).unwrap().as_deref(),
+        Some("masked by BBMASK")
+    );
+    let hello = query::find_recipes(&fx.idx, "hello")
+        .unwrap()
+        .into_iter()
+        .find(|r| r.file.layer == "meta-core")
+        .unwrap();
+    let appends: Vec<String> = query::appends_for(&fx.idx, hello.file.id)
+        .unwrap()
+        .iter()
+        .map(|f| f.loc(sous_chef::types::LineSpan::line(1)).to_string())
+        .collect();
+    assert!(
+        !appends
+            .iter()
+            .any(|a| a.contains("meta-mine:recipes-core/hello/hello_1.1.bbappend")),
+        "{appends:?}"
+    );
+    // Lint leaves the masked files alone.
+    let found = lint_all(&fx, &["override/legacy-syntax", "org/recipe-path"]);
+    assert!(
+        !found.iter().any(|f| f.loc.path.ends_with("app_0.1.bb")),
+        "{found:#?}"
+    );
+}
+
+#[test]
+fn a_bbmask_with_python_is_said_to_be_unapplied() {
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "build/conf/local.conf",
+            "BBMASK = \"${@'meta-mine/recipes-app/' if d.getVar('X') else ''}\"\n",
+        );
+    });
+    // Not applied: the recipe is still found.
+    assert!(!query::find_recipes(&fx.idx, "app").unwrap().is_empty());
+    let ds = eval(&fx, "app");
+    assert!(
+        ds.replay()
+            .target_notes
+            .iter()
+            .any(|n| n.contains("BBMASK is set but sous-chef does not apply it")),
+        "{:?}",
+        ds.replay().target_notes
+    );
+}
+
+fn skip_notes(fx: &Fx, recipe: &str) -> Vec<String> {
+    eval(fx, recipe)
+        .replay()
+        .target_notes
+        .iter()
+        .filter(|n| n.contains("BitBake would skip this recipe"))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn skipped_recipes_are_noted() {
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-mine/recipes-app/app/app_0.1.bb",
+            "COMPATIBLE_MACHINE = \"boardx|qemuarm.*\"\n",
+        );
+        append_to(
+            r,
+            "meta-core/conf/distro/testdistro.conf",
+            "SKIP_RECIPE[libfoo] = \"not for this distro\"\nHOST_SYS = \"i686-linux\"\n",
+        );
+        append_to(
+            r,
+            "meta-core/recipes-core/hello/hello_1.1.bb",
+            "COMPATIBLE_HOST = \"(x86_64|i.86).*-linux\"\nCOMPATIBLE_MACHINE = \"qemux8\"\n",
+        );
+    });
+    let app = skip_notes(&fx, "app");
+    assert_eq!(app.len(), 1, "{app:?}");
+    assert!(
+        app[0].contains("incompatible with machine qemux86")
+            && app[0].contains("COMPATIBLE_MACHINE = \"boardx|qemuarm.*\""),
+        "{app:?}"
+    );
+    let libfoo = skip_notes(&fx, "libfoo");
+    assert!(
+        libfoo
+            .iter()
+            .any(|n| n.contains("SKIP_RECIPE[libfoo] = \"not for this distro\"")),
+        "{libfoo:?}"
+    );
+    // re.match is anchored at the start only: `qemux8` matches `qemux86`; the host matches.
+    assert!(skip_notes(&fx, "hello").is_empty());
+    // Another machine: compatible.
+    let t = Target {
+        recipe: Some("app".into()),
+        machine: Some("boardx".into()),
+        ..Target::default()
+    };
+    let ds = eval::evaluate_with(&ConfigCache::new(), &fx.idx, &fx.ws, &t).unwrap();
+    assert!(
+        !ds.replay()
+            .target_notes
+            .iter()
+            .any(|n| n.contains("would skip")),
+        "{:?}",
+        ds.replay().target_notes
+    );
+}
+
+#[test]
+fn an_undecidable_skip_check_says_nothing() {
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-mine/recipes-app/app/app_0.1.bb",
+            "COMPATIBLE_MACHINE = \"${@'boardx' if d.getVar('X') else 'qemux86'}\"\nCOMPATIBLE_HOST = \"arm.*\"\n",
+        );
+    });
+    // Python in COMPATIBLE_MACHINE; HOST_SYS is not set in the fixture.
+    assert!(skip_notes(&fx, "app").is_empty());
+}
+
+#[tokio::test]
+async fn recipe_summary_shows_the_skip_note() {
+    use sous_chef::mcp::tools::recipe;
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-mine/recipes-app/app/app_0.1.bb",
+            "COMPATIBLE_MACHINE = \"boardx\"\n",
+        );
+    });
+    let ctx = ctx_for(&fx);
+    let out = recipe::run(
+        &ctx,
+        recipe::Args {
+            name: "app".into(),
+            version: None,
+            show: recipe::Show::Summary,
+            budget_tokens: Some(8000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(out.contains("BitBake would skip this recipe"), "{out}");
+}

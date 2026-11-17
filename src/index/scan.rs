@@ -247,6 +247,9 @@ pub fn refresh(index: &mut Index, ws: &Workspace) -> Result<RefreshReport> {
             Ok(())
         })?;
     }
+    if rebuild {
+        apply_bbmask(index, ws)?;
+    }
 
     Ok(RefreshReport {
         scanned: found.len() as u32,
@@ -325,6 +328,7 @@ pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<Fil
     let rebuild_all = |index: &mut Index| -> Result<()> {
         if stale_release {
             index.write(|tx| rebuild_edges(tx, ws))?;
+            apply_bbmask(index, ws)?;
         }
         Ok(())
     };
@@ -334,6 +338,7 @@ pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<Fil
             tx.execute("DELETE FROM files WHERE id = ?1", [id])?;
             rebuild_edges(tx, ws)
         })?;
+        apply_bbmask(index, ws)?;
         Ok(FileRefresh::Removed(loc.clone()))
     };
 
@@ -383,6 +388,14 @@ pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<Fil
                     _ => rebuild_edges(tx, ws),
                 }
             })?;
+            // A full rebuild drops the BBMASK marks, and a configuration file may set it.
+            if existing.is_none()
+                || layer_conf
+                || stale_release
+                || FileKind::from_path(abs) == Some(FileKind::Conf)
+            {
+                apply_bbmask(index, ws)?;
+            }
             Ok(FileRefresh::Reindexed(Loc {
                 lines: LineSpan::new(1, lines),
                 ..loc.clone()
@@ -1158,25 +1171,75 @@ struct EdgeCtx {
     corebase: Option<String>,
 }
 
-/// Recomputes every edge from the indexed statements and files.
-/// Records the workspace's release as the one the edges were resolved for.
-fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
-    tx.execute("DELETE FROM edges", [])?;
-    let ecx = edge_ctx(tx, ws)?;
-    insert_ref_edges(tx, ws, &ecx, None)?;
-    let collection = resolve::collect(ws);
-    let collected = collected_ids(&collection.files, &ecx);
+/// The `bbappend` edges and the `files.not_collected` marks from the `BBFILES` collection
+/// (`resolve::collect_masked`): collected files get edges, the rest of the `.bb` /
+/// `.bbappend` files a reason (`bbfiles`, `dynamic`, `bbmask`), then the data files are
+/// marked. Expects no `bbappend` edge in the table.
+fn apply_collection(
+    tx: &Transaction<'_>,
+    ws: &Workspace,
+    ecx: &EdgeCtx,
+    mask: Option<&regex::Regex>,
+) -> Result<()> {
+    let collection = resolve::collect_masked(ws, mask);
+    let collected = collected_ids(&collection.files, ecx);
     let inactive = collected_ids(
         &collection
             .inactive_dynamic
             .iter()
             .map(|(p, _)| p.clone())
             .collect::<Vec<_>>(),
-        &ecx,
+        ecx,
     );
+    let masked = collected_ids(&collection.masked, ecx);
     insert_append_edges(tx, &collected)?;
     mark_collected(tx, &collected, &inactive)?;
-    mark_data(tx)?;
+    let mut st = tx.prepare_cached("UPDATE files SET not_collected = ?1 WHERE id = ?2")?;
+    for (id, _) in &masked {
+        st.execute(params![super::schema::NOT_COLLECTED_BBMASK, id])?;
+    }
+    mark_data(tx)
+}
+
+/// `BBMASK` from the evaluated configuration (default machine and distro), applied to the
+/// index when it is static ([`crate::eval::bbmask`]): the collection is recomputed with it,
+/// so masked files are `not_collected = 'bbmask'` and take part in no `bbappend` edge. A
+/// value sous-chef cannot apply leaves the collection unmasked (the evaluation notes say so).
+/// Runs after every full edge rebuild and after a `.conf` is reindexed; a configuration that
+/// cannot be evaluated changes nothing.
+fn apply_bbmask(index: &mut Index, ws: &Workspace) -> Result<()> {
+    let cfg = crate::eval::evaluate_with(
+        &crate::eval::ConfigCache::new(),
+        index,
+        ws,
+        &crate::eval::Target::default(),
+    );
+    let mask = match cfg.as_ref().map(crate::eval::bbmask) {
+        Ok(crate::eval::BbMask::Static(re)) => Some(re),
+        _ => None,
+    };
+    let marked: i64 = index.conn().query_row(
+        "SELECT count(*) FROM files WHERE not_collected = ?1",
+        [super::schema::NOT_COLLECTED_BBMASK],
+        |r| r.get(0),
+    )?;
+    if mask.is_none() && marked == 0 {
+        return Ok(());
+    }
+    index.write(|tx| {
+        tx.execute("DELETE FROM edges WHERE kind = 'bbappend'", [])?;
+        let ecx = edge_ctx(tx, ws)?;
+        apply_collection(tx, ws, &ecx, mask.as_ref())
+    })
+}
+
+/// Recomputes every edge from the indexed statements and files.
+/// Records the workspace's release as the one the edges were resolved for.
+fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
+    tx.execute("DELETE FROM edges", [])?;
+    let ecx = edge_ctx(tx, ws)?;
+    insert_ref_edges(tx, ws, &ecx, None)?;
+    apply_collection(tx, ws, &ecx, None)?;
     for (k, v) in [
         (super::schema::META_RELEASE, ws.release.release.codename()),
         (super::schema::META_EDGES, super::schema::EDGES_VERSION),

@@ -350,6 +350,11 @@ pub fn resolve_target(
             version: Some(pv.to_string()),
         });
     }
+    if let Some(hint) = crate::mcp::tools::recipe::class_extend_hint(index, t)? {
+        return Err(Error::NotFound {
+            what: format!("lint target {t:?}: {hint}"),
+        });
+    }
     Err(Error::NotFound {
         what: format!(
             "lint target {t:?}: not a layer, file pointer (layer:path), path or recipe name"

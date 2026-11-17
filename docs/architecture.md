@@ -318,7 +318,7 @@ files(id INTEGER PK, layer_id INT, path TEXT,        -- relative to layer root
       kind TEXT,                                      -- bb | bbappend | inc | bbclass | conf
       mtime INT, size INT, sha256 TEXT,
       pn TEXT, pv TEXT,                               -- from the file name, bb and bbappend only
-      not_collected TEXT NULL,                        -- 'bbfiles' | 'data' | NULL (schema 3)
+      not_collected TEXT NULL,                        -- 'bbfiles' | 'dynamic' | 'bbmask' | 'data' | NULL (schema 3; 'dynamic', 'bbmask' w6)
       UNIQUE(layer_id, path))
 
 statements(id INTEGER PK, file_id INT, ord INT,      -- order within the file

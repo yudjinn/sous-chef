@@ -44,7 +44,7 @@
 //! A class inherited by both the recipe and a bbappend is parsed once by both. On the fixture
 //! recipes the two agree (`tests/eval_replay.rs`, `static_walk_and_replay_*`).
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 
 use schemars::JsonSchema;
@@ -55,6 +55,7 @@ use crate::eval::{self, DataStore, OpStatus, Target, providers};
 use crate::index::Index;
 use crate::index::query::{self, EdgeRow, FileRow, RecipeRow, StatementFilter, StatementRow};
 use crate::mcp::Ctx;
+use crate::parse::words;
 use crate::render::{self, Format, Table};
 use crate::types::{FileKind, LineSpan, Loc};
 use crate::workspace::Workspace;
@@ -203,6 +204,11 @@ pub fn resolve_recipe(index: &Index, name: &str, version: Option<&str>) -> Resul
             }
         }
     }
+    if let Some(hint) = class_extend_hint(index, name)? {
+        return Err(Error::NotFound {
+            what: format!("recipe {name}: {hint}"),
+        });
+    }
     let candidates = query::recipe_names_like(index, name, 20)?;
     if candidates.is_empty() {
         return Err(Error::NotFound {
@@ -241,6 +247,111 @@ pub fn resolve_selected(
         return Ok((sel.recipe.clone(), Some(sel.describe())));
     }
     Ok((recipe, None))
+}
+
+/// For a name that is no recipe: whether it has the form of a class-extended variant of a
+/// recipe whose `BBCLASSEXTEND` (statically: the words of its assignments in the recipe's
+/// tree and bbappends, without `${...}`, not taken out by a `:remove`) lists that class, and
+/// if so the sentence saying so. Shared by every tool that resolves a bare name (through
+/// [`resolve_recipe`]) and by lint's target resolution.
+///
+/// The forms (BitBake 2.18.0 `lib/bb/parse/ast.py` `multi_finalize`: for each word of
+/// `BBCLASSEXTEND`, `ext.split(':', 2)`; a plain word sets `PN = "<pn>-<word>"` and
+/// `inherit_defer`s the class; OE-core Wrynose `classes-recipe/nativesdk.bbclass`
+/// `nativesdk_virtclass_handler` then renames `<pn>-nativesdk` to `nativesdk-<pn>`;
+/// `classes/multilib.bbclass` sets `PN = "<variant>-<pn>"` for `multilib:<variant>`):
+/// `<pn>-native` (word `native`), `nativesdk-<pn>` (word `nativesdk`), `<variant>-<pn>`
+/// (word `multilib:<variant>`). `<pn>` is the recipe's file-name `PN`. Other classes are
+/// not claimed (what their handlers do to `PN` was not checked).
+pub fn class_extend_hint(index: &Index, name: &str) -> Result<Option<String>> {
+    let name = name.trim();
+    let mut cands: Vec<(String, String, String)> = Vec::new(); // (base pn, word, class)
+    if let Some(base) = name.strip_suffix("-native") {
+        cands.push((base.into(), "native".into(), "native".into()));
+    }
+    if let Some(base) = name.strip_prefix("nativesdk-") {
+        cands.push((base.into(), "nativesdk".into(), "nativesdk".into()));
+    }
+    if let Some((variant, base)) = name.split_once('-') {
+        cands.push((
+            base.into(),
+            format!("multilib:{variant}"),
+            "multilib".into(),
+        ));
+    }
+    for (base, word, class) in cands {
+        if base.is_empty() {
+            continue;
+        }
+        let Some(recipe) = query::preferred_recipe(index, &base, None)? else {
+            continue;
+        };
+        if !class_extend_words(index, &recipe)?.contains(&word) {
+            continue;
+        }
+        let what = if class == "multilib" {
+            format!(
+                "the `{}` multilib variant",
+                word.trim_start_matches("multilib:")
+            )
+        } else {
+            format!("the `{class}` variant")
+        };
+        return Ok(Some(format!(
+            "`{name}` is {what} of `{base}`, which `BBCLASSEXTEND` provides (`{word}` in {}); \
+             sous-chef does not evaluate class-extended variants; `recipe {base}` shows the \
+             base recipe",
+            file_label(&recipe.file)
+        )));
+    }
+    Ok(None)
+}
+
+/// The static words of `BBCLASSEXTEND` in a recipe's files (its tree and its bbappends'):
+/// every assignment's words (any operator, `:append` / `:prepend` included, other
+/// conditional names left out), minus the words of `:remove` statements, without words
+/// holding `${...}`.
+fn class_extend_words(index: &Index, recipe: &RecipeRow) -> Result<BTreeSet<String>> {
+    let mut ids = vec![recipe.file.id];
+    ids.extend(
+        query::appends_for(index, recipe.file.id)?
+            .iter()
+            .map(|f| f.id),
+    );
+    let mut files: Vec<i64> = Vec::new();
+    for id in ids {
+        for n in query::tree(index, id)? {
+            if let Some(f) = n.file
+                && !files.contains(&f.id)
+            {
+                files.push(f.id);
+            }
+        }
+    }
+    let scope = StatementFilter {
+        kinds: vec!["assign".into()],
+        files: Some(files),
+        ..StatementFilter::default()
+    };
+    let mut add = BTreeSet::new();
+    let mut remove = BTreeSet::new();
+    for s in query::statements_by_base(index, "BBCLASSEXTEND", &scope)? {
+        if s.flag.is_some() || s.legacy {
+            continue;
+        }
+        let into = match s.overrides.as_slice() {
+            [] => &mut add,
+            [k] if k == "append" || k == "prepend" => &mut add,
+            [k] if k == "remove" => &mut remove,
+            _ => continue,
+        };
+        into.extend(
+            words::known_words(s.value.as_deref().unwrap_or(""))
+                .into_iter()
+                .map(str::to_string),
+        );
+    }
+    Ok(add.difference(&remove).cloned().collect())
 }
 
 fn versions(rows: &[RecipeRow]) -> String {
@@ -595,6 +706,15 @@ fn summary(
     t.note(&format!(
         "note: key values are evaluated for MACHINE={machine} DISTRO={distro} (static replay of the configuration, classes, recipe and bbappends; python not run); use var for the full history"
     ));
+    // (`run` adds the not-collected note for every static view itself.)
+    for n in ds
+        .replay()
+        .target_notes
+        .iter()
+        .filter(|n| !n.contains("BitBake does not collect it"))
+    {
+        t.note(n);
+    }
     let anon = &ds.replay().anonymous;
     if anon.iter().any(|a| a.opaque) {
         t.note("warning: anonymous python changes variables through computed names; any key value may differ");
