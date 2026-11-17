@@ -432,12 +432,7 @@ fn final_line(
                 *python += 1;
             }
             let mut line = format!("final: {}", shown(ctx, &v.text, name, None, args)?);
-            if !v.unresolved.is_empty() {
-                line.push_str(&format!(
-                    " (unresolved, left as written: {})",
-                    v.unresolved.join(", ")
-                ));
-            }
+            line.push_str(&unresolved_note(ds, &v));
             Ok(line)
         }
     }
@@ -461,15 +456,54 @@ fn flag_final(
                 "final[{flag}]: {}",
                 shown(ctx, &v.text, name, Some(flag), args)?
             );
-            if !v.unresolved.is_empty() {
-                line.push_str(&format!(
-                    " (unresolved, left as written: {})",
-                    v.unresolved.join(", ")
-                ));
-            }
+            line.push_str(&unresolved_note(ds, &v));
             Ok(line)
         }
     }
+}
+
+/// The note after a final value for its unresolved names. A name still in the text as
+/// `${NAME}` is "left as written". Any other name reached the value because an override
+/// decision it depends on (an override variant, or a conditional `:append` / `:prepend` /
+/// `:remove`, of the variable or of one it references) was judged inactive while
+/// `OVERRIDES` has that name unresolved, or because a statement the replay could not apply
+/// may set the variable: the text is complete, but it may differ. The evaluator attaches
+/// such names only to values whose result could depend on them (`eval::overrides`: a value
+/// with no conditional operation in its history is not affected).
+pub fn unresolved_note(ds: &DataStore, v: &eval::Value) -> String {
+    if v.unresolved.is_empty() {
+        return String::new();
+    }
+    let (left, other): (Vec<&String>, Vec<&String>) = v
+        .unresolved
+        .iter()
+        .partition(|u| v.text.contains(&format!("${{{u}}}")));
+    let join = |xs: &[&String]| xs.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
+    let mut out = String::new();
+    if !left.is_empty() {
+        out.push_str(&format!(" (unresolved, left as written: {})", join(&left)));
+    }
+    if !other.is_empty() {
+        let in_overrides = ds
+            .overrides_value()
+            .map(|o| o.unresolved)
+            .unwrap_or_default();
+        let (ovr, rest): (Vec<&String>, Vec<&String>) =
+            other.into_iter().partition(|u| in_overrides.contains(u));
+        if !ovr.is_empty() {
+            out.push_str(&format!(
+                " (may differ: an override decision it depends on is uncertain because OVERRIDES has unresolved {})",
+                join(&ovr)
+            ));
+        }
+        if !rest.is_empty() {
+            out.push_str(&format!(
+                " (may differ: depends on unresolved {})",
+                join(&rest)
+            ));
+        }
+    }
+    out
 }
 
 /// The value as shown: quoted, cut at [`MAX_FINAL_CHARS`] with the full text in a handle.

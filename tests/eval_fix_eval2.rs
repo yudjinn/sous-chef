@@ -14,7 +14,7 @@ use sous_chef::eval::{self, ConfigCache, DataStore, RefProblem, Target};
 use sous_chef::handles::HandleStore;
 use sous_chef::index::{Index, query};
 use sous_chef::mcp::Ctx;
-use sous_chef::mcp::tools::{deps, overrides};
+use sous_chef::mcp::tools::{deps, overrides, var};
 use sous_chef::workspace::Workspace;
 
 struct Fx {
@@ -426,4 +426,72 @@ async fn dead_leaves_out_variables_read_by_name_and_inactive_overrides() {
     // For a recipe, an `.inc` the configuration includes is not one of the recipe's files.
     let out = overrides_out(&f, Some("hello"), overrides::Show::Conditional).await;
     assert!(!out.contains("tune-cortexa8.inc"), "{out}");
+}
+
+// ---------------------------------------------------------------------------------------
+// B18: the OVERRIDES uncertainty note only where an override decision is involved
+// ---------------------------------------------------------------------------------------
+
+async fn var_final(f: &ToolFx, name: &str) -> String {
+    let out = var::run(
+        &f.ctx,
+        var::Args {
+            name: name.into(),
+            recipe: Some("hello".into()),
+            machine: None,
+            distro: None,
+            authoritative: false,
+            flags: false,
+            budget_tokens: Some(20000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap();
+    out.lines()
+        .find(|l| l.starts_with("final:"))
+        .unwrap_or_else(|| panic!("no final line: {out}"))
+        .to_string()
+}
+
+#[tokio::test]
+async fn overrides_uncertainty_is_noted_only_where_it_matters() {
+    let f = tools("wrynose", |root| {
+        // Part of OVERRIDES is genuinely unknown: a variable nothing sets.
+        replace_in(
+            root,
+            "meta-core/conf/bitbake.conf",
+            "${CLASSOVERRIDE}${LIBCOVERRIDE}",
+            "${CLASSOVERRIDE}:${NOT_SET_ANYWHERE}${LIBCOVERRIDE}",
+        );
+        append_to(
+            root,
+            "meta-core/recipes-core/hello/hello_1.1.bb",
+            "\nPLAIN_VALUE = \"a b\"\n\
+             COND_VALUE = \"a\"\n\
+             COND_VALUE:append:nosuchoverride = \" b\"\n\
+             USES_COND = \"x ${COND_VALUE}\"\n\
+             LEFT = \"${NOT_SET_EITHER} y\"\n",
+        );
+    });
+    // No conditional operation anywhere in its history: certain, no note.
+    assert_eq!(var_final(&f, "PLAIN_VALUE").await, "final: \"a b\"");
+    // An inactive `:append:nosuchoverride` could be active if the unknown entry were
+    // `nosuchoverride`: flagged, and said how (the text is complete).
+    for name in ["COND_VALUE", "USES_COND"] {
+        let l = var_final(&f, name).await;
+        assert!(
+            l.contains(
+                "may differ: an override decision it depends on is uncertain because OVERRIDES has unresolved NOT_SET_ANYWHERE"
+            ),
+            "{l}"
+        );
+        assert!(!l.contains("left as written"), "{l}");
+    }
+    // A reference really left in the text.
+    let l = var_final(&f, "LEFT").await;
+    assert!(
+        l.ends_with("(unresolved, left as written: NOT_SET_EITHER)"),
+        "{l}"
+    );
 }

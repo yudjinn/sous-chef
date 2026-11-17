@@ -186,7 +186,13 @@ Output: one row per operation on the variable and its override variants, in pars
 
 Then the notes: `final:` with the value in quotes (`final[flag]:` for flags; `final: X is
 not set`), cut at 600 characters with the full text in a `value` handle; references left
-unexpanded; a warning per anonymous python function that changes the variable by name, and
+unexpanded (`(unresolved, left as written: X)`, only for a `${X}` still in the text); `(may
+differ: an override decision it depends on is uncertain because OVERRIDES has unresolved
+X)` when the text is complete but an override variant or a conditional `:append` /
+`:prepend` / `:remove` of the variable, or of one it references, was judged inactive while
+part of `OVERRIDES` is unknown (a value with no conditional operation in its history never
+carries it); a note for each reference followed with an uncertain value (`inherit_defer
+toolchain/${TOOLCHAIN}` while `OVERRIDES` holds python); a warning per anonymous python function that changes the variable by name, and
 one for each that is opaque (changes variables through computed names or hands `d` to other
 code), since anonymous python is never run; a count of the other anonymous functions;
 `note: global configuration only (no recipe)` without a recipe; the python note when the
