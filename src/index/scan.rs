@@ -597,6 +597,12 @@ fn walk(ws: &Workspace, layers: &[LayerRow]) -> Vec<Found> {
             .filter(|r| **r != own && r.starts_with(&own))
             .cloned()
             .collect();
+        // The walk does not follow symlinks, so from a canonical root inside the workspace
+        // every directory it enters is canonical and confined, and a regular file in one is
+        // too: confined once here, not once per file (each `confine` canonicalises the whole
+        // path). A symlink is still confined on its own.
+        let trusted_root = fs::canonicalize(&layer.root).is_ok_and(|c| c == layer.root)
+            && ws.confine(&layer.root).is_ok();
         let walker = ignore::WalkBuilder::new(&layer.root)
             .standard_filters(false)
             .hidden(true)
@@ -614,16 +620,49 @@ fn walk(ws: &Workspace, layers: &[LayerRow]) -> Vec<Found> {
             })
             .build();
         for entry in walker.flatten() {
-            if entry.file_type().is_some_and(|t| t.is_dir()) {
+            let Some(t) = entry.file_type() else { continue };
+            if t.is_dir() {
                 continue;
             }
             let path = entry.path();
-            if let Some(f) = found_file(ws, i, &layer.root, path) {
+            let found = if trusted_root && t.is_file() {
+                found_regular_file(i, &layer.root, path)
+            } else {
+                found_file(ws, i, &layer.root, path)
+            };
+            if let Some(f) = found {
                 out.push(f);
             }
         }
     }
     out
+}
+
+/// [`found_file`] for a regular file (not a symlink) the walk reached from a canonical,
+/// confined layer root without following symlinks: the path is its own resolved path.
+fn found_regular_file(layer: usize, root: &Path, path: &Path) -> Option<Found> {
+    let kind = FileKind::from_path(path)?;
+    let rel = path.strip_prefix(root).ok()?.to_str()?.to_string();
+    let meta = fs::symlink_metadata(path).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    Some(Found {
+        layer,
+        rel,
+        real: path.to_path_buf(),
+        kind,
+        mtime: mtime_nanos(&meta),
+        size: i64::try_from(meta.len()).unwrap_or(i64::MAX),
+    })
+}
+
+fn mtime_nanos(meta: &fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
 }
 
 /// `<build>/conf/*.conf`.
@@ -650,18 +689,12 @@ fn found_file(ws: &Workspace, layer: usize, root: &Path, path: &Path) -> Option<
     if !meta.is_file() {
         return None;
     }
-    let mtime = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
-        .unwrap_or(0);
     Some(Found {
         layer,
         rel,
         real,
         kind,
-        mtime,
+        mtime: mtime_nanos(&meta),
         size: i64::try_from(meta.len()).unwrap_or(i64::MAX),
     })
 }
