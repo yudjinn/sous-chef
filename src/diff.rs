@@ -5,8 +5,8 @@
 //! Revisions are read with `git ls-tree` and `git cat-file --batch` (the working tree from
 //! disk, with the file list from `git ls-files`) into the real parser; nothing is checked
 //! out, nothing is written into the repository, nothing is fetched. Every git command is
-//! read-only, run with argv only, a timeout, no optional locks and the `GIT_DIR` family
-//! removed. A revision is validated before it reaches git (no leading `-`, no whitespace,
+//! read-only and goes through [`crate::gitcmd`] (argv only, a timeout, no optional locks,
+//! fsmonitor off, the `GIT_DIR` family removed). A revision is validated before it reaches git (no leading `-`, no whitespace,
 //! no `:`, no range) and resolved with `rev-parse --verify --end-of-options <rev>^{commit}`;
 //! only the full commit hash is passed on.
 //!
@@ -34,11 +34,9 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -276,126 +274,26 @@ pub struct FileCount {
 // ---------------------------------------------------------------------------------------
 // git
 
-// TODO: use the shared git helper once merged
+/// The release diff's use of [`crate::gitcmd`]: its timeouts, and the error type of this
+/// module.
 mod git {
     use super::*;
-
-    /// Removed from git's environment so the repository is the one `current_dir` names.
-    const GIT_ENV: &[&str] = &[
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_COMMON_DIR",
-        "GIT_NAMESPACE",
-        "GIT_CEILING_DIRECTORIES",
-        "GIT_CONFIG",
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_EXTERNAL_DIFF",
-        "GIT_PAGER",
-    ];
+    pub use crate::gitcmd::nul_fields;
 
     /// For short commands.
     pub const TIMEOUT: Duration = Duration::from_secs(20);
-    /// For `cat-file --batch` over a whole layer.
+    /// For `cat-file --batch` and `diff` over a whole layer.
     pub const BATCH_TIMEOUT: Duration = Duration::from_secs(120);
 
-    /// Runs a read-only git command in `dir`: argv only, stdin closed unless `input` is
-    /// given, no prompts, no optional locks, no fsmonitor, the `GIT_DIR` family removed,
-    /// killed after `timeout`. Its stdout when it exits 0, else the first line git wrote to
-    /// stderr.
-    pub fn run(
-        dir: &Path,
-        args: &[&str],
-        input: Option<Vec<u8>>,
-        timeout: Duration,
-    ) -> std::result::Result<Vec<u8>, String> {
-        let mut cmd = Command::new("git");
-        cmd.args(["--no-optional-locks", "-c", "core.fsmonitor=false"])
-            .args(args)
-            .current_dir(dir)
-            .stdin(if input.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .env("LC_ALL", "C");
-        for v in GIT_ENV {
-            cmd.env_remove(v);
-        }
-        let what = args.first().copied().unwrap_or("git");
-        let mut child = cmd.spawn().map_err(|e| format!("cannot run git: {e}"))?;
-        let writer = match (input, child.stdin.take()) {
-            (Some(data), Some(mut stdin)) => Some(thread::spawn(move || {
-                let _ = stdin.write_all(&data);
-            })),
-            _ => None,
-        };
-        let mut stdout = child.stdout.take().ok_or("git: no stdout")?;
-        let mut stderr = child.stderr.take().ok_or("git: no stderr")?;
-        let out_reader = thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = stdout.read_to_end(&mut buf);
-            buf
-        });
-        let err_reader = thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = stderr.read_to_end(&mut buf);
-            buf
-        });
-        let start = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break Some(status),
-                Ok(None) if start.elapsed() < timeout => thread::sleep(Duration::from_millis(2)),
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break None;
-                }
-            }
-        };
-        if let Some(w) = writer {
-            let _ = w.join();
-        }
-        let out = out_reader
-            .join()
-            .map_err(|_| "git: reading stdout failed")?;
-        let err = err_reader.join().unwrap_or_default();
-        match status {
-            Some(s) if s.success() => Ok(out),
-            Some(_) => {
-                let msg = String::from_utf8_lossy(&err);
-                let line = msg.lines().map(str::trim).find(|l| !l.is_empty());
-                Err(format!(
-                    "git {what} failed: {}",
-                    line.unwrap_or("no message")
-                ))
-            }
-            None => Err(format!(
-                "git {what} timed out after {} s",
-                timeout.as_secs()
-            )),
-        }
+    /// [`crate::gitcmd::run`] without input; stdout, or why git failed.
+    pub fn run(dir: &Path, args: &[&str], timeout: Duration) -> Result<Vec<u8>> {
+        crate::gitcmd::run(dir, args, None, timeout).map_err(|msg| Error::Invalid { msg })
     }
 
-    /// [`run`] with the short timeout, stdout as text.
+    /// [`crate::gitcmd::run`] with the short timeout, stdout as text, the reason on failure.
     pub fn text(dir: &Path, args: &[&str]) -> std::result::Result<String, String> {
-        run(dir, args, None, TIMEOUT).map(|b| String::from_utf8_lossy(&b).into_owned())
-    }
-
-    /// NUL-separated output split into its fields.
-    pub fn nul_fields(bytes: &[u8]) -> Vec<String> {
-        bytes
-            .split(|b| *b == 0)
-            .filter(|f| !f.is_empty())
-            .map(|f| String::from_utf8_lossy(f).into_owned())
-            .collect()
+        crate::gitcmd::run(dir, args, None, TIMEOUT)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
     }
 }
 
@@ -497,10 +395,8 @@ impl Side {
         let out = git::run(
             dir,
             &["ls-tree", "-r", "-z", "--end-of-options", commit],
-            None,
             git::TIMEOUT,
-        )
-        .map_err(|e| Error::Invalid { msg: e })?;
+        )?;
         let mut files = BTreeMap::new();
         for entry in git::nul_fields(&out) {
             // `<mode> SP <type> SP <object> TAB <path>`
@@ -527,10 +423,8 @@ impl Side {
         let out = git::run(
             dir,
             &["ls-files", "-z", "-c", "-o", "--exclude-standard"],
-            None,
             git::TIMEOUT,
-        )
-        .map_err(|e| Error::Invalid { msg: e })?;
+        )?;
         let mut files = BTreeMap::new();
         for path in git::nul_fields(&out) {
             if dir.join(&path).is_file() {
@@ -581,41 +475,21 @@ impl Side {
             }
             return Ok(());
         }
-        let mut input = Vec::new();
+        let mut oids = Vec::new();
         let mut order = Vec::new();
         for p in wanted {
             if let Some(Some(oid)) = self.files.get(p) {
-                input.extend_from_slice(oid.as_bytes());
-                input.push(b'\n');
+                oids.push(oid.as_str());
                 order.push(p.clone());
             }
         }
-        let out = git::run(
-            &self.dir,
-            &["cat-file", "--batch"],
-            Some(input),
-            git::BATCH_TIMEOUT,
-        )
-        .map_err(|e| Error::Invalid { msg: e })?;
-        let mut pos = 0;
-        for p in order {
-            let Some(nl) = out[pos..].iter().position(|b| *b == b'\n') else {
-                break;
-            };
-            let header = String::from_utf8_lossy(&out[pos..pos + nl]).into_owned();
-            pos += nl + 1;
-            let mut parts = header.split(' ');
-            let (_oid, kind, size) = (parts.next(), parts.next(), parts.next());
-            let Some(size) = size.and_then(|s| s.parse::<usize>().ok()) else {
-                // `<oid> missing`
-                continue;
-            };
-            let end = (pos + size).min(out.len());
-            if kind == Some("blob") {
-                let text: Arc<str> = Arc::from(parse::lexer::decode(&out[pos..end]).as_ref());
+        let blobs = crate::gitcmd::cat_file_batch(&self.dir, &oids, git::BATCH_TIMEOUT)
+            .map_err(|msg| Error::Invalid { msg })?;
+        for (p, blob) in order.into_iter().zip(blobs) {
+            if let Some(bytes) = blob {
+                let text: Arc<str> = Arc::from(parse::lexer::decode(&bytes).as_ref());
                 self.texts.insert(p, text);
             }
-            pos = end + 1;
         }
         Ok(())
     }
@@ -2495,8 +2369,7 @@ fn changed_files(old: &Side, new: &Side) -> Result<Vec<(String, &'static str)>> 
     if let Some(to) = &new.commit {
         args.push(to.as_str());
     }
-    let out = git::run(&old.dir, &args, None, git::BATCH_TIMEOUT)
-        .map_err(|e| Error::Invalid { msg: e })?;
+    let out = git::run(&old.dir, &args, git::BATCH_TIMEOUT)?;
     let fields = git::nul_fields(&out);
     let mut map: BTreeMap<String, &'static str> = BTreeMap::new();
     let mut it = fields.into_iter();
@@ -2533,7 +2406,6 @@ fn uncommitted_count(dir: &Path) -> usize {
             "-z",
             "HEAD",
         ],
-        None,
         git::TIMEOUT,
     ) {
         paths.extend(git::nul_fields(&out));
@@ -2541,7 +2413,6 @@ fn uncommitted_count(dir: &Path) -> usize {
     if let Ok(out) = git::run(
         dir,
         &["ls-files", "-z", "-o", "--exclude-standard"],
-        None,
         git::TIMEOUT,
     ) {
         paths.extend(git::nul_fields(&out));
