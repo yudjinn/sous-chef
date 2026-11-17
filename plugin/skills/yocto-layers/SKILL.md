@@ -13,16 +13,16 @@ BitBake's parse order, layer priority and override chain, which a grep does not.
 
 | Question | Tool |
 |---|---|
-| What is this recipe: file, versions, bbappends, classes, key values | `recipe` (`show`: `summary`, `tree` of files in parse order, `outline` of functions and tasks) |
+| What is this recipe: file, versions, bbappends, classes, key values | `recipe` (`show`: `summary`, `tree` of files in parse order, `outline` of functions and tasks, `sources` with patch files and their `Upstream-Status`, `tasks` in order, `packages`) |
 | Final value of a variable and every operation on it, in order | `var` (`recipe`, `machine`, `distro`; `VAR[flag]`; `flags: true`) |
 | Active overrides, conditional operations, misspelt overrides | `overrides` (`show`: `chain`, `conditional`, `dead`) |
 | The text of a function or assignment | `item` (`loc`, or `recipe` + `name`, or `file` + `name`) |
 | Where a name or text occurs | `search` (`mode`: `name`, `regex`, `fts`; filter by `kind`, `layer`, `recipe`) |
 | A class: which file wins, its interface, who inherits it | `class` (`show`: `summary`, `users`, `outline`) |
-| Layers, shadowed recipes and classes, bbappend matches | `layers` (`show`: `list`, `shadowed`, `appends`) |
+| Layers, shadowed recipes and classes, bbappend matches, layer compatibility | `layers` (`show`: `list`, `shadowed`, `appends`, `compat`) |
 | Build / runtime / PACKAGECONFIG deps, reverse deps, providers | `deps` (`kind`) |
 | Convention and syntax problems | `lint` (`target`: recipe, layer, pointer or path) |
-| New recipe, bbappend, layer, class | `scaffold` |
+| New recipe, bbappend, layer, class; an `.inc` for shared versions; where a change belongs | `scaffold` (`kind`: `recipe`, `bbappend`, `layer`, `class`, `inc_split`, `where`) |
 | Run bitbake, devtool, bitbake-layers | `bitbake` (`op`), then `op: status` to poll |
 | Why a task failed | `log` |
 | Read stored output | `slice` |
@@ -46,18 +46,24 @@ BitBake's parse order, layer priority and override chain, which a grep does not.
   evaluated` or `1 value depends on python ... use authoritative=true`.
 - A warning that anonymous python changes a variable means the value shown is the one
   before that code runs; an opaque anonymous function may change anything.
-- In those cases `var` with `authoritative: true` asks BitBake (`bitbake -e`); it needs an
-  initialised build environment. Until that mode is implemented it returns `bitbake is not
-  available`.
+- In those cases `var` with `authoritative: true` asks BitBake (`bitbake -e`, as a
+  background job; a few seconds with a warm BitBake cache). It needs a build environment
+  (`status` shows it). The dump is cached until a `.conf`, class, `.inc` or the recipe
+  changes; while a build runs it answers from that cache or says it cannot run now.
+- A note `no MACHINE is set` means machine-specific values were not applied: pass
+  `machine`.
 
 ## Writing
 
 - `scaffold` is a dry run that returns the planned files unless `write: true`. It writes
   only in layers listed in `writable_layers`, and lints what it wrote.
+- Not sure where a change belongs? `scaffold kind=where name=<recipe>` with a `variable`,
+  `task` or `intent` says which file (recipe, bbappend, machine or distro conf, image) and
+  the call that makes the change; it writes nothing.
 - To change a recipe of an upstream layer, add a bbappend in a writable layer
   (`scaffold kind=bbappend`), not an edit of the upstream file.
-- The `inc_split` and `where` kinds are documented but return an error until they are
-  implemented.
+- `scaffold kind=inc_split` moves what several versions of your recipe share into
+  `<pn>.inc`; it refuses when the move could change what BitBake parses.
 - `bitbake` starts a background job and returns `job:<n>` at once; one job runs at a time.
   `cleansstate`, `cleanall`, `devtool reset` and `devtool finish` need `confirm: true` and
   `allow_destructive` in `sous-chef.toml`.
@@ -73,8 +79,9 @@ the release it applies to. Scaffold output follows the same releases.
 
 With the plugin's hooks on: Grep and Read results on Yocto files get the enclosing item,
 and for a recipe the bbappends and includes that also contribute; large `bitbake`,
-`devtool` or `bitbake-layers` output in Bash is replaced by a digest and a handle; after an
-Edit or Write of a Yocto file its lint findings are added. A plain `grep -rn` or `rg -n`
+`devtool` or `bitbake-layers` output in Bash (also through `kas build` or `kas shell -c`) is
+replaced by a digest and a handle; after an Edit or Write of a Yocto file its lint findings
+are added. A plain `grep -rn` or `rg -n`
 run through Bash (no pipe; line numbers asked for) gets the same annotation as Grep, for
 its first 200 hits; anything else run through Bash gets none: use `search`.
 
@@ -82,7 +89,12 @@ its first 200 hits; anything else run through Bash gets none: use `search`.
 
 A project set up with kas (<https://kas.readthedocs.io>) keeps its configuration in kas
 YAML files, and kas writes `conf/local.conf` and `conf/bblayers.conf` in its build
-directory (`build/` by default) from them. Make a configuration change in the kas file
-(`local_conf_header`, `machine`, `distro`, the repos and layers), not in the generated
-`local.conf` or `bblayers.conf`. Run BitBake inside the kas environment:
-`kas shell <file.yml>[:<more.yml>] -c '<bitbake command>'`.
+directory (`build/` by default) from them, again on every checkout, shell and build. Make
+a configuration change in the kas file (`local_conf_header`, `machine`, `distro`, the repos
+and layers), not in the generated `local.conf` or `bblayers.conf`; lint reports edits there
+(`org/generated-conf-edit`). sous-chef finds the project (`kas` in `sous-chef.toml`, or the
+only kas file next to a kas build directory) and `status` shows its files, machine, distro
+and layers. `scaffold kind=layer` adds a new layer to the kas file, not to `bblayers.conf`.
+With `kas` on `PATH` the `bitbake` tool runs commands through `kas shell
+--keep-config-unchanged`; by hand: `kas shell <file.yml>[:<more.yml>] -c '<bitbake
+command>'`.
