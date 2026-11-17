@@ -192,8 +192,8 @@ pub fn generator(kind: Kind) -> Option<&'static dyn Generator> {
     match kind {
         Kind::Recipe => Some(&recipe::RecipeGen), // T6.2: recipe.rs
         Kind::Bbappend => Some(&append::AppendGen), // T6.2: append.rs
-        Kind::Layer => None,                      // T6.3: layer.rs
-        Kind::Class => None,                      // T6.3: class.rs
+        Kind::Layer => Some(&layer::LayerGen),    // T6.3: layer.rs
+        Kind::Class => Some(&class::ClassGen),    // T6.3: class.rs
         Kind::IncSplit => None,                   // T6.4: inc_split.rs
         Kind::Where => None,                      // T6.5: placement.rs
     }

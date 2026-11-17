@@ -1,0 +1,18 @@
+---
+source: tests/scaffold_layer_class.rs
+expression: text
+---
+--- create meta-mine:classes-global/site_policy.bbclass
+# site_policy.bbclass
+#
+# Logic shared by the configurations that inherit this class.
+#
+# Use: INHERIT += "site_policy" in a configuration file.
+#
+# Interface (weak defaults, ?=; set them in the recipe to override):
+#   SITE_POLICY_LEVEL  default "strict"
+#   SITE_POLICY_EXTRA  default ""
+
+SITE_POLICY_LEVEL ?= "strict"
+SITE_POLICY_EXTRA ?= ""
+note: enable it with INHERIT += "site_policy" in a distro or local configuration (meta-mine:classes-global/site_policy.bbclass)

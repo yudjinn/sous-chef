@@ -1,0 +1,53 @@
+---
+source: tests/scaffold_layer_class.rs
+expression: text
+---
+--- create meta-new:conf/layer.conf
+# We have a conf and classes directory, add to BBPATH
+BBPATH .= ":${LAYERDIR}"
+
+# We have recipes-* directories, add to BBFILES
+BBFILES += "${LAYERDIR}/recipes-*/*/*.bb \
+            ${LAYERDIR}/recipes-*/*/*.bbappend"
+
+BBFILE_COLLECTIONS += "meta-new"
+BBFILE_PATTERN_meta-new = "^${LAYERDIR}/"
+BBFILE_PRIORITY_meta-new = "6"
+
+LAYERDEPENDS_meta-new = "core"
+LAYERSERIES_COMPAT_meta-new = "wrynose"
+--- create meta-new:README.md
+# meta-new
+
+Compatible with the Yocto Project series: wrynose.
+
+## Dependencies
+
+- `core`
+
+## Adding the layer to a build
+
+Run `bitbake-layers add-layer <path to meta-new>`, or add its path to `BBLAYERS` in
+`conf/bblayers.conf`.
+--- modify build:conf/bblayers.conf
+# POKY_BBLAYERS_CONF_VERSION is increased each time build/conf/bblayers.conf
+# changes incompatibly
+POKY_BBLAYERS_CONF_VERSION = "2"
+
+BBPATH = "${TOPDIR}"
+BBFILES ?= ""
+
+LAYERS_ROOT = "${TOPDIR}/.."
+
+BBLAYERS ?= " \
+  ${LAYERS_ROOT}/meta-core \
+  ${TOPDIR}/../meta-vendor \
+  ${TOPDIR}/../meta-mine \
+  "
+
+# Added by sous-chef scaffold.
+BBLAYERS += "${TOPDIR}/../meta-new"
+note: the layer is created in <ws>: a new layer must go in a directory that already holds a workspace layer (or the one `path` names), outside every existing layer
+note: BBLAYERS in build:conf/bblayers.conf gets the new layer (a separate change in this plan)
+note: to scaffold into meta-new later, list it in writable_layers in sous-chef.toml; sous-chef sees the layer once the workspace is discovered again (restart the server)
+note: the new layer's files are not linted after the write: the layer is not part of the loaded workspace yet

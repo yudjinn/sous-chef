@@ -748,6 +748,34 @@ A git URL without `branch` (and without `nobranch=1`): BitBake 2.0 `fetch2/git.p
 tools and repositories is uncertain") and falls back to `master`. The generator asks for a
 branch instead of relying on that.
 
+### Scaffold: layers and classes (verified, T6.3)
+
+Checked 2026-11-17 against OE-core `wrynose` (`meta/lib/bblayers/create.py`,
+`meta/lib/bblayers/templates/layer.conf`, `meta/classes-global/base.bbclass`) and BitBake
+`master` (`lib/bb/parse/ast.py`). `src/scaffold/layer.rs` and `class.rs` follow this.
+
+- **`bitbake-layers create-layer`:** the layer name is the basename of the directory and is
+  also the collection (`--layerid` overrides it); default priority 6; `LAYERSERIES_COMPAT`
+  is filled from `LAYERSERIES_CORENAMES`; the `layer.conf` template extends `BBPATH` with
+  `${LAYERDIR}`, adds `recipes-*/*/*.bb` and `.bbappend` to `BBFILES`, sets
+  `BBFILE_COLLECTIONS`, `BBFILE_PATTERN_<id> = "^${LAYERDIR}/"`, `BBFILE_PRIORITY_<id>`,
+  `LAYERDEPENDS_<id> = "core"` and `LAYERSERIES_COMPAT_<id>`; it writes `README` and
+  `COPYING.MIT` and an example recipe. The generator differs where M6 says so: compat from
+  the core layer's own `LAYERSERIES_COMPAT` (equal to `LAYERSERIES_CORENAMES` in OE-core),
+  `README.md`, `COPYING.MIT` and `recipes-example/` only when asked. It adds the layer with
+  `BBLAYERS += "<path>"` appended to `bblayers.conf` (`bitbake-layers add-layer` edits the
+  `BBLAYERS` assignment instead; the result is the same list).
+- **Tasks a class may override without `addtask`:** `base.bbclass` has `addtask fetch`,
+  `unpack after do_fetch`, `configure after do_patch`, `compile after do_configure`,
+  `install after do_compile`, `build after do_populate_sysroot` (and others), and
+  `EXPORT_FUNCTIONS do_fetch do_unpack do_configure do_compile do_install`; `do_patch` comes
+  from `meta/classes-global/patch.bbclass` (`addtask patch after do_unpack`,
+  `EXPORT_FUNCTIONS do_patch`, implemented by python `patch_do_patch`). Any other task a class defines needs `addtask`.
+- **`EXPORT_FUNCTIONS`** (`ExportFuncsNode`): in class `c`, `do_x` becomes a stub calling
+  `c_do_x` (the function is named `<classname>_<func>`); a class name containing `-` with a
+  shell function is fatal ("contains a dash character and is calling an sh function"), so
+  the generator refuses `-` in the name of a class with tasks.
+
 *Verify* (open, not used by any code): whether Wrynose changes how the build environment is
 initialised, which matters to `src/bitbake/env.rs` (it sources `oe-init-build-env` or uses an
 environment that is already set up). Checked 2026-11-17: the 6.0 migration guide only says

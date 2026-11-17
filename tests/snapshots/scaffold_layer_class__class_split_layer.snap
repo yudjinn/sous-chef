@@ -1,0 +1,44 @@
+---
+source: tests/scaffold_layer_class.rs
+expression: text
+---
+--- create meta-mine:classes-recipe/widget_docs.bbclass
+# widget_docs.bbclass
+#
+# Builds and deploys the widget documentation.
+#
+# Use: inherit widget_docs
+#
+# Interface (weak defaults, ?=; set them in the recipe to override):
+#   WIDGET_DOCS_DIR     default "${datadir}/doc/${PN}"
+#   WIDGET_DOCS_FORMAT  default "html"
+#
+# Tasks (exported with EXPORT_FUNCTIONS; a recipe's own do_<task> replaces them):
+#   do_configure: replaces the default implementation
+#   do_install: replaces the default implementation
+#   do_deploy_docs: new task, after do_install before do_build
+#   do_check_docs: new task, after do_compile before do_build
+
+WIDGET_DOCS_DIR ?= "${datadir}/doc/${PN}"
+WIDGET_DOCS_FORMAT ?= "html"
+
+widget_docs_do_configure() {
+	:
+}
+
+widget_docs_do_install() {
+	install -d ${D}
+}
+
+widget_docs_do_deploy_docs() {
+	:
+}
+addtask deploy_docs after do_install before do_build
+
+widget_docs_do_check_docs() {
+	:
+}
+addtask check_docs after do_compile before do_build
+
+EXPORT_FUNCTIONS do_configure do_install do_deploy_docs do_check_docs
+note: use it with `inherit widget_docs` in a recipe (meta-mine:classes-recipe/widget_docs.bbclass)
