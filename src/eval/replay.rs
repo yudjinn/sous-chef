@@ -20,7 +20,10 @@
 //! statement, following `require` / `include` / `include_all` / `inherit` where they appear
 //! (targets resolved with the store as it is at that point, along the current `BBPATH`; a
 //! class is parsed once, `__inherit_cache`); each bbappend in application order; deferred
-//! inherits; `expand_keys`. Anonymous python is stored, never run.
+//! inherits; `expand_keys`. Anonymous python is stored, never run. On a release without
+//! `Feature::InheritDefer` an `inherit_defer` line is not a directive (BitBake fails with
+//! "unparsed line"): it is recorded in [`ReplayNotes::references`] as
+//! [`RefProblem::NotInRelease`] and nothing is inherited.
 //!
 //! **`FILE` and the values computed from it.** BitBake sets `FILE` to every `.conf`, `.bb`,
 //! `.inc` and `.bbappend` while it is parsed and restores it afterwards (not for classes).
@@ -62,6 +65,7 @@ use super::{DataStore, FileVisit, OpStatus, Target, VarOp};
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
 use crate::index::{self, Index};
+use crate::release::Feature;
 use crate::types::{AssignOp, FileKind, LineSpan, Loc, VarRef};
 use crate::workspace::Workspace;
 use crate::workspace::resolve::{self, Resolver};
@@ -145,6 +149,10 @@ pub enum RefProblem {
     NotFound(String),
     /// The file is already being parsed further up (BitBake would recurse until it fails).
     Cycle(Loc),
+    /// The directive does not exist on the workspace release (`inherit_defer` before
+    /// Scarthgap): BitBake fails to parse the file there ("unparsed line"). The replay skips
+    /// the statement and goes on.
+    NotInRelease(Feature),
 }
 
 /// One piece of a function's value (see [`DataStore::function`]).
@@ -940,7 +948,19 @@ impl<'a> Replay<'a> {
             }
             "inherit" => {
                 let text = st.name.clone().unwrap_or_default();
-                if st.op.as_deref() == Some("inherit_defer") {
+                let deferred = st.op.as_deref() == Some("inherit_defer");
+                if deferred && !self.ws.release.release.has(Feature::InheritDefer) {
+                    // BitBake before 2.8 has no such directive: the line falls through to
+                    // ConfHandler.feeder and fails with "unparsed line" (bitbake-semantics.md,
+                    // "Directives"). Recorded, and the class is not inherited.
+                    self.issue(
+                        Some(&st.loc),
+                        via,
+                        "inherit_defer",
+                        &text,
+                        RefProblem::NotInRelease(Feature::InheritDefer),
+                    );
+                } else if deferred {
                     Arc::make_mut(&mut self.ds.notes).deferred.push(Deferred {
                         text,
                         loc: Some(st.loc.clone()),

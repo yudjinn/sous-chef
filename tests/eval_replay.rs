@@ -11,6 +11,7 @@ use common::*;
 use sous_chef::error::Error;
 use sous_chef::eval::{self, ConfigCache, DataStore, OpStatus, RefProblem, Target};
 use sous_chef::index::Index;
+use sous_chef::release::Feature;
 use sous_chef::types::{AssignOp, FileKind};
 use sous_chef::workspace::Workspace;
 
@@ -845,4 +846,76 @@ fn static_walk_and_replay_differ_where_documented() {
             ),
         ]
     );
+}
+
+/// The fixture copy on `codename` with a recipe that uses `inherit_defer` on a class in
+/// `classes/` (found on every release).
+fn deferring(codename: &str) -> Fx {
+    let (tmp, _root, _cfg, ws) = temp_ws_release(codename, |root| {
+        let dir = root.join("meta-mine/recipes-app/later");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("later_1.0.bb"),
+            "inherit_defer deferme\nX = \"1\"\n",
+        )
+        .unwrap();
+        let c = root.join("meta-mine/classes");
+        fs::create_dir_all(&c).unwrap();
+        fs::write(c.join("deferme.bbclass"), "DEFERRED = \"yes\"\n").unwrap();
+    });
+    indexed(ws, Some(tmp))
+}
+
+#[test]
+fn inherit_defer_before_scarthgap_is_a_problem_and_inherits_nothing() {
+    let fx = deferring("kirkstone");
+    let ds = eval(&fx, &target(Some("later"), None));
+    let issues: Vec<(String, String, String, RefProblem)> = ds
+        .replay()
+        .references
+        .iter()
+        .filter(|r| r.kind == "inherit_defer")
+        .map(|r| {
+            (
+                r.loc.as_ref().map(|l| l.to_string()).unwrap_or_default(),
+                r.kind.clone(),
+                r.text.clone(),
+                r.problem.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        issues,
+        [(
+            "meta-mine:recipes-app/later/later_1.0.bb:1".to_string(),
+            "inherit_defer".to_string(),
+            "deferme".to_string(),
+            RefProblem::NotInRelease(Feature::InheritDefer),
+        )]
+    );
+    assert!(ds.value("DEFERRED").is_none());
+    assert!(
+        !ds.files()
+            .iter()
+            .any(|v| v.loc.path.ends_with("deferme.bbclass"))
+    );
+    // The rest of the recipe is still replayed.
+    assert_eq!(ds.value("X").unwrap().text, "1");
+}
+
+#[test]
+fn inherit_defer_from_scarthgap_inherits_at_the_end() {
+    let fx = deferring("scarthgap");
+    let ds = eval(&fx, &target(Some("later"), None));
+    assert!(
+        ds.replay()
+            .references
+            .iter()
+            .all(|r| r.kind != "inherit_defer"),
+        "{:?}",
+        ds.replay().references
+    );
+    assert_eq!(ds.value("DEFERRED").unwrap().text, "yes");
+    let last = ds.files().last().unwrap();
+    assert_eq!(last.loc.to_string(), "meta-mine:classes/deferme.bbclass:1");
 }
