@@ -34,6 +34,7 @@ use std::sync::Arc;
 use super::datastore::{Keyword, Piece, base_of, split_keyword};
 use super::expand::{Expander, Source};
 use super::{DataStore, OpStatus, Value, VarOp};
+use crate::parse::words;
 
 /// Nesting limit for variant-of-variant recursion (each level is a strictly longer name in
 /// normal data; the limit guards against odd renames).
@@ -42,8 +43,11 @@ const MAX_VARIANT_DEPTH: usize = 32;
 /// The active override list and what is uncertain about it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct OverrideState {
-    /// Entries of `OVERRIDES`, lowest priority first, empty entries dropped.
+    /// Known entries of `OVERRIDES`, lowest priority first, empty entries and unevaluated
+    /// entries dropped.
     pub(crate) list: Vec<String>,
+    /// Entries that hold an unevaluated `${...}` (`parse::words`), as written.
+    pub(crate) unevaluated: Vec<String>,
     pub(crate) set: HashSet<String>,
     /// `OVERRIDES` had an empty entry (`a::b`); BitBake keeps it, so an empty override
     /// element counts as active.
@@ -60,9 +64,13 @@ impl OverrideState {
     fn from_value(v: Option<Value>) -> OverrideState {
         let mut s = OverrideState::default();
         if let Some(v) = v {
-            for e in v.text.split(':') {
+            for e in words::colon_parts(&v.text) {
                 if e.is_empty() {
                     s.has_empty = true;
+                } else if words::is_unevaluated(e) {
+                    // `${@...}dogbonedark`: what it stands for is not known; never an
+                    // override name (the value is flagged through `python` / `unresolved`).
+                    s.unevaluated.push(e.to_string());
                 } else {
                     s.list.push(e.to_string());
                     s.set.insert(e.to_string());
@@ -96,7 +104,7 @@ impl OverrideState {
 
     /// Some entries are unknown (python or undefined variables).
     fn uncertain(&self) -> bool {
-        self.python || !self.unresolved.is_empty()
+        self.python || !self.unresolved.is_empty() || !self.unevaluated.is_empty()
     }
 }
 
@@ -151,6 +159,11 @@ impl Eval<'_> {
         let mut v = c.parsed?;
         // Anonymous python may change this variable (recorded by the replay, T3.4).
         if self.ds.notes.python_vars.contains(base_of(name)) {
+            v.unevaluated_python = true;
+        }
+        // A file reached through a reference whose value is not certain changes it
+        // (`inherit_defer toolchain/${TOOLCHAIN}` while `OVERRIDES` holds python).
+        if self.ds.notes.uncertain_vars.contains(base_of(name)) {
             v.unevaluated_python = true;
         }
         // A statement the replay could not apply may set it (`addfragments`).
@@ -284,7 +297,12 @@ impl Eval<'_> {
                 for u in &e.unresolved {
                     push_unique(&mut pv.unresolved, u);
                 }
-                words.push(e.text.split_whitespace().map(str::to_string).collect());
+                words.push(
+                    words::words(&e.text)
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                );
             }
             let mut hit = vec![false; removes.len()];
             let mut out = String::with_capacity(pv.text.len());
@@ -372,23 +390,10 @@ pub(crate) fn select_variant(
     matched.filter(|m| !m.is_empty())
 }
 
-/// Python `re.split(r'(\s)', s)`: runs of non-whitespace and single whitespace characters.
+/// Python `re.split(r'(\s)', s)`: runs of non-whitespace and single whitespace characters,
+/// an unevaluated `${...}` kept whole (`parse::words`).
 fn split_keep_whitespace(s: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    for (i, c) in s.char_indices() {
-        if c.is_whitespace() {
-            if start < i {
-                out.push(&s[start..i]);
-            }
-            out.push(&s[i..i + c.len_utf8()]);
-            start = i + c.len_utf8();
-        }
-    }
-    if start < s.len() {
-        out.push(&s[start..]);
-    }
-    out
+    words::split_keep_whitespace(s)
 }
 
 fn push_unique(v: &mut Vec<String>, s: &str) {
@@ -422,9 +427,25 @@ impl DataStore {
         Some(v)
     }
 
-    /// `OVERRIDES` entries, lowest priority first (empty entries dropped).
+    /// The known `OVERRIDES` entries, lowest priority first (empty entries dropped, and
+    /// entries that hold an unevaluated `${@...}` or undefined `${VAR}` left out: they are
+    /// not override names, see [`DataStore::override_entries`]).
     pub fn overrides(&self) -> Vec<String> {
         self.override_state().list.clone()
+    }
+
+    /// Every non-empty `OVERRIDES` entry in order, `${...}` groups kept whole
+    /// (`parse::words::colon_parts`), with whether it is unevaluated (holds `${`).
+    pub fn override_entries(&self) -> Vec<(String, bool)> {
+        let ovr = self.override_state();
+        let Some(v) = self.value_with("OVERRIDES", &ovr) else {
+            return Vec::new();
+        };
+        words::colon_parts(&v.text)
+            .into_iter()
+            .filter(|e| !e.is_empty())
+            .map(|e| (e.to_string(), words::is_unevaluated(e)))
+            .collect()
     }
 
     /// The finalised value of `OVERRIDES` the override list was split from, with its python
@@ -528,7 +549,7 @@ impl DataStore {
             return false;
         }
         let text = self.expand(&op.value).text;
-        let mut words = text.split_whitespace().peekable();
+        let mut words = words::words(&text).into_iter().peekable();
         words.peek().is_some() && words.all(|w| trace.removed.contains(w))
     }
 

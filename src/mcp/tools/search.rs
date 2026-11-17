@@ -11,6 +11,10 @@
 //! recipe's tree: the `.bb`, its includes and classes, its bbappends). In regex mode `kind`
 //! filters on the enclosing statement, so lines outside any statement are dropped. `limit`
 //! (default 30) cuts the hits with a `+N more (limit=L)` marker; the budget cuts rows after.
+//!
+//! Data files (`files.not_collected` = `data`: a `.conf` / `.inc` in a recipe's files
+//! directory that nothing includes, see `index/scan.rs`) are not searched in any mode. A hit
+//! in a `.bb` / `.bbappend` that no `BBFILES` glob collects gets a note saying so.
 
 use std::collections::HashMap;
 
@@ -111,10 +115,15 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
             };
             let more = rows.len().saturating_sub(limit);
             rows.truncate(limit);
+            let mut files: Vec<i64> = Vec::new();
             for s in &rows {
                 t.row(&[&s.loc.to_string(), &s.kind, &item_label(s), &s.snippet]);
+                if !files.contains(&s.file_id) {
+                    files.push(s.file_id);
+                }
             }
             t.limited(more, limit);
+            collection_notes(&index, &files, &mut t)?;
         }
         Mode::Regex => regex_search(&index, ctx, query, &filter, limit, &mut t)?,
     }
@@ -128,6 +137,19 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         .budget_tokens
         .unwrap_or(ctx.config.output.budget_tokens);
     Ok(t.render_as(args.format.unwrap_or_default(), budget))
+}
+
+/// A note for each file of the hits that BitBake does not parse as indexed (a `.bb` no
+/// `BBFILES` glob matches; see [`super::item::collection_note`]), in hit order.
+fn collection_notes(index: &Index, files: &[i64], t: &mut Table) -> Result<()> {
+    for id in files {
+        if let Some(f) = query::file(index, *id)?
+            && let Some(n) = super::item::collection_note(index, &f)?
+        {
+            t.note(&n);
+        }
+    }
+    Ok(())
 }
 
 /// `[name A-B]`.
@@ -207,6 +229,7 @@ fn regex_search(
     }
     let mut hits = 0usize;
     let mut skipped = 0usize;
+    let mut hit_files: Vec<i64> = Vec::new();
     for f in &files {
         let loc = f.loc(LineSpan::line(1));
         let bytes = match read_confined(&ctx.workspace, &loc) {
@@ -242,6 +265,9 @@ fn regex_search(
             if hits > limit {
                 continue;
             }
+            if !hit_files.contains(&f.id) {
+                hit_files.push(f.id);
+            }
             let at = Loc {
                 lines: LineSpan::line(n),
                 ..loc.clone()
@@ -256,6 +282,7 @@ fn regex_search(
     if hits > limit {
         t.limited(hits - limit, limit);
     }
+    collection_notes(index, &hit_files, t)?;
     if skipped > 0 {
         t.note(&format!(
             "note: {skipped} indexed {} could not be read and {} skipped",

@@ -167,8 +167,15 @@ fn live_performance() {
         return;
     };
     let build = live.join("bitbake-builds/kiss-wrynose-dogbonedark/build");
-    let perf = live.join("runs/perf");
+    // `SOUS_CHEF_PERF_DIR` puts the caches and the report elsewhere (a run that must write
+    // nothing under `runs/perf`).
+    let perf = std::env::var_os("SOUS_CHEF_PERF_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| live.join("runs/perf"));
     fs::create_dir_all(&perf).unwrap();
+    // `SOUS_CHEF_PERF_NO_EDIT=1` skips the measurements that write to the build's
+    // `conf/local.conf` (touch, change, restore).
+    let no_edit = std::env::var_os("SOUS_CHEF_PERF_NO_EDIT").is_some();
     let n = runs();
     let mut rep = Report {
         text: String::new(),
@@ -240,44 +247,49 @@ fn live_performance() {
     rep.row("no-change refresh", &stats(v), "< 150 ms (M8)");
 
     // 3. Touch one file (mtime only), then change one (a comment line), then restore it.
-    let local = build.join("conf/local.conf");
-    let original = fs::read(&local).unwrap();
-    let mut touched = Vec::new();
-    let mut changed = Vec::new();
-    let mut single = Vec::new();
-    for i in 0..n {
-        let f = fs::File::options().write(true).open(&local).unwrap();
-        f.set_modified(SystemTime::now()).unwrap();
-        drop(f);
-        let (d, _) = time(|| idx.refresh(&ws).unwrap());
-        touched.push(d);
-        let mut text = original.clone();
-        text.extend_from_slice(format!("# sous-chef perf {i}\n").as_bytes());
-        fs::write(&local, &text).unwrap();
-        let (d, r) = time(|| idx.refresh(&ws).unwrap());
-        assert_eq!(r.reindexed.len(), 1);
-        changed.push(d);
-        fs::write(&local, &original).unwrap();
-        let (d, _) = time(|| idx.refresh_file(&ws, &local).unwrap());
-        single.push(d);
+    if no_edit {
+        rep.note("SOUS_CHEF_PERF_NO_EDIT: the touch / change / refresh_file rows are skipped");
     }
-    assert_eq!(fs::read(&local).unwrap(), original);
-    idx.refresh(&ws).unwrap();
-    rep.row(
-        "refresh after touching one file (mtime only)",
-        &stats(touched),
-        "",
-    );
-    rep.row(
-        "refresh after changing one file (reparse + edges)",
-        &stats(changed),
-        "",
-    );
-    rep.row(
-        "refresh_file of that file (the edit hook's path)",
-        &stats(single),
-        "",
-    );
+    if !no_edit {
+        let local = build.join("conf/local.conf");
+        let original = fs::read(&local).unwrap();
+        let mut touched = Vec::new();
+        let mut changed = Vec::new();
+        let mut single = Vec::new();
+        for i in 0..n {
+            let f = fs::File::options().write(true).open(&local).unwrap();
+            f.set_modified(SystemTime::now()).unwrap();
+            drop(f);
+            let (d, _) = time(|| idx.refresh(&ws).unwrap());
+            touched.push(d);
+            let mut text = original.clone();
+            text.extend_from_slice(format!("# sous-chef perf {i}\n").as_bytes());
+            fs::write(&local, &text).unwrap();
+            let (d, r) = time(|| idx.refresh(&ws).unwrap());
+            assert_eq!(r.reindexed.len(), 1);
+            changed.push(d);
+            fs::write(&local, &original).unwrap();
+            let (d, _) = time(|| idx.refresh_file(&ws, &local).unwrap());
+            single.push(d);
+        }
+        assert_eq!(fs::read(&local).unwrap(), original);
+        idx.refresh(&ws).unwrap();
+        rep.row(
+            "refresh after touching one file (mtime only)",
+            &stats(touched),
+            "",
+        );
+        rep.row(
+            "refresh after changing one file (reparse + edges)",
+            &stats(changed),
+            "",
+        );
+        rep.row(
+            "refresh_file of that file (the edit hook's path)",
+            &stats(single),
+            "",
+        );
+    }
 
     // 4. Evaluation: configuration pass and a recipe, cold (new cache) and warm.
     let t = |recipe: Option<&str>| Target {

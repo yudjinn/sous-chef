@@ -54,6 +54,16 @@
 //! - `files.not_collected`: set with the edges (step 6) from the same `BBFILES` collection:
 //!   `bbfiles` for a `.bb` / `.bbappend` no glob matches, NULL otherwise. Only collected files
 //!   take part in `bbappend` edges.
+//!
+//! **Data files.** Then [`mark_data`] sets `not_collected` = `data` on every `.conf`, `.inc`
+//! and `.bbclass` that is not BitBake metadata: not in the layer's `conf/` tree, not a class
+//! in a `classes*/` directory, the target of no edge (resolved, or unresolved with a path
+//! pattern it fits), and under a directory a recipe takes files from (`files/`, `<pn>/`,
+//! `<pn>-<pv>/`) or under `files/`, `lib/`, `scripts/`, `wic/` (docs/bitbake-semantics.md,
+//! "Data files"). Its statements stay in the index (`item` shows it); search and the file
+//! listings of `query` leave it out. `meta.edges` records the version of this step
+//! (`schema::EDGES_VERSION`): an index from before it gets its edges and marks recomputed on
+//! the next refresh.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -587,6 +597,12 @@ fn walk(ws: &Workspace, layers: &[LayerRow]) -> Vec<Found> {
             .filter(|r| **r != own && r.starts_with(&own))
             .cloned()
             .collect();
+        // The walk does not follow symlinks, so from a canonical root inside the workspace
+        // every directory it enters is canonical and confined, and a regular file in one is
+        // too: confined once here, not once per file (each `confine` canonicalises the whole
+        // path). A symlink is still confined on its own.
+        let trusted_root = fs::canonicalize(&layer.root).is_ok_and(|c| c == layer.root)
+            && ws.confine(&layer.root).is_ok();
         let walker = ignore::WalkBuilder::new(&layer.root)
             .standard_filters(false)
             .hidden(true)
@@ -604,16 +620,49 @@ fn walk(ws: &Workspace, layers: &[LayerRow]) -> Vec<Found> {
             })
             .build();
         for entry in walker.flatten() {
-            if entry.file_type().is_some_and(|t| t.is_dir()) {
+            let Some(t) = entry.file_type() else { continue };
+            if t.is_dir() {
                 continue;
             }
             let path = entry.path();
-            if let Some(f) = found_file(ws, i, &layer.root, path) {
+            let found = if trusted_root && t.is_file() {
+                found_regular_file(i, &layer.root, path)
+            } else {
+                found_file(ws, i, &layer.root, path)
+            };
+            if let Some(f) = found {
                 out.push(f);
             }
         }
     }
     out
+}
+
+/// [`found_file`] for a regular file (not a symlink) the walk reached from a canonical,
+/// confined layer root without following symlinks: the path is its own resolved path.
+fn found_regular_file(layer: usize, root: &Path, path: &Path) -> Option<Found> {
+    let kind = FileKind::from_path(path)?;
+    let rel = path.strip_prefix(root).ok()?.to_str()?.to_string();
+    let meta = fs::symlink_metadata(path).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    Some(Found {
+        layer,
+        rel,
+        real: path.to_path_buf(),
+        kind,
+        mtime: mtime_nanos(&meta),
+        size: i64::try_from(meta.len()).unwrap_or(i64::MAX),
+    })
+}
+
+fn mtime_nanos(meta: &fs::Metadata) -> i64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
 }
 
 /// `<build>/conf/*.conf`.
@@ -640,18 +689,12 @@ fn found_file(ws: &Workspace, layer: usize, root: &Path, path: &Path) -> Option<
     if !meta.is_file() {
         return None;
     }
-    let mtime = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| i64::try_from(d.as_nanos()).unwrap_or(i64::MAX))
-        .unwrap_or(0);
     Some(Found {
         layer,
         rel,
         real,
         kind,
-        mtime,
+        mtime: mtime_nanos(&meta),
         size: i64::try_from(meta.len()).unwrap_or(i64::MAX),
     })
 }
@@ -844,14 +887,15 @@ fn file_rows(text: &str, kind: FileKind, file_name: &str) -> FileRows {
                 row.kind = "export_functions";
                 row.name = Some(names.join(" "));
             }
+            StatementKind::AddFragments { rest } => {
+                // `value` keeps the whole line, as for an unknown statement: the replay
+                // reads it back with `ast::add_fragments_line` (no schema change).
+                row.kind = "addfragments";
+                row.name = Some(rest.trim_start_matches(lexer::py_space).to_string());
+                row.value = Some(format!("addfragments{rest}"));
+            }
             StatementKind::Unknown { text } => {
-                match st.add_fragments() {
-                    Some(af) => {
-                        row.kind = "addfragments";
-                        row.name = Some(af.rest.trim_start_matches(lexer::py_space).to_string());
-                    }
-                    None => row.kind = "unknown",
-                }
+                row.kind = "unknown";
                 row.value = Some(text.clone());
             }
         }
@@ -933,10 +977,13 @@ fn unconditional(overrides: &[String]) -> bool {
     overrides.iter().all(|o| o == "append" || o == "prepend")
 }
 
+/// The literal words of a list value: `${...}` groups are one word each
+/// (`parse::words`) and left out with everything else that needs expansion, as are version
+/// constraints.
 fn static_words(value: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut depth = 0usize;
-    for w in value.split_whitespace() {
+    for w in crate::parse::words::words(value) {
         // Version constraints: `foo (>= 1.0)`.
         if w.starts_with('(') {
             depth += 1;
@@ -983,7 +1030,7 @@ fn collect_depends(
             }
         }
         ("PACKAGECONFIG", Some(flag)) if var.overrides.is_empty() => {
-            if let Some(field) = value.split(',').nth(2) {
+            if let Some(field) = crate::parse::words::comma_fields(value).get(2) {
                 for w in static_words(field) {
                     out.push(("PACKAGECONFIG", Some(flag.clone()), w, line));
                 }
@@ -1120,17 +1167,28 @@ fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
     let collected = collected_ids(ws, &ecx);
     insert_append_edges(tx, &collected)?;
     mark_collected(tx, &collected)?;
-    tx.execute(
-        "INSERT INTO meta(key, value) VALUES (?1, ?2) \
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![super::schema::META_RELEASE, ws.release.release.codename()],
-    )?;
+    mark_data(tx)?;
+    for (k, v) in [
+        (super::schema::META_RELEASE, ws.release.release.codename()),
+        (super::schema::META_EDGES, super::schema::EDGES_VERSION),
+    ] {
+        tx.execute(
+            "INSERT INTO meta(key, value) VALUES (?1, ?2) \
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![k, v],
+        )?;
+    }
     Ok(())
 }
 
-/// Whether the edges were resolved for another release than the workspace's (or never).
+/// Whether the edges were resolved for another release than the workspace's (or never), or
+/// by another version of the edge step ([`super::schema::EDGES_VERSION`]).
 fn release_changed(index: &Index, ws: &Workspace) -> Result<bool> {
-    Ok(super::query::indexed_release(index)? != Some(ws.release.release))
+    Ok(
+        super::query::indexed_release(index)? != Some(ws.release.release)
+            || super::query::indexed_edges_version(index)?.as_deref()
+                != Some(super::schema::EDGES_VERSION),
+    )
 }
 
 /// Recomputes the `require` / `include` / `include_all` / `inherit` edges of one file; its
@@ -1141,7 +1199,13 @@ fn rebuild_file_edges(tx: &Transaction<'_>, ws: &Workspace, file_id: i64) -> Res
         [file_id],
     )?;
     let ecx = edge_ctx(tx, ws)?;
-    insert_ref_edges(tx, ws, &ecx, Some(file_id))
+    insert_ref_edges(tx, ws, &ecx, Some(file_id))?;
+    // A new reference may make a data file metadata, or the last one may be gone.
+    tx.execute(
+        "UPDATE files SET not_collected = NULL WHERE not_collected = ?1",
+        [super::schema::NOT_COLLECTED_DATA],
+    )?;
+    mark_data(tx)
 }
 
 fn edge_ctx(tx: &Transaction<'_>, ws: &Workspace) -> Result<EdgeCtx> {
@@ -1304,6 +1368,213 @@ fn mark_collected(tx: &Transaction<'_>, collected: &[(i64, PathBuf)]) -> Result<
     Ok(())
 }
 
+/// Directory names under which an unreferenced file is data, wherever they are in the
+/// layer: a recipe's `files/` (`FILESPATH`), OE-core's `lib/` (python, templates),
+/// `scripts/` and `wic/` (kickstart includes).
+const DATA_DIRS: &[&str] = &["files", "lib", "scripts", "wic"];
+
+/// `files.not_collected` = `data` for every `.conf`, `.inc` and `.bbclass` that is not BitBake
+/// metadata (module docs, "Data files"). Runs after the edges are inserted and after
+/// [`mark_collected`] (which clears the marks of other kinds).
+///
+/// BitBake reads a `.conf` only when the configuration includes it (`conf/...` along
+/// `BBPATH`), an `.inc` only when something requires it, a `.bbclass` only from the class
+/// directories. Without evaluating, a file is taken as metadata when it is in a layer's
+/// `conf/` tree, or is a class under a `classes*/` directory, or is the target of a resolved
+/// edge, or could be the target of an unresolved one (its path ends with the edge's text,
+/// each `${...}` standing for any text within a path component; a text that is all
+/// `${...}` matches nothing). Otherwise it is data only when it sits under a directory a
+/// recipe takes files from (`files/`, `<pn>/`, `<pn>-<pv>/` next to a `.bb` or `.bbappend`
+/// of that name) or under [`DATA_DIRS`]; anything else stays metadata.
+fn mark_data(tx: &Transaction<'_>) -> Result<()> {
+    struct F {
+        id: i64,
+        layer: i64,
+        path: String,
+        kind: String,
+    }
+    let files: Vec<F> = {
+        let mut st = tx.prepare_cached(
+            "SELECT id, layer_id, path, kind FROM files WHERE not_collected IS NULL",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok(F {
+                id: r.get(0)?,
+                layer: r.get(1)?,
+                path: r.get(2)?,
+                kind: r.get(3)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    let referenced: HashSet<i64> = {
+        let mut st = tx.prepare_cached(
+            "SELECT DISTINCT target_file FROM edges WHERE target_file IS NOT NULL",
+        )?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    // Unresolved references: (pattern, layer and directory of the including file).
+    let patterns: Vec<(Vec<String>, i64, String)> = {
+        let mut st = tx.prepare_cached(
+            "SELECT DISTINCT e.target_text, f.layer_id, f.path FROM edges e \
+             JOIN files f ON f.id = e.src_file WHERE e.target_file IS NULL \
+             AND e.kind IN ('include', 'require', 'include_all')",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        let texts: Vec<(String, i64, String)> = rows.collect::<rusqlite::Result<_>>()?;
+        texts
+            .into_iter()
+            .filter_map(|(t, layer, src)| {
+                let dir = src.rsplit_once('/').map(|(d, _)| d.to_string());
+                ref_pattern(&t).map(|p| (p, layer, dir.unwrap_or_default()))
+            })
+            .collect()
+    };
+    // Directories a recipe takes files from: (layer, dir of the .bb) -> {pn, pn-pv}.
+    let mut recipe_dirs: HashMap<(i64, String), HashSet<String>> = HashMap::new();
+    for f in files
+        .iter()
+        .filter(|f| f.kind == "bb" || f.kind == "bbappend")
+    {
+        let p = Path::new(&f.path);
+        let dir = p
+            .parent()
+            .map(|d| d.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let stem = p
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut parts = stem.split('_');
+        let pn = parts.next().unwrap_or("").to_string();
+        let names = recipe_dirs.entry((f.layer, dir)).or_default();
+        if let Some(pv) = parts
+            .next()
+            .filter(|pv| !pv.is_empty() && !pv.contains('%'))
+        {
+            names.insert(format!("{pn}-{pv}"));
+        }
+        if !pn.is_empty() {
+            names.insert(pn);
+        }
+    }
+    let mut up = tx.prepare_cached("UPDATE files SET not_collected = ?1 WHERE id = ?2")?;
+    for f in &files {
+        if !matches!(f.kind.as_str(), "conf" | "inc" | "bbclass") {
+            continue;
+        }
+        let comps: Vec<&str> = f.path.split('/').collect();
+        let dirs = &comps[..comps.len().saturating_sub(1)];
+        let metadata_place = comps.first() == Some(&"conf")
+            || (f.kind == "bbclass" && dirs.first().is_some_and(|d| d.starts_with("classes")));
+        let dir = dirs.join("/");
+        let maybe_target = patterns.iter().any(|(p, layer, src_dir)| {
+            if p.len() > 1 {
+                // A path: found along BBPATH (layer roots) or next to the includer.
+                pattern_matches(p, &comps)
+            } else {
+                // A bare name: next to the including file, or at a layer root (BBPATH).
+                pattern_matches(p, &comps)
+                    && ((*layer == f.layer && dir == *src_dir) || dirs.is_empty())
+            }
+        });
+        if metadata_place || referenced.contains(&f.id) || maybe_target {
+            continue;
+        }
+        let in_recipe_dir = (0..dirs.len()).any(|i| {
+            let parent = dirs[..i].join("/");
+            recipe_dirs
+                .get(&(f.layer, parent))
+                .is_some_and(|names| names.contains(dirs[i]) || dirs[i] == "files")
+        });
+        if in_recipe_dir || dirs.iter().any(|d| DATA_DIRS.contains(d)) {
+            up.execute(params![super::schema::NOT_COLLECTED_DATA, f.id])?;
+        }
+    }
+    Ok(())
+}
+
+/// The path components of an unresolved reference's text, each a glob where `${...}` stands
+/// for any text (`conf/machine/${MACHINE}.conf` -> `conf`, `machine`, `*.conf`). `None` when
+/// no component has literal text (`${@...}`, `${X}/${Y}`): such a reference could name any
+/// file, and taking it as a reference to every file would keep every data file.
+fn ref_pattern(text: &str) -> Option<Vec<String>> {
+    let mut comps = Vec::new();
+    for c in crate::parse::words::split_outside(text.trim(), |ch| ch == '/') {
+        // Each `${...}` group becomes `*`.
+        let mut out = String::new();
+        let mut rest = c;
+        while let Some(i) = rest.find("${") {
+            out.push_str(&rest[..i]);
+            out.push('*');
+            let after = &rest[i..];
+            rest = &after[group_end(after)..];
+        }
+        out.push_str(rest);
+        if !out.is_empty() {
+            comps.push(out);
+        }
+    }
+    comps
+        .iter()
+        .any(|c| c.chars().any(|ch| ch != '*'))
+        .then_some(comps)
+}
+
+/// Byte length of the `${...}` group at the start of `s` (braces nest; unterminated: all).
+fn group_end(s: &str) -> usize {
+    let mut depth = 0usize;
+    for (i, c) in s.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    s.len()
+}
+
+/// Whether the path `comps` ends with the components of `pattern` (each a `*` glob).
+fn pattern_matches(pattern: &[String], comps: &[&str]) -> bool {
+    if pattern.len() > comps.len() {
+        return false;
+    }
+    let tail = &comps[comps.len() - pattern.len()..];
+    pattern.iter().zip(tail).all(|(p, c)| glob_one(p, c))
+}
+
+/// `*`-only glob match of one path component.
+fn glob_one(p: &str, s: &str) -> bool {
+    let parts: Vec<&str> = p.split('*').collect();
+    if parts.len() == 1 {
+        return p == s;
+    }
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    if !s.starts_with(first) || !s.ends_with(last) || s.len() < first.len() + last.len() {
+        return false;
+    }
+    let mut rest = &s[first.len()..s.len() - last.len()];
+    for mid in &parts[1..parts.len() - 1] {
+        match rest.find(mid) {
+            Some(i) => rest = &rest[i + mid.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
 /// Inserts every `bbappend` edge, in BBFILES collection order (the order BitBake applies
 /// appends in). Only collected files take part.
 fn insert_append_edges(tx: &Transaction<'_>, ids: &[(i64, PathBuf)]) -> Result<()> {
@@ -1443,6 +1714,21 @@ mod tests {
         assert_eq!(
             static_words("a (>= 1.0) ${PN}-b c (= 2) d"),
             ["a", "c", "d"]
+        );
+        // B6: OE-core's curl_8.19.0.bb:175 and libglvnd's PROVIDES; no python fragment
+        // (`'1',`, `'',`) is a word.
+        assert_eq!(
+            static_words(
+                "${@bb.utils.contains('PTEST_ENABLED', '1', ' openssl-native', '', d)} zlib"
+            ),
+            ["zlib"]
+        );
+        assert!(
+            static_words(
+                "${@bb.utils.contains('PACKAGECONFIG', 'egl', 'virtual/egl', '', d)} \
+                 ${@bb.utils.contains('PACKAGECONFIG', 'gles1', 'virtual/libgles1', '', d)}"
+            )
+            .is_empty()
         );
     }
 

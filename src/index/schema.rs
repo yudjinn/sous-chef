@@ -34,7 +34,11 @@ pub const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 ///   not collect, why ([`NOT_COLLECTED_BBFILES`]: no layer's `BBFILES` glob matches it);
 ///   NULL for a collected one and for every other kind. Set with the edges. Such a file
 ///   stays indexed (`item`, `search` show it) but is never a recipe for a name, a provider
-///   or an append. A `BBMASK` reason would be another value of the same column.
+///   or an append. A `BBMASK` reason would be another value of the same column. The value
+///   [`NOT_COLLECTED_DATA`] marks a `.conf` / `.inc` / `.bbclass` that is not BitBake
+///   metadata (a data file); `meta.edges` ([`META_EDGES`]) records the version of the edge
+///   step, so an index built before data files were marked gets its marks without a schema
+///   change.
 pub const DDL: &str = r#"
 CREATE TABLE IF NOT EXISTS layers(
     id          INTEGER PRIMARY KEY,
@@ -152,6 +156,19 @@ CREATE TABLE IF NOT EXISTS meta(
 
 /// `files.not_collected` of a `.bb` / `.bbappend` that no layer's `BBFILES` glob matches.
 pub const NOT_COLLECTED_BBFILES: &str = "bbfiles";
+
+/// `files.not_collected` of a `.conf`, `.inc` or `.bbclass` that is not BitBake metadata: a
+/// data file (`wpa_supplicant.conf` in a recipe's `<pn>/` directory, `files/wic/*.wks.inc`),
+/// see `scan.rs` ("Data files").
+pub const NOT_COLLECTED_DATA: &str = "data";
+
+/// The `meta` key holding the version of the edge computation ([`EDGES_VERSION`]); an index
+/// with another value (or none) has its edges and file marks recomputed on the next refresh.
+pub const META_EDGES: &str = "edges";
+
+/// Bumped when what the edge step computes changes (it also sets `files.not_collected`).
+/// `data-files-1`: data files are marked (w5-fix-eval2).
+pub const EDGES_VERSION: &str = "data-files-1";
 
 /// The `meta` key holding the codename of the release the edges were resolved for.
 pub const META_RELEASE: &str = "release";

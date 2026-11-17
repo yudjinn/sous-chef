@@ -870,3 +870,33 @@ fn modern_workspace_has_no_legacy_and_no_diagnostics() {
         }
     }
 }
+
+#[test]
+fn addfragments_is_a_statement_kind() {
+    // OE-core Wrynose bitbake.conf:822; ConfHandler `__addfragments_regexp__`.
+    let line = "addfragments ${OE_FRAGMENTS_PREFIX} OE_FRAGMENTS OE_FRAGMENTS_METADATA_VARS OE_FRAGMENTS_BUILTIN\n";
+    let pf = parse(line);
+    assert!(pf.diagnostics.is_empty(), "{:?}", pf.diagnostics);
+    assert_eq!(
+        pf.statements[0].kind,
+        StatementKind::AddFragments {
+            rest: " ${OE_FRAGMENTS_PREFIX} OE_FRAGMENTS OE_FRAGMENTS_METADATA_VARS OE_FRAGMENTS_BUILTIN".into()
+        }
+    );
+    let af = pf.statements[0].add_fragments().unwrap();
+    assert_eq!(af.groups(4).unwrap()[1], "OE_FRAGMENTS");
+    // Fewer than three arguments match no release: an unparsed line.
+    let pf = parse("addfragments a b\n");
+    assert!(matches!(
+        pf.statements[0].kind,
+        StatementKind::Unknown { .. }
+    ));
+    assert!(pf.diagnostics[0].message.starts_with("unparsed line"));
+    // `addpylib` is still kept as an unknown statement with a note.
+    let pf = parse("addpylib ${LAYERDIR}/lib oe\n");
+    assert!(matches!(
+        pf.statements[0].kind,
+        StatementKind::Unknown { .. }
+    ));
+    assert!(pf.diagnostics[0].message.contains("not modelled"));
+}

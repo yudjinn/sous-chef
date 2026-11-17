@@ -333,9 +333,13 @@ fn parse_error_skips_whitespace_after_backslash_but_the_parser_still_reports_it(
         msgs.iter().any(|m| m.starts_with("`addpylib` ")),
         "{msgs:?}"
     );
+    // `addfragments` is a statement kind of its own: no diagnostic, nothing to skip.
+    assert!(!msgs.iter().any(|m| m.contains("addfragments")), "{msgs:?}");
     assert!(
-        msgs.iter().any(|m| m.starts_with("`addfragments` ")),
-        "{msgs:?}"
+        parsed
+            .statements
+            .iter()
+            .any(|s| matches!(s.kind, sous_chef::parse::StatementKind::AddFragments { .. }))
     );
 }
 

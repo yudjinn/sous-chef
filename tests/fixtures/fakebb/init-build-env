@@ -1,0 +1,15 @@
+# Fake bitbake-setup init-build-env for tests (never a real BitBake). The real one
+# (tests/fixtures/outputs/live/bitbake-setup-build/init-build-env) is
+#     cd <dir of oe-init-build-env>
+#     set <build dir>
+#     . ./oe-init-build-env
+#     set --
+# with both paths written in. This one has the same shape, ending with `set --` (which
+# clears the positional parameters of whoever sources it), but takes the build directory
+# from its argument or, sourced without one, from the current directory (the runner starts
+# commands in the build directory).
+__fakebb_build="${1:-$PWD}"
+cd "$(dirname "${BASH_SOURCE[0]}")" || return 1
+set "$__fakebb_build"
+. ./oe-init-build-env
+set --

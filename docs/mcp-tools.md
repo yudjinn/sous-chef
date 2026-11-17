@@ -186,7 +186,13 @@ Output: one row per operation on the variable and its override variants, in pars
 
 Then the notes: `final:` with the value in quotes (`final[flag]:` for flags; `final: X is
 not set`), cut at 600 characters with the full text in a `value` handle; references left
-unexpanded; a warning per anonymous python function that changes the variable by name, and
+unexpanded (`(unresolved, left as written: X)`, only for a `${X}` still in the text); `(may
+differ: an override decision it depends on is uncertain because OVERRIDES has unresolved
+X)` when the text is complete but an override variant or a conditional `:append` /
+`:prepend` / `:remove` of the variable, or of one it references, was judged inactive while
+part of `OVERRIDES` is unknown (a value with no conditional operation in its history never
+carries it); a note for each reference followed with an uncertain value (`inherit_defer
+toolchain/${TOOLCHAIN}` while `OVERRIDES` holds python); a warning per anonymous python function that changes the variable by name, and
 one for each that is opaque (changes variables through computed names or hands `d` to other
 code), since anonymous python is never run; a count of the other anonymous functions;
 `note: global configuration only (no recipe)` without a recipe; the python note when the
@@ -293,19 +299,30 @@ final: function do_install, 3 pieces in order: meta-core:classes-recipe/autotool
   lowest priority first, each with the variables it came through
   (`OVERRIDES <- MACHINEOVERRIDES <- MACHINE`) and the deepest assignment that contributes
   it. Entries are attributed by expanding the applied assignments piece by piece; a piece
-  that is python is unknown and said so.
+  that is python is unknown and said so. `OVERRIDES` is split on `:` with `${...}` kept
+  whole (bitbake-semantics.md, "Splitting list values"): an entry that holds python is one
+  row, abbreviated (`${@...}dogbonedark`, `linux${@...}eabi`), from `${@...} (python, not
+  evaluated): stands for entries that are not known`; it is never split into fragments and
+  never counted as an override name.
 - `conditional`: rows `state condition name loc snippet`: every operation whose name
   carries an override condition, in parse order, `active` or `inactive` for this machine
   and distro. With a recipe: the operations from the recipe's own files (recipe, includes,
-  classes, bbappends) and `.conf` operations conditional on `pn-<pn>`; without, the
+  classes, bbappends: the files read in the recipe pass, not an `.inc` the configuration
+  includes) and `.conf` operations conditional on `pn-<pn>`; without, the
   configuration's operations. Package-name overrides (`FILES:${PN}-dev`,
   `RDEPENDS:libfoo-dev`) are not conditions and are left out.
 - `dead`: rows `override closest name loc snippet`: the conditional operations with an
-  override element known nowhere: not in `OVERRIDES` for any machine or distro conf of the
-  workspace, not a machine, distro or declared override, not a class, `pn-` or `layer-`
-  form, not a package of the recipe. `closest` is the nearest known name by edit distance.
-  It evaluates the configuration once per machine conf (with the default distro) and once
-  per distro conf (with the default machine); the passes are cached.
+  override element that **matches no known override**, by the lint rule `override/dead`'s
+  definition: not in the evaluated `OVERRIDES`, not a name `KnownOverrides` accepts
+  (machine and distro conf names, declared and built-in overrides, `class-` / `pn-` /
+  `layer-` / ... forms), not a class name, not a word of any `*OVERRIDES` assignment in the
+  workspace (python included), not a package of the recipe. Not listed, and counted in
+  notes instead: operations whose overrides are known but inactive for this machine and
+  distro; operations on a variable that BitBake reads by name (some value holds
+  `${VAR:<prefix>${...}}`, `'VAR:<prefix>' +` or `"VAR:<prefix>%s"`: OE-core's
+  `TUNE_FEATURES:tune-<tune>`, read as `${TUNE_FEATURES:tune-${DEFAULTTUNE}}`); a name in
+  the package position of a package variable, or of any variable while `PACKAGES` holds
+  python (a package python adds). `closest` is the nearest known name by edit distance.
 
 A warning follows when `OVERRIDES` contains python or unresolved references (active and
 inactive may then be wrong), and one for each opaque anonymous python function. `chain` of
@@ -340,7 +357,8 @@ note: 1 active, 3 inactive; scope: the recipe's files, and .conf statements cond
 ```
 override	closest	name	loc	snippet
 boradx	boardx (distance 2)	EXTRA_OECONF:append:boradx	meta-vendor:recipes-core/hello/hello_%.bbappend:9	EXTRA_OECONF:append:boradx = " --enable-typo"
-note: known overrides: OVERRIDES of 3 machine/distro configurations, machine and distro names, declared MACHINEOVERRIDES/DISTROOVERRIDES words, class-/pn-/layer- forms, and the recipe's packages
+note: dead = an override element that matches no known override: not in OVERRIDES, not a machine, distro or class name, not a declared or built-in override, not a word of any *OVERRIDES assignment in the workspace (python included), not a package of the recipe; the same definition as the lint rule override/dead
+note: 2 inactive conditional operations use known overrides: inactive for this machine and distro, not dead (show=conditional lists them)
 ```
 
 ### `item`
@@ -370,7 +388,9 @@ Otherwise it returns a header line `layer:path:A-B sha256=<12 hex>` then the exa
 unmodified (line endings included), so they can be used as Edit strings. The header range
 is the range actually returned, context included; the hash is of the file as read. Capped
 at 8 KB (or `budget_tokens * 4` when that is smaller) with a `+N more lines (lines=A-B)`
-marker. JSON: `{loc, sha256, text, more_lines, rest, notes}`.
+marker. JSON: `{loc, sha256, text, more_lines, rest, notes}`. A note follows the text when
+BitBake does not parse the file as indexed: a `.bb` / `.bbappend` no `BBFILES` glob matches
+(as in `recipe`), or a data file (`is not BitBake metadata: a data file ...`).
 
 ```
 meta-mine:recipes-app/app/app_0.1.bb:25-29 sha256=8c263137e2cb
@@ -396,7 +416,11 @@ its range. `regex` mode reads file content line by line, through the confinement
 applies to the enclosing statement, so lines outside any statement are dropped. Files that
 cannot be read are skipped and counted in a note. The other modes use the index. `limit`
 cuts with a `+N more (limit=L)` marker; in `name` and `fts` mode it counts up to 5000 index
-hits, beyond which `N` is a lower bound.
+hits, beyond which `N` is a lower bound. Data files (a `.conf` / `.inc` that is not BitBake
+metadata, bitbake-semantics.md "Data files") are not searched in any mode. A hit in a `.bb`
+/ `.bbappend` that no `BBFILES` glob collects is followed by a note per file: `note:
+<layer>:<path> is not matched by any layer's BBFILES: BitBake does not collect it, so it is
+no recipe and no bbappend applies`.
 
 ```
 loc	kind	item	snippet
@@ -518,7 +542,15 @@ the flags of the selected options, with a note.
   options (on `${PN}`).
 - `packageconfig`: rows `option selected enable disable build runtime loc`, one per
   `PACKAGECONFIG[option]` flag (fields 1 to 4), and a note with the value of
-  `PACKAGECONFIG` and where it is set. Fields 5 and 6 are not shown.
+  `PACKAGECONFIG` and where it is set. Fields 5 and 6 are not shown. BitBake's own flags
+  (`doc`, `vardepvalue`, `vardeps`, ...; OE-core sets `PACKAGECONFIG[doc]` and
+  `PACKAGECONFIG[vardepvalue]`) are not options and are named in a note, unless
+  `base.bbclass` would really use one (bitbake-semantics.md, `PACKAGECONFIG`).
+- Lists are split with `${...}` kept whole (bitbake-semantics.md, "Splitting list
+  values"): a word of `DEPENDS`, `RDEPENDS:<pkg>` or `PACKAGECONFIG` that holds python is
+  one row, abbreviated (`${@bb.utils.contains(...)}`), with provider / selection
+  `unknown: not evaluated ...`; it is never resolved as a name. A python word of `PACKAGES`
+  is named in a note (its packages are not listed).
 - `reverse`: rows `depth recipe kind target loc status`: recipes whose `DEPENDS`,
   `RDEPENDS:<pkg>` or `PACKAGECONFIG` build field names the recipe (`by name`) or
   something it provides (`via <name>`, with the selected provider of that name). Static:

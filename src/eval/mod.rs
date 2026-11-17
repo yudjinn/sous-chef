@@ -12,8 +12,8 @@ pub mod replay;
 
 pub use datastore::{DataStore, OpStatus, UnsetRecord, VarOp};
 pub use replay::{
-    AnonPython, ConfigCache, FunctionPiece, RefIssue, RefProblem, ReplayNotes, evaluate_with,
-    global_cache,
+    AnonPython, ConfigCache, FunctionPiece, RefIssue, RefProblem, ReplayNotes, UncertainRef,
+    evaluate_with, global_cache,
 };
 
 use serde::Serialize;

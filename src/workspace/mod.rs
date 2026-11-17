@@ -384,6 +384,11 @@ pub(crate) fn resolve_existing(path: &Path) -> std::io::Result<PathBuf> {
     } else {
         std::env::current_dir()?.join(path)
     };
+    // The whole path exists (the common case): one `realpath` gives the same result as the
+    // walk below, which resolves each prefix again and so costs about depth² lookups.
+    if let Ok(real) = fs::canonicalize(&abs) {
+        return Ok(real);
+    }
     let mut cur = PathBuf::new();
     let mut exists = true;
     for c in abs.components() {

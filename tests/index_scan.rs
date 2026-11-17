@@ -730,6 +730,41 @@ fn symlink_outside_the_workspace_is_not_indexed() {
     assert!(r.reindexed.is_empty(), "{:?}", r.reindexed);
 }
 
+/// A symlinked directory inside a layer that leads out of the workspace: nothing under it
+/// is indexed (the walk does not follow it, and confinement would refuse it), also when
+/// the walk takes its fast path for regular files (w5-fix-eval2 item 10). A symlinked file
+/// that stays inside the workspace is still indexed, from its target.
+#[cfg(unix)]
+#[test]
+fn symlinked_directory_leading_outside_is_not_indexed() {
+    let (t, _root, ws, _c, mut idx) = temp_index();
+    let away = t.path().join("away/recipes-evil/evil");
+    fs::create_dir_all(&away).unwrap();
+    fs::write(away.join("evil_1.0.bb"), "A = \"1\"\n").unwrap();
+    fs::write(away.join("evil.inc"), "B = \"1\"\n").unwrap();
+    let mine = ws.layer("meta-mine").unwrap().root.clone();
+    std::os::unix::fs::symlink(
+        t.path().join("away/recipes-evil"),
+        mine.join("recipes-evil"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&away, mine.join("recipes-app/evil-dir")).unwrap();
+    let inside = mine.join("recipes-app/app/app_0.1.bb");
+    std::os::unix::fs::symlink(&inside, mine.join("recipes-app/app/linked_0.2.bb")).unwrap();
+    let r = idx.refresh(&ws).unwrap();
+    let got = reindexed(&r);
+    assert!(!got.iter().any(|l| l.contains("evil")), "{got:?}");
+    assert_eq!(got, ["meta-mine:recipes-app/app/linked_0.2.bb"]);
+    // Nothing was read through the links on later refreshes either.
+    let r = idx.refresh(&ws).unwrap();
+    assert!(r.reindexed.is_empty(), "{:?}", r.reindexed);
+    for f in
+        sous_chef::index::query::all_files_in(&idx, sous_chef::index::query::FileSet::ALL).unwrap()
+    {
+        assert!(!f.path.to_string_lossy().contains("evil"), "{f:?}");
+    }
+}
+
 #[test]
 fn unreadable_bytes_do_not_break_the_scan() {
     let (_t, _root, ws, _c, mut idx) = temp_index();

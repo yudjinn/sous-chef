@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use sous_chef::bitbake::env::{ALLOWED_PROGRAMS, INIT_SCRIPT_NAME};
+use sous_chef::bitbake::env::{ALLOWED_PROGRAMS, INIT_SCRIPT_NAME, WRAPPER};
 use sous_chef::bitbake::{BbEnv, Finish, HostEnv, Supervised, validate_name};
 use sous_chef::config::Config;
 use sous_chef::workspace::{Layer, Workspace};
@@ -302,6 +302,52 @@ async fn runs_directly_when_initialised() {
         "{stdout}"
     );
     assert!(stdout.contains("argc: 1\narg: show-layers\n"), "{stdout}");
+}
+
+/// B7: a script that ends with `set --` (bitbake-setup's `init-build-env`, here the fake
+/// one in `tests/fixtures/fakebb/`) clears the positional parameters of the shell that
+/// sources it. The program must run anyway: when `init_script` names it directly
+/// (bitbake-setup mode), and when it is reached through another script (init-script mode,
+/// [`WRAPPER`]).
+#[tokio::test]
+async fn runs_through_a_script_that_ends_with_set_dashdash() {
+    let tmp = tempfile::tempdir().unwrap();
+    let t = tree(tmp.path(), "poky", false);
+    let setup = fakebb().join("init-build-env");
+    let other = tmp.path().join("my-env.sh");
+    fs::write(&other, format!(". '{}' \"$1\"\n", setup.display())).unwrap();
+    for (script, mode) in [(setup.clone(), "bitbake-setup"), (other, "init-script")] {
+        let cfg = Config {
+            init_script: Some(script),
+            ..enabled()
+        };
+        let env = BbEnv::detect_in(&cfg, &t.ws, &HostEnv::default()).unwrap();
+        assert_eq!(env.mode(), mode);
+        let out = env.output("bitbake", &["-e", "hello"], None).await.unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.finish.success(), "{mode}: {out:?}");
+        assert!(stdout.starts_with("fakebb: bitbake\n"), "{mode}: {stdout}");
+        assert!(
+            stdout.contains("argc: 2\narg: -e\narg: hello\n"),
+            "{mode}: {stdout}"
+        );
+        assert!(
+            stdout.contains(&format!("BUILDDIR: {}\n", t.build.display())),
+            "{mode}: {stdout}"
+        );
+    }
+    // The wrapper alone, as the live check runs it.
+    let out = std::process::Command::new("bash")
+        .arg("-c")
+        .arg(WRAPPER)
+        .arg("--")
+        .arg(&setup)
+        .arg(&t.build)
+        .arg("echo")
+        .arg("program ran")
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "program ran");
 }
 
 #[tokio::test]

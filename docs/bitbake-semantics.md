@@ -165,6 +165,37 @@ what `src/eval/overrides.rs` and `src/eval/datastore.rs` reproduce:
   before `VAR = "a"` still gives `"a x"`. `VAR:foo:append` with `foo` inactive is ignored;
   `VAR:append:foo` with `foo` inactive too.
 
+### Splitting list values (verified, w5-fix-eval2 B4/B6)
+
+BitBake splits a value only **after** expanding it, python included: `need_overrides`
+(`lib/bb/data_smart.py`, BitBake 2.18.0) does `self.overrides = (self.getVar("OVERRIDES")
+or "").split(":")`; list consumers do `(d.getVar("DEPENDS") or "").split()`
+(`ast.handleVirtRecipeProviders`, `taskdata`, OE-core's `base.bbclass` for `PACKAGECONFIG`,
+whose flags it splits with `flagval.split(",")` after `getVarFlags` expanded them). The
+`${@...}` has been run by then, so no python text is ever split. A static value can still
+hold `${@...}` (or an undefined `${VAR}`): OE-core's `MACHINEOVERRIDES` for ti33x is
+`${@['', 'ti-soc:ti33x:'][...]}dogbonedark`, curl's `DEPENDS:append:class-target` is
+`${@bb.utils.contains('PTEST_ENABLED', '1', ' openssl-native', '', d)}`, libglvnd's
+`PROVIDES` is four such expressions. Splitting that text gives fragments (`'',`, `']['ti-soc`)
+that are not words of the real value.
+
+sous-chef splits every value with one tokeniser, `src/parse/words.rs`: a `${...}` group is
+opaque (braces nest; inside `${@...}` a quoted string is skipped, so a brace in a string
+does not end it; unterminated, it runs to the end), so whitespace, `:` and `,` inside it do
+not split. A word or entry that holds a group is **unevaluated**: it stands for text that is
+not known (any number of real words, possibly none), it is shown as what it is (abbreviated
+`${@name(...)}` in tables), and it is never an override name (`DataStore::overrides` leaves
+it out; `override_entries` lists it), a dependency, a provider, a package or a
+`PACKAGECONFIG` option. `:remove` matching uses the same split, so a remove word is never
+matched against a fragment. (BitBake's own regex for the end of `${@...}`,
+`\$\{@(?:\{.*?\}|.)+?\}`, stops at the first `}` that does not close a one-level `{...}`;
+for the python OE-core writes the two agree.) Used by `eval/overrides.rs`,
+`eval/providers.rs`, `eval/replay.rs` (`INHERIT`, `BB_DEFER_BBCLASSES`, the
+`BB_RECIPE_VIRTUAL_PROVIDERS` rewrite, which keeps an expression whole when it joins the
+words again), `index/scan.rs` (`provides` and `depends` rows, the `PACKAGECONFIG` build
+field) and the `overrides` and `deps` tools. Lint rules split values themselves (outside this
+change).
+
 ### Datastore (parse-time operators)
 
 Verified (T3.1) against `ast.py` `DataNode.eval` and `data_smart.py`, `master` 2026-11:
@@ -397,9 +428,9 @@ fragment"; `cfddce7ab` error for a built-in fragment next to an assignment; `5ed
     Not found: `bb.fatal("Could not find fragment ...")` on 2.16 and later, `bb.error` (and
     go on) on 2.12.
 - **sous-chef** (`src/eval/replay.rs` `add_fragments`, `Release::has(Feature::AddFragments)`
-  / `Feature::BuiltinFragments`): the parser keeps the line as an unknown statement with a
-  diagnostic starting `` `addfragments` `` (a `StatementKind` variant of its own needs an
-  arm in `src/scaffold/inc_split.rs`, which this change could not edit) and
+  / `Feature::BuiltinFragments`): the parser makes a line with at least three arguments a
+  `StatementKind::AddFragments { rest }` (since w5-fix-eval2; no diagnostic; fewer
+  arguments stay an unknown statement with "unparsed line"), and
   `Statement::add_fragments` / `AddFragments::groups` reproduce the regex; the index stores
   it as kind `addfragments` with an `addfragments` edge whose target is always unresolved
   (the files follow from the evaluated fragments variable, never from the file alone). The
@@ -501,7 +532,39 @@ file in the index (`item`, `search`, `layers` show it) and marks it
 `providers::recipes_using` leave it out, it takes part in no `bbappend` edge, and an
 evaluation addressed to it by path (`layer:path`) adds the note "not matched by any layer's
 BBFILES" (`ReplayNotes::target_notes`). A file `BBMASK` masks would be another value of the
-same column (not implemented: `BBMASK` is evaluated configuration).
+same column (not implemented: `BBMASK` is evaluated configuration). Since w5-fix-eval2 the
+`item` and `search` tools add the same note for a hit in such a file, and
+`query::files_in_layer_in(.., FileSet::COLLECTED)` lists a layer's files without them (lint's
+engine uses `files_in_layer`, which still includes them).
+
+**Data files** (w5-fix-eval2, live verification B1; BitBake 2.18.0
+`lib/bb/cookerdata.py` `parseConfigurationFiles`, `parse/parse_py/ConfHandler.py`
+`include_single_file`, `parse/parse_py/BBHandler.py` `inherit`, `lib/bb/cooker.py`
+`collect_bbfiles`): BitBake parses a `.conf` only when the configuration reaches it
+(`bblayers.conf`, each layer's `conf/layer.conf`, `conf/bitbake.conf` on `BBPATH`, and what
+those include), an `.inc` only when a `require` / `include` names it, a `.bbclass` only from
+`classes-<type>/` or `classes/` along `BBPATH` (or by absolute path), and a `.bb` /
+`.bbappend` only when `BBFILES` collects it. Nothing else in a layer is metadata: OE-core
+ships about 35 `.conf` files that recipes install (`wpa-supplicant/wpa-supplicant/wpa_supplicant.conf`,
+`busybox/files/mdev.conf`, the systemd drop-ins), `files/wic/common.wks.inc` (a wic
+kickstart include) and `conf/ccache.conf` (ccache's own configuration, used as
+`CCACHE_CONFIGPATH`). sous-chef cannot know without evaluating which files a dynamic
+reference reaches, so it decides by place and by the index's edges, keeping a file when in
+doubt (`index/scan.rs` `mark_data`): a `.conf` / `.inc` / `.bbclass` is metadata when it is
+in the layer's `conf/` tree, is a class under a `classes*/` directory, is the target of a
+resolved `include` / `require` / `include_all` / `inherit` edge, or could be the target of
+an unresolved one (the reference's path, `${...}` standing for any text within a component,
+ends the file's path; a bare name only next to the including file or at a layer root; a
+reference that is all `${...}` matches nothing); otherwise it is **data** when it is under a
+directory a recipe takes files from (`files/`, `<pn>/` or `<pn>-<pv>/` next to a `.bb` /
+`.bbappend` of that name, `FILESPATH`'s defaults) or under `files/`, `lib/`, `scripts/` or
+`wic/`; anything else stays metadata. A data file is indexed and marked
+(`files.not_collected = 'data'`): `item` shows it with a note, `search` (every mode) and the
+file listings (`all_files`, `files_by_kind`, `files_in_layer`; lint's file list) leave it out
+unless `FileSet::ALL` is asked for, and the replay still reads it if an evaluation reaches it.
+The marks are recomputed with the edges, and with one file's edges on `refresh_file`. Known
+residual: `conf/ccache.conf` is in `conf/` and stays metadata (3 `hygiene/parse-error`
+findings on OE-core, from 422).
 
 **A bbappend that matches no recipe** (checked by T4.3 in `cooker.py`
 `show_appends_with_no_recipes`, master and branches `2.0` and `2.8`): BitBake stops with a
@@ -741,6 +804,34 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
 - **Inherit** (`BBHandler.inherit`): the argument is expanded and split; a word listed in
   `BB_DEFER_BBCLASSES` is deferred (unless already deferred); a class file in
   `__inherit_cache` is not parsed again. Not found is a parse error.
+- **When a deferred inherit's argument is expanded** (verified, w5-fix-eval2 B5, BitBake
+  2.18.0 `lib/bb/parse/parse_py/BBHandler.py` `inherit_defer` and `inherit`, `lib/bb/parse/ast.py`
+  `InheritDeferredNode.eval` and `finalize`): `inherit_defer` stores the argument **as
+  written** (`(expression, fn, lineno)` appended to `__BBDEFINHERITS`); `finalize` pops the
+  entries in order and calls `inherit(..., deferred=True)`, which does `d.expand(files)` then,
+  with the recipe and its bbappends fully parsed, so `${TOOLCHAIN}` is read with the recipe's
+  own value (`kernel-arch.bbclass` sets `TOOLCHAIN = "gcc"`) and `getVar` semantics
+  (override variants, `:append`). A word with `/` is a path under the class directories:
+  `toolchain/gcc` is `classes-<type>/toolchain/gcc.bbclass` or `classes/toolchain/gcc.bbclass`
+  along `BBPATH`, as for any name without `.bbclass`. OE-core Wrynose `base.bbclass:22-36`:
+  `PREFERRED_TOOLCHAIN = "${PREFERRED_TOOLCHAIN_TARGET}"` with `:class-native`,
+  `:class-cross`, `:class-crosssdk`, `:class-nativesdk` variants, `TOOLCHAIN ??=
+  "${PREFERRED_TOOLCHAIN}"`, `inherit_defer toolchain/${TOOLCHAIN}`; `classes/toolchain/gcc.bbclass`
+  sets `TCOVERRIDE = "toolchain-gcc"`, which `OVERRIDES` (`bitbake.conf:800`) references.
+  So when BitBake expands `${TOOLCHAIN}`, `TCOVERRIDE` is still unset and `OVERRIDES` holds
+  the literal `${TCOVERRIDE}` (no `class-*` override can come from it).
+  
+  sous-chef (`Replay::expand_ref`): a reference is refused (recorded in `references`) only
+  when the expanded text itself still holds `${@...}` or an undefined `${VAR}`: then the file
+  is not known. When the text is complete but the value is flagged (an override variant was
+  judged inactive while `OVERRIDES` holds python or unresolved names, or a variable python
+  may change), the file is read, the reference is recorded in
+  `ReplayNotes::uncertain_references`, and every variable the files read under it change is
+  flagged `unevaluated_python` (`ReplayNotes::uncertain_vars`; unresolved names go to
+  `unresolved_vars`). An unresolved name that the file itself sets (`TCOVERRIDE`) is dropped
+  from that uncertainty, because it was unset when BitBake expanded the argument too; if
+  nothing else is uncertain the reference counts as exact. Not covered: variables only
+  another candidate (`toolchain/clang`) would have set are not flagged.
 - **Include** (`include_single_file`): skipped only when the written name equals the
   including file's path text, so `require self.inc` inside `self.inc` recurses (BitBake
   fails eventually).
@@ -764,7 +855,8 @@ only in the recipe pass and only while their stored value is python or absent (t
 is assumed to be OE-Core's); `BP` is set to `${BPN}-${PV}` when absent. Target `MACHINE` /
 `DISTRO` are set before `bblayers.conf` and again after every configuration assignment to
 them. A function's stored value is a pointer per piece instead of the body. A reference
-that needs python or an undefined variable is not followed (BitBake would expand the
+whose expanded text still needs python or an undefined variable is not followed (one whose
+text is complete but whose value is uncertain is followed and flagged, see above; BitBake would expand the
 python, or look for a file with `${X}` in its name) and is recorded; `include` of a missing
 file is silent, as in BitBake; a missing `require` / class and an include cycle are recorded
 instead of failing the parse; so is an `inherit_defer` on a release without it (see
@@ -846,6 +938,23 @@ recommendations (`RRECOMMENDS:${PN}`), 6 conflicting options (an enabled conflic
 Flags are iterated in sorted order; a word of `PACKAGECONFIG` with no flag is ignored; no
 flag name is special. The additions are made by anonymous python, which sous-chef does not
 run: `deps` lists them from the flags and says so.
+
+**BitBake's own flags on `PACKAGECONFIG`** (verified, w5-fix-eval2 B15, OE-core Wrynose
+`meta/classes-global/base.bbclass` anonymous python lines 471-549, BitBake 2.18.0
+`lib/bb/data_smart.py` `getVarFlags`, `lib/bb/data.py` `build_dependencies`,
+`lib/bb/cooker.py` `getAllKeysWithFlags`): `pkgconfigflags = d.getVarFlags("PACKAGECONFIG")`
+returns every flag except the internal ones (names starting with `_` or `:`), and the loop
+skips none, so OE-core's own `PACKAGECONFIG[vardepvalue] = "${PACKAGECONFIG}"`
+(`bitbake.conf:942`) and `PACKAGECONFIG[doc] = "..."` (`documentation.conf:311`) go through
+it like options. Each adds nothing unless its name is a word of `PACKAGECONFIG` (then field 1,
+3, 4, 5) or its text has a non-empty second comma field (then that field goes to
+`PACKAGECONFIG_CONFARGS`). Those flag names are BitBake's: `doc` (documentation; the
+`getAllKeysWithFlags(["doc", "func"])` dump), `vardeps`, `vardepvalue`, `vardepsexclude`,
+`vardepvalueexclude`, `exports`, `prefuncs`, `postfuncs`, `lineno`, `filename`
+(`build_dependencies`, the task signature), `export`, `unexport`, `func`, `python`. The `deps`
+tool (`kind=packageconfig`) lists such a flag as an option only when it would add something
+by the rule above, and names the others in a note; a `${@...}` word of `PACKAGECONFIG` is
+one row, "unknown", never an option (see "Splitting list values").
 
 ## Files and patches
 
@@ -1309,9 +1418,14 @@ set --
 build directory with `BUILDDIR`, `BBPATH`, `BB_ENV_PASSTHROUGH_ADDITIONS`, `OE_ADDED_PATHS`,
 `PYTHONPATH` set and `PATH` extended. Bash keeps positional parameters that a sourced file
 changes even when `source` was given arguments (checked with bash 5.3: after
-`source s.sh x` where `s.sh` runs `set --`, `$#` is 0), so the `init-script` wrapper
-(`source "$1" "$2" && shift 2 && exec "$@"`) loses the program with this script; the
-`bitbake-setup` mode saves the argv in an array before sourcing. The setup directory is
+`source s.sh x` where `s.sh` runs `set --`, `$#` is 0), so a wrapper of the form
+`source "$1" "$2" && shift 2 && exec "$@"` loses the program with this script (live
+verification B7). The `bitbake-setup` mode (a script named `init-build-env`, found in the
+build directory or configured as `init_script`) saves the argv in an array before
+sourcing, and since w5-fix-eval2 so does the `init-script` wrapper
+(`__sous_chef_argv=("$@"); source "$1" "$2" && exec "${__sous_chef_argv[@]:2}"`), so an
+`init_script` under another name that ends with, or sources a script ending with, `set --`
+works too (`tests/bitbake_env.rs`, `runs_through_a_script_that_ends_with_set_dashdash`). The setup directory is
 `bitbake-builds/<config>-<machine>` (T9.1); `conf/` holds `bblayers.conf` with absolute
 paths, a `local.conf` with only a comment, `site.conf` as a symlink, and fragments in
 `conf/toolcfg.conf` (T9.1).
