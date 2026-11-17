@@ -88,6 +88,42 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After w5-fix-eval2
+
+Re-run on 2026-11-17 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/fix-eval2/`), before and after the branch:
+
+| | Compared | Equal | Flagged (of which literal differs) | Known gap | Bug |
+|---|---|---|---|---|---|
+| Sample, explicit machine and distro: before | 1019 | 656 | 336 (20) | 27 | 0 |
+| Sample, explicit machine and distro: after | 1019 | 656 | 336 (20) | 27 | 0 |
+
+- **`inherit_defer toolchain/${TOOLCHAIN}` is followed** (live verification B5;
+  bitbake-semantics.md, "When a deferred inherit's argument is expanded"): `TOOLCHAIN`
+  expands to `gcc`, its uncertainty came only from inactive `class-*` variants of
+  `PREFERRED_TOOLCHAIN` while `OVERRIDES` holds python, so `classes/toolchain/gcc.bbclass` is
+  read and what it sets is flagged instead of missing. Flagged values that list `TCOVERRIDE`
+  in `unresolved`: **156 -> 0**. Unfollowed references: one fewer in each of the 19 targets
+  that inherit through `base.bbclass:36` (curl 3 -> 2, ...; linux-kiss, u-boot-kiss and their
+  `virtual/` aliases set `TOOLCHAIN = "gcc"` themselves and already had it).
+- **No class moved** (`classes.tsv` unchanged): every value that listed `TCOVERRIDE` is also
+  flagged for python (`OVERRIDES` still holds python from `TARGET_OS`,
+  `TRANSLATED_TARGET_ARCH`, the tune's `MACHINEOVERRIDES` and `DISTROOVERRIDES`), and the
+  variables `gcc.bbclass` sets (`CC`, `CXX`, `LD`, `OBJDUMP`, ... and `TCOVERRIDE`) are not
+  in the compared set; `OVERRIDES`, which uses `TCOVERRIDE`, stays flagged for python. The
+  change is in what the flags say, not in how many values carry one.
+- **`OVERRIDES` of curl**: BitBake has 13 entries
+  (`linux-gnueabi:arm:pn-curl:layer-core:armv7a:ti-soc:ti33x:dogbonedark:kiss:class-target:toolchain-gcc:libc-glibc:forcevariable`).
+  Known cleanly now: **6** (`pn-curl`, `layer-core`, `class-target`, `toolchain-gcc`,
+  `libc-glibc`, `forcevariable`; was 5, without `toolchain-gcc`). The other 7 are inside 4
+  unevaluated entries, each kept whole and never taken as an override name (B4,
+  bitbake-semantics.md "Splitting list values"): `linux${@...}eabi` (`TARGET_OS`) for
+  `linux-gnueabi`, `${@d.getVar('TARGET_ARCH')...}` (`TRANSLATED_TARGET_ARCH`) for `arm`, the
+  tune and SoC python of `MACHINEOVERRIDES` followed by `dogbonedark` for `armv7a`,
+  `ti-soc`, `ti33x`, `dogbonedark`, and `${@d.getVar('DISTRO') or ''}` (`DISTROOVERRIDES`)
+  for `kiss`. What stops them is python only; `ti33x`, which the naive split used to find by
+  accident, is no longer claimed.
+
 **The test fails only on what the milestone names:** a value classified **bug** on a tracked
 variable (`SRC_URI`, `DEPENDS`, `RDEPENDS:*`, `FILES:*`, `PACKAGECONFIG`, `EXTRA_OECONF`,
 `EXTRA_OECMAKE`, `S`, `B`, `PV`, `LICENSE`, `OVERRIDES`, `FILESPATH`, `PREFERRED_PROVIDER_*`)
@@ -291,7 +327,7 @@ static value is a pointer list; the test recognises functions by the value's sha
 |---|---|
 | `LAYERDIR` is the canonical layer root, not the `BBLAYERS` text (wave 3 "Open items", Replay) | 27 unflagged values: `FILE` in all 23 targets, `FILESEXTRAPATHS` in 4 (linux-kiss, virtual/kernel, systemd-boot, util-linux). bitbake-setup's `layers/` entries are symlinks; BitBake keeps the symlinked path, sous-chef the target. The files are the same. Paths that BitBake prints through `layers/` (also in `FILESPATH`, `THISDIR`) will not match textually. |
 | `BBCLASSEXTEND` variants not resolved (wave 3 Replay, wave 4 Provider resolution) | 2 targets: `gmp-native`, `nativesdk-zlib` give `NotFound` ("recipe gmp-native; list recipes with the recipe tool"). A refusal, not a wrong answer; the message could say why. |
-| Python in `OVERRIDES` (wave 2) | Behind most flags: `OVERRIDES` itself is flagged in all 23 targets (`TARGET_OS`, `TRANSLATED_TARGET_ARCH`, the tune `MACHINEOVERRIDES` are python). The replay also reports `inherit_defer toolchain/${TOOLCHAIN}` (base.bbclass:36; `TOOLCHAIN ??= "${PREFERRED_TOOLCHAIN}"`, which has `class-*` override variants) as needing python in 19 of the 23 targets (not in linux-kiss, u-boot-kiss and their two `virtual/` aliases, where `kernel-arch.bbclass:84` sets `TOOLCHAIN = "gcc"`), so `toolchain/gcc.bbclass` is not replayed and `TCOVERRIDE` stays unresolved (which part of the chain is python was not traced further): 156 of the 336 flagged values list `TCOVERRIDE` in `unresolved`. |
+| Python in `OVERRIDES` (wave 2) | Behind most flags: `OVERRIDES` itself is flagged in all 23 targets (`TARGET_OS`, `TRANSLATED_TARGET_ARCH`, the tune `MACHINEOVERRIDES` are python). (The rest of this cell is the first measurement; since w5-fix-eval2 the toolchain class is followed, see "After w5-fix-eval2".) The replay also reports `inherit_defer toolchain/${TOOLCHAIN}` (base.bbclass:36; `TOOLCHAIN ??= "${PREFERRED_TOOLCHAIN}"`, which has `class-*` override variants) as needing python in 19 of the 23 targets (not in linux-kiss, u-boot-kiss and their two `virtual/` aliases, where `kernel-arch.bbclass:84` sets `TOOLCHAIN = "gcc"`), so `toolchain/gcc.bbclass` is not replayed and `TCOVERRIDE` stays unresolved (which part of the chain is python was not traced further): 156 of the 336 flagged values list `TCOVERRIDE` in `unresolved`. |
 | Anonymous python and `d.setVar` in classes not run (wave 3 Replay; bitbake-semantics.md "What the static evaluator cannot do") | Every target has 10 to 17 anonymous functions (7 to 12 opaque). Of the 22 flagged-literal-differs values, the BitBake history names the python that made the difference for 15: `kernel.bbclass` / `kernel-devicetree.bbclass` adding `kernel-image-zimage kernel-devicetree` to `PACKAGES`; `packagegroup.bbclass` adding `-dbg -dev`; `base.bbclass:508` (`appendVar`, `PACKAGECONFIG` dependencies) and `update-alternatives.bbclass:78` (`ua_extend_depends`) to `DEPENDS`; python3's manifest function to `PACKAGES`, `FILES:*`, `RDEPENDS:*`; busybox's anonymous function to `configmangle`. Of the other 7, 2 are bug 3 (`linux-kiss` and `virtual/kernel` `DEPENDS`) and 5 are values built from python-set variables or classes the replay could not inherit (`EXTRA_OECONF` of curl, dropbear and python3, `EXTRA_OEMESON` of dbus, `DEPENDS` of kiss-image). No unflagged value was caused by python. |
 | `inherit` / `inherit_defer` whose argument needs python (bitbake-semantics.md) | Every target: `require ${@...multiconfig...}` and `include conf/machine-sdk/${SDKMACHINE}.conf` (bitbake.conf:824, 826), `inherit_defer toolchain/${TOOLCHAIN}`; `kiss-image` also `${IMGCLASSES}` and `${SDK_CLASSES}`. All reported in `ReplayNotes.references`. |
 | `addtask` not replayed, `BB_DEFER_BBCLASSES` | Not observable in these variables. |
