@@ -16,6 +16,17 @@
 //! cached pass probed for an `include` / `require` / `include_all` and did not find (a new
 //! file there would have been read). See `replay::evaluate_with_overlay`.
 //!
+//! **Limit: the overlay replaces contents, not the collection.** Which recipes and bbappends
+//! exist, which bbappends apply to a recipe and which version a recipe name chooses come
+//! from the index (its `bbappend` edges, `files.not_collected`, `providers.rs`), never from
+//! the overlay: an overlaid `.bbappend` that is not indexed is not applied, a new `.bb` is
+//! no recipe, and an overlaid recipe's text does not change the provider choice. The one
+//! user, the `.inc` split (`scaffold::inc_split`), never needs more: its plan modifies
+//! existing `.bb` files (same names, so the same bbappends match them; BitBake 2.18
+//! `cooker.py` `collect_bbfiles` collects only `.bb` and `.bbappend` names and matches a
+//! bbappend by basename) and creates one `.inc` (never collected), it evaluates each version
+//! by its path (no provider choice), and version data (`PV`, `PE`, `PR`, ...) never moves.
+//!
 //! The statement rows are built by the scanner's own conversion
 //! (`index::scan::statement_rows`), so an overlaid file has exactly the rows the index would
 //! store for it.
