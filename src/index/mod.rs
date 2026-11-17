@@ -43,6 +43,20 @@ pub struct RefreshReport {
     pub millis: u64,
 }
 
+/// What [`Index::refresh_file`] did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum FileRefresh {
+    /// The rows were already current (same stat, or same content).
+    Unchanged,
+    /// The file was (re)parsed and its rows replaced; the pointer spans the whole file.
+    Reindexed(Loc),
+    /// The file is gone (or unreadable) and its rows were deleted.
+    Removed(Loc),
+    /// Not a file the index holds: not BitBake metadata, outside every layer, or in a
+    /// directory the full scan skips.
+    NotIndexed,
+}
+
 impl Index {
     /// Opens (creating if needed) the index for this workspace under
     /// `$XDG_CACHE_HOME/sous-chef/<16 hex>/index.sqlite`.
@@ -92,9 +106,44 @@ impl Index {
         })
     }
 
+    /// Opens an existing database for reading and writing, for the edit hook (T7.4): never
+    /// creates the file and never rebuilds it. A missing file, a schema version other than
+    /// [`schema::SCHEMA_VERSION`] is an error; a lock held longer than `busy` makes the write
+    /// fail (the caller fails open).
+    pub fn open_existing(path: &Path, busy: std::time::Duration) -> Result<Index> {
+        if !path.is_file() {
+            return Err(Error::NotFound {
+                what: format!("index {}", path.display()),
+            });
+        }
+        let conn = schema::connect(path)?;
+        conn.busy_timeout(busy)?;
+        let version = schema::user_version(&conn)?;
+        if version != schema::SCHEMA_VERSION {
+            return Err(Error::Invalid {
+                msg: format!(
+                    "index {} has schema version {version}, expected {}",
+                    path.display(),
+                    schema::SCHEMA_VERSION
+                ),
+            });
+        }
+        Ok(Index {
+            conn,
+            path: path.to_path_buf(),
+        })
+    }
+
     /// Brings the index up to date with the files on disk. Call at the start of every tool.
     pub fn refresh(&mut self, ws: &Workspace) -> Result<RefreshReport> {
         scan::refresh(self, ws)
+    }
+
+    /// Reindexes exactly one file (absolute path) without walking the layers: hash check,
+    /// reparse, its rows replaced in one transaction, and the edges that depend on it
+    /// recomputed. See [`scan::refresh_file`] for which edges.
+    pub fn refresh_file(&mut self, ws: &Workspace, abs: &Path) -> Result<FileRefresh> {
+        scan::refresh_file(self, ws, abs)
     }
 
     /// The database file.
