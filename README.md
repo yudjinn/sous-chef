@@ -5,10 +5,11 @@ OpenEmbedded layers. It indexes every layer of a workspace into SQLite and answe
 **pointers** (`layer:path:A-B` plus a one-line snippet) instead of file contents. It replays
 a recipe's files in BitBake's order, with its includes, classes, bbappends and the override
 chain, so "where does `SRC_URI` get its value for this recipe on this machine" is one call.
-It also lints layers against Yocto conventions, scaffolds recipes, bbappends, layers and
-classes, and runs BitBake when a build environment exists, keeping large output on disk
-under a handle. Three Claude Code hooks make the index useful even when the agent reaches
-for Grep, Read or Bash.
+It also lints layers against Yocto conventions, scaffolds recipes, bbappends, layers,
+classes and `.inc` splits, advises where a change belongs, and runs BitBake when a build
+environment exists (an OE init script, a bitbake-setup build or a kas project), keeping
+large output on disk under a handle. Claude Code hooks make the index useful even when the
+agent reaches for Grep, Read or Bash.
 
 ## Install
 
@@ -72,21 +73,30 @@ The hooks are optional; to use them without the plugin, copy the `PostToolUse` e
 ## Configuration
 
 `sous-chef.toml` in the working directory is optional (or give `--config FILE`). Without
-it, sous-chef walks up from the working directory to the first `conf/bblayers.conf`, and
-failing that treats directories with a `conf/layer.conf` as the layers. Paths are relative
-to the file. A minimal example:
+it, sous-chef walks up from the working directory to the first `conf/bblayers.conf`, then
+tries a kas project's build directory, and failing that treats directories with a
+`conf/layer.conf` as the layers. Paths are relative to the file; an unknown key is an
+error. An example:
 
 ```toml
 build_dir = "build"                   # where conf/bblayers.conf lives
 writable_layers = ["meta-mycompany"]  # scaffold writes only here; lint checks these by default
 release = "scarthgap"                 # optional; detected from the core layer otherwise
+kas = ["kas/base.yml", "kas/board.yml"]  # optional; a kas project's files, in kas's order
+
+[lint.severity]
+"override/remove-in-recipe" = "info"
+
+[hooks]
+bash = false                          # see Hooks
 ```
 
 Other keys: `layers` (extra layer roots, for a workspace without a build directory),
 `init_script` (sourced before any bitbake command), `[bitbake] enabled` and
-`allow_destructive`, `[lint] disable` and `[lint.severity]`, `[output] budget_tokens`,
-`[hooks] grep_read`, `bash` and `edit` (see [Hooks](#hooks)). See "Configuration" in
-[docs/architecture.md](docs/architecture.md).
+`allow_destructive`, `[lint] disable`, `[output] budget_tokens`, `[hooks] grep_read` and
+`edit`. In a kas project the kas files are found without `kas` when exactly one sits next
+to the kas build directory, and with `writable_layers` empty the project's own layers are
+writable. See "Configuration" in [docs/architecture.md](docs/architecture.md).
 
 ## A short tour
 
@@ -144,20 +154,20 @@ fakeroot do_install() {
 
 | Tool | What it answers |
 |---|---|
-| `recipe` | A recipe's files, versions, bbappends, classes and key values; its file tree; its functions and tasks |
-| `var` | The history and final value of a variable for a recipe, machine and distro |
+| `recipe` | A recipe's files, versions, bbappends, classes and key values; its file tree; its functions; its sources and patches, tasks in order, packages |
+| `var` | The history and final value of a variable for a recipe, machine and distro; with `authoritative`, BitBake's own (`bitbake -e`) |
 | `overrides` | The evaluated `OVERRIDES` chain; conditional operations, active or not; overrides that match nothing |
 | `item` | The text of a pointer or of a named statement |
 | `search` | Statements by name, regex or full text, each with its enclosing item |
 | `class` | Which class file wins, its interface and tasks; who inherits it |
-| `layers` | Layers, priorities and compatibility; shadowed recipes and classes; bbappend matches |
+| `layers` | Layers, priorities and compatibility; shadowed recipes and classes; bbappend matches; compatibility, dependency and order problems |
 | `deps` | Build, runtime and `PACKAGECONFIG` dependencies; reverse dependencies; providers |
 | `lint` | Convention and syntax findings for a recipe, file, layer or the workspace |
-| `scaffold` | A new recipe, bbappend, layer or class, as a dry run or written |
-| `bitbake` | Runs bitbake, devtool or bitbake-layers as a background job |
+| `scaffold` | A new recipe, bbappend, layer or class, or an `.inc` split, as a dry run or written; or where a change belongs |
+| `bitbake` | Runs bitbake, devtool or bitbake-layers as a background job, in the build environment (init script, bitbake-setup or kas) |
 | `log` | A digest of a failed task's log |
 | `slice` | Part of a stored output, by lines, regex, variable or failures |
-| `status` | Workspace roots, release, index, build environment, running job |
+| `status` | Workspace roots, release, index, build environment, kas project, running job |
 
 Every argument and output format is in [docs/mcp-tools.md](docs/mcp-tools.md); the lint
 rules are in [docs/lint-rules.md](docs/lint-rules.md). The server also offers the resources
@@ -176,7 +186,7 @@ Global flags: `--build-dir DIR`, `--config FILE`, `--layer DIR` (repeatable).
 
 ## Hooks
 
-All three are `PostToolUse` and fail open: any error, a missing index or more than 150 ms
+All are `PostToolUse` and fail open: any error, a missing index or more than 150 ms
 means no output and the tool result unchanged.
 
 - **Grep, Read**: hits in Yocto files get their enclosing item (`[do_install:append
@@ -188,8 +198,9 @@ means no output and the tool result unchanged.
   terminal) whose output is `<path>:<line>:<text>` gets the same annotations as context,
   for the first 200 hits (the context says when it stopped there). The output is not
   changed; any other command is left alone.
-- **Bash**: the output of a `bitbake`, `devtool` or `bitbake-layers` command over 3 KiB is
-  stored under a handle and replaced by a digest and a `slice` hint.
+- **Bash**: the output of a `bitbake`, `devtool` or `bitbake-layers` command over 3 KiB
+  (also run through `kas build` or `kas shell -c`) is stored under a handle and replaced by
+  a digest and a `slice` hint.
 - **Edit, Write**: the edited file is reindexed and linted, and up to five findings at
   warning level or above are added; an edit in a layer that is not writable gets a line
   suggesting a bbappend, with the `scaffold kind=where name=<recipe>` call to run when the
@@ -211,21 +222,35 @@ edit = false       # the reindex and lint after an edit
   layers themselves and need no build environment. Python is never evaluated statically:
   `${@...}` expressions, anonymous python and `d.setVar` in classes. Values that depend on
   them are marked (`depends on python, not evaluated`), and anonymous python that changes a
-  variable is named in a warning.
+  variable is named in a warning. Measured against `bitbake -e` on a real Wrynose workspace
+  (23 recipes, 1019 values, [docs/differential.md](docs/differential.md)): 656 (64%) were
+  exactly BitBake's; the other 363 differed and said so (336 flagged as depending on python
+  or unresolved references) or were one documented path-spelling gap (27); no value
+  differed without a flag or a documented cause.
 - **Needs BitBake.** `bitbake`, `log`, and `var` with `authoritative: true` (which runs
-  `bitbake -e`; documented as returning "bitbake is not available" until it is
-  implemented) need an initialised build environment (`init_script`, `[bitbake]
-  enabled`).
-- **Not modelled.** `deps` does not resolve `BBCLASSEXTEND` variants such as `-native`;
-  `PACKAGECONFIG` dependencies are listed from the flags, since OE-core adds them with
-  anonymous python. Reverse dependencies see unconditional statements as written.
-- **Writes** go only to layers listed in `writable_layers`; upstream layers are never
-  edited. No arbitrary shell execution through MCP; no network.
+  `bitbake -e` as a background job and caches the dump until the metadata changes) need a
+  build environment: an OE `oe-init-build-env`, a bitbake-setup `init-build-env`, an
+  environment the server was started in, or a kas project with `kas` on `PATH`
+  (`status` shows which).
+- **Not modelled.** `BBCLASSEXTEND` variants such as `-native` (no provider, not
+  evaluated), `BBMASK`, `SKIP_RECIPE`, `COMPATIBLE_MACHINE` / `COMPATIBLE_HOST`,
+  `PREFERRED_PROVIDERS`; `addpylib`; `BBFILES_DYNAMIC` (only `layers show=appends` reads
+  it). `PACKAGECONFIG` dependencies are listed from the flags, since OE-core adds them with
+  anonymous python. Reverse dependencies see unconditional statements as written. Tasks
+  added by anonymous python are not seen. The `.inc` split checks statement order
+  statically; it does not evaluate the result.
+- **Writes** go only to layers listed in `writable_layers` (and, in a kas project, the kas
+  file a new layer is added to); upstream layers are never edited. No arbitrary shell
+  execution through MCP; no network.
 - **Releases.** Wrynose (6.0 LTS) is the primary target: defaults, fixtures and scaffold
   output follow it. Scarthgap (5.0 LTS) is fully supported. Kirkstone (4.0 LTS) is the
   floor, best effort: it parses and release-dependent behaviour is switched correctly, but
   it has no fixture workspace. Older releases are out of scope. A layer is linted against
   every supported release in its `LAYERSERIES_COMPAT` and the workspace's own release.
+- **Speed.** On a 1784-file workspace (OE-core, meta-poky, meta-yocto-bsp, meta-arm and two
+  product layers) the first index build takes about 1.3 s and the refresh every tool call
+  starts with about 19 ms ([docs/performance.md](docs/performance.md)). meta-openembedded
+  scale was not measured.
 
 The decisions and non-goals are in [docs/overview.md](docs/overview.md).
 
@@ -239,7 +264,14 @@ The decisions and non-goals are in [docs/overview.md](docs/overview.md).
 - **Rebuilding the index.** Every tool call refreshes it (files whose mtime or size
   changed are rehashed and reindexed); `sous-chef index` does the same from the shell. The
   index is derived and can be deleted: remove the workspace's cache directory and run
-  `sous-chef index` to build it from scratch.
+  `sous-chef index` to build it from scratch. Set `XDG_CACHE_HOME` to keep an experiment's
+  index out of `~/.cache`.
+- **A recipe or file sous-chef calls "not collected".** A `.bb` / `.bbappend` that no
+  layer's `BBFILES` glob matches is indexed but is no recipe; a `.conf` / `.inc` a recipe
+  installs (a data file) is not searched or linted. `item` says which applies.
+- **`authoritative: true` says it cannot run.** BitBake allows one client per build
+  directory: while a `bitbake` job runs, authoritative `var` answers only from a cached dump.
+  Wait for the job (`bitbake op=status`) or use static mode.
 - **No annotations from the hooks.** The hooks never build the index: run `sous-chef index`
   (or use any tool) first. A file edited since the last refresh gets no Grep / Read
   annotation until the next one. Check `hook.log`, and run `claude --debug=hooks`.
