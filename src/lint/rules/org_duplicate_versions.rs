@@ -12,9 +12,9 @@
 //! `vercmp`), listing the others as pointers.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs;
 
 use crate::index::query;
+use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
 use crate::types::{FileKind, LineSpan};
@@ -24,43 +24,21 @@ pub struct OrgDuplicateVersions;
 const PERCENT: usize = 60;
 const MIN_SHARED: usize = 3;
 
-/// Whether an assignment is version data.
-fn version_data(base: &str, flag: Option<&str>) -> bool {
-    matches!(base, "PV" | "PR" | "PE" | "LIC_FILES_CHKSUM")
-        || base == "SRCREV"
-        || base.starts_with("SRCREV_")
-        || (base == "SRC_URI" && flag.is_some_and(|f| f.ends_with("sum")))
-}
-
-/// Statement text normalised for comparison.
-fn normalise(text: &str) -> String {
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// The normalised statements of a file; `None` if it cannot be read.
 fn statements(cx: &LintContext<'_>, f: &query::FileRow) -> Option<Vec<String>> {
-    let abs = cx
-        .ws
-        .confine(&cx.ws.abs_path(&f.loc(LineSpan::line(1)))?)
-        .ok()?;
-    let bytes = fs::read(abs).ok()?;
-    let text = crate::parse::lexer::decode(&bytes).into_owned();
-    let parsed = crate::parse::parse(&text);
+    let (text, parsed) = helpers::read_indexed(cx, f)?;
     let mut out = Vec::new();
     for st in &parsed.statements {
         match &st.kind {
             StatementKind::Include { .. } => continue,
-            StatementKind::Assign { var, .. } if version_data(&var.base, var.flag.as_deref()) => {
+            StatementKind::Assign { var, .. }
+                if helpers::is_version_data(&var.base, var.flag.as_deref()) =>
+            {
                 continue;
             }
             _ => {}
         }
-        let n = normalise(text.get(st.bytes.clone()).unwrap_or(""));
+        let n = helpers::normalise(text.get(st.bytes.clone()).unwrap_or(""));
         if !n.is_empty() {
             out.push(n);
         }

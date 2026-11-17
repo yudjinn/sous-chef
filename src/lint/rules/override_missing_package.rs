@@ -63,22 +63,8 @@ impl Rule for OverrideMissingPackage {
             if *without_packages.get_or_insert_with(|| in_recipes_without_packages(cx)) {
                 return;
             }
-            let written = {
-                let mut n = var.base.clone();
-                for o in &var.overrides {
-                    n.push(':');
-                    n.push_str(o);
-                }
-                n
-            };
-            let fixed = {
-                let mut n = format!("{}:${{PN}}", var.base);
-                for o in &var.overrides {
-                    n.push(':');
-                    n.push_str(o);
-                }
-                n
-            };
+            let written = helpers::colon_name(var);
+            let fixed = helpers::joined(&format!("{}:${{PN}}", var.base), &var.overrides, ':');
             let parens = if is_fn { "()" } else { "" };
             out.push(helpers::finding(
                 self,
@@ -98,7 +84,7 @@ impl Rule for OverrideMissingPackage {
 /// Whether the linted file belongs to at least one recipe and every recipe it belongs to has
 /// an empty `PACKAGES` ([`packages_empty`]). Any index error answers false (report).
 fn in_recipes_without_packages(cx: &LintContext<'_>) -> bool {
-    let Ok(Some(f)) = query::file_by_path(cx.index, &cx.loc.layer, &cx.loc.path) else {
+    let Ok(Some(f)) = query::file_for_loc(cx.index, &cx.loc) else {
         return false;
     };
     match recipes_of(cx.index, &f) {

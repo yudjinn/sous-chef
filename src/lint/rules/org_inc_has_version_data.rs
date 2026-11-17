@@ -31,7 +31,7 @@ fn sets(op: AssignOp) -> bool {
 
 /// The recipe name and the sorted distinct versions of the `.bb` files that pull `file` in.
 fn users(cx: &LintContext<'_>) -> Option<(String, Vec<String>)> {
-    let row = query::file_by_path(cx.index, &cx.loc.layer, &cx.loc.path).ok()??;
+    let row = query::file_for_loc(cx.index, &cx.loc).ok()??;
     let mut pns: Vec<String> = Vec::new();
     let mut pvs: Vec<String> = Vec::new();
     for e in query::edges_to(cx.index, row.id).ok()? {
@@ -106,7 +106,7 @@ impl Rule for OrgIncHasVersionData {
             if let Some(f) = flag {
                 name = format!("{name}[{f}]");
             }
-            let list = and_list(&versions);
+            let list = helpers::and_list(&versions);
             let message = if severity == Severity::Info {
                 format!(
                     "`{name}` is in an .inc shared by {pn} {list}: fine only while the license \
@@ -123,14 +123,5 @@ impl Rule for OrgIncHasVersionData {
             f.severity = severity;
             out.push(f);
         }
-    }
-}
-
-/// `1.0`, `1.0 and 1.1`, `1.0, 1.1 and 1.2`.
-fn and_list(items: &[String]) -> String {
-    match items {
-        [] => String::new(),
-        [one] => one.clone(),
-        [init @ .., last] => format!("{} and {last}", init.join(", ")),
     }
 }

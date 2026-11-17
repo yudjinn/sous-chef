@@ -65,7 +65,7 @@ impl Rule for OrgIncludeMustExist {
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
         let Some(file) = cx.file else { return };
-        let Ok(Some(row)) = query::file_by_path(cx.index, &cx.loc.layer, &cx.loc.path) else {
+        let Ok(Some(row)) = query::file_for_loc(cx.index, &cx.loc) else {
             return;
         };
         let Ok(edges) = query::edges_from(cx.index, row.id) else {

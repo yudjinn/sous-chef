@@ -3,14 +3,18 @@
 //! findings.
 //!
 //! Owned by T4.1. Rule tasks ask for additions in their hand-off, or keep a private helper in
-//! their own file.
+//! their own file. Wave 4 follow-up: the helpers the rule streams had duplicated (names,
+//! message values, recipe-pass files, version data, reading an indexed file, here-documents,
+//! image classes) moved here.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
+use std::path::PathBuf;
 
 use crate::error::Result;
+use crate::eval::DataStore;
 use crate::index::{Index, query};
 use crate::lint::{Finding, LintContext, Rule};
-use crate::parse::Statement;
+use crate::parse::{ParsedFile, Statement};
 use crate::release::{Feature, Release};
 use crate::types::{FileKind, LineSpan, Loc, VarRef};
 
@@ -48,17 +52,156 @@ pub fn statement_text<'a>(cx: &LintContext<'a>, stmt: &Statement) -> &'a str {
         .unwrap_or("")
 }
 
+/// `a`, `a and b`, `a, b and c`.
+pub fn and_list<S: AsRef<str>>(items: &[S]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.as_ref().to_string(),
+        [init @ .., last] => {
+            let init: Vec<&str> = init.iter().map(AsRef::as_ref).collect();
+            format!("{} and {}", init.join(", "), last.as_ref())
+        }
+    }
+}
+
+/// The longest value a message quotes in full, in characters.
+pub const MESSAGE_VALUE_CHARS: usize = 40;
+
+/// `text` as a message quotes it: unchanged up to [`MESSAGE_VALUE_CHARS`] characters, else
+/// its first 37 and `...`.
+pub fn clip(text: &str) -> String {
+    if text.chars().count() > MESSAGE_VALUE_CHARS {
+        text.chars()
+            .take(MESSAGE_VALUE_CHARS - 3)
+            .collect::<String>()
+            + "..."
+    } else {
+        text.to_string()
+    }
+}
+
+/// A value as a message quotes it: whitespace runs collapsed to one space, then at most
+/// [`MESSAGE_VALUE_CHARS`] characters. A longer value keeps its start (`keep_end` false) or
+/// its end, with `...` for the cut.
+pub fn short_value(value: &str, keep_end: bool) -> String {
+    let s = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let n = s.chars().count();
+    if n <= MESSAGE_VALUE_CHARS {
+        return s;
+    }
+    if keep_end {
+        "...".to_string()
+            + &s.chars()
+                .skip(n - (MESSAGE_VALUE_CHARS - 3))
+                .collect::<String>()
+    } else {
+        s.chars().take(MESSAGE_VALUE_CHARS - 3).collect::<String>() + "..."
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Names
+
+/// `base` followed by each override, joined with `sep` (`:` for the current syntax, `_` for
+/// the legacy one).
+pub fn joined(base: &str, overrides: &[String], sep: char) -> String {
+    let mut s = base.to_string();
+    for o in overrides {
+        s.push(sep);
+        s.push_str(o);
+    }
+    s
+}
+
+/// A variable reference back to text in the current syntax, without its flag:
+/// `RDEPENDS:${PN}:append`.
+pub fn colon_name(var: &VarRef) -> String {
+    joined(&var.base, &var.overrides, ':')
+}
+
+// ---------------------------------------------------------------------------------------
+// Files
+
+/// Files as `(layer, path)`.
+pub type FileSet = HashSet<(String, PathBuf)>;
+
+/// `(tree, all)` from a recipe pass's visits ([`DataStore::files`]), from the visit of the
+/// context's own `.bb` on: `tree` holds the recipe's own files (`.bb`, `.inc`, bbappends),
+/// `all` every file visited (classes included). Both empty when the recipe was not visited.
+pub fn recipe_pass_files(cx: &LintContext<'_>, data: &DataStore) -> (FileSet, FileSet) {
+    let visits = data.files();
+    let Some(start) = visits.iter().position(|v| {
+        v.kind == FileKind::Recipe && v.loc.layer == cx.loc.layer && v.loc.path == cx.loc.path
+    }) else {
+        return (HashSet::new(), HashSet::new());
+    };
+    let mut tree = HashSet::new();
+    let mut all = HashSet::new();
+    for v in &visits[start..] {
+        let key = (v.loc.layer.clone(), v.loc.path.clone());
+        if matches!(
+            v.kind,
+            FileKind::Recipe | FileKind::Append | FileKind::Include
+        ) {
+            tree.insert(key.clone());
+        }
+        all.insert(key);
+    }
+    (tree, all)
+}
+
+/// Reads an indexed file through [`crate::workspace::Workspace::confine`], decodes and
+/// parses it; `None` when it cannot be read.
+pub fn read_indexed(cx: &LintContext<'_>, f: &query::FileRow) -> Option<(String, ParsedFile)> {
+    let abs = cx
+        .ws
+        .confine(&cx.ws.abs_path(&f.loc(LineSpan::line(1)))?)
+        .ok()?;
+    let bytes = std::fs::read(abs).ok()?;
+    let text = crate::parse::lexer::decode(&bytes).into_owned();
+    let parsed = crate::parse::parse(&text);
+    Some((text, parsed))
+}
+
+/// Text normalised for comparison, one entry per line: lines trimmed, blank and comment
+/// lines dropped, whitespace runs collapsed.
+pub fn normalise_lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect()
+}
+
+/// [`normalise_lines`] joined with `\n`.
+pub fn normalise(text: &str) -> String {
+    normalise_lines(text).join("\n")
+}
+
+/// The here-document delimiter a shell line opens (`cat > x <<EOF`, `<<-'EOF'`), if any; not
+/// a `<<<` here-string.
+pub fn heredoc_delimiter(line: &str) -> Option<String> {
+    let at = line.find("<<")?;
+    let rest = &line[at + 2..];
+    if rest.starts_with('<') {
+        return None;
+    }
+    let rest = rest.strip_prefix('-').unwrap_or(rest).trim_start();
+    let word: String = rest
+        .trim_start_matches(['\'', '"', '\\'])
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    (!word.is_empty()).then_some(word)
+}
+
 // ---------------------------------------------------------------------------------------
 // Releases
 
 /// `kirkstone`, `kirkstone and scarthgap`, `kirkstone, langdale and scarthgap`.
 pub fn release_list(releases: &[Release]) -> String {
     let names: Vec<&str> = releases.iter().map(|r| r.codename()).collect();
-    match names.as_slice() {
-        [] => String::new(),
-        [one] => (*one).to_string(),
-        [init @ .., last] => format!("{} and {last}", init.join(", ")),
-    }
+    and_list(&names)
 }
 
 /// The releases of the context that do not have `feature`, oldest first.
@@ -286,10 +429,11 @@ pub const PACKAGE_ONLY_VARS: &[&str] = &[
     "ALLOW_EMPTY",
 ];
 
-/// Variables that may carry a package override (`PACKAGEVARS` in
-/// `meta/classes-global/package.bbclass`, OE-core master 2026-11). Many of them (`SUMMARY`,
-/// `LICENSE`, `SECTION`) also have a recipe-wide meaning, so being in this list does not make
-/// a bare assignment wrong; see [`PACKAGE_ONLY_VARS`] for that.
+/// Variables that may carry a package override: `PACKAGEVARS` in
+/// `meta/classes-global/package.bbclass` (OE-core master 2026-11), plus `INSANE_SKIP` and
+/// `QA_EMPTY_DIRS`, which OE-core reads per package too. Many of them (`SUMMARY`, `LICENSE`,
+/// `SECTION`) also have a recipe-wide meaning, so being in this list does not make a bare
+/// assignment wrong; see [`PACKAGE_ONLY_VARS`] for that.
 pub const PACKAGE_VARS: &[&str] = &[
     "FILES",
     "RDEPENDS",
@@ -325,7 +469,24 @@ pub const PACKAGE_VARS: &[&str] = &[
     "SKIP_FILEDEPS",
     "PRIVATE_LIBS",
     "PACKAGE_ADD_METADATA",
+    "INSANE_SKIP",
+    "QA_EMPTY_DIRS",
 ];
+
+/// Whether an assignment (`base`, `flag`) is version data: `PV`, `PR`, `PE`,
+/// `LIC_FILES_CHKSUM`, `SRCREV` and `SRCREV_<name>`, and the checksum flags of `SRC_URI`.
+pub fn is_version_data(base: &str, flag: Option<&str>) -> bool {
+    matches!(base, "PV" | "PR" | "PE" | "LIC_FILES_CHKSUM")
+        || base == "SRCREV"
+        || base.starts_with("SRCREV_")
+        || (base == "SRC_URI" && flag.is_some_and(|f| f.ends_with("sum")))
+}
+
+/// Whether an inherited class name makes a recipe an image: `image`, `core-image`, or a
+/// name ending in `-image`.
+pub fn image_class(name: &str) -> bool {
+    name == "image" || name == "core-image" || name.ends_with("-image")
+}
 
 /// Whether `base` only means something with a package override ([`PACKAGE_ONLY_VARS`]).
 pub fn is_package_only(base: &str) -> bool {

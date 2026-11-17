@@ -51,19 +51,19 @@ impl Rule for OverrideAppendNoSpace {
             else {
                 continue;
             };
-            let name = full_name(&var.base, &var.overrides);
+            let name = helpers::colon_name(var);
             let msg = match kw.as_str() {
                 "append" if !value.starts_with(char::is_whitespace) => format!(
                     "`{name}` value has no leading space, so it is glued to the last word of \
                      {base}; write `{name} = \" {v}\"`",
                     base = var.base,
-                    v = short(value, false)
+                    v = helpers::short_value(value, false)
                 ),
                 "prepend" if !value.ends_with(char::is_whitespace) => format!(
                     "`{name}` value has no trailing space, so it is glued to the first word of \
                      {base}; write `{name} = \"{v} \"`",
                     base = var.base,
-                    v = short(value, true)
+                    v = helpers::short_value(value, true)
                 ),
                 _ => continue,
             };
@@ -75,30 +75,4 @@ impl Rule for OverrideAppendNoSpace {
             ));
         }
     }
-}
-
-/// The value for the message: whitespace runs collapsed, at most 40 characters. A longer
-/// value keeps its start (`keep_end` false: `:append`, where the start matters) or its end
-/// (`:prepend`), with `...` for the cut.
-fn short(value: &str, keep_end: bool) -> String {
-    let words: Vec<&str> = value.split_whitespace().collect();
-    let s = words.join(" ");
-    let n = s.chars().count();
-    if n <= 40 {
-        return s;
-    }
-    if keep_end {
-        "...".to_string() + &s.chars().skip(n - 37).collect::<String>()
-    } else {
-        s.chars().take(37).collect::<String>() + "..."
-    }
-}
-
-fn full_name(base: &str, overrides: &[String]) -> String {
-    let mut s = base.to_string();
-    for o in overrides {
-        s.push(':');
-        s.push_str(o);
-    }
-    s
 }

@@ -283,6 +283,11 @@ pub fn file_by_path(index: &Index, layer: &str, path: &Path) -> Result<Option<Fi
         .optional()?)
 }
 
+/// The file a pointer names (its layer and path; the lines are ignored).
+pub fn file_for_loc(index: &Index, loc: &Loc) -> Result<Option<FileRow>> {
+    file_by_path(index, &loc.layer, &loc.path)
+}
+
 /// A file by absolute path (as hooks see it), through [`Workspace::loc_for`].
 pub fn file_by_abs(index: &Index, ws: &Workspace, abs: &Path) -> Result<Option<FileRow>> {
     match ws.loc_for(abs, LineSpan::line(1)) {
@@ -732,6 +737,16 @@ fn edge_row(r: &Row<'_>) -> rusqlite::Result<EdgeRow> {
 pub fn edges_from(index: &Index, file: i64) -> Result<Vec<EdgeRow>> {
     let sql = format!("{EDGE_SELECT} WHERE e.src_file = ?1 ORDER BY e.line IS NULL, e.line, e.id");
     collect(index, &sql, &[&file], edge_row)
+}
+
+/// Every `require` / `include` / `include_all` edge whose target is not resolved (missing,
+/// or needing evaluation), by source layer, path and line.
+pub fn unresolved_include_edges(index: &Index) -> Result<Vec<EdgeRow>> {
+    let sql = format!(
+        "{EDGE_SELECT} WHERE e.kind IN ('require', 'include', 'include_all') \
+         AND e.target_file IS NULL ORDER BY ls.id, fs.path, e.line, e.id"
+    );
+    collect(index, &sql, &[], edge_row)
 }
 
 /// Edges pointing at `file`, by source layer and path.

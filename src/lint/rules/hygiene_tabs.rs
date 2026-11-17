@@ -23,22 +23,6 @@ fn indentation(line: &str) -> &str {
     &line[..line.len() - line.trim_start_matches([' ', '\t']).len()]
 }
 
-/// The here-document delimiter a shell line opens, if any (as `hygiene/host-path` reads it).
-fn heredoc_delimiter(line: &str) -> Option<String> {
-    let at = line.find("<<")?;
-    let rest = &line[at + 2..];
-    if rest.starts_with('<') {
-        return None;
-    }
-    let rest = rest.strip_prefix('-').unwrap_or(rest).trim_start();
-    let word: String = rest
-        .trim_start_matches(['\'', '"', '\\'])
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-        .collect();
-    (!word.is_empty()).then_some(word)
-}
-
 fn shell_finding(lines: &[&str], body: LineSpan) -> Option<(u32, String)> {
     let mut style: Option<char> = None;
     let mut heredoc: Option<String> = None;
@@ -50,7 +34,7 @@ fn shell_finding(lines: &[&str], body: LineSpan) -> Option<(u32, String)> {
             }
             continue;
         }
-        heredoc = heredoc_delimiter(line);
+        heredoc = helpers::heredoc_delimiter(line);
         if line.trim().is_empty() {
             continue;
         }

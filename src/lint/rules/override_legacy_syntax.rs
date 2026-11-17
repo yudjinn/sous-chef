@@ -172,16 +172,16 @@ fn message(var: &VarRef, suffix_at: Option<usize>, is_fn: bool, written: Option<
             // any written with `:`).
             let written = written
                 .map(str::to_string)
-                .unwrap_or_else(|| joined(&var.base, &var.overrides, '_'));
-            (written, joined(&var.base, &var.overrides, ':'))
+                .unwrap_or_else(|| helpers::joined(&var.base, &var.overrides, '_'));
+            (written, helpers::joined(&var.base, &var.overrides, ':'))
         }
         Some(cut) => {
             let mut overrides: Vec<String> =
                 var.base[cut + 1..].split('_').map(str::to_string).collect();
             overrides.extend(var.overrides.iter().cloned());
             (
-                joined(&var.base, &var.overrides, ':'),
-                joined(&var.base[..cut], &overrides, ':'),
+                helpers::joined(&var.base, &var.overrides, ':'),
+                helpers::joined(&var.base[..cut], &overrides, ':'),
             )
         }
     };
@@ -190,15 +190,6 @@ fn message(var: &VarRef, suffix_at: Option<usize>, is_fn: bool, written: Option<
         "legacy `_` override syntax in `{written}{flag}{parens}`, which current BitBake \
          rejects or treats as a different variable; write `{modern}{flag}{parens}`"
     )
-}
-
-fn joined(base: &str, overrides: &[String], sep: char) -> String {
-    let mut s = base.to_string();
-    for o in overrides {
-        s.push(sep);
-        s.push_str(o);
-    }
-    s
 }
 
 /// The name at the start of a statement's text (after `export`, `python`, `fakeroot`),

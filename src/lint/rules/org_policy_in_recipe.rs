@@ -23,11 +23,6 @@ use crate::types::FileKind;
 
 pub struct OrgPolicyInRecipe;
 
-/// Whether an inherited class name makes a recipe an image.
-fn image_class(name: &str) -> bool {
-    name == "image" || name == "core-image" || name.ends_with("-image")
-}
-
 /// What the static trees say about the file being an image recipe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Image {
@@ -39,7 +34,7 @@ enum Image {
 /// Image status from the index: the file's own tree, and for a bbappend the trees of the
 /// recipes it applies to. `None` when the file is not indexed.
 fn image_from_index(cx: &LintContext<'_>) -> Option<Image> {
-    let row = query::file_by_path(cx.index, &cx.loc.layer, &cx.loc.path).ok()??;
+    let row = query::file_for_loc(cx.index, &cx.loc).ok()??;
     let mut roots = vec![row.id];
     if row.kind == FileKind::Append {
         for e in query::edges_from(cx.index, row.id).ok()? {
@@ -57,7 +52,7 @@ fn image_from_index(cx: &LintContext<'_>) -> Option<Image> {
             match &node.file {
                 Some(f) if node.kind == "inherit" => {
                     let stem = f.path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                    if image_class(stem) {
+                    if helpers::image_class(stem) {
                         return Some(Image::Yes);
                     }
                 }
@@ -80,7 +75,7 @@ fn image_from_text(cx: &LintContext<'_>) -> Image {
             if classes.contains("${") {
                 unknown = true;
             }
-            if classes.split_whitespace().any(image_class) {
+            if classes.split_whitespace().any(helpers::image_class) {
                 return Image::Yes;
             }
         }

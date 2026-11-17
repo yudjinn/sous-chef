@@ -81,22 +81,6 @@ fn strip_comment(line: &str) -> &str {
     line
 }
 
-/// The here-document delimiter a line opens (`cat > x <<EOF`, `<<-'EOF'`), if any.
-fn heredoc_delimiter(line: &str) -> Option<String> {
-    let at = line.find("<<")?;
-    let rest = &line[at + 2..];
-    if rest.starts_with('<') {
-        return None; // `<<<` here-string
-    }
-    let rest = rest.strip_prefix('-').unwrap_or(rest).trim_start();
-    let word: String = rest
-        .trim_start_matches(['\'', '"', '\\'])
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-        .collect();
-    (!word.is_empty()).then_some(word)
-}
-
 /// Host paths at the start of a word in `line` (not the first word).
 fn host_paths(line: &str) -> Vec<(&'static str, &'static str)> {
     let mut out = Vec::new();
@@ -205,7 +189,7 @@ impl Rule for HygieneHostPath {
                         ),
                     ));
                 }
-                heredoc = heredoc_delimiter(code);
+                heredoc = helpers::heredoc_delimiter(code);
             }
             let whole = name.base == "do_install"
                 && !name
@@ -241,7 +225,10 @@ mod tests {
         assert!(host_paths("\tcp a /usrx/b").is_empty());
         assert_eq!(strip_comment("a # /etc"), "a ");
         assert_eq!(strip_comment("a '#' /etc"), "a '#' /etc");
-        assert_eq!(heredoc_delimiter("cat > x <<-'EOF'"), Some("EOF".into()));
-        assert_eq!(heredoc_delimiter("cat <<< x"), None);
+        assert_eq!(
+            helpers::heredoc_delimiter("cat > x <<-'EOF'"),
+            Some("EOF".into())
+        );
+        assert_eq!(helpers::heredoc_delimiter("cat <<< x"), None);
     }
 }
