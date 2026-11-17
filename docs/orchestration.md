@@ -225,3 +225,88 @@ Open decisions and discrepancies (not resolved in wave 1):
   `writable_layers` matches layer names, not collection names.
 - Still open from wave 0: the CI workflow has never run on GitHub; the fixture README items
   marked *verify* (class parse order, bbappend order, `FILE_LAYERNAME`).
+
+## Wave 2 hand-off notes (for whoever launches wave 3)
+
+State: T1.4, T2.2, T2.3, T3.1, T3.2, T3.3, T5.2, T5.3, T5.6 and T6.1 are merged (branches
+`w2-a` .. `w2-e`, one `--no-ff` merge each, gate after each, no conflicts) on the
+integration branch `worktree-w2-integration`, which is `dev` (`88db3aa`) plus wave 2.
+`dev` itself was not moved: it is checked out in the user's main checkout. Fast-forward it
+first (`git merge --ff-only worktree-w2-integration` in the main checkout) and cut wave 3
+branches from the result. `sous-chef index` now works on the fixture workspace.
+
+How wave 2 was run: a Fable session launched the five agents (Opus, one worktree each) at
+the user's request, reviewed each hand-off against the checklist, and integrated on its own
+worktree (`.claude/worktrees/w2-integration`). The user wants implementation work done by
+agents, so T1.6 (below) also went to an agent.
+
+Decisions the user made during wave 2 (recorded in `docs/overview.md`):
+
+- **Releases:** Wrynose (6.0 LTS) is the primary target, Scarthgap fully supported,
+  Kirkstone the floor. One rule set; release-dependent rules and behaviour are gated on the
+  `Feature` table in `src/release.rs`. See "Release contract" in `docs/architecture.md`.
+- **Lint against the oldest claimed release:** a layer is linted against every supported
+  release in its `LAYERSERIES_COMPAT`, plus the workspace's release.
+- **T1.6 Release detection** was added to M1 and done at the end of wave 2.
+- **T8.6 Workspace audit report** was added to M8, not scheduled (after wave 5).
+
+Orchestrator changes at integration:
+
+- `slice failures=true` takes its blocks from `bitbake::logs::detect` (lines containing
+  `ERROR:` remain the fallback). The blocks now include the detector's context lines, and
+  the `slice` test was changed to match.
+- `logs::task_definition` resolves through the query layer, and the `log` tool refreshes
+  the index before the lookup. Tests in `tests/w2_integration.rs`.
+- `status` takes file counts from `query::layer_stats()` after a successful refresh.
+- `Cargo.toml`: the `unused_dependencies = "allow"` lint setting is gone.
+- `docs/architecture.md`: "As implemented in wave 2" lists what each stream added. Read it
+  before briefing wave 3.
+
+Things wave 3 briefs must say:
+
+- **Stream A (T3.4 replay):** call `DataStore::expand_keys()` once at the end of each
+  recipe, after deferred inherits. Record `export` with `mark_exported`. Functions are not
+  handled by the datastore yet. `statements_by_base` with `files` orders by file, then
+  position; interleaved parse order is the replay's job.
+- **Stream B (T2.6, T2.7 lookup tools):** `statement_by_name` returns a `Vec`.
+  `class_files` and `shadowed` take the workspace as well as the index.
+- **Stream C (T4.1 lint engine, T4.5):** implement the release gating in the T4.1 text
+  (`Rule::releases()`, `LintContext.releases`, `Layer::lint_releases`) and
+  `[lint.severity]`. Replace `scaffold::RuleLint`'s body with a call to the engine scoped
+  to the written files (a declared edit in `src/scaffold/mod.rs`), and check that findings
+  from generated files show up. Still open from wave 1: parser diagnostics that are not
+  BitBake errors need a severity.
+- **Stream D (T5.4 jobs, `bitbake` tool):** run `validate_name` on every user-supplied
+  target; `BbEnv::command` cannot tell a target from a flag. Use `Supervised` for
+  cancellation. `log job=...` and `status.job` are waiting for the job table; connect both.
+  `logs::failure_logfiles` and `failed_tasks` read a build's console output.
+- **Stream E (T7.1, T7.2 hooks):** `bitbake::logs::detect` is the failure detector for the
+  Bash hook; `query::enclosing_item` is ready.
+- **Wave 4 scaffold generators (T6.2, T6.3):** each registers itself with a one-line edit
+  in `scaffold::generator()`; the brief must allow it. Generated files follow `ws.release`.
+
+Open items and gaps (not resolved in wave 2):
+
+- **Python in `OVERRIDES`.** OE-core's `OVERRIDES` contains python, so the static override
+  list is partly unknown on real layers; the evaluator flags affected values with a
+  heuristic. Check this against a real poky checkout in T8.1.
+- **`validate_name` rejects `:`**, so `bitbake-getvar` cannot be asked for a name such as
+  `FILES:${PN}`. T5.5 needs a decision.
+- **`log`:** the `bitbake-getvar` route for finding `T` has no test (it was written against
+  the `BbEnv` stub); a `TMPDIR` outside the build directory fails the workspace path check,
+  so its logs cannot be read; `--value` may not exist in older `bitbake-getvar` releases.
+- **Scaffold writes:** no rollback when a later file of a multi-file plan fails; the check
+  before each rename is not atomic. Files of a new layer are not linted after the write.
+- **Query layer:** `preferred_recipe` with a version picks the first match in layer and
+  path order; `DEFAULT_PREFERENCE`, `PE` and `PR` are ignored; `BBMASK` is not applied.
+- **Scanner:** directories named `tmp`, `sstate-cache` and `downloads` inside a layer are
+  never indexed; non-UTF-8 paths are skipped silently.
+- **Unverified BitBake behaviour:** the real `oe-init-build-env` (and whether Wrynose
+  replaces it with `bitbake-setup`); the layout of `bitbake -e` output that `slice var=`
+  expects; bbappend order against real `bitbake-layers show-appends` output; whether the
+  BitBake server leaves the process group on a kill; the compiler, configure, make, wget
+  and quilt text in the recorded logs (written by hand from the sources, not captured).
+- Still open from earlier waves: the CI workflow has never run on GitHub; handle retention
+  limits are not in `Config`; `tests/fixtures/README.md` does not mention `fakebb/` or
+  `outputs/`; the milestone and fixture README disagreements with BitBake listed in the
+  wave 1 notes.

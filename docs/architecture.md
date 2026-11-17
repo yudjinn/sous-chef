@@ -520,6 +520,98 @@ pub struct LintContext<'a> {
 pub fn cli(cfg: &Config, args: &LintCliArgs) -> Result<i32>;   // exit code
 ```
 
+### As implemented in wave 2
+
+The signatures in the sections above are the contract; these are the additions each stream
+made. The module docs in the named files are the detailed reference.
+
+Path resolution (T1.4, `workspace::resolve`): `bbpath(ws)` reads the configured `BBPATH`
+(it does not assume layer order). `Resolver` (`new`, `with_bbpath`, `with_known_files`,
+`find_in_bbpath`, `include_all`, `find_class`, `class_candidates` with the winner first,
+`resolve_with(ws, RefKind, text, from, vars) -> Option<Vec<Target>>`), `RefKind`, `Target`,
+`expand_with(text, vars)`, `class_candidates(ws, name, global)`, `recipe_files(ws)` in
+BitBake collection order. `layers::read_bbpath(build_dir, roots)`. Layer confs are read
+with `parse()`; `include` / `require` / `include_all` inside them are followed when the
+argument expands statically and the file is inside the build directory or a layer.
+
+Scanner (T2.2, `index::scan`): `Index::refresh` calls `scan::refresh`. Column conventions:
+`statements.op` holds the include mode, `inherit` / `inherit_defer`, or `shell` / `python`
+(with a `fakeroot ` prefix) for functions; anonymous python is named `__anonymous`;
+`bbappend` edges have `line` NULL and `target_text` set to the matching `.bb` name; every
+edge is recomputed after any change. The build pseudo-layer row is `build`, priority 0.
+`depends` holds unconditional `DEPENDS` / `RDEPENDS:<pkg>` and the build-dependency field of
+`PACKAGECONFIG`. Helpers `pn_pv`, `written_name`.
+
+Query layer (T2.3, `index::query`; every function takes `&Index`): rows `FileRow`,
+`RecipeRow`, `StatementRow` (= `ItemRow`), `EdgeRow`, `TreeNode`, `UserRow`, `ClassFileRow`,
+`LayerStats`, `ShadowRow`, filter `StatementFilter`. Functions `file`, `file_by_path`,
+`file_by_abs`, `find_recipes`, `preferred_recipe`, `version_matches`, `appends_for`
+(application order), `orphan_appends`, `statements_in`, `statement_by_name` (a `Vec`),
+`statements_by_base`, `enclosing_item`, `search_names`, `search_fts`, `edges_from`,
+`edges_to`, `tree`, `class_files(index, ws, name, global)`, `inheritors`, `layer_stats`,
+`shadowed(index, ws)`, `vercmp`. `status` takes its file counts from `layer_stats`.
+
+Evaluator core (T3.1 to T3.3, `eval::{datastore, expand, overrides}`):
+- Building: `DataStore::new`, `fork` (copy-on-write), `record_visit(FileVisit)`,
+  `apply(VarOp)`, `apply_with(VarOp, expander)`, `mark_exported(name)`,
+  `unset(name, flag, loc, via)`, `expand_keys() -> Vec<String>` (BitBake's `expandKeys`;
+  **the replay must call it once at the end of a recipe, after deferred inherits**).
+- Reading: `value(name)`, `history(name)`, `flag_history(name, flag)`,
+  `unsets(base) -> Vec<UnsetRecord>`, `overrides()`, `overrides_value()`, `expand(text)`,
+  `flag`, `raw`, `raw_flag`, `flag_names`, `names`. `expand::{expand, Expander, Source,
+  has_python}`.
+- `unset` is not part of `history()` (`VarOp.op` is an `AssignOp`); a tool that shows
+  history must also read `unsets()`.
+- `OpStatus`: `InactiveOverride` (a condition is missing from `OVERRIDES`; legacy `_`
+  syntax ops always get this), `Shadowed` (conditions hold, but the op does not contribute),
+  `Removed` (applied, then every word it added was taken out by a `:remove`).
+- Differences from BitBake, on purpose: a reference cycle is left in place and listed in
+  `unresolved` (BitBake raises); an `OVERRIDES` that does not reach a fixed point uses the
+  second result and adds `OVERRIDES` to `unresolved` (BitBake stops).
+
+Environment runner (T5.3, `bitbake`): `BbEnv::detect`, `detect_in(cfg, ws, &HostEnv)`,
+`probe(..) -> Result<BbEnv, String>` (the reason when nothing is found), `mode()`
+(`init-script` or `initialised`), `command(program, args)`, `output(program, args, timeout)
+-> CommandOutput`, `Supervised` (`spawn`, `child_mut`, `group`, `wait(timeout, cancel) ->
+Finish { Exited, TimedOut, Cancelled }`), `environment_state(cfg, ws) -> EnvState`.
+`validate_arg` accepts a name or a plain option; **callers must run `validate_name` on a
+user-supplied target themselves**, because `command()` cannot tell a target from a flag.
+`validate_name` rejects `:`, so a variable name like `FILES:${PN}` cannot be passed yet.
+Unix only. The fake BitBake for tests is `tests/fixtures/fakebb/` (`FAKEBB_*` variables).
+
+`slice` (T5.2): one selector per call; the cap is 8 KB or `budget_tokens * 4` when smaller;
+`failure_blocks` takes its blocks from `bitbake::logs::detect`.
+
+Log digests (T5.6, `bitbake::logs`): `detect(text) -> Vec<Failure>` (`Failure { kind, rank,
+line, span, message, detail, frames }`), `first_error`, `failure_logfiles(output)`,
+`failed_tasks(output)`, `digest(&DigestInput) -> Digest` and `Digest::render`,
+`meta_from_text`, `meta_from_path`, `shell_trace`, `failing_function`,
+`t_dir_from_bitbake(&BbEnv, recipe)`, `find_task_logs`, `logs_in_t_dir`,
+`newest_cooker_log`, `tmp_dirs`, `normalize_task`, `check_name`,
+`task_definition(index, ws, recipe, task) -> Option<Loc>` (recipe and bbappends first, then
+included files, then a class default `<class>_<task>`).
+
+Scaffold engine (T6.1, `scaffold`): `Kind` lives here (the tool re-exports it).
+`Plan { files, notes, new_layer: Option<PathBuf> }`, `FileAction::as_str`.
+
+```rust
+pub trait Generator: Sync {
+    fn kind(&self) -> Kind;
+    fn options(&self) -> &'static [&'static str];        // any other option key is refused
+    fn plan(&self, cx: &GenContext<'_>) -> Result<Plan>; // must not write
+}
+pub struct GenContext<'a> { ws, config, index: &Index, request: &Request }  // target_layer(), opt_str(key)
+pub struct Request { kind, layer, name, version, options }
+pub fn execute(ws, config, &mut index, &request, write, generator_override, &dyn PostWriteLint) -> Result<Outcome>;
+```
+
+A generator task registers itself by replacing `None` with `Some(&<file>::<Struct>)` in
+its kind's arm of `scaffold::generator()` (an edit in `src/scaffold/mod.rs`, outside the
+generator's own file). Paths must be absolute, pass `Workspace::confine` and lie in a
+writable layer; a plan with `new_layer` may also modify `<build>/conf/bblayers.conf`.
+`RuleLint` runs file-scope rules on the written files until the lint engine (T4.1) exists.
+`sha256_hex`, `file_sha256`, `line_count`; test seam `tools::scaffold::run_with`.
+
 ## Errors
 
 `error::Error` (thiserror) with variants `Io(io::Error)`, `Sqlite(rusqlite::Error)`,
