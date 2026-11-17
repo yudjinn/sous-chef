@@ -19,7 +19,11 @@ meta-yocto `b60511544c41f5d29d290681e15c9e302f747efe`, meta-openembedded
 The first samples (T9.1) were written before BitBake could start on this host and recorded
 the host tools failure (`chrpath diffstat rpcgen` missing). The tools are installed now;
 T9.2 replaced the two `*-hosttools.out` files with the real output of the same commands
-(`kas-shell-bitbake-p.out`, `kas-shell-bitbake-getvar-T-value.out`) and added the rest. The
+(`kas-shell-bitbake-p.out`, `kas-shell-bitbake-getvar-T-value.out`) and added the rest.
+One sample still shows the old failure: `bitbake-setup-build/bitbake-setup-init.out`, whose
+last step (`bitbake-config-build enable-fragment`) hit it; the fragments were enabled
+afterwards by `scripts/live-env.sh`, so that build's `conf/toolcfg.conf`, which is not
+recorded here, exists now. The
 `bitbake -e curl` dump (27 247 lines, 1.8 MB) is not committed; it is
 `{{LIVE}}/runs/bitbake-e-curl.out`. What the samples show is in
 `docs/live-verification.md`.
@@ -47,9 +51,10 @@ Commands are run from `{{LIVE}}/yocto-kiss` with `KAS=../venv/bin/kas` and
 | `broken-fetch/console.out` | `$KAS shell ../scratch/kas-scratch.yaml -c 'bitbake -c fetch broken-fetch'` (exit 1): the real console output of a failed `do_fetch` |
 | `broken-fetch/log.do_fetch.1484343`, `broken-fetch/log.task_order` | that task's `${T}` files |
 | `hooks/*.event.json` | `PostToolUse` events built by hand for real files and outputs of this workspace (shape of `tests/fixtures/hooks/captured/`; not captured from Claude Code) |
-| `hooks/*.response.json` | what `sous-chef hook` printed for each (empty: no output) |
+| `hooks/*.response.json` | what `sous-chef hook` printed for each (empty: no output), at T9.2. `bash_kas_fetch_failure.response.json` is empty because the hook did not recognise `kas shell ... -c 'bitbake ...'` then; since T9.3 it does (`live_bash_hook_digests_real_fetch_failure` checks it), and the file was not re-recorded |
 | `kas-build-conf/*` | the files `kas checkout $FILES` wrote: `build/conf/*` and `build/CACHEDIR.TAG` |
-| `bitbake-setup-build/bitbake-setup-init.out` | `bitbake-setup --setting default top-dir-prefix {{LIVE}} --setting default top-dir-name bitbake-builds init --non-interactive --source-overrides {{LIVE}}/bitbake-setup-sources.json {{LIVE}}/yocto-kiss/yocto-kiss.conf.json dogbonedark` (exit 1; progress lines removed) |
+| `bitbake-setup-build/bitbake-setup-init.out` | `bitbake-setup --setting default top-dir-prefix {{LIVE}} --setting default top-dir-name bitbake-builds init --non-interactive --source-overrides {{LIVE}}/bitbake-setup-sources.json {{LIVE}}/yocto-kiss/yocto-kiss.conf.json dogbonedark` (exit 1 at the `enable-fragment` step, the host tools failure, before they were installed; progress lines removed) |
+| `differential/summary.txt`, `classes.tsv`, `workspace.txt` | the differential test's report (`tests/differential.rs`, docs/differential.md): per-target table and totals, every compared value with its class, and the workspace-level comparisons |
 | `bitbake-setup-build/init-build-env` | `{{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/build/init-build-env`, as written by bitbake-setup |
 | `bitbake-setup-build/{bblayers,local}.conf`, `conf-summary.txt` | that build's `conf/` (`conf-notes.txt` and `templateconf.cfg` are empty; `site.conf` is a symlink to `../../../site.conf`) |
 | `bitbake-setup-build/site.conf` | `{{LIVE}}/bitbake-builds/site.conf` |
