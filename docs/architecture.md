@@ -8,7 +8,7 @@ with an explicit note in your hand-off.
 ```
 src/
   main.rs              CLI entry (clap): serve | index | lint | hook; each calls one library
-                       function (mcp::serve, mcp::index_command, lint::cli, hook::handle)
+                       function (mcp::serve, mcp::index_command, lint::cli, hook::run)
   lib.rs               module declarations only
   types.rs             shared types (below)
   error.rs             Error, Result
@@ -261,7 +261,7 @@ not writable it is the workspace release alone.
 Who reads it:
 
 - **Lint.** `Rule` gains `fn releases(&self) -> RangeInclusive<Release>` (default: all).
-  The engine skips a rule for a layer when none of `lint_releases` is in the range, and
+  The engine skips a rule for a unit when none of its releases is in the range, and
   `LintContext` gains `releases: &'a [Release]` so a rule can say which of them a finding
   applies to ("`inherit_defer` is not available in kirkstone, which this layer claims").
   Rule ids, the catalogue and `[lint] disable` are unchanged.
@@ -528,6 +528,7 @@ pub struct LintContext<'a> {
     pub index: &'a Index,
     pub ws: &'a Workspace,
     pub loc: Loc,
+    pub releases: &'a [Release],          // added by T4.1; see "As implemented in wave 3"
 }
 #[derive(clap::Args)] pub struct LintCliArgs { target, rules (--rule), severity, format, fail_on, all }
 pub fn cli(cfg: &Config, args: &LintCliArgs) -> Result<i32>;   // exit code
@@ -622,8 +623,117 @@ A generator task registers itself by replacing `None` with `Some(&<file>::<Struc
 its kind's arm of `scaffold::generator()` (an edit in `src/scaffold/mod.rs`, outside the
 generator's own file). Paths must be absolute, pass `Workspace::confine` and lie in a
 writable layer; a plan with `new_layer` may also modify `<build>/conf/bblayers.conf`.
-`RuleLint` runs file-scope rules on the written files until the lint engine (T4.1) exists.
-`sha256_hex`, `file_sha256`, `line_count`; test seam `tools::scaffold::run_with`.
+`RuleLint` calls `lint::run` on exactly the written files (default options, so
+`[lint] disable`, `[lint.severity]` and inline suppression apply); files of a new layer are
+skipped because they are not in the workspace until `bblayers.conf` lists it. `sha256_hex`, `file_sha256`, `line_count`; test seam `tools::scaffold::run_with`.
+
+### As implemented in wave 3
+
+As for wave 2: the additions each stream made; the module docs in the named files are the
+detailed reference, and docs/mcp-tools.md describes the tools' behaviour.
+
+Lookup tools (T2.6, T2.7, `mcp::tools::{recipe, item, search, class, layers}`): helpers the
+other tools share: `recipe::resolve_recipe(index, name, version) -> RecipeRow` (a `pn`, a
+`pn_pv`, or a pointer to a `.bb` or `.bbappend`; no exact name is `Ambiguous` with up to 20
+candidates), `recipe::walk_recipe(index, &RecipeRow) -> Walk` (`Walk { nodes, statements,
+files }`, `Node`, `NodeState`: the recipe tree in parse order, static), `recipe::file_ref`,
+`file_label`, `outline_kind`; `item::matching(stmts, name)`, `read_confined(ws, loc)`,
+`hex12`, `CAP_BYTES`; `search::item_label`, `DEFAULT_LIMIT`. **The walk is static: an
+`include` or `inherit` whose argument needs evaluation is unresolved, and `base.bbclass` and
+the `INHERIT` classes are not part of it.** `recipe` summary values are read from direct
+statements, not from the replay.
+
+Replay (T3.4, `eval::replay`): `evaluate(index, ws, target)` uses a process-wide
+`ConfigCache` (`global_cache()`); `evaluate_with(&ConfigCache, index, ws, target)` takes an
+explicit one; `ConfigCache::{new, passes, clear}`. **The caller must refresh the index
+first.** `Target.recipe` is a recipe name (with `version`, `%` allowed, else the preferred
+one), an absolute path to a `.bb`, or `layer:path` ending in `.bb`; `None` evaluates the
+configuration only; an unknown recipe is `NotFound`. `machine` / `distro` in the target are
+set first and set again after every plain assignment to them in the configuration pass, so
+they win over the configured values. A cache entry is keyed by (index file, workspace key, machine, distro)
+and reused while every `.conf` keeps its sha256, the set of `.bbclass` paths is the same,
+and every file the configuration pass visited keeps its sha256. Problems in the metadata
+never fail the evaluation: `DataStore::replay() -> &ReplayNotes` has `recipe`, `appends`,
+`layer_name` (`FILE_LAYERNAME`), `anonymous: Vec<AnonPython { loc, via, name, sets, opaque
+}>`, `python_vars`, `references: Vec<RefIssue { loc, via, kind, text, problem: RefProblem
+}>` (`Python`, `Undefined`, `NotFound`, `Cycle`) and `incomplete_keys`. A variable in
+`python_vars` has `unevaluated_python` set on its value. **Tools should warn when
+`anonymous` is not empty, and especially for an entry with `opaque: true` (it changes
+variables through a computed name or hands `d` to other code); this is binding on wave 4's
+`var`, `overrides` and `deps`.** Functions are stored like variables, with flags `func`,
+`python`, `fakeroot`; the stored value is one pointer line per piece (`layer:path:A-B`, or
+`layer:path:A-B -> class_do_x` for an `EXPORT_FUNCTIONS` stub); `DataStore::function(name)
+-> Option<Vec<FunctionPiece { loc, calls }>>` gives the composed pieces, `is_function(name)`.
+Anonymous python is stored under BitBake's name `__anon_<line>_<file>`. In the recipe pass
+`PN`, `PV`, `BPN`, `BP`, `FILE_DIRNAME` and `THISDIR` are computed from `FILE` when their
+stored value is python or absent. `via` chains: an included or inherited file gets its
+parent's chain plus the statement; a bbappend's statements get the recipe file (line 1); a
+`layer.conf` gets the chain of the last applied `BBLAYERS` operation plus that operation; an
+`INHERIT` class gets the chain of the first applied `INHERIT` operation naming it plus that
+operation; `conf/bblayers.conf`, `conf/bitbake.conf` and `base` get none. A `FileVisit.loc` spans line 1 to the
+end of the file's last statement. Not replayed: `addtask`, `deltask`, `addhandler`; event
+handlers and anonymous python never run.
+
+Lint engine (T4.1, `lint`): `Rule` keeps `id`, `scope`, `default_severity`, `check` and
+gains two methods with defaults: `releases() -> RangeInclusive<Release>` (default: every
+supported release) and `default_enabled() -> bool` (default true; false means the rule runs
+only when selected by its exact id or an alias of it). **The wave 4 hygiene task (T4.4) must
+override `default_enabled` to return false in `hygiene_variable_order.rs`; the M0 stub does
+not, so the rule is on by default until then.** `LintContext.releases` is oldest first and
+never empty: `Layer::lint_releases` of the unit's layer, or the workspace release alone for
+a file outside every layer. `lint::run(ws, index, config, &Target, &Options) ->
+Result<Report>` is the contract (the milestone's `run(target, options) -> Vec<Finding>` is
+superseded): `Target { Workspace, Layer(name), Recipe { name, version }, Files { files,
+lines } }`, `Options { rules, min_severity, all }`, `Report { findings, notes, files, layers
+}`; `resolve_target(ws, index, text, work_dir)`; `run_with(.., rules, &dyn Evaluate)` (test
+seam; `Replay` is the real evaluator); `check_text(rule, ws, index, loc, text, kind,
+releases, data)` runs one file-scope rule on text outside the workspace, for rule fixture
+tests; `applies`, `sort_findings`, `effective_severity`, `releases_for`, `allow_comment`,
+`entry_matches`, `is_disabled`, `group_of`, `GROUPS`, `ALIASES` (`style/variable-order` ->
+`hygiene/variable-order`), `summary_line`, `render_report`, `JsonReport`, `exit_code`,
+`cli_with`. Helpers for rule authors in `lint/helpers.rs`: `finding`, `loc_at`,
+`statement_text`; `release_list`, `releases_lacking`, `releases_having`, `feature_range`;
+`ListKind`, `list_kind`, `list_kind_of`, `is_space_list`; `PACKAGE_ONLY_VARS`,
+`PACKAGE_VARS`, `is_package_only`, `is_package_var`; `KnownOverrides { machines, distros,
+classes, declared }` (`from_index`, `contains`, `is_machine_or_distro`). Selection,
+configuration, suppression and exit codes are described in lint-rules.md ("Running lint").
+
+Lint tool (T4.5, `mcp::tools::lint`): a wrapper over `lint::run` and `render_report`;
+`rules_resource(config)` generates `sous-chef://rules` from the rule registry and the Flags
+column of lint-rules.md (so a row there must keep four cells).
+
+Jobs and the `bitbake` tool (T5.4, `bitbake::jobs`, `mcp::tools::bitbake`): `JobTable`
+(`new`, `start(&BbEnv, JobSpec, dir) -> Result<Started>`, `get`, `running`, `last`, `list`,
+`cancel`, `wait(id, timeout)`, `process_group`, `settle(&HandleStore)`), `JobInfo`,
+`JobSpec { op, target, program, args, kind }` (`command_line`), `JobState { Running,
+Succeeded, Failed, Cancelled }`, `Started { Started, AlreadyRunning }` (these five are
+re-exported from `bitbake`), `tail`, `tail_of`. One job of any kind runs at a time. A job's output goes to
+`<cache dir>/jobs/<pid>-<n>.out`; **a finished job's output becomes a handle only when
+`settle` is next called, which the `bitbake` tool does on every call and `log` does with
+`job`.** Cancellation terminates the process group (SIGTERM, SIGKILL after `KILL_GRACE`).
+Tool side: `Op`, `plan(config, ws, &Args) -> Plan { spec, destructive }` (the allowlisted
+argv; validates every name with `validate_name`), `check_destructive`, `status::job_line`.
+`logs::meta_from_path_in(path, ws)` reads the version directory of a work directory for the
+workspace's release (`Feature::PrInWorkdir`); `meta_from_path` returns it as it is.
+
+Hooks (T7.1, T7.2, `hook`): `sous-chef hook` reads one Claude Code hook event on stdin and
+writes nothing or one `hookSpecificOutput` object with `additionalContext`; no handler
+rewrites tool output. The wire format it was built against is recorded in
+`plugin/README.md`. `Handler` (`name`, `events`, `tools`, `handle(&mut Ctx, &Event) ->
+Result<Option<Response>>`), `HANDLERS` and `handler_for` (`grep_read::GrepRead` for Grep and
+Read; stubs `bash::BashDigest` for Bash and `edit::EditFollowUp` for Edit, Write and
+MultiEdit, which T7.3 and T7.4 fill in), `Event` (`parse`, `input_str`, `abs_path`),
+`Response` (`context` caps the text at `CONTEXT_CAP`, 9,000 bytes; `to_json`), `Ctx` (`env`,
+`elapsed`, `over_budget`, `check_budget`, `note`), `Env { ws, index }` with
+`fresh_file(abs)` (the index row only for a Yocto file inside the workspace whose bytes on
+disk still match the indexed sha256), `Options`, `run(event_json, &Options)` (fail open: any
+error, panic or overrun gives no output), `BUDGET` (150 ms, `SOUS_CHEF_HOOK_BUDGET_MS`
+overrides), `WATCHDOG` (2 s, `arm_watchdog`, `begin_output`), the debug log `hook.log` in the
+cache directory. `Index::open_read_only(path, busy)` opens an existing database read-only:
+it never creates, rebuilds or writes, and a missing file or another schema version is an
+error. A file edited since the last index refresh gets no annotation until the index is
+refreshed. **What the index should offer hooks and does not yet: `refresh_file(ws, abs)`,
+which reindexes one file. The wave 4 edit hook (T7.4) needs it.**
 
 ## Errors
 
@@ -648,12 +758,12 @@ release = "scarthgap"                     # optional; overrides detection
 
 [bitbake]
 enabled = true
-allow_destructive = false                 # cleansstate, cleanall, devtool reset
+allow_destructive = false                 # cleansstate, cleanall, devtool reset, devtool finish
 
 [lint]
 disable = ["style/variable-order"]
 
-[lint.severity]                           # optional per-rule override (read; applied by T4.1)
+[lint.severity]                           # optional override by rule id or group
 "hygiene/workdir-s" = "error"
 
 [output]
@@ -661,7 +771,7 @@ budget_tokens = 600
 ```
 
 In code (`src/config.rs`): `Config { build_dir, layers, writable_layers, init_script,
-bitbake: BitbakeConfig { enabled, allow_destructive }, lint: LintConfig { disable },
+bitbake: BitbakeConfig { enabled, allow_destructive }, lint: LintConfig { disable, severity },
 output: OutputConfig { budget_tokens }, work_dir }` (`work_dir` is not read from the file),
 `Config::load(&CliOverrides) -> Result<Config>`, `Config::from_toml(text, origin)`,
 `Config::validate(&Workspace)`. `CliOverrides { build_dir, config, layers, work_dir }` carries
