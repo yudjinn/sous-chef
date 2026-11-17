@@ -1,13 +1,22 @@
 //! Runs a command inside the initialised build environment.
 //!
-//! Two modes:
+//! Four modes:
 //!
 //! - **init script**: every command is
 //!   `bash -c 'source "$1" "$2" >/dev/null && shift 2 && exec "$@"' -- <init> <build_dir> <program> <args...>`,
 //!   so the script, the build directory, the program and every argument travel as argv and
 //!   are never interpolated into shell text;
+//! - **bitbake-setup**: the init script is a `bitbake-setup` `init-build-env` (it takes no
+//!   arguments); [`SETUP_WRAPPER`] instead of [`WRAPPER`], argv as above;
 //! - **initialised**: the server was started inside an environment that is already set up
-//!   (`BUILDDIR` or `BBPATH` set, `bitbake` on `PATH`); the program is executed directly.
+//!   (`BUILDDIR` or `BBPATH` set, `bitbake` on `PATH`); the program is executed directly;
+//! - **kas**: the workspace is a kas project and `kas` is on `PATH`; every command is
+//!   `kas shell --keep-config-unchanged <a.yaml:b.yaml> -c '<command>'`, run in kas's work
+//!   directory. kas takes the command as one string and hands it to the user's `$SHELL`
+//!   (`$SHELL -c`), so this is the one mode that builds shell text: the string is made
+//!   only of the allowlisted program and arguments that passed [`validate_arg`] (letters,
+//!   digits, `_ . + - /`), each in single quotes, which every POSIX shell, bash and zsh take
+//!   literally ([`kas_command_string`]).
 //!
 //! Only allowlisted programs run, and every argument is validated. Each command runs in its
 //! own process group, so a timeout or cancellation ([`Supervised`]) kills the whole tree
@@ -42,6 +51,32 @@ pub const INIT_SCRIPT_NAME: &str = "oe-init-build-env";
 /// The wrapper run by `bash -c` in init-script mode. Positional parameters only.
 pub const WRAPPER: &str = r#"source "$1" "$2" >/dev/null && shift 2 && exec "$@""#;
 
+/// The script `bitbake-setup` writes into the build directory of each setup.
+pub const SETUP_SCRIPT_NAME: &str = "init-build-env";
+
+/// The wrapper run by `bash -c` for a `bitbake-setup` build. Its `init-build-env` takes no
+/// arguments and runs `set <builddir>`, sources `oe-init-build-env`, then `set --`; bash
+/// keeps positional parameters a sourced file changes, so [`WRAPPER`] would lose the
+/// program. The argv is saved in an array first; still positional parameters only.
+pub const SETUP_WRAPPER: &str = r#"__sous_chef_argv=("$@"); set --; source "${__sous_chef_argv[0]}" >/dev/null && exec "${__sous_chef_argv[@]:1}""#;
+
+/// The kas subcommand and option every kas-mode command uses: `kas shell
+/// --keep-config-unchanged`, which skips kas's checkout and configuration steps, so running
+/// BitBake through sous-chef never updates repositories or rewrites `local.conf`.
+pub const KAS_SHELL_ARGS: [&str; 2] = ["shell", "--keep-config-unchanged"];
+
+/// How a kas-mode command is started: `<program> shell --keep-config-unchanged
+/// <files joined by :> -c '<command>'` in `work_dir`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KasRun {
+    /// The `kas` executable.
+    pub program: PathBuf,
+    /// The kas files, absolute, in command-line order.
+    pub files: Vec<PathBuf>,
+    /// kas's work directory (the command's working directory).
+    pub work_dir: PathBuf,
+}
+
 /// How long a terminated process group gets between SIGTERM and SIGKILL.
 pub const KILL_GRACE: Duration = Duration::from_secs(2);
 
@@ -51,6 +86,8 @@ pub struct BbEnv {
     pub build_dir: PathBuf,
     /// `None` when the process environment is already initialised.
     pub init_script: Option<PathBuf>,
+    /// Set in kas mode: commands run through `kas shell`; `init_script` is `None` then.
+    pub kas: Option<KasRun>,
 }
 
 /// The parts of the process environment detection looks at. Tests build one directly
@@ -118,7 +155,10 @@ impl BbEnv {
     /// 3. Already initialised: `BUILDDIR` or `BBPATH` set and an executable `bitbake` on
     ///    `PATH`. The build directory is `BUILDDIR` if it is a directory, else the
     ///    workspace's.
-    /// 4. A build directory and an `oe-init-build-env` in a layer root, a layer root's
+    /// 4. A kas project with kas files (`ws.kas`), an executable `kas` on `PATH` and an
+    ///    existing kas build directory: kas mode.
+    /// 5. A build directory holding a `bitbake-setup` `init-build-env`: bitbake-setup mode.
+    /// 6. A build directory and an `oe-init-build-env` in a layer root, a layer root's
     ///    parent (poky's layout: `poky/meta` next to `poky/oe-init-build-env`) or the build
     ///    directory's parent, searched in BBLAYERS order.
     pub fn probe(
@@ -152,6 +192,7 @@ impl BbEnv {
             return Ok(BbEnv {
                 build_dir,
                 init_script: Some(absolute(script)),
+                kas: None,
             });
         }
 
@@ -167,16 +208,55 @@ impl BbEnv {
                 return Ok(BbEnv {
                     build_dir,
                     init_script: None,
+                    kas: None,
                 });
             }
         }
 
+        let mut kas_problem = None;
+        if let Some(k) = ws.kas.as_ref().filter(|k| !k.files.is_empty()) {
+            match find_on_path("kas", host.path.as_deref()) {
+                Some(program) if k.build_dir.is_dir() => {
+                    return Ok(BbEnv {
+                        build_dir: k.build_dir.clone(),
+                        init_script: None,
+                        kas: Some(KasRun {
+                            program,
+                            files: k.files.clone(),
+                            work_dir: k.work_dir.clone(),
+                        }),
+                    });
+                }
+                Some(_) => {
+                    kas_problem = Some(format!(
+                        "the kas build directory {} does not exist yet; run kas checkout {}",
+                        k.build_dir.display(),
+                        k.files_arg(&k.work_dir)
+                    ));
+                }
+                None => {
+                    kas_problem = Some("this is a kas project but kas is not on PATH".to_string());
+                }
+            }
+        }
+
         let Some(build_dir) = build_dir else {
+            if let Some(p) = kas_problem {
+                return Err(p);
+            }
             return Err(
                 "no build directory and no initialised environment; set build_dir or start sous-chef after sourcing oe-init-build-env"
                     .into(),
             );
         };
+        let setup = build_dir.join(SETUP_SCRIPT_NAME);
+        if setup.is_file() {
+            return Ok(BbEnv {
+                build_dir,
+                init_script: Some(setup),
+                kas: None,
+            });
+        }
         let mut candidates: Vec<PathBuf> = Vec::new();
         for layer in &ws.layers {
             candidates.push(layer.root.join(INIT_SCRIPT_NAME));
@@ -191,20 +271,38 @@ impl BbEnv {
             Some(script) => Ok(BbEnv {
                 build_dir,
                 init_script: Some(script),
+                kas: None,
             }),
-            None => Err(format!(
-                "no {INIT_SCRIPT_NAME} found next to the layers; set init_script in sous-chef.toml"
-            )),
+            None => Err(match kas_problem {
+                Some(p) => format!(
+                    "{p}, and no {INIT_SCRIPT_NAME} was found next to the layers; install kas or set init_script in sous-chef.toml"
+                ),
+                None => format!(
+                    "no {INIT_SCRIPT_NAME} found next to the layers; set init_script in sous-chef.toml"
+                ),
+            }),
         }
     }
 
-    /// `init-script` or `initialised`.
+    /// `init-script`, `bitbake-setup`, `kas` or `initialised`.
     pub fn mode(&self) -> &'static str {
-        if self.init_script.is_some() {
+        if self.kas.is_some() {
+            "kas"
+        } else if self.is_setup_script() {
+            "bitbake-setup"
+        } else if self.init_script.is_some() {
             "init-script"
         } else {
             "initialised"
         }
+    }
+
+    /// Whether the init script is a `bitbake-setup` `init-build-env`.
+    fn is_setup_script(&self) -> bool {
+        self.init_script
+            .as_deref()
+            .and_then(Path::file_name)
+            .is_some_and(|n| n == SETUP_SCRIPT_NAME)
     }
 
     /// A command running an allowlisted `program` with `args` in the environment. Arguments
@@ -229,8 +327,27 @@ impl BbEnv {
         for a in args {
             validate_arg(a)?;
         }
-        let mut cmd = match &self.init_script {
-            Some(script) => {
+        let mut dir = self.build_dir.clone();
+        let mut cmd = match (&self.kas, &self.init_script) {
+            (Some(k), _) => {
+                let script = kas_command_string(program, args)?;
+                let files = kas_files_arg(&k.files)?;
+                let mut c = Command::new(&k.program);
+                c.args(KAS_SHELL_ARGS).arg(files).arg("-c").arg(script);
+                dir = k.work_dir.clone();
+                c
+            }
+            (None, Some(script)) if self.is_setup_script() => {
+                let mut c = Command::new("bash");
+                c.arg("-c")
+                    .arg(SETUP_WRAPPER)
+                    .arg("--")
+                    .arg(script)
+                    .arg(program)
+                    .args(args);
+                c
+            }
+            (None, Some(script)) => {
                 let mut c = Command::new("bash");
                 c.arg("-c")
                     .arg(WRAPPER)
@@ -241,13 +358,13 @@ impl BbEnv {
                     .args(args);
                 c
             }
-            None => {
+            (None, None) => {
                 let mut c = Command::new(program);
                 c.args(args);
                 c
             }
         };
-        cmd.current_dir(&self.build_dir)
+        cmd.current_dir(&dir)
             .stdin(Stdio::null())
             .kill_on_drop(true);
         #[cfg(unix)]
@@ -276,6 +393,56 @@ impl BbEnv {
             stderr: err.finish().await,
         })
     }
+}
+
+/// The command string kas mode hands to `kas shell -c`: the allowlisted `program` and each
+/// argument, every one validated with [`validate_arg`] (so none holds a quote, `$`, a
+/// backquote, a space or any other shell character) and wrapped in single quotes, joined
+/// by spaces. Errors as [`BbEnv::command`] does; nothing is started.
+pub fn kas_command_string(program: &str, args: &[&str]) -> Result<String> {
+    if !ALLOWED_PROGRAMS.contains(&program) {
+        return Err(Error::Invalid {
+            msg: format!("program {program:?} is not allowed"),
+        });
+    }
+    let mut words = vec![format!("'{program}'")];
+    for a in args {
+        validate_arg(a)?;
+        // validate_arg admits no quote; checked again so the quoting can never be broken.
+        if a.contains('\'') {
+            return Err(Error::Invalid {
+                msg: format!("invalid argument {a:?}"),
+            });
+        }
+        words.push(format!("'{a}'"));
+    }
+    Ok(words.join(" "))
+}
+
+/// The kas files as one command-line argument, `a.yaml:b.yaml`. A path containing `:` (the
+/// separator) cannot be passed and is an error.
+pub fn kas_files_arg(files: &[PathBuf]) -> Result<OsString> {
+    let mut out = OsString::new();
+    for (i, f) in files.iter().enumerate() {
+        if f.as_os_str().to_string_lossy().contains(':') {
+            return Err(Error::Invalid {
+                msg: format!(
+                    "kas file {} contains `:`, which kas takes as a file separator",
+                    f.display()
+                ),
+            });
+        }
+        if i > 0 {
+            out.push(":");
+        }
+        out.push(f.as_os_str());
+    }
+    if out.is_empty() {
+        return Err(Error::Invalid {
+            msg: "kas mode has no kas files".into(),
+        });
+    }
+    Ok(out)
 }
 
 /// Validates a recipe, task, image or package name: only `A-Z a-z 0-9 _ . + - /`, not

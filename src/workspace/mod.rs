@@ -1,5 +1,6 @@
 //! Workspace and layers. Contract: `docs/architecture.md` ("Workspace contract").
 
+pub mod kas;
 pub mod layers;
 pub mod resolve;
 
@@ -24,6 +25,8 @@ pub struct Workspace {
     /// The Yocto release the workspace targets (see [`release::detect`]). The default is
     /// [`Release::DEFAULT`], assumed.
     pub release: ReleaseInfo,
+    /// The kas project, when this is one ([`kas::detect`]); `None` otherwise.
+    pub kas: Option<kas::KasProject>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -61,8 +64,22 @@ impl Workspace {
     /// The release is detected last, once the layers are known and marked writable:
     /// `cfg.release`, then `LAYERSERIES_CORENAMES`, then the layers' `LAYERSERIES_COMPAT`
     /// ([`release::detect`]). An unknown `cfg.release` is an error.
+    ///
+    /// A kas project ([`kas::detect`], reading `KAS_WORK_DIR` and `KAS_BUILD_DIR` of this
+    /// process) changes three things, and nothing when there is none: its build directory
+    /// is used when the walk finds none; without a build directory its present layers (in
+    /// `BBLAYERS` order as kas writes it) are the layers, its missing ones only listed; and
+    /// with `writable_layers` empty, its own layers are writable. With a build directory,
+    /// `bblayers.conf` stays the authority for the layer list and the differences are
+    /// recorded in [`kas::KasProject::not_in_bblayers`] and `not_in_kas`.
     pub fn discover(cfg: &Config) -> Result<Workspace> {
+        Workspace::discover_in(cfg, &kas::KasEnv::from_process())
+    }
+
+    /// [`Workspace::discover`] with an explicit kas environment.
+    pub fn discover_in(cfg: &Config, kas_env: &kas::KasEnv) -> Result<Workspace> {
         let work_dir = absolute(&cfg.work_dir)?;
+        let mut kas = kas::detect(cfg, kas_env)?;
         let build_dir = match &cfg.build_dir {
             Some(b) => {
                 let b = work_dir.join(b);
@@ -76,7 +93,11 @@ impl Workspace {
                 }
                 Some(b)
             }
-            None => layers::find_build_dir(&work_dir),
+            None => layers::find_build_dir(&work_dir).or_else(|| {
+                kas.as_ref()
+                    .map(|k| k.build_dir.clone())
+                    .filter(|b| b.join("conf").join("bblayers.conf").is_file())
+            }),
         };
 
         let (build_dir, (mut found, corenames)) = match build_dir {
@@ -116,10 +137,26 @@ impl Workspace {
                 (Some(b), found)
             }
             None => {
-                let roots = if cfg.layers.is_empty() {
-                    layers::scan_for_layers(&work_dir, layers::SCAN_DEPTH)
-                } else {
-                    cfg.layers.iter().map(|l| work_dir.join(l)).collect()
+                let roots = match kas.as_ref().filter(|k| !k.files.is_empty()) {
+                    Some(k) => {
+                        let mut roots: Vec<PathBuf> = k
+                            .layers
+                            .iter()
+                            .filter(|l| l.present)
+                            .map(|l| l.path.clone())
+                            .collect();
+                        for l in &cfg.layers {
+                            let l = work_dir.join(l);
+                            if !roots.iter().any(|r| kas::same_path(r, &l)) {
+                                roots.push(l);
+                            }
+                        }
+                        roots
+                    }
+                    None if cfg.layers.is_empty() => {
+                        layers::scan_for_layers(&work_dir, layers::SCAN_DEPTH)
+                    }
+                    None => cfg.layers.iter().map(|l| work_dir.join(l)).collect(),
                 };
                 let mut canon = Vec::with_capacity(roots.len());
                 for r in &roots {
@@ -139,11 +176,40 @@ impl Workspace {
         for l in &mut found {
             l.writable = cfg.writable_layers.contains(&l.name);
         }
+        if let Some(k) = kas.as_mut() {
+            if cfg.writable_layers.is_empty() {
+                for l in &mut found {
+                    l.writable = k.own_layer(&l.root).is_some();
+                }
+            }
+            if let Some(b) = &build_dir {
+                if k.generates(b) {
+                    k.not_in_bblayers = k
+                        .layers
+                        .iter()
+                        .filter(|kl| !found.iter().any(|l| kas::same_path(&l.root, &kl.path)))
+                        .map(|kl| kl.path.clone())
+                        .collect();
+                    k.not_in_kas = found
+                        .iter()
+                        .filter(|l| k.layer_at(&l.root).is_none())
+                        .map(|l| l.name.clone())
+                        .collect();
+                } else if !k.files.is_empty() {
+                    k.problems.push(format!(
+                        "the build directory {} is not the kas build directory {}; its configuration is not generated from the kas files",
+                        b.display(),
+                        k.build_dir.display()
+                    ));
+                }
+            }
+        }
         let release = release::detect(cfg.release.as_deref(), &corenames, &found)?;
         Ok(Workspace {
             build_dir,
             layers: found,
             release,
+            kas,
         })
     }
 
@@ -312,7 +378,7 @@ fn normalize(p: &Path) -> PathBuf {
 /// Resolves `path` as the OS would: each existing prefix is canonicalised (so symlinks and
 /// `..` after a symlink behave as on disk); components past the first missing one are
 /// applied lexically.
-fn resolve_existing(path: &Path) -> std::io::Result<PathBuf> {
+pub(crate) fn resolve_existing(path: &Path) -> std::io::Result<PathBuf> {
     let abs = if path.is_absolute() {
         path.to_path_buf()
     } else {

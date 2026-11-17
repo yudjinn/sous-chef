@@ -324,6 +324,7 @@ fn refuses_programs_outside_the_allowlist() {
     let env = BbEnv {
         build_dir: PathBuf::from("/"),
         init_script: Some(fakebb().join(INIT_SCRIPT_NAME)),
+        kas: None,
     };
     for p in [
         "bash",

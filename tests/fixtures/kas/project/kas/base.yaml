@@ -1,0 +1,34 @@
+# The project's base kas file, modelled on yocto-kiss kas/kiss.yaml.
+header:
+  version: 11
+  includes:
+    - kas/common.yaml
+
+distro: projdistro
+target: proj-image
+
+repos:
+  bitbake:
+    url: "https://git.openembedded.org/bitbake"
+    branch: "2.18"
+    layers:
+      .: disabled
+
+  openembedded-core:
+    url: "https://git.openembedded.org/openembedded-core"
+    branch: wrynose
+    layers:
+      meta:
+
+  meta-vendor:
+    url: "https://example.com/git/meta-vendor"
+    commit: 0123456789abcdef0123456789abcdef01234567
+
+  proj:
+    layers:
+      meta-proj:
+
+local_conf_header:
+  proj: |
+    # Lines for development
+    IMAGE_FSTYPES = "tar"

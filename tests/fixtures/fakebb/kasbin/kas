@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Fake kas for tests (never the real kas). It prints its argv, appends one line per call to
+# ./fakekas-called (its working directory, kas's work directory) so a test can tell whether
+# kas was started at all, sources ./fakekas.env when it exists (`export FAKEBB_...` lines
+# for the fake BitBake, as init-with-env does), and for
+# `kas shell [options] <files> -c <command>` does what kas does with the command: runs it as
+# one string under a shell (here always /bin/sh, so tests do not depend on the user's
+# $SHELL), in the build directory ($KAS_BUILD_DIR, else ./build), with BUILDDIR and BBPATH
+# set and the fake BitBake (../bin) first on PATH.
+FAKEBB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+printf '%s\n' "$*" >> "$PWD/fakekas-called"
+if [ -f "$PWD/fakekas.env" ]; then
+    . "$PWD/fakekas.env"
+fi
+echo "fakekas: argc $#"
+for a in "$@"; do
+    printf 'kasarg: %s\n' "$a"
+done
+[ "${1-}" = shell ] || exit 0
+shift
+cmd=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+    -c | --command)
+        cmd="$2"
+        shift 2
+        ;;
+    *)
+        shift
+        ;;
+    esac
+done
+BUILDDIR="${KAS_BUILD_DIR:-$PWD/build}"
+export BUILDDIR
+export BBPATH="$BUILDDIR"
+export PATH="$FAKEBB_ROOT/bin:$PATH"
+cd "$BUILDDIR" || exit 1
+exec /bin/sh -c "$cmd"

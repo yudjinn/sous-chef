@@ -801,6 +801,15 @@ layer count, file counts by kind, index path and age, whether a build directory 
 bitbake environment were found, and the running job if any (`job`, e.g.
 `job:1 task hello running 1s`).
 
+In a kas project (and only then) it adds `kas` (the files as kas takes them and how they
+were found, e.g. `kas/kiss.yaml:kas/dogbonedark.yaml (from kas in sous-chef.toml)`),
+`kas_defaults` (`machine dogbonedark, distro kiss, target kiss-image`), `kas_layers` (how
+many layers the kas files name, and those not checked out yet), `kas_lock` (lock files
+read), `kas_mismatch` (layers in the kas files but not in `bblayers.conf`, and the reverse:
+the kas files changed since the last checkout) and one `kas_problem` row per problem; in
+JSON, a `kas` object with the same fields. The `bitbake` row's mode is `init-script`,
+`bitbake-setup`, `kas` or `initialised`.
+
 ## MCP resources
 
 - `sous-chef://help`: this document, condensed.

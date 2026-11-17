@@ -148,7 +148,8 @@ Notes:
 | `org/append-wildcard-broad` | I | layer | A `%` bbappend that matches recipes of two or more versions while it pins version-specific data: a `file://` patch in `SRC_URI`, `SRCREV` / `SRCREV_<name>` (not `AUTOREV`), a set `PV`, or a `SRC_URI` checksum flag. One finding per append. |
 | `org/append-missing-filesextrapaths` | E/W | file | A bbappend adds `file://` to `SRC_URI` but neither it nor a file it includes touches `FILESEXTRAPATHS`. Error when a named file exists below the append's directory, else warning. Not flagged when the append sits in the recipe's own directory. |
 | `org/policy-in-recipe` | W | file | A recipe or bbappend sets distro or machine policy: `DISTRO_FEATURES`, `MACHINE_FEATURES`, `PREFERRED_PROVIDER_*`, or `IMAGE_INSTALL` outside an image recipe. When the recipe's inherit tree cannot be resolved statically, `IMAGE_INSTALL` is not flagged. |
-| `org/recipe-change-in-local-conf` | I | file | `local.conf` carries `:pn-<recipe>` changes that belong in a bbappend or distro conf. |
+| `org/recipe-change-in-local-conf` | I | file | `local.conf` carries `:pn-<recipe>` changes that belong in a bbappend or distro conf. In a kas project the message adds that kas rewrites `local.conf` and names the kas file. |
+| `org/generated-conf-edit` | W | file | In a kas project, a statement in the kas build directory's `conf/local.conf` or `conf/bblayers.conf` that comes from no `local_conf_header` / `bblayers_conf_header` entry and is not one of kas's own lines: kas rewrites both files on every checkout, shell and build. Names the kas file to put it in. A `BBLAYERS` entry that is no kas layer is reported on its line. Silent outside a kas project, when the kas files could not all be read, and when the file does not look kas-generated. |
 | `org/layer-conf` | E/W/I | layer | Problems in `conf/layer.conf`, one check per case, each with its own severity (see the notes): missing `BBFILE_COLLECTIONS`, duplicate collection, `LAYERSERIES_COMPAT` missing, copied or incompatible, unknown `LAYERDEPENDS`, missing `LAYERDEPENDS` while using classes from another layer, `BBFILES` that misses a `.bbappend`, `BBPATH` not extended with `LAYERDIR`. |
 | `org/upstream-edit` | W | layer | Uncommitted modifications inside a layer that is not marked writable, from `git status`. Runs only when such a layer is linted (`--all`, or naming it). Any git failure skips the layer silently. |
 
@@ -181,6 +182,17 @@ Notes:
 - **`policy-in-recipe`.** An image recipe is one that inherits `image` or `core-image`, or a
   class whose name ends in `-image`, directly or through its static tree (for a bbappend:
   a recipe it applies to).
+- **`generated-conf-edit`.** kas writes each header entry as `# <id>` then its text, in id
+  order, then `MACHINE ??=`, `DISTRO ??=` and `BBMULTICONFIG ?=` (`local.conf`), or the
+  `BBLAYERS ?=` list, `BBPATH ?= "${TOPDIR}"` and `BBFILES ??= ""` (`bblayers.conf`); see
+  "kas" in bitbake-semantics.md. A statement is kas's when every line of it is a line of a
+  header entry of the current kas files or one of those lines (with any value: `KAS_MACHINE`
+  and the like change them). The rule runs only when the workspace's kas files were all
+  read (no unreadable include), the build directory is the kas build directory, and the
+  directory has kas's `CACHEDIR.TAG` or the file has kas's own lines. A line left from a
+  header entry that was since removed from the kas files is reported: it will be lost too.
+  The kas file named is the first project file with a header of that kind, else the last
+  file on the command line.
 - **`layer-conf`.** The checks and their severities:
 
   | Check | Sev |

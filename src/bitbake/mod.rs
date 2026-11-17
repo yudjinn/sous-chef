@@ -10,7 +10,7 @@ pub mod jobs;
 pub mod logs;
 
 pub use env::{
-    BbEnv, CommandOutput, EnvState, Finish, HostEnv, ProcessGroup, Supervised, environment_state,
-    validate_arg, validate_name,
+    BbEnv, CommandOutput, EnvState, Finish, HostEnv, KasRun, ProcessGroup, Supervised,
+    environment_state, validate_arg, validate_name,
 };
 pub use jobs::{JobInfo, JobSpec, JobState, JobTable, Started};

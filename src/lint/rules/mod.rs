@@ -21,6 +21,7 @@ pub mod org_class_export_functions;
 pub mod org_class_location;
 pub mod org_class_recipe_specific;
 pub mod org_duplicate_versions;
+pub mod org_generated_conf_edit;
 pub mod org_inc_has_version_data;
 pub mod org_inc_unused;
 pub mod org_include_must_exist;
@@ -71,6 +72,7 @@ pub static ALL: &[&dyn Rule] = &[
     &org_append_missing_filesextrapaths::OrgAppendMissingFilesextrapaths,
     &org_policy_in_recipe::OrgPolicyInRecipe,
     &org_recipe_change_in_local_conf::OrgRecipeChangeInLocalConf,
+    &org_generated_conf_edit::OrgGeneratedConfEdit,
     &org_layer_conf::OrgLayerConf,
     &org_upstream_edit::OrgUpstreamEdit,
     &hygiene_missing_metadata::HygieneMissingMetadata,

@@ -103,6 +103,7 @@ budget_tokens = 900
             writable_layers: vec!["meta-mycompany".into()],
             init_script: Some(dir.join("poky/oe-init-build-env")),
             release: Some("scarthgap".into()),
+            kas: Vec::new(),
             bitbake: sous_chef::config::BitbakeConfig {
                 enabled: false,
                 allow_destructive: true,
