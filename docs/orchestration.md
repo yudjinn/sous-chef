@@ -95,9 +95,46 @@ Every subagent prompt contains, in this order:
 
 | Wave | State | Notes |
 |---|---|---|
-| 0 | not started | |
+| 0 | **done** (commit `2879e75` on `dev`, gate passes) | Paused here at the user's request; wave 1 not launched. See "Wave 0 hand-off notes" below. |
 | 1 | not started | |
 | 2 | not started | |
 | 3 | not started | |
 | 4 | not started | |
 | 5 | not started | |
+
+## Wave 0 hand-off notes (for whoever launches wave 1)
+
+State: M0 is merged on `dev`. `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
+and `cargo test` pass (20 tests). Every module, the 14 tool files and the 37 lint rule files
+exist as non-panicking stubs and are registered. `docs/architecture.md` was updated by the M0
+agent and is the current contract; read it rather than relying on earlier summaries.
+
+Things wave 1+ agents need to know:
+
+- **rmcp 3.10.0** is pinned. The server does not use rmcp's tool macros: `mcp::Server`
+  implements `ServerHandler::list_tools` / `call_tool` over our own `TOOLS` table, so tool
+  files never import rmcp. A failing tool is returned as `Ok(CallToolResult::error(..))`.
+  rmcp has no notion of deferred tools; T2.5 must decide how (or whether) to signal it.
+- **Tool files**: `pub struct Args` + `pub async fn run(ctx: &Ctx, args: Args) -> Result<String>`.
+  `Ctx.index` is a `tokio::sync::Mutex<Index>`.
+- **`main.rs` should not need editing**: it already dispatches to `mcp::serve`,
+  `mcp::index_command`, `lint::cli`, `hook::handle`.
+- **Lint rule files** are named `src/lint/rules/<group>_<name>.rs` (both `/` and `-` become `_`).
+- **`tests/registry.rs`** checks the tool and rule registries against `docs/mcp-tools.md` and
+  `docs/lint-rules.md`; adding a tool or rule means updating the doc too.
+- **Fixtures**: `tests/fixtures/README.md` states the expected answers (layer priorities,
+  bbappend matches, MACHINE qemux86 / DISTRO testdistro, `virtual/foo` -> libfoo-alt, the
+  misspelled override `boradx`). `syntax/` and `lint/` sit directly under `tests/fixtures/`.
+  `fixture_ws()` in `tests/common/mod.rs` panics until T1.3 lands.
+- `Cargo.toml` has `[lints.cargo] unused_dependencies = "allow"`; remove once `ignore` and
+  `regex` are used.
+
+Open items, not verified by M0:
+
+- The MCP server has never run end to end (T2.5 does this).
+- The CI workflow has never run on GitHub.
+- Fixture README statements still marked *verify*: base vs `INHERIT` class parse order,
+  bbappend application order, the value of `FILE_LAYERNAME` (and so the expected `OVERRIDES`).
+- `hello.inc` uses `FILES:${PN} +=`; T4.2 must decide whether
+  `override/plus-equals-with-override` ignores package overrides (it should: that form is
+  idiomatic).
