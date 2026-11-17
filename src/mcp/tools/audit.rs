@@ -64,7 +64,7 @@ pub fn digest(a: &Audit, handle: &str, lines: usize, bytes: usize) -> Table {
     let mut t = Table::new(&["field", "value"]);
     let s = &a.summary;
     t.row(&["summary", &s.line]);
-    let mut ws = format!("root . ; release {} ({})", s.release, s.release_source);
+    let mut ws = format!("root .; release {} ({})", s.release, s.release_source);
     if let Some(b) = &s.build_dir {
         ws.push_str(&format!("; build {b}"));
     }

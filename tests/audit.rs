@@ -453,6 +453,12 @@ async fn tool_digest_fits_the_budget_and_slice_returns_the_report() {
     .await
     .unwrap();
     assert!(render::estimate_tokens(&out) <= 600, "{out}");
+    // The handle id follows the content, which holds the time: masked.
+    let masked = regex::Regex::new(r"h:[0-9a-f]{10}")
+        .unwrap()
+        .replace_all(&out, "h:XXXXXXXXXX")
+        .into_owned();
+    insta::assert_snapshot!("audit_tool_digest", masked);
     assert!(out.starts_with("field\tvalue\nsummary\t"), "{out}");
     assert!(out.contains("\n4 lint\t"), "{out}");
     assert!(out.contains("\nattention 1\t"), "{out}");
