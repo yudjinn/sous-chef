@@ -53,6 +53,17 @@ Common to every tool:
   `tests/eval_w8.rs`). When nothing sets `MACHINE`, every evaluated view ends with
   `note: no MACHINE is set (...)`: machine-specific values are not applied.
 
+- **Progress.** A call whose request carries `_meta.progressToken` gets MCP
+  `notifications/progress` while a long operation runs, before its result and never after
+  it: `bitbake` with `wait` (and while a request waits behind a read-only job), the
+  authoritative `var` (waiting for its `bitbake -e`), and `audit` (one step per stage:
+  refreshing the index, finding layers and git facts, lint, lint done, parse problems).
+  `progress` increases with every notification (seconds since the call began for the waits,
+  a step count for `audit`); there is no `total`; `message` says what is happening. At most
+  four a second: intermediate updates are dropped, and the newest pending one is sent before
+  the result. A request without a token gets none. `lint` sends none (it would need a
+  per-file hook in the lint engine).
+
 The first six are always loaded. The rest are deferred (short descriptions, loaded on demand).
 
 ## Always loaded
@@ -263,10 +274,13 @@ instead of the static evaluator:
   need no relaxed validation.
 - **Running.** `bitbake -e` runs as a background job (operation `env`, visible to
   `bitbake op=status` / `op=cancel`) and the tool waits up to 120 s for it (about 15 s on a
-  real environment). One job runs at a time because BitBake allows one client per build
-  directory: while another job (a build) runs, the tool answers from a cached dump if the
-  tree is unchanged, and otherwise returns an error naming the running job and suggesting
-  static mode. If its own job is still running after 120 s it returns the job id; the next
+  real environment; progress notifications while it waits, see the common section). One
+  job runs at a time because BitBake allows one client per build
+  directory (see `bitbake`): while another job runs, the tool answers from a cached dump if
+  the tree is unchanged; otherwise, behind a read-only job (`bitbake op=env`, `op=layers`,
+  another authoritative `var`) it waits for that job, up to 30 s, and then runs, and behind
+  a build, task, clean or devtool job it returns at once an error naming the running job
+  and suggesting static mode. If its own job is still running after 120 s it returns the job id; the next
   call for the same recipe waits for that job instead of starting another. A failed run is
   an error with the first `ERROR:` lines and the output's handle.
 - **Cache.** The output is stored as an `env` handle, one per recipe (and one for the
@@ -1004,6 +1018,7 @@ now: EXTRA_OECONF is set last at meta-mine:recipes-core/hello/hello_1.1.bbappend
 | `args` | op-specific, validated against an allowlist (below) |
 | `confirm` | required true for destructive operations |
 | `job` | for `status` and `cancel`: `job:<n>` or `<n>`; default: the running job, else the last one |
+| `wait` | seconds to wait for the job to end before answering (0 to 300, default 0); for a starting operation and `status` |
 
 | `op` | Runs | `args` | Handle kind |
 |---|---|---|---|
@@ -1040,9 +1055,26 @@ sourced and the program run by a wrapper that takes every name as argv; in `kas`
 command string is made only of validated words, each single-quoted.
 
 Every operation except `status` and `cancel` starts a background job and returns at once
-with `job:<n>`. One job of any kind runs at a time: a second request of any operation starts
-nothing and returns the running job with "already running". There are no MCP progress
-notifications; poll with `op: status`.
+with `job:<n>`. One job of any kind runs at a time, because BitBake allows one client per
+build directory: a second client finds the lock taken, waits and retries, and fails with
+"Unable to connect to bitbake server, or start one" after about 20 s (BitBake
+`lib/bb/main.py`; live, a `bitbake-layers` started during a 4 s `bitbake -e` waited and
+succeeded, live-verification.md "Two clients"). So sous-chef never starts a second BitBake
+client, and what happens to a request depends on the running job:
+
+- while a read-only job runs (`env`, `layers`, or the `bitbake -e` of an authoritative
+  `var`; seconds to a minute), the request waits for it, up to 30 s, and then starts;
+- while a `build`, `task`, `clean` or `devtool` job runs (minutes to hours), the request
+  starts nothing and returns at once the running job, with "already running (one job at a
+  time)" and why; call again once `op=status` shows it ended, or `op=cancel` it;
+- a read-only job still running after the 30 s gets the same answer.
+
+`wait` (seconds, 0 to 300; default 0) makes a starting operation, or `op: status`, wait
+for the job to end before answering; the answer is then the finished job (its handle, its
+tail or digest). While it waits, and while a request waits behind a read-only job, a client
+that sent a progress token gets progress notifications (common section): the seconds since
+the call began, and the job with its last output line (`job:1 build hello running 12s:
+NOTE: Running task 812 of 3301 ...`). Without `wait`, poll with `op: status`.
 
 `status` reports `job`, `op`, `target`, `command`, `state` (`running`, `succeeded`,
 `failed`, `cancelled`), `elapsed`, `exit` and `handle`. While running it shows the last 5
@@ -1107,11 +1139,20 @@ function, from its `# line:` comment to the closing `}`; for a python function, 
 `python NAME () {` to the closing `}`. Override variants (`T:task-clean`) are blocks of
 their own; names are exact.
 
+A handle lasts until retention removes it, which happens when the server starts: handles
+last stored more than `[handles] max_age_days` ago (default 14) are deleted, then the
+oldest until the store holds at most `[handles] max_total_mb` (default 500 MB); a handle
+stored by the running server is never deleted. An expired handle is a `NotFound` error that
+says to rerun the command. `status` shows the store's size and the limits.
+
 ### `status`
 No arguments. Workspace roots, the release (`release`, e.g. `wrynose (LAYERSERIES_CORENAMES)`),
 layer count, file counts by kind, index path and age, whether a build directory and a usable
 bitbake environment were found, and the running job if any (`job`, e.g.
-`job:1 task hello running 1s`). Layers are named by their directory (`meta`,
+`job:1 task hello running 1s`), and the handle store (`handles`: how many handles it holds,
+their total size, and the retention limits it applied at start, `[handles] max_total_mb` and
+`max_age_days` in `sous-chef.toml`, e.g. `12 stored, 3.4 MB; limits 500.0 MB, 14 days`; JSON
+`handles {count, bytes, max_total_bytes, max_age_days, error}`). Layers are named by their directory (`meta`,
 `meta-arm-toolchain`) in every tool and pointer; BitBake 2.18's `bitbake-layers
 show-layers` prints the collection name instead (`core`, `arm-toolchain`).
 
@@ -1174,7 +1215,8 @@ slice handle=h:XXXXXXXXXX page=1 | grep=RE | lines=A-B
 The CLI writes the report itself: `sous-chef audit [ROOT] [--format md|json] [--output
 FILE]` (ROOT default: the working directory; discovery starts there, and the global
 `--build-dir`, `--config` and `--layer` are taken relative to the working directory as
-for every command). Progress goes to stderr, never into the report. Exit status 0 when the
+for every command). Progress goes to stderr, never into the report; the `audit` tool sends
+it as MCP progress notifications when the request carries a progress token. Exit status 0 when the
 report was produced, whatever it finds (`sous-chef lint --fail-on` is the command that
 fails on findings); 2 when it could not be produced.
 

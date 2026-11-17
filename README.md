@@ -89,12 +89,18 @@ kas = ["kas/base.yml", "kas/board.yml"]  # optional; a kas project's files, in k
 
 [hooks]
 bash = false                          # see Hooks
+
+[handles]                             # stored tool output (handles), cleaned at server start
+max_total_mb = 500                    # keep at most this much (default 500)
+max_age_days = 14                     # drop handles older than this (default 14)
 ```
 
 Other keys: `layers` (extra layer roots, for a workspace without a build directory),
 `init_script` (sourced before any bitbake command), `[bitbake] enabled` and
 `allow_destructive`, `[lint] disable`, `[output] budget_tokens`, `[hooks] grep_read` and
-`edit`. See "Configuration" in [docs/architecture.md](docs/architecture.md).
+`edit`. A `[handles]` value of 0 or out of range (`max_total_mb` 1 to 1000000,
+`max_age_days` 1 to 3650) is a configuration error; `status` shows the store's size and
+limits. See "Configuration" in [docs/architecture.md](docs/architecture.md).
 
 **kas projects.** The kas files are found without `kas` when exactly one sits next to the
 kas build directory, and with `writable_layers` empty the project's own layers are
@@ -173,7 +179,7 @@ fakeroot do_install() {
 | `deps` | Build, runtime and `PACKAGECONFIG` dependencies; reverse dependencies; providers |
 | `lint` | Convention and syntax findings for a recipe, file, layer or the workspace |
 | `scaffold` | A new recipe, bbappend, layer or class, or an `.inc` split, as a dry run or written; or where a change belongs |
-| `bitbake` | Runs bitbake, devtool or bitbake-layers as a background job, in the build environment (init script, bitbake-setup or kas) |
+| `bitbake` | Runs bitbake, devtool or bitbake-layers as a background job, in the build environment (init script, bitbake-setup or kas); poll with `op=status`, or pass `wait` to answer when it ends, with MCP progress notifications meanwhile if the client asks for them |
 | `log` | A digest of a failed task's log |
 | `slice` | Part of a stored output, by lines, regex, variable or failures |
 | `status` | Workspace roots, release, index, build environment, kas project, running job |
@@ -289,8 +295,9 @@ The decisions and non-goals are in [docs/overview.md](docs/overview.md).
   that a static `BBMASK` masks is indexed but is no recipe; a `.conf` / `.inc` a recipe
   installs (a data file) is not searched or linted. `item` says which applies.
 - **`authoritative: true` says it cannot run.** BitBake allows one client per build
-  directory: while a `bitbake` job runs, authoritative `var` answers only from a cached dump.
-  Wait for the job (`bitbake op=status`) or use static mode.
+  directory: while a build, task, clean or devtool job runs, authoritative `var` answers
+  only from a cached dump (behind a `bitbake -e` or `bitbake-layers` job it waits up to
+  30 s instead). Wait for the job (`bitbake op=status`) or use static mode.
 - **No annotations from the hooks.** The hooks never build the index: run `sous-chef index`
   (or use any tool) first. A file edited since the last refresh gets no Grep / Read
   annotation until the next one. Check `hook.log`, and run `claude --debug=hooks`.

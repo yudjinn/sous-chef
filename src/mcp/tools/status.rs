@@ -57,6 +57,23 @@ pub struct Report {
     /// The running background job, if any, as `<id> <op> [<target>] running <elapsed>s`
     /// ([`job_line`]).
     pub job: Option<String>,
+    /// The handle store: what it holds now and its retention limits.
+    pub handles: HandlesStatus,
+}
+
+/// What `status` shows about the handle store (`handles::HandleStore`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct HandlesStatus {
+    /// Handles stored and their total size; `None` when the store is not open (degraded) or
+    /// could not be read.
+    pub count: Option<u64>,
+    pub bytes: Option<u64>,
+    /// The retention limits: those the store applied when it was opened, else (degraded)
+    /// those of `[handles]` in the configuration.
+    pub max_total_bytes: u64,
+    pub max_age_days: u64,
+    /// Why the store could not be read.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -167,8 +184,35 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         report.bitbake.init_script = env.init_script.map(|p| p.display().to_string());
     }
     report.job = ctx.jobs.running().map(|j| job_line(&j));
+    report.handles = handles_status(&ctx.handles);
 
     output(&report, freshness, &args, ctx.config.output.budget_tokens)
+}
+
+/// The handle store's size and the limits it applied.
+pub fn handles_status(store: &crate::handles::HandleStore) -> HandlesStatus {
+    let mut h = limits(store.retention());
+    match store.count().and_then(|n| Ok((n, store.total_bytes()?))) {
+        Ok((n, bytes)) => {
+            h.count = Some(n);
+            h.bytes = Some(bytes);
+        }
+        Err(e) => h.error = Some(e.to_string()),
+    }
+    h
+}
+
+fn limits(r: crate::handles::Retention) -> HandlesStatus {
+    HandlesStatus {
+        max_total_bytes: r.max_total_bytes,
+        max_age_days: r.max_age_secs / (24 * 60 * 60),
+        ..HandlesStatus::default()
+    }
+}
+
+/// `1234567` as `1.2 MB` (1 MB = 1,000,000 bytes, as `[handles] max_total_mb`).
+fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_000_000.0)
 }
 
 /// The running job as one line: `job:3 build core-image-minimal running 42s`.
@@ -198,6 +242,7 @@ fn base(config: &Config) -> Report {
             init_script: config.init_script.as_ref().map(|p| p.display().to_string()),
             ..BitbakeStatus::default()
         },
+        handles: limits(config.handles.retention()),
         ..Report::default()
     }
 }
@@ -423,6 +468,20 @@ fn table(r: &Report) -> Table {
     };
     rows.push(("bitbake", bitbake));
     rows.push(("job", r.job.clone().unwrap_or_else(none)));
+    let h = &r.handles;
+    let held = match (&h.error, h.count, h.bytes) {
+        (Some(e), _, _) => format!("store not readable: {e}"),
+        (None, Some(n), Some(b)) => format!("{n} stored, {}", megabytes(b)),
+        _ => "store not open".to_string(),
+    };
+    rows.push((
+        "handles",
+        format!(
+            "{held}; limits {}, {} days ([handles] in sous-chef.toml)",
+            megabytes(h.max_total_bytes),
+            h.max_age_days
+        ),
+    ));
 
     let mut t = Table::new(&["field", "value"]);
     for (k, v) in &rows {

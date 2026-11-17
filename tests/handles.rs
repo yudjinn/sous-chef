@@ -540,3 +540,32 @@ fn deny_list_refuses_to_return() {
         assert!(matches!(r, Err(Error::Invalid { .. })), "{h}: {r:?}");
     }
 }
+
+// ---- configured retention -------------------------------------------------------------
+
+#[test]
+fn open_with_retention_applies_and_reports_the_given_limits() {
+    let cache = Cache::new();
+    let t = now();
+    let (three_days, blob) = cache.foreign("three days", 10, t - 3 * DAY);
+    // The defaults (14 days) keep it.
+    let store = HandleStore::open(&cache.handles_dir()).unwrap();
+    assert_eq!(store.retention(), Retention::default());
+    assert!(store.meta(&three_days).is_ok());
+    assert_eq!(store.count().unwrap(), 1);
+    assert_eq!(store.total_bytes().unwrap(), 10);
+    drop(store);
+    // Two days, as `[handles] max_age_days = 2` gives: deleted on open.
+    let two_days = Retention {
+        max_age_secs: 2 * DAY,
+        max_total_bytes: 1_000_000,
+    };
+    let store = HandleStore::open_with_retention(&cache.handles_dir(), two_days).unwrap();
+    assert_eq!(store.retention(), two_days);
+    assert!(matches!(
+        store.meta(&three_days),
+        Err(Error::NotFound { .. })
+    ));
+    assert!(!blob.exists());
+    assert_eq!(store.count().unwrap(), 0);
+}

@@ -1,6 +1,7 @@
 //! Tool `audit`: the whole-repository audit report (T8.6). See docs/mcp-tools.md.
 //!
-//! Builds the report with [`crate::audit::build`], stores the full Markdown under a `text`
+//! Builds the report with [`crate::audit::build`] (each of its stage lines is an MCP
+//! progress step when the client sent a progress token: [`stage_progress`]), stores the full Markdown under a `text`
 //! handle and returns a digest within the budget: the summary line and the workspace rows,
 //! one row per section with its summary, then the items most worth attention, and the
 //! handle with the `slice` hint. The report itself is not subject to the budget.
@@ -37,7 +38,22 @@ pub struct Args {
 
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let root = resolve_root(ctx, args.root.as_deref())?;
-    let report = audit::build(ctx, &audit::Options::new(&root)).await?;
+    let opts = audit::Options {
+        progress: Some(stage_progress),
+        ..audit::Options::new(&root)
+    };
+    let build = audit::build(ctx, &opts);
+    // The lint run inside is synchronous and takes seconds; on the server's multi-threaded
+    // runtime, `block_in_place` hands this worker's queue to another thread meanwhile, so
+    // the progress forwarder and rmcp's service loop keep running and notifications go out
+    // while the audit runs, not after it. (A current-thread runtime, as in tests, cannot do
+    // that and just awaits.)
+    let report = match tokio::runtime::Handle::try_current() {
+        Ok(h) if h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(|| h.block_on(build))?
+        }
+        _ => build.await?,
+    };
     let md = audit::render_markdown(&report);
     let label = format!(
         "audit {}",
@@ -56,6 +72,12 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let lines = md.lines().count();
     let t = digest(&report, &handle.0, lines, md.len());
     Ok(t.render_as(args.format.unwrap_or_default(), budget))
+}
+
+/// `audit::Options::progress`: each stage line of the audit (refreshing the index, layer
+/// discovery and git facts, lint, lint done, parse problems) is one MCP progress step.
+fn stage_progress(msg: &str) {
+    crate::mcp::progress::step(&format!("audit: {msg}"));
 }
 
 /// The digest table: `field value` rows, most important first, so a small budget keeps

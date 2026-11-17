@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
+use crate::handles::Retention;
 use crate::lint::Severity;
 use crate::workspace::Workspace;
 
@@ -32,6 +33,7 @@ pub struct Config {
     pub lint: LintConfig,
     pub output: OutputConfig,
     pub hooks: HooksConfig,
+    pub handles: HandlesConfig,
     /// Directory that discovery starts from (not read from the file; set by the CLI,
     /// normally the process working directory).
     #[serde(skip)]
@@ -51,6 +53,7 @@ impl Default for Config {
             lint: LintConfig::default(),
             output: OutputConfig::default(),
             hooks: HooksConfig::default(),
+            handles: HandlesConfig::default(),
             work_dir: PathBuf::from("."),
         }
     }
@@ -133,6 +136,75 @@ impl HooksConfig {
     }
 }
 
+/// `[handles]`: retention limits of the handle store (`handles::Retention`), applied when the
+/// server opens the store. Defaults: [`Retention::default`] (500 MB, 14 days).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HandlesConfig {
+    /// After the age pass, the oldest handles are deleted until the stored output totals at
+    /// most this many megabytes (1 MB = 1,000,000 bytes).
+    pub max_total_mb: u64,
+    /// Handles last stored longer ago than this many days are deleted.
+    pub max_age_days: u64,
+}
+
+/// Bounds of `[handles] max_total_mb`: 1 MB to 1,000,000 MB (1 TB).
+pub const HANDLES_MAX_TOTAL_MB: std::ops::RangeInclusive<u64> = 1..=1_000_000;
+/// Bounds of `[handles] max_age_days`: 1 day to 3650 days (10 years).
+pub const HANDLES_MAX_AGE_DAYS: std::ops::RangeInclusive<u64> = 1..=3650;
+
+const SECS_PER_DAY: u64 = 24 * 60 * 60;
+const BYTES_PER_MB: u64 = 1000 * 1000;
+
+impl Default for HandlesConfig {
+    fn default() -> HandlesConfig {
+        let r = Retention::default();
+        HandlesConfig {
+            max_total_mb: r.max_total_bytes / BYTES_PER_MB,
+            max_age_days: r.max_age_secs / SECS_PER_DAY,
+        }
+    }
+}
+
+impl HandlesConfig {
+    /// The store's limits. Call [`HandlesConfig::check`] first; values out of range are
+    /// clamped to it here.
+    pub fn retention(&self) -> Retention {
+        let mb = self
+            .max_total_mb
+            .clamp(*HANDLES_MAX_TOTAL_MB.start(), *HANDLES_MAX_TOTAL_MB.end());
+        let days = self
+            .max_age_days
+            .clamp(*HANDLES_MAX_AGE_DAYS.start(), *HANDLES_MAX_AGE_DAYS.end());
+        Retention {
+            max_age_secs: days * SECS_PER_DAY,
+            max_total_bytes: mb * BYTES_PER_MB,
+        }
+    }
+
+    /// Every value out of its range, one message each.
+    pub fn check(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if !HANDLES_MAX_TOTAL_MB.contains(&self.max_total_mb) {
+            problems.push(format!(
+                "handles.max_total_mb = {} is out of range: give {} to {} (megabytes of stored output kept)",
+                self.max_total_mb,
+                HANDLES_MAX_TOTAL_MB.start(),
+                HANDLES_MAX_TOTAL_MB.end()
+            ));
+        }
+        if !HANDLES_MAX_AGE_DAYS.contains(&self.max_age_days) {
+            problems.push(format!(
+                "handles.max_age_days = {} is out of range: give {} to {} (days a handle is kept)",
+                self.max_age_days,
+                HANDLES_MAX_AGE_DAYS.start(),
+                HANDLES_MAX_AGE_DAYS.end()
+            ));
+        }
+        problems
+    }
+}
+
 /// Global command-line flags that override the file. Flags win.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CliOverrides {
@@ -210,6 +282,12 @@ impl Config {
                 e.message().lines().next().unwrap_or("invalid TOML")
             ),
         })?;
+        let problems = cfg.handles.check();
+        if !problems.is_empty() {
+            return Err(Error::Config {
+                msg: format!("{}: {}", origin.display(), problems.join("; ")),
+            });
+        }
         let base = if origin.is_dir() {
             origin.to_path_buf()
         } else {

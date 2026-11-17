@@ -9,10 +9,18 @@
 //! `log` when given `job`; `status` does not call it) stores the output of each finished job
 //! under a handle and removes the file.
 //!
-//! One job runs at a time, of any kind: BitBake takes a lock on the build directory, so a
-//! second `bitbake -e` or `bitbake-layers` while a build runs would wait for it or fail.
-//! A second [`JobTable::start`] while one runs returns [`Started::AlreadyRunning`] with the
-//! running job.
+//! One job runs at a time, of any kind: BitBake allows one client per build directory. A
+//! second client finds the lock taken, connects to the running server and retries (8 times,
+//! 5 s apart after the fourth: `lib/bb/main.py`), then fails with "Unable to connect to
+//! bitbake server, or start one"; live (docs/live-verification.md, "Two clients") a
+//! `bitbake-layers` started during a 4 s `bitbake -e` waited and succeeded, but behind a long
+//! build it would fail after about 20 s. So sous-chef never starts a second client: a second
+//! [`JobTable::start`] while one runs returns [`Started::AlreadyRunning`] with the running
+//! job. [`JobTable::start_or_queue`] adds one rule on top: when the running job is
+//! read-only and short ([`JobInfo::is_read_only`]: `bitbake -e`, `bitbake-layers`), the new
+//! job waits for it, up to [`QUEUE_WAIT`], and then starts; behind a build, a task, a clean
+//! or devtool it is refused at once, whatever its own kind, because those hold the lock for
+//! minutes to hours.
 //!
 //! Cancellation ([`JobTable::cancel`]) terminates the job's process group
 //! ([`Supervised::terminate`]): SIGTERM, then SIGKILL after
@@ -125,6 +133,19 @@ pub struct JobInfo {
     /// Where the output is written while the job runs (removed once stored).
     pub output: PathBuf,
 }
+
+impl JobInfo {
+    /// Whether the job only reads (`bitbake -e`, operation `env`; `bitbake-layers show-*`,
+    /// operation `layers`): seconds to a minute on a real build directory, so a new job may
+    /// wait for it ([`JobTable::start_or_queue`]).
+    pub fn is_read_only(&self) -> bool {
+        matches!(self.op.as_str(), "env" | "layers")
+    }
+}
+
+/// How long [`JobTable::start_or_queue`] waits for a running read-only job before giving
+/// up (a `bitbake -e` takes about 15 s on a real workspace, a `bitbake-layers` a few).
+pub const QUEUE_WAIT: Duration = Duration::from_secs(30);
 
 /// Result of [`JobTable::start`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -398,13 +419,59 @@ impl JobTable {
 
     /// Waits until job `id` is no longer running, at most `timeout`. Returns the job.
     pub async fn wait(&self, id: &str, timeout: Duration) -> Option<JobInfo> {
+        self.wait_with(id, timeout, |_| {}).await
+    }
+
+    /// As [`JobTable::wait`], calling `tick` with the job as it is now about every 20 ms
+    /// while it runs (the caller rate-limits what it does with it: progress notifications).
+    pub async fn wait_with(
+        &self,
+        id: &str,
+        timeout: Duration,
+        mut tick: impl FnMut(&JobInfo),
+    ) -> Option<JobInfo> {
         let deadline = Instant::now() + timeout;
         loop {
             let info = self.get(id)?;
             if info.state != JobState::Running || Instant::now() >= deadline {
                 return Some(info);
             }
+            tick(&info);
             tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// [`JobTable::start`], except that while a read-only job runs
+    /// ([`JobInfo::is_read_only`]) it waits for that job to end, up to `max_wait` in all
+    /// (normally [`QUEUE_WAIT`]), and then starts `spec`; `tick` sees the job waited for, as
+    /// in [`JobTable::wait_with`]. A running job that is not read-only, or a read-only job
+    /// still running after `max_wait`, gives [`Started::AlreadyRunning`] at once (module
+    /// docs). Never two jobs at a time: the start itself is [`JobTable::start`].
+    pub async fn start_or_queue(
+        &self,
+        env: &BbEnv,
+        spec: JobSpec,
+        dir: &Path,
+        max_wait: Duration,
+        mut tick: impl FnMut(&JobInfo),
+    ) -> Result<Started> {
+        let deadline = Instant::now() + max_wait;
+        loop {
+            match self.start(env, spec.clone(), dir)? {
+                Started::Started(job) => return Ok(Started::Started(job)),
+                Started::AlreadyRunning(running) => {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if !running.is_read_only() || left.is_zero() {
+                        return Ok(Started::AlreadyRunning(running));
+                    }
+                    let after = self.wait_with(&running.id, left, &mut tick).await;
+                    if after.is_some_and(|j| j.state == JobState::Running) {
+                        return Ok(Started::AlreadyRunning(
+                            self.get(&running.id).unwrap_or(running),
+                        ));
+                    }
+                }
+            }
         }
     }
 

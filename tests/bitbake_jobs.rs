@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use sous_chef::bitbake::logs::{meta_from_path, meta_from_path_in};
-use sous_chef::bitbake::{JobState, JobTable};
+use sous_chef::bitbake::{BbEnv, HostEnv, JobSpec, JobState, JobTable, Started};
 use sous_chef::config::Config;
 use sous_chef::error::Error;
 use sous_chef::handles::{HandleKind, HandleStore};
@@ -101,6 +101,7 @@ fn args(op: Op) -> Args {
         args: Vec::new(),
         confirm: false,
         job: None,
+        wait: None,
         budget_tokens: None,
         format: None,
     }
@@ -874,4 +875,216 @@ fn version_directory_follows_the_release() {
         ..Default::default()
     });
     assert_eq!(d.meta.version.as_deref(), Some("1.0"));
+}
+
+// --- one job at a time: queueing behind a read-only job (w10) ----------------------------
+
+fn fake_env(f: &Fixture) -> BbEnv {
+    BbEnv::probe(&f.ctx.config, &f.ctx.workspace, &HostEnv::from_process()).unwrap()
+}
+
+fn spec(op: &str, program: &str, args: &[&str]) -> JobSpec {
+    JobSpec {
+        op: op.into(),
+        target: None,
+        program: program.into(),
+        args: args.iter().map(|s| s.to_string()).collect(),
+        kind: HandleKind::Text,
+    }
+}
+
+#[tokio::test]
+async fn an_operation_behind_a_read_only_job_waits_for_it_then_starts() {
+    let f = fixture();
+    let pidfile = f.root.join("fake.pids");
+    f.fake(&[
+        ("FAKEBB_SLEEP", "2"),
+        ("FAKEBB_PIDFILE", &pidfile.display().to_string()),
+    ]);
+    let out = f.call(args(Op::Layers)).await.unwrap();
+    assert!(out.contains("job\tjob:1\n"), "{out}");
+    wait_for_file(&pidfile).await;
+    f.fake(&[]);
+    // `bitbake -e` while `bitbake-layers` runs: waits for it, then starts.
+    let asked = Instant::now();
+    let out = f.call(target(Op::Env, "hello")).await.unwrap();
+    assert!(out.contains("job\tjob:2\n"), "{out}");
+    assert!(out.contains("started;"), "{out}");
+    assert!(
+        asked.elapsed() >= Duration::from_millis(500),
+        "did not wait"
+    );
+    let first = f.ctx.jobs.get("job:1").unwrap();
+    assert_eq!(first.state, JobState::Succeeded, "{first:?}");
+    f.wait_done("job:2").await;
+}
+
+#[tokio::test]
+async fn an_operation_behind_a_build_is_refused_at_once_saying_why() {
+    let f = fixture();
+    let pidfile = f.root.join("fake.pids");
+    f.fake(&[
+        ("FAKEBB_SLEEP", "60"),
+        ("FAKEBB_PIDFILE", &pidfile.display().to_string()),
+    ]);
+    f.call(target(Op::Build, "hello")).await.unwrap();
+    wait_for_file(&pidfile).await;
+    for a in [args(Op::Env), args(Op::Layers), target(Op::Build, "libfoo")] {
+        let asked = Instant::now();
+        let out = f.call(a).await.unwrap();
+        assert!(asked.elapsed() < Duration::from_secs(5), "it waited");
+        assert!(out.contains("job\tjob:1\n"), "{out}");
+        assert!(
+            out.contains("job:1 (build hello) is already running (one job at a time)")
+                && out.contains("gives up after about 20 s"),
+            "{out}"
+        );
+    }
+    assert_eq!(f.ctx.jobs.list().len(), 1);
+    f.call(args(Op::Cancel)).await.unwrap();
+}
+
+#[tokio::test]
+async fn queueing_gives_up_after_its_wait_and_never_runs_two_jobs() {
+    let f = fixture();
+    let env = fake_env(&f);
+    let dir = f.ctx.jobs_dir();
+    let pidfile = f.root.join("fake.pids");
+    f.fake(&[
+        ("FAKEBB_SLEEP", "60"),
+        ("FAKEBB_PIDFILE", &pidfile.display().to_string()),
+    ]);
+    let first = match f
+        .ctx
+        .jobs
+        .start(
+            &env,
+            spec("layers", "bitbake-layers", &["show-layers"]),
+            &dir,
+        )
+        .unwrap()
+    {
+        Started::Started(j) => j,
+        other => panic!("{other:?}"),
+    };
+    assert!(first.is_read_only());
+    wait_for_file(&pidfile).await;
+    // Still running after the wait: the running job comes back, nothing started.
+    let mut ticks = 0;
+    let r = f
+        .ctx
+        .jobs
+        .start_or_queue(
+            &env,
+            spec("env", "bitbake", &["-e"]),
+            &dir,
+            Duration::from_millis(300),
+            |j| {
+                assert_eq!(j.id, first.id);
+                ticks += 1;
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(&r, Started::AlreadyRunning(j) if j.id == first.id),
+        "{r:?}"
+    );
+    assert!(ticks > 0);
+    assert_eq!(f.ctx.jobs.list().len(), 1);
+    f.ctx.jobs.cancel(&first.id).unwrap();
+    f.wait_done(&first.id).await;
+
+    // Two callers queued behind a short read-only job: each starts in turn, never both.
+    f.fake(&[("FAKEBB_SLEEP", "1")]);
+    let short = f
+        .ctx
+        .jobs
+        .start(&env, spec("env", "bitbake", &["-e"]), &dir)
+        .unwrap();
+    assert!(matches!(short, Started::Started(_)));
+    let queue = |op: &'static str| {
+        let jobs = f.ctx.jobs.clone();
+        let env = env.clone();
+        let dir = dir.clone();
+        let running_seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        async move {
+            let r = jobs
+                .start_or_queue(
+                    &env,
+                    spec(op, "bitbake", &["-e"]),
+                    &dir,
+                    Duration::from_secs(20),
+                    |_| {
+                        let n = jobs
+                            .list()
+                            .iter()
+                            .filter(|j| j.state == JobState::Running)
+                            .count();
+                        running_seen.fetch_max(n, std::sync::atomic::Ordering::Relaxed);
+                    },
+                )
+                .await
+                .unwrap();
+            (r, running_seen.load(std::sync::atomic::Ordering::Relaxed))
+        }
+    };
+    let ((a, seen_a), (b, seen_b)) = tokio::join!(queue("env"), queue("layers"));
+    assert!(matches!(a, Started::Started(_)), "{a:?}");
+    assert!(matches!(b, Started::Started(_)), "{b:?}");
+    assert!(seen_a <= 1 && seen_b <= 1, "two jobs ran at once");
+    let ids: Vec<String> = f.ctx.jobs.list().into_iter().map(|j| j.id).collect();
+    assert_eq!(ids.len(), 4, "{ids:?}");
+    for id in &ids {
+        f.wait_done(id).await;
+    }
+}
+
+#[tokio::test]
+async fn wait_answers_once_the_job_has_ended() {
+    let f = fixture();
+    f.fake(&[("FAKEBB_SLEEP", "1")]);
+    // A start with wait: the answer is the finished job, its output stored.
+    let out = f
+        .call(Args {
+            wait: Some(30),
+            ..args(Op::Layers)
+        })
+        .await
+        .unwrap();
+    assert!(out.contains("state\tsucceeded\n"), "{out}");
+    assert!(out.contains("handle\th:"), "{out}");
+    assert!(!out.contains("started; poll"), "{out}");
+    // A wait shorter than the job: still running, with the poll hint.
+    let out = f
+        .call(Args {
+            wait: Some(0),
+            ..args(Op::Layers)
+        })
+        .await
+        .unwrap();
+    assert!(out.contains("state\trunning\n"), "{out}");
+    assert!(out.contains("started; poll"), "{out}");
+    // status with wait: the same job, finished.
+    let out = f
+        .call(Args {
+            wait: Some(30),
+            ..status_of(Some("job:2"))
+        })
+        .await
+        .unwrap();
+    assert!(
+        out.contains("job\tjob:2\n") && out.contains("state\tsucceeded\n"),
+        "{out}"
+    );
+    // Too long a wait is refused before anything runs.
+    let e = f
+        .call(Args {
+            wait: Some(301),
+            ..args(Op::Layers)
+        })
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("wait=301 is too long"), "{e}");
+    assert_eq!(f.ctx.jobs.list().len(), 2);
 }

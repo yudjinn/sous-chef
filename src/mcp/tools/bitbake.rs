@@ -11,8 +11,9 @@
 //! [`validate_name`] before any argv is built: [`crate::bitbake::BbEnv::command`] cannot
 //! tell a target from an option.
 //!
-//! No MCP progress notifications: tool functions do not see the rmcp request context
-//! (`mcp::Server` dispatches through its own table), so the agent polls with `op: status`.
+//! One job at a time ([`crate::bitbake::jobs`], module docs): a new operation while a
+//! read-only job (`env`, `layers`) runs waits for it, up to [`QUEUE_WAIT`], then starts;
+//! while any other job runs it is refused at once with [`not_started_note`].
 
 use std::time::Duration;
 
@@ -20,7 +21,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::bitbake::env::KILL_GRACE;
-use crate::bitbake::jobs::{self, JobInfo, JobSpec, JobState, Started};
+use crate::bitbake::jobs::{self, JobInfo, JobSpec, JobState, QUEUE_WAIT, Started};
 use crate::bitbake::logs::{self, Digest, DigestInput};
 use crate::bitbake::{BbEnv, HostEnv, validate_name};
 use crate::config::Config;
@@ -34,6 +35,10 @@ use crate::workspace::Workspace;
 pub const RUNNING_TAIL_LINES: usize = 5;
 /// Lines of output shown for a finished job that did not fail.
 pub const FINISHED_TAIL_LINES: usize = 3;
+/// The longest `wait` accepted, in seconds.
+pub const MAX_WAIT_SECS: u64 = 300;
+/// How often a waiting call looks at the job's output for a progress notification.
+pub const PROGRESS_EVERY: Duration = Duration::from_millis(500);
 
 /// Operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -94,6 +99,11 @@ pub struct Args {
     /// For `op: status` and `op: cancel`: the job id (default: the running job, else the
     /// last one).
     pub job: Option<String>,
+    /// Seconds to wait for the job to end before answering (default 0: answer at once; at
+    /// most 300). For a starting operation, after it starts; for `op: status`, for the job
+    /// shown. While waiting, a client that sent a progress token gets MCP progress
+    /// notifications (elapsed time and the last output line).
+    pub wait: Option<u64>,
     /// Output budget in tokens (default 600).
     pub budget_tokens: Option<usize>,
     /// `text` (default) or `json`.
@@ -117,10 +127,19 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         n => n,
     };
     let format = args.format.unwrap_or_default();
+    let wait = match args.wait.unwrap_or(0) {
+        w if w > MAX_WAIT_SECS => {
+            return Err(invalid(format!(
+                "wait={w} is too long: give 0 to {MAX_WAIT_SECS} seconds, then poll with op=status"
+            )));
+        }
+        w => Duration::from_secs(w),
+    };
     ctx.jobs.settle(&ctx.handles);
     match args.op {
         Op::Status => {
             let job = pick_job(ctx, args.job.as_deref())?;
+            let job = wait_for(ctx, job, wait).await;
             report(ctx, &job, &[], format, budget)
         }
         Op::Cancel => {
@@ -159,24 +178,109 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
                     msg: format!("no bitbake environment: {reason}"),
                 },
             )?;
-            match ctx.jobs.start(&env, plan.spec, &ctx.jobs_dir())? {
+            let started = ctx
+                .jobs
+                .start_or_queue(
+                    &env,
+                    plan.spec,
+                    &ctx.jobs_dir(),
+                    QUEUE_WAIT,
+                    queue_progress(),
+                )
+                .await?;
+            match started {
                 Started::Started(job) => {
-                    let notes = [format!(
-                        "started; poll with bitbake op=status job={}, stop with op=cancel",
-                        job.id
-                    )];
+                    let job = wait_for(ctx, job, wait).await;
+                    let notes = if job.state == JobState::Running {
+                        vec![format!(
+                            "started; poll with bitbake op=status job={}, stop with op=cancel",
+                            job.id
+                        )]
+                    } else {
+                        Vec::new()
+                    };
                     report(ctx, &job, &notes, format, budget)
                 }
                 Started::AlreadyRunning(job) => {
-                    let notes = [format!(
-                        "not started: {} is already running (one job at a time); poll with \
-                         op=status job={} or stop it with op=cancel",
-                        job.id, job.id
-                    )];
-                    report(ctx, &job, &notes, format, budget)
+                    report(ctx, &job, &[not_started_note(&job)], format, budget)
                 }
             }
         }
+    }
+}
+
+/// Waits up to `wait` for a running `job` to end, sending progress meanwhile
+/// ([`job_progress`]), then settles the table and returns the job as it is now.
+async fn wait_for(ctx: &Ctx, job: JobInfo, wait: Duration) -> JobInfo {
+    if wait.is_zero() || job.state != JobState::Running {
+        return job;
+    }
+    let after = ctx.jobs.wait_with(&job.id, wait, job_progress()).await;
+    ctx.jobs.settle(&ctx.handles);
+    ctx.jobs.get(&job.id).or(after).unwrap_or(job)
+}
+
+/// A `tick` for [`crate::bitbake::JobTable::wait_with`] that reports a running job as MCP
+/// progress (`mcp::progress`) every [`PROGRESS_EVERY`]: the progress value is the seconds
+/// since the tool call began ([`crate::mcp::progress::elapsed`]), the message `job:3 build hello running 12s: <last output line>`. Does
+/// nothing when the client asked for no progress.
+pub fn job_progress() -> impl FnMut(&JobInfo) {
+    let mut last: Option<std::time::Instant> = None;
+    move |job: &JobInfo| {
+        if !crate::mcp::progress::active() || last.is_some_and(|t| t.elapsed() < PROGRESS_EVERY) {
+            return;
+        }
+        last = Some(std::time::Instant::now());
+        let line = jobs::tail(&job.output, 1).pop().unwrap_or_default();
+        let mut msg = crate::mcp::tools::status::job_line(job);
+        if !line.is_empty() {
+            msg.push_str(": ");
+            msg.push_str(&render::snippet(&line));
+        }
+        crate::mcp::progress::elapsed(&msg);
+    }
+}
+
+/// A `tick` for [`crate::bitbake::JobTable::start_or_queue`]: reports, as progress, which
+/// running job the new one waits for.
+pub fn queue_progress() -> impl FnMut(&JobInfo) {
+    let mut last: Option<std::time::Instant> = None;
+    move |job: &JobInfo| {
+        if !crate::mcp::progress::active() || last.is_some_and(|t| t.elapsed() < PROGRESS_EVERY) {
+            return;
+        }
+        last = Some(std::time::Instant::now());
+        crate::mcp::progress::elapsed(&format!(
+            "waiting for {} to end before starting (one BitBake client at a time)",
+            crate::mcp::tools::status::job_line(job)
+        ));
+    }
+}
+
+/// Why nothing was started while `job` runs (module docs of [`crate::bitbake::jobs`]).
+pub fn not_started_note(job: &JobInfo) -> String {
+    let what = match &job.target {
+        Some(t) => format!("{} {t}", job.op),
+        None => job.op.clone(),
+    };
+    if job.is_read_only() {
+        format!(
+            "not started: {} ({what}) is already running (one job at a time) and did not end \
+             within {} s of waiting; poll with op=status job={} and call again once it has \
+             ended, or stop it with op=cancel",
+            job.id,
+            QUEUE_WAIT.as_secs(),
+            job.id
+        )
+    } else {
+        format!(
+            "not started: {} ({what}) is already running (one job at a time): it holds \
+             BitBake's lock on the build directory, and a second BitBake client waits for \
+             that lock and gives up after about 20 s, so sous-chef starts nothing while a \
+             build, task, clean or devtool job runs; poll with op=status job={} and call \
+             again once it has ended, or stop it with op=cancel",
+            job.id, job.id
+        )
     }
 }
 

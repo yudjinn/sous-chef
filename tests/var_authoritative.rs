@@ -409,6 +409,52 @@ async fn a_running_job_blocks_a_new_run_but_not_a_cached_dump() {
 }
 
 #[tokio::test]
+async fn a_running_read_only_job_is_waited_for_then_bitbake_e_runs() {
+    let f = fixture();
+    let dump = f.live.root.join("bitbake-e-curl.out");
+    let env = sous_chef::bitbake::BbEnv::probe(
+        &f.ctx.config,
+        &f.ctx.workspace,
+        &sous_chef::bitbake::HostEnv::from_process(),
+    )
+    .unwrap();
+    // A `bitbake-layers` of a second, then the dump without sleeping for the next run.
+    let pidfile = f.live.root.join("layers.pids");
+    f.live.fake(&[
+        ("FAKEBB_SLEEP", "1"),
+        ("FAKEBB_PIDFILE", &pidfile.display().to_string()),
+    ]);
+    let started = f
+        .ctx
+        .jobs
+        .start(
+            &env,
+            JobSpec {
+                op: "layers".into(),
+                target: None,
+                program: "bitbake-layers".into(),
+                args: vec!["show-layers".into()],
+                kind: HandleKind::Text,
+            },
+            &f.cache.path().join("jobs"),
+        )
+        .unwrap();
+    let sous_chef::bitbake::Started::Started(layers) = started else {
+        panic!("not started");
+    };
+    // Once it sleeps, the next run (the `bitbake -e` after it) reads the new settings.
+    while !pidfile.exists() {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    f.live
+        .fake(&[("FAKEBB_OUTPUT", &dump.display().to_string())]);
+    let out = ok(&f, args("PN", Some("curl"))).await;
+    assert!(out.contains("source: BitBake (bitbake -e curl)"), "{out}");
+    let done = f.ctx.jobs.get(&layers.id).unwrap();
+    assert_ne!(done.state, sous_chef::bitbake::JobState::Running);
+}
+
+#[tokio::test]
 async fn a_slow_run_returns_the_job_and_the_next_call_waits_for_it() {
     let f = fixture();
     let dump = f.live.root.join("bitbake-e-curl.out");
