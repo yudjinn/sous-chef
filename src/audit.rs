@@ -1710,7 +1710,7 @@ fn listing(ws: &Workspace, own: &BTreeSet<String>, items: Vec<(String, Item)>) -
 
 /// Marks a problem BitBake stops on (listed first in a [`Listing`]).
 const BITBAKE_STOPS: &str = "BitBake stops";
-const BITBAKE_STOPS_NOT_FOUND: &str = "not found; BitBake stops on this";
+const BITBAKE_STOPS_NOT_FOUND: &str = "not found on the search path sous-chef used (a class in classes/ is resolved as a recipe inherit); BitBake stops if it cannot find it either";
 
 /// Pointers sorted by layer, path, then line numerically.
 fn cmp_pointer(a: &str, b: &str) -> std::cmp::Ordering {
@@ -2301,6 +2301,10 @@ fn render_summary(md: &mut Md, s: &Summary) {
         md.line("Nothing: no errors, no layer structure errors and no warnings in own layers.");
     }
     for (i, a) in s.attention.iter().enumerate() {
+        let message = match order_parts(&a.message) {
+            Some((head, effect)) => format!("{head}; {effect}"),
+            None => a.message.clone(),
+        };
         md.line(&format!(
             "{}. **{}** `{}` ({} {}, in {}): `{}` {}",
             i + 1,
@@ -2310,7 +2314,7 @@ fn render_summary(md: &mut Md, s: &Summary) {
             if a.count == 1 { "finding" } else { "findings" },
             a.layers.join(", "),
             a.pointer,
-            inline(&a.message)
+            inline(&message)
         ));
     }
 }
@@ -2532,6 +2536,20 @@ fn render_releases(md: &mut Md, r: &Releases) {
     md.table(&h, &rows);
 }
 
+/// The explanation every `layers show=compat` order row carries, between its first
+/// sentence and what the order changes.
+const ORDER_EXPLANATION: &str = "BitBake does not need dependencies first: LAYERDEPENDS is checked against every enabled layer and priority does not come from the order";
+
+/// An order row's message without [`ORDER_EXPLANATION`]: `(what, what it changes)`.
+fn order_parts(msg: &str) -> Option<(&str, &str)> {
+    let at = msg.find(ORDER_EXPLANATION)?;
+    let head = msg[..at].trim_end().trim_end_matches('.');
+    let effect = msg[at + ORDER_EXPLANATION.len()..]
+        .trim_start_matches(';')
+        .trim();
+    (!head.is_empty() && !effect.is_empty()).then_some((head, effect))
+}
+
 fn render_structure(md: &mut Md, s: &Structure) {
     md.blank();
     md.line("## 3. Layer structure");
@@ -2543,15 +2561,28 @@ fn render_structure(md: &mut Md, s: &Structure) {
     if s.problems.is_empty() && s.order.is_empty() {
         md.line("None.");
     }
+    let mut explained = false;
     for p in s.problems.iter().chain(&s.order) {
+        // The order rows repeat why the order matters; say it once.
+        let msg = match (p.check == "order", order_parts(&p.message)) {
+            (true, Some((head, effect))) => {
+                explained = true;
+                format!("{head}; {effect}")
+            }
+            _ => p.message.clone(),
+        };
         md.line(&format!(
             "- **{}** {} `{}` {}: {}",
             p.severity,
             p.check,
             p.pointer,
             p.layer,
-            inline(&p.message)
+            inline(&msg)
         ));
+    }
+    if explained {
+        md.blank();
+        md.line(&format!("- Note: {ORDER_EXPLANATION}"));
     }
     md.blank();
     md.line("### Shadowed recipes and classes");

@@ -661,14 +661,15 @@ async fn live_workspace_audit() {
         .filter(|l| l.enabled)
         .map(|l| l.name.as_str())
         .collect();
+    // In BBLAYERS order, as kas writes it (prio, then repository name).
     assert_eq!(
         enabled,
         [
-            "meta",
-            "meta-arm-toolchain",
             "meta-arm",
+            "meta-arm-toolchain",
             "meta-kiss",
-            "meta-kiss-ti"
+            "meta-kiss-ti",
+            "meta"
         ],
         "{md}"
     );
