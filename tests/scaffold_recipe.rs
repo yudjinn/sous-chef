@@ -466,6 +466,78 @@ fn an_existing_recipe_file_is_not_overwritten() {
     assert!(e.to_string().contains("already exists"), "{e}");
 }
 
+#[test]
+fn a_recipe_that_exists_in_another_layer_gets_a_shadowing_note() {
+    // B17: T9.2 planned `curl` into meta-kiss (priority 9) while OE-core (priority 5) has
+    // curl_8.19.0.bb. Here: libfoo 2.0 is in meta-core (priority 5).
+    let req = request(
+        Kind::Recipe,
+        "libfoo",
+        Some("2.0"),
+        json!({"sha256sum": SHA, "source": "https://example.org/libfoo-2.0.tar.gz", "license": "MIT", "lic_files_chksum": CHK}),
+    );
+    let note = |text: &str| -> String {
+        text.lines()
+            .find(|l| l.starts_with("note: libfoo already exists in another layer"))
+            .unwrap_or_else(|| panic!("no shadowing note in\n{text}"))
+            .to_string()
+    };
+    // meta-mine (priority 10) is higher: the new file wins and shadows the existing one.
+    let mut env = Env::new();
+    let text = env.show(&req);
+    let n = note(&text);
+    for want in [
+        "meta-core:recipes-core/libfoo/libfoo_2.0.bb (priority 5)",
+        "this layer (meta-mine) has priority 10",
+        "BitBake would then build the new libfoo_2.0.bb",
+        "so the new file shadows the existing libfoo",
+        "scaffold kind=bbappend, or kind=where",
+    ] {
+        assert!(n.contains(want), "{want:?} in {n}");
+    }
+    // A plan, not a refusal.
+    assert!(
+        text.contains("--- create meta-mine:recipes-core/libfoo/libfoo_2.0.bb"),
+        "{text}"
+    );
+
+    // A lower-priority layer: the existing recipe stays the one built.
+    let set_priority = |p: &'static str| {
+        move |root: &std::path::Path| {
+            let conf = root.join("meta-mine/conf/layer.conf");
+            let t = std::fs::read_to_string(&conf).unwrap().replace(
+                "BBFILE_PRIORITY_mine = \"10\"",
+                &format!("BBFILE_PRIORITY_mine = \"{p}\""),
+            );
+            std::fs::write(conf, t).unwrap();
+        }
+    };
+    let mut env = Env::edited(set_priority("1"));
+    let n = note(&env.show(&req));
+    assert!(
+        n.contains("BitBake would then build meta-core:recipes-core/libfoo/libfoo_2.0.bb"),
+        "{n}"
+    );
+    assert!(n.contains("so the new file is not built"), "{n}");
+    // The same priority and version: BitBake takes the first in its file order.
+    let mut env = Env::edited(set_priority("5"));
+    let n = note(&env.show(&req));
+    assert!(
+        n.contains(
+            "one of the priority-5 files of version 2.0 (equal: the first in BBFILES order)"
+        ),
+        "{n}"
+    );
+
+    // A name no other layer has: no note.
+    let mut env = Env::new();
+    let mut other = req.clone();
+    other.name = Some("brandnew".into());
+    other.options.insert("category".into(), json!("app"));
+    let text = env.show(&other);
+    assert!(!text.contains("already exists in another layer"), "{text}");
+}
+
 /// Replaces the `LAYERSERIES_COMPAT_mine` value of the copy's meta-mine.
 pub fn set_compat(root: &std::path::Path, compat: &str) {
     let p = root.join("meta-mine/conf/layer.conf");

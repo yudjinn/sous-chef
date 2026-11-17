@@ -620,7 +620,11 @@ Generated files follow the releases the target layer is checked against (see "Re
 lint-rules.md) and are meant to lint clean for them.
 
 `recipe`: `name` is `PN`, `version` is `PV` (no `_`, `/`, quotes or spaces); both required.
-Writes `recipes-<category>/<pn>/<pn>_<pv>.bb`.
+Writes `recipes-<category>/<pn>/<pn>_<pv>.bb`. When recipes of that `PN` exist in other
+layers, a note (never a refusal) names their files and layer priorities and which file
+BitBake would then build (highest layer priority, then highest version, as
+`findBestProvider` without `PREFERRED_VERSION`; equal ones: the first in `BBFILES` order),
+and suggests `scaffold kind=bbappend` (or `kind=where`) to change the existing recipe.
 
 | Option | Notes |
 |---|---|

@@ -10,3 +10,4 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=0835ade698e0bcf8506ecda2f7b4f302"
 SRC_URI[sha256sum] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 note: other versions share meta-core:recipes-core/hello/hello.inc; this file requires it and sets only version data
 note: ignored because meta-core:recipes-core/hello/hello.inc sets them: build
+note: hello already exists in another layer: meta-core:recipes-core/hello/hello_1.1.bb (priority 5), meta-core:recipes-core/hello/hello_1.0.bb (priority 5); this layer (meta-mine) has priority 10; BitBake would then build the new hello_1.2.bb (highest layer priority, then highest version; PREFERRED_VERSION_hello or DEFAULT_PREFERENCE can change this), so the new file shadows the existing hello; to change the existing recipe write a bbappend instead (scaffold kind=bbappend, or kind=where to see where the change belongs)
