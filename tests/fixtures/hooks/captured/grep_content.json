@@ -1,0 +1,28 @@
+{
+  "session_id": "299e0d6d-46f0-450b-9e83-3c71dca2abd2",
+  "transcript_path": "/home/user/.claude/projects/-ws/299e0d6d-46f0-450b-9e83-3c71dca2abd2.jsonl",
+  "cwd": "{{WS}}",
+  "prompt_id": "434f6f36-788a-4808-950c-963d7c9de6c4",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Grep",
+  "tool_input": {
+    "pattern": "install -d",
+    "path": ".",
+    "output_mode": "content",
+    "-n": true
+  },
+  "tool_response": {
+    "mode": "content",
+    "numFiles": 0,
+    "filenames": [],
+    "content": "meta-legacy/recipes-legacy/oldapp/oldapp_1.0.bb:24:\tinstall -d ${D}${bindir}\nmeta-legacy/recipes-legacy/oldapp/oldapp_1.0.bb:28:\tinstall -d ${D}${datadir}/oldapp\nmeta-mine/recipes-app/app/app_0.1.bb:26:\tinstall -d ${D}${bindir}\nmeta-core/recipes-core/hello/hello.inc:16:\tinstall -d ${D}${sysconfdir}",
+    "numLines": 4,
+    "totalLines": 4
+  },
+  "tool_use_id": "toolu_01WDcNmKPfX9EPQUi1yy7raU",
+  "duration_ms": 8
+}
