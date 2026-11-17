@@ -1,0 +1,6 @@
+SUMMARY = "Sources in their own directory"
+SRC_URI = "git://example.org/x.git;protocol=https;branch=main"
+S = "${WORKDIR}/git"
+B = "${WORKDIR}"
+S:class-native = "${UNPACKDIR}"
+EXTRA_OEMAKE = "S=${WORKDIR}"

@@ -9,6 +9,7 @@ pub mod hygiene_continuation;
 pub mod hygiene_host_path;
 pub mod hygiene_missing_metadata;
 pub mod hygiene_parse_error;
+pub mod hygiene_release_syntax;
 pub mod hygiene_src_uri_checksum;
 pub mod hygiene_tabs;
 pub mod hygiene_variable_order;
@@ -81,4 +82,5 @@ pub static ALL: &[&dyn Rule] = &[
     &hygiene_tabs::HygieneTabs,
     &hygiene_continuation::HygieneContinuation,
     &hygiene_parse_error::HygieneParseError,
+    &hygiene_release_syntax::HygieneReleaseSyntax,
 ];

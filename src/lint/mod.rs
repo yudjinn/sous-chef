@@ -200,6 +200,17 @@ fn names_exactly(entry: &str, id: &str) -> bool {
     canonical(entry) == id
 }
 
+/// Whether an entry is an alias group (`style`) whose aliases name `id`. An alias group
+/// stands for exactly the ids its aliases name, so a selection by it behaves as a selection
+/// by those aliases (it runs rules that are off by default).
+fn names_by_alias_group(entry: &str, id: &str) -> bool {
+    let e = entry.trim().trim_end_matches('/');
+    !GROUPS.contains(&e)
+        && ALIASES
+            .iter()
+            .any(|(alias, target)| *target == id && group_of(alias) == e)
+}
+
 /// Whether an entry names `id`, its group, or an alias group containing it.
 pub fn entry_matches(entry: &str, id: &str) -> bool {
     let e = canonical(entry);
@@ -736,7 +747,11 @@ fn select_rules<'r>(
             if options.rules.is_empty() {
                 return r.default_enabled() && !is_disabled(config, id);
             }
-            if options.rules.iter().any(|e| names_exactly(e, id)) {
+            if options
+                .rules
+                .iter()
+                .any(|e| names_exactly(e, id) || names_by_alias_group(e, id))
+            {
                 return true;
             }
             options.rules.iter().any(|e| entry_matches(e, id))

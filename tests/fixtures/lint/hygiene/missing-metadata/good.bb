@@ -1,0 +1,7 @@
+require good.inc
+
+LICENSE = "MIT"
+LIC_FILES_CHKSUM = "file://COPYING;md5=0835ade698e0bcf8506ecda2f7b4f302"
+
+SRC_URI = "https://example.org/releases/good-${PV}.tar.gz"
+SRC_URI[sha256sum] = "1111111111111111111111111111111111111111111111111111111111111111"

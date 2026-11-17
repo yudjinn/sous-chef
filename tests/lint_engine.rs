@@ -207,6 +207,20 @@ fn rows(report: &Report) -> Vec<String> {
         .collect()
 }
 
+/// [`rows`] of the findings of one rule only. Tests of the engine through the real rule set
+/// look at `hygiene/parse-error` alone, so rules that also fire on the fixture workspace
+/// (`app_0.1.bb` has findings of its own) do not change them.
+fn rows_of(report: &Report, rule: &str) -> Vec<String> {
+    report
+        .findings
+        .iter()
+        .filter(|f| f.rule == rule)
+        .map(|f| format!("{} {} {}", f.severity.as_str(), f.rule, f.loc))
+        .collect()
+}
+
+const PE: &str = "hygiene/parse-error";
+
 fn opts(rules: &[&str]) -> Options {
     Options {
         rules: rules.iter().map(|s| s.to_string()).collect(),
@@ -521,7 +535,7 @@ fn parse_error_through_the_engine() {
     let env = garbage_env(|_| {});
     let report = env.run_all(&Target::Layer("meta-mine".into()));
     assert_eq!(
-        rows(&report),
+        rows_of(&report, PE),
         ["error hygiene/parse-error meta-mine:recipes-app/bad/bad_1.0.bb:2"]
     );
 }
@@ -532,7 +546,10 @@ fn disable_by_id_by_group_and_by_alias() {
         let env = garbage_env(|c| c.lint.disable = vec![disable.into()]);
         let report = env.run_all(&Target::Layer("meta-mine".into()));
         assert!(
-            report.findings.is_empty(),
+            !report
+                .findings
+                .iter()
+                .any(|f| lint::entry_matches(disable, f.rule)),
             "{disable}: {:?}",
             report.findings
         );
@@ -540,9 +557,7 @@ fn disable_by_id_by_group_and_by_alias() {
     }
     let env = garbage_env(|c| c.lint.disable = vec!["org".into()]);
     assert_eq!(
-        env.run_all(&Target::Layer("meta-mine".into()))
-            .findings
-            .len(),
+        rows_of(&env.run_all(&Target::Layer("meta-mine".into())), PE).len(),
         1
     );
 
@@ -568,7 +583,7 @@ fn unknown_ids_in_config_are_notes_and_in_a_selection_are_errors() {
         c.lint.severity.insert("nosuchgroup".into(), Severity::Info);
     });
     let report = env.run_all(&Target::Layer("meta-mine".into()));
-    assert_eq!(report.findings.len(), 1);
+    assert_eq!(rows_of(&report, PE).len(), 1);
     assert!(
         report
             .notes
@@ -641,7 +656,7 @@ fn severity_overrides_and_minimum() {
     });
     let report = env.run_all(&Target::Layer("meta-mine".into()));
     assert_eq!(
-        rows(&report),
+        rows_of(&report, PE),
         ["warning hygiene/parse-error meta-mine:recipes-app/bad/bad_1.0.bb:2"]
     );
     assert!(report.notes.iter().all(|n| !n.contains("sous-chef.toml")));
@@ -657,7 +672,13 @@ fn severity_overrides_and_minimum() {
         &only_errors,
     )
     .unwrap();
-    assert!(report.findings.is_empty());
+    assert!(rows_of(&report, PE).is_empty());
+    assert!(
+        report
+            .findings
+            .iter()
+            .all(|f| f.severity == Severity::Error)
+    );
 
     // An id wins over its group, whatever the order in the table.
     let env = garbage_env(|c| {
@@ -667,12 +688,13 @@ fn severity_overrides_and_minimum() {
             .insert("hygiene/parse-error".into(), Severity::Warning);
     });
     let report = env.run_all(&Target::Layer("meta-mine".into()));
-    assert_eq!(report.findings[0].severity, Severity::Warning);
+    let pe = |r: &Report| r.findings.iter().find(|f| f.rule == PE).unwrap().severity;
+    assert_eq!(pe(&report), Severity::Warning);
     let env = garbage_env(|c| {
         c.lint.severity.insert("hygiene".into(), Severity::Info);
     });
     let report = env.run_all(&Target::Layer("meta-mine".into()));
-    assert_eq!(report.findings[0].severity, Severity::Info);
+    assert_eq!(pe(&report), Severity::Info);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1018,7 +1040,7 @@ LINTME\"
     );
     let report = env.run_all(&env.resolve("meta-mine:recipes-app/g/g_1.0.bb").unwrap());
     assert_eq!(
-        rows(&report),
+        rows_of(&report, PE),
         ["error hygiene/parse-error meta-mine:recipes-app/g/g_1.0.bb:3"]
     );
 }
@@ -1072,9 +1094,16 @@ fn cli_exit_codes_and_output() {
     let env = garbage_env(|_| {});
     let (code, out) = cli(&env, LintCliArgs::default());
     assert_eq!(code, 1, "{out}");
-    // The whole workspace includes build/conf/local.conf, whose line 13 is a fixture
-    // workspace hit of override/plus-equals-on-default (T4.2).
-    assert!(out.starts_with("2 findings in "), "{out}");
+    // Other rules also report on the fixture workspace (for example line 13 of
+    // build/conf/local.conf, override/plus-equals-on-default); the summary counts
+    // parse-error once.
+    assert!(
+        out.lines()
+            .next()
+            .unwrap()
+            .contains("hygiene/parse-error 1"),
+        "{out}"
+    );
     assert!(out.contains("error\thygiene/parse-error\tmeta-mine:recipes-app/bad/bad_1.0.bb:2\t"));
     assert!(out.contains("warning\toverride/plus-equals-on-default\tbuild:conf/local.conf:13\t"));
 
@@ -1231,8 +1260,16 @@ fn scaffold_rule_lint_reports_findings_in_written_files() {
     let findings = outcome.lint.unwrap().unwrap();
     let got: Vec<String> = findings
         .iter()
+        .filter(|f| f.rule == PE)
         .map(|f| format!("{} {}", f.rule, f.loc))
         .collect();
+    // Other rules may report on the written file too, but only on that file.
+    assert!(
+        findings
+            .iter()
+            .all(|f| f.loc.path.ends_with("new/new_1.0.bb")),
+        "{findings:?}"
+    );
     assert_eq!(
         got,
         ["hygiene/parse-error meta-mine:recipes-app/new/new_1.0.bb:2"]

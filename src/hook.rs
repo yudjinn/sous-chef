@@ -24,7 +24,10 @@
 //!   the indexed sha256 is treated as not indexed ([`Env::fresh_file`]): the hook stays
 //!   silent about it rather than refresh. The CLI path also arms a watchdog that exits 0
 //!   after [`WATCHDOG`] if something blocks.
-//! - **Additions only.** Handlers return `additionalContext`.
+//! - **Additions only.** Handlers return `additionalContext`. The one exception is the Bash
+//!   digest (`bash.rs`), which replaces large bitbake output after storing all of it under a
+//!   handle; Bash output is never content an Edit relies on. The edit hook (`edit.rs`) is
+//!   the one writer: it reindexes the edited file through its own read-write connection.
 //! - **Yocto files inside the workspace only** ([`is_yocto_path`], [`Env::fresh_file`]).
 //!
 //! Adding a handler (T7.3, T7.4): implement [`Handler`] in its file and keep its entry in
@@ -188,7 +191,7 @@ pub struct Response {
     /// `hookSpecificOutput.additionalContext`: text shown to Claude next to the tool result.
     pub additional_context: Option<String>,
     /// `hookSpecificOutput.updatedToolOutput`: replaces the tool output. Must match the
-    /// tool's output shape. No handler in T7.2 sets it.
+    /// tool's output shape. Only the Bash digest (T7.3) sets it.
     pub updated_tool_output: Option<Value>,
 }
 
@@ -329,6 +332,7 @@ pub struct Ctx<'o> {
     start: Instant,
     budget: Duration,
     ws: Option<Workspace>,
+    cfg: Option<Config>,
     index: Option<Index>,
     env_error: Option<String>,
     fresh: HashMap<PathBuf, Option<FileRow>>,
@@ -344,6 +348,7 @@ impl<'o> Ctx<'o> {
             start: Instant::now(),
             budget: opts.budget(),
             ws: None,
+            cfg: None,
             index: None,
             env_error: None,
             fresh: HashMap::new(),
@@ -404,6 +409,12 @@ impl<'o> Ctx<'o> {
         }
     }
 
+    /// The configuration the workspace was discovered with (`sous-chef.toml` and the hook's
+    /// flags), once [`Ctx::env`] has opened it.
+    pub fn config(&self) -> Option<&Config> {
+        self.cfg.as_ref()
+    }
+
     /// Discovers the workspace (kept even when the index is missing, so the log lands in
     /// the workspace cache directory), then opens the index.
     fn open(&mut self) -> Result<()> {
@@ -420,6 +431,7 @@ impl<'o> Ctx<'o> {
                 work_dir: cwd,
             })?;
             self.ws = Some(Workspace::discover(&cfg)?);
+            self.cfg = Some(cfg);
         }
         let Some(ws) = &self.ws else {
             return Err(Error::Invalid {

@@ -234,6 +234,19 @@ impl HandleStore {
         Ok(store)
     }
 
+    /// Opens the store at `dir` on an existing connection without a retention pass, for a
+    /// short-lived process that only adds a handle (the Bash hook, T7.3). Retention also
+    /// sweeps blob files that have no row, which would race with a `put` of the MCP server
+    /// between writing the blob and inserting its row; the server's own open applies it.
+    pub fn without_retention(dir: &Path, conn: Connection) -> Result<HandleStore> {
+        fs::create_dir_all(dir)?;
+        conn.execute_batch(HANDLES_DDL)?;
+        Ok(HandleStore {
+            dir: dir.to_path_buf(),
+            conn: Mutex::new(conn),
+        })
+    }
+
     /// The directory blobs are stored under.
     pub fn dir(&self) -> &Path {
         &self.dir

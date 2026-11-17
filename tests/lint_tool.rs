@@ -98,11 +98,10 @@ async fn snapshot_on_a_fixture_layer() {
     .unwrap();
     insta::assert_snapshot!("lint_meta_mine", out);
 
-    // The default rule set on the same layer: the same findings (the other rules are still
-    // stubs), and the recipe-scope rules are reported as skipped until the evaluator lands.
+    // The default rule set on the same layer: the same parse-error findings, plus those of
+    // the other rules (the hygiene rules report on app_0.1.bb and bad_1.0.bb too).
     let all = tool::run(&env.ctx, args(Some("meta-mine"))).await.unwrap();
     // org/append-no-match also reports the fixture workspace's orphan bbappend.
-    assert!(all.starts_with("5 findings in "), "{all}");
     assert!(all.contains("hygiene/parse-error 4"), "{all}");
     assert!(all.contains("org/append-no-match 1"), "{all}");
 
@@ -130,6 +129,7 @@ async fn budget_truncation_keeps_the_summary_line() {
         &env.ctx,
         Args {
             budget_tokens: Some(150),
+            rules: Some(vec!["hygiene/parse-error".into()]),
             ..args(Some("meta-mine:recipes-app/many/many_1.0.bb"))
         },
     )
@@ -150,6 +150,7 @@ async fn budget_truncation_keeps_the_summary_line() {
         &env.ctx,
         Args {
             budget_tokens: Some(150),
+            rules: Some(vec!["hygiene/parse-error".into()]),
             format: Some(Format::Json),
             ..args(Some("meta-mine:recipes-app/many/many_1.0.bb"))
         },
@@ -210,11 +211,10 @@ async fn tool_arguments_and_errors() {
     )
     .unwrap();
     let fixed = tool::run(&env.ctx, args(Some("meta-mine"))).await.unwrap();
-    // What is left is the fixture workspace's orphan bbappend (org/append-no-match).
-    assert!(
-        fixed.starts_with("1 finding in ") && fixed.contains("org/append-no-match 1"),
-        "{fixed}"
-    );
+    // The parse errors are gone; the fixture workspace's orphan bbappend
+    // (org/append-no-match) and the other rules' findings remain.
+    assert!(!fixed.contains("hygiene/parse-error"), "{fixed}");
+    assert!(fixed.contains("org/append-no-match 1"), "{fixed}");
     assert!(
         fixed.contains("reindexed 1 file: meta-mine:recipes-app/bad/bad_1.0.bb"),
         "{fixed}"

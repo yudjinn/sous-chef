@@ -51,7 +51,7 @@ use std::time::{Instant, UNIX_EPOCH};
 use rusqlite::{OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
-use super::{Index, RefreshReport};
+use super::{FileRefresh, Index, RefreshReport};
 use crate::error::Result;
 use crate::parse::{IncludeMode, Lang, StatementKind, lexer};
 use crate::render;
@@ -230,6 +230,162 @@ pub fn refresh(index: &mut Index, ws: &Workspace) -> Result<RefreshReport> {
         removed,
         millis: start.elapsed().as_millis() as u64,
     })
+}
+
+/// [`Index::refresh_file`]: brings the rows of one file up to date without walking the
+/// layers.
+///
+/// - The file's layer (or the build directory) is looked up in the `layers` table, which is
+///   not synced: a layer the index does not know yet is an error (a full refresh is
+///   needed). A path the full walk would skip (hidden or build-output directories, a nested
+///   layer or build directory, anything but `conf/*.conf` in the build directory) or that
+///   is not a BitBake file is [`FileRefresh::NotIndexed`].
+/// - Same stat as the row: [`FileRefresh::Unchanged`]. Same sha256: only the stat columns
+///   move, also `Unchanged`. Otherwise the file is reparsed and its rows replaced in one
+///   transaction ([`FileRefresh::Reindexed`]).
+/// - Edges: when the file was already indexed and is not a `conf/layer.conf`, only its own
+///   reference edges are recomputed. Its `bbappend` edges depend on its name alone and are
+///   kept, and so is every edge pointing at it, since the row keeps its id. A new file, a
+///   deleted one, or a changed `conf/layer.conf` recomputes every edge as the full refresh
+///   does: a new file may resolve references that were unresolved, and a deleted one leaves
+///   the edges that pointed at it unresolved (the foreign key sets `target_file` to NULL
+///   first).
+pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<FileRefresh> {
+    if FileKind::from_path(abs).is_none() {
+        return Ok(FileRefresh::NotIndexed);
+    }
+    let Some(loc) = ws.loc_for(abs, LineSpan::line(1)) else {
+        return Ok(FileRefresh::NotIndexed);
+    };
+    let Some(rel) = loc.path.to_str().map(str::to_string) else {
+        return Ok(FileRefresh::NotIndexed);
+    };
+    if !walk_would_index(ws, &loc.layer, &loc.path) {
+        return Ok(FileRefresh::NotIndexed);
+    }
+    let layer: Option<(i64, String)> = index
+        .conn()
+        .query_row(
+            "SELECT id, root FROM layers WHERE name = ?1",
+            [&loc.layer],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((layer_id, root)) = layer else {
+        return Err(crate::error::Error::Invalid {
+            msg: format!(
+                "layer {} is not in the index yet; a full refresh is needed",
+                loc.layer
+            ),
+        });
+    };
+    let root = PathBuf::from(root);
+    let existing: Option<Existing> = index
+        .conn()
+        .query_row(
+            "SELECT id, mtime, size, sha256 FROM files WHERE layer_id = ?1 AND path = ?2",
+            params![layer_id, rel],
+            |r| {
+                Ok(Existing {
+                    id: r.get(0)?,
+                    mtime: r.get::<_, Option<i64>>(1)?.unwrap_or(-1),
+                    size: r.get::<_, Option<i64>>(2)?.unwrap_or(-1),
+                    sha: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                })
+            },
+        )
+        .optional()?;
+    let found = found_file(ws, 0, &root, &root.join(&rel));
+    let layer_conf = rel == "conf/layer.conf";
+
+    let remove = |index: &mut Index, id: i64| -> Result<FileRefresh> {
+        index.write(|tx| {
+            tx.execute("DELETE FROM files WHERE id = ?1", [id])?;
+            rebuild_edges(tx, ws)
+        })?;
+        Ok(FileRefresh::Removed(loc.clone()))
+    };
+
+    let Some(f) = found else {
+        return match existing {
+            Some(e) => remove(index, e.id),
+            None => Ok(FileRefresh::NotIndexed),
+        };
+    };
+    if let Some(e) = &existing
+        && e.mtime == f.mtime
+        && e.size == f.size
+    {
+        return Ok(FileRefresh::Unchanged);
+    }
+    match analyse(&f, existing.as_ref()) {
+        Analysed::Same => {
+            if let Some(e) = &existing {
+                index.write(|tx| {
+                    tx.execute(
+                        "UPDATE files SET mtime = ?1, size = ?2 WHERE id = ?3",
+                        params![f.mtime, f.size, e.id],
+                    )?;
+                    Ok(())
+                })?;
+            }
+            Ok(FileRefresh::Unchanged)
+        }
+        Analysed::Unreadable => match existing {
+            Some(e) => remove(index, e.id),
+            None => Ok(FileRefresh::NotIndexed),
+        },
+        Analysed::Changed { sha, rows } => {
+            let lines = rows.lines.max(1);
+            index.write(|tx| {
+                write_file(tx, layer_id, &f, &sha, &rows)?;
+                match (&existing, layer_conf) {
+                    (Some(e), false) => rebuild_file_edges(tx, ws, e.id),
+                    _ => rebuild_edges(tx, ws),
+                }
+            })?;
+            Ok(FileRefresh::Reindexed(Loc {
+                lines: LineSpan::new(1, lines),
+                ..loc.clone()
+            }))
+        }
+    }
+}
+
+/// Whether the full walk ([`walk`]) would index `rel` in `layer`.
+fn walk_would_index(ws: &Workspace, layer: &str, rel: &Path) -> bool {
+    let parts: Vec<String> = rel
+        .components()
+        .map(|c| match c {
+            Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default();
+    if parts.is_empty() {
+        return false;
+    }
+    if layer == BUILD_LAYER && ws.layer(BUILD_LAYER).is_none() {
+        return parts.len() == 2 && parts[0] == "conf";
+    }
+    let Some(root) = ws.layer(layer).map(|l| l.root.clone()) else {
+        return false;
+    };
+    let dirs = &parts[..parts.len() - 1];
+    if parts.iter().any(|p| p.starts_with('.'))
+        || dirs.iter().any(|d| SKIP_DIRS.contains(&d.as_str()))
+    {
+        return false;
+    }
+    // A directory that holds a build directory (`conf/bblayers.conf`) is not walked.
+    let mut dir = root;
+    for d in dirs {
+        dir.push(d);
+        if dir.join("conf").join("bblayers.conf").is_file() {
+            return false;
+        }
+    }
+    true
 }
 
 // ---- 1. layers ----
@@ -833,7 +989,13 @@ fn write_file(
             for table in ["statements", "tasks", "provides", "depends"] {
                 tx.execute(&format!("DELETE FROM {table} WHERE file_id = ?1"), [id])?;
             }
-            tx.execute("DELETE FROM edges WHERE src_file = ?1", [id])?;
+            // `bbappend` edges follow from the file name, which has not changed; keeping
+            // them keeps their ids, whose order is the order BitBake applies appends in.
+            // Edges pointing at this file keep their target: the id stays.
+            tx.execute(
+                "DELETE FROM edges WHERE src_file = ?1 AND kind != 'bbappend'",
+                [id],
+            )?;
             id
         }
         None => {
@@ -905,10 +1067,35 @@ struct FileInfo {
     pv: Option<String>,
 }
 
+/// What edge resolution needs: every indexed file, by id and by absolute path, and the
+/// resolver over them.
+struct EdgeCtx {
+    files: HashMap<i64, FileInfo>,
+    by_path: HashMap<PathBuf, i64>,
+    resolver: Resolver,
+    corebase: Option<String>,
+}
+
 /// Recomputes every edge from the indexed statements and files.
 fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
     tx.execute("DELETE FROM edges", [])?;
+    let ecx = edge_ctx(tx, ws)?;
+    insert_ref_edges(tx, ws, &ecx, None)?;
+    insert_append_edges(tx, ws, &ecx)
+}
 
+/// Recomputes the `require` / `include` / `include_all` / `inherit` edges of one file; its
+/// `bbappend` edges (which depend only on its name) and every edge pointing at it are kept.
+fn rebuild_file_edges(tx: &Transaction<'_>, ws: &Workspace, file_id: i64) -> Result<()> {
+    tx.execute(
+        "DELETE FROM edges WHERE src_file = ?1 AND kind != 'bbappend'",
+        [file_id],
+    )?;
+    let ecx = edge_ctx(tx, ws)?;
+    insert_ref_edges(tx, ws, &ecx, Some(file_id))
+}
+
+fn edge_ctx(tx: &Transaction<'_>, ws: &Workspace) -> Result<EdgeCtx> {
     let mut files: HashMap<i64, FileInfo> = HashMap::new();
     let mut by_path: HashMap<PathBuf, i64> = HashMap::new();
     {
@@ -949,13 +1136,34 @@ fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
         .find(|l| l.collections.iter().any(|c| c == "core"))
         .and_then(|l| l.root.parent())
         .map(|p| p.to_string_lossy().into_owned());
+    Ok(EdgeCtx {
+        files,
+        by_path,
+        resolver,
+        corebase,
+    })
+}
 
+/// Inserts the reference edges of every file (`only: None`) or of one file.
+fn insert_ref_edges(
+    tx: &Transaction<'_>,
+    ws: &Workspace,
+    ecx: &EdgeCtx,
+    only: Option<i64>,
+) -> Result<()> {
+    let EdgeCtx {
+        files,
+        by_path,
+        resolver,
+        corebase,
+    } = ecx;
     let refs: Vec<(i64, String, String, String, u32)> = {
         let mut st = tx.prepare(
             "SELECT file_id, kind, name, op, start_line FROM statements \
-             WHERE kind IN ('include', 'inherit') AND name IS NOT NULL ORDER BY file_id, ord",
+             WHERE kind IN ('include', 'inherit') AND name IS NOT NULL \
+             AND (?1 IS NULL OR file_id = ?1) ORDER BY file_id, ord",
         )?;
-        st.query_map([], |r| {
+        st.query_map([only], |r| {
             Ok((
                 r.get(0)?,
                 r.get(1)?,
@@ -1005,8 +1213,16 @@ fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
 
-    // bbappend edges, in BBFILES collection order (the order BitBake applies appends in).
+/// Inserts every `bbappend` edge, in BBFILES collection order (the order BitBake applies
+/// appends in).
+fn insert_append_edges(tx: &Transaction<'_>, ws: &Workspace, ecx: &EdgeCtx) -> Result<()> {
+    let by_path = &ecx.by_path;
+    let mut ins = tx.prepare_cached(
+        "INSERT INTO edges(src_file, kind, target_text, target_file, line) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
     let collected = resolve::recipe_files(ws);
     let ids: Vec<(i64, PathBuf)> = collected
         .iter()
