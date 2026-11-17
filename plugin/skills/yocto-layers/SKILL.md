@@ -96,7 +96,10 @@ a configuration change in the kas file (`local_conf_header`, `machine`, `distro`
 and layers), not in the generated `local.conf` or `bblayers.conf`; lint reports edits there
 (`org/generated-conf-edit`). sous-chef finds the project (`kas` in `sous-chef.toml`, or the
 only kas file next to a kas build directory) and `status` shows its files, machine, distro
-and layers. `scaffold kind=layer` adds a new layer to the kas file, not to `bblayers.conf`.
-With `kas` on `PATH` the `bitbake` tool runs commands through `kas shell
---keep-config-unchanged`; by hand: `kas shell <file.yml>[:<more.yml>] -c '<bitbake
-command>'`.
+and layers, and any `KAS_MACHINE`, `KAS_DISTRO`, `KAS_TARGET` or `KAS_TASK` in the
+environment that overrides them (as in kas). `scaffold kind=layer` adds a new layer to the
+kas file, not to `bblayers.conf`. With `kas` on `PATH` and a kas build directory the
+`bitbake` tool runs commands through `kas shell --keep-config-unchanged`, except when a kas
+file includes a file from another repository (`{repo, file}`): kas fetches and checks out
+such repositories on every `kas shell`, so sous-chef does not use kas then (`status` says
+why). By hand: `kas shell <file.yml>[:<more.yml>] -c '<bitbake command>'`.
