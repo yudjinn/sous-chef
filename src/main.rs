@@ -102,19 +102,25 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
         Command::Hook => {
-            // Hooks fail open: any error means no output and exit status 0.
+            // Hooks fail open: any error means no output and exit status 0. The workspace
+            // is found from the event's `cwd`; the global flags apply relative to it.
+            // A watchdog exits 0 with no output if the call blocks.
+            sous_chef::hook::arm_watchdog();
+            let opts = sous_chef::hook::Options {
+                build_dir: cli.build_dir.clone(),
+                config: cli.config.clone(),
+                layers: cli.layers.clone(),
+                ..Default::default()
+            };
             let mut input = String::new();
             if std::io::stdin().read_to_string(&mut input).is_err() {
                 return Ok(ExitCode::SUCCESS);
             }
-            match sous_chef::hook::handle(&input) {
-                Ok(Some(out)) => {
-                    let mut stdout = std::io::stdout().lock();
-                    let _ = stdout.write_all(out.as_bytes());
-                    let _ = stdout.flush();
-                }
-                Ok(None) => {}
-                Err(e) => eprintln!("sous-chef hook: {e}"),
+            if let Some(out) = sous_chef::hook::run(&input, &opts) {
+                sous_chef::hook::begin_output();
+                let mut stdout = std::io::stdout().lock();
+                let _ = stdout.write_all(out.as_bytes());
+                let _ = stdout.flush();
             }
             Ok(ExitCode::SUCCESS)
         }

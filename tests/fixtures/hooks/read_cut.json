@@ -1,0 +1,28 @@
+{
+  "session_id": "0b6d7c1e-5f0a-4c2e-9a51-3f1f2c0d9e11",
+  "prompt_id": "550e8400-e29b-41d4-a716-446655440000",
+  "transcript_path": "/home/user/.claude/projects/-ws/0b6d7c1e-5f0a-4c2e-9a51-3f1f2c0d9e11.jsonl",
+  "cwd": "{{WS}}",
+  "permission_mode": "default",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "{{WS}}/meta-core/recipes-core/hello/hello.inc",
+    "limit": 16
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "{{WS}}/meta-core/recipes-core/hello/hello.inc",
+      "content": "SUMMARY = \"GNU Hello stand-in\"\nDESCRIPTION = \"Prints a friendly greeting. Shared by every hello version.\"\nHOMEPAGE = \"https://example.org/hello\"\nSECTION = \"examples\"\nLICENSE = \"MIT\"\n\nDEPENDS = \"virtual/foo\"\n\nSRC_URI = \"https://example.org/releases/hello-${PV}.tar.gz\"\n\ninherit autotoolsish\n\nEXTRA_OECONF = \"--disable-nls\"\n\ndo_install:append() {\n\tinstall -d ${D}${sysconfdir}",
+      "numLines": 16,
+      "startLine": 1,
+      "totalLines": 20
+    }
+  },
+  "tool_use_id": "toolu_01read_cut",
+  "duration_ms": 3
+}

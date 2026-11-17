@@ -1,0 +1,38 @@
+{
+  "session_id": "0b6d7c1e-5f0a-4c2e-9a51-3f1f2c0d9e11",
+  "prompt_id": "550e8400-e29b-41d4-a716-446655440000",
+  "transcript_path": "/home/user/.claude/projects/-ws/0b6d7c1e-5f0a-4c2e-9a51-3f1f2c0d9e11.jsonl",
+  "cwd": "{{WS}}",
+  "permission_mode": "acceptEdits",
+  "effort": { "level": "high" },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "{{WS}}/meta-mine/recipes-core/hello/hello_1.1.bbappend",
+    "old_string": "EXTRA_OECONF:append = \" --with-mine\"",
+    "new_string": "EXTRA_OECONF:append = \" --with-mine --with-more\"",
+    "replace_all": false
+  },
+  "tool_response": {
+    "filePath": "{{WS}}/meta-mine/recipes-core/hello/hello_1.1.bbappend",
+    "oldString": "EXTRA_OECONF:append = \" --with-mine\"",
+    "newString": "EXTRA_OECONF:append = \" --with-mine --with-more\"",
+    "originalFile": null,
+    "structuredPatch": [
+      {
+        "oldStart": 6,
+        "oldLines": 1,
+        "newStart": 6,
+        "newLines": 1,
+        "lines": [
+          "-EXTRA_OECONF:append = \" --with-mine\"",
+          "+EXTRA_OECONF:append = \" --with-mine --with-more\""
+        ]
+      }
+    ],
+    "userModified": false,
+    "replaceAll": false
+  },
+  "tool_use_id": "toolu_01Edit000000000000000",
+  "duration_ms": 14
+}

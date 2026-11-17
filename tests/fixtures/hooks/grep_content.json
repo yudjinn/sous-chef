@@ -1,0 +1,25 @@
+{
+  "session_id": "0b6d7c1e-5f0a-4c2e-9a51-3f1f2c0d9e11",
+  "prompt_id": "550e8400-e29b-41d4-a716-446655440000",
+  "transcript_path": "/home/user/.claude/projects/-ws/0b6d7c1e-5f0a-4c2e-9a51-3f1f2c0d9e11.jsonl",
+  "cwd": "{{WS}}",
+  "permission_mode": "default",
+  "effort": { "level": "high" },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Grep",
+  "tool_input": {
+    "pattern": "install -d|install -m",
+    "path": "{{WS}}",
+    "output_mode": "content",
+    "-n": true
+  },
+  "tool_response": {
+    "mode": "content",
+    "numFiles": 4,
+    "filenames": [],
+    "content": "{{WS}}/meta-core/recipes-core/hello/hello.inc:16:\tinstall -d ${D}${sysconfdir}\n{{WS}}/meta-legacy/recipes-legacy/oldapp/oldapp_1.0.bb:24:\tinstall -d ${D}${bindir}\n{{WS}}/meta-legacy/recipes-legacy/oldapp/oldapp_1.0.bb:28:\tinstall -d ${D}${datadir}/oldapp\n{{WS}}/meta-mine/recipes-app/app/app_0.1.bb:26:\tinstall -d ${D}${bindir}\n{{WS}}/meta-mine/recipes-app/app/app_0.1.bb:27:\tinstall -m 0755 app ${D}${bindir}/app\n{{WS}}/meta-mine/recipes-core/hello/hello_1.1.bbappend:9:\tinstall -m 0644 ${S}/README ${D}${sysconfdir}/hello.readme",
+    "numLines": 6
+  },
+  "tool_use_id": "toolu_01GrepContent0000000000",
+  "duration_ms": 9
+}
