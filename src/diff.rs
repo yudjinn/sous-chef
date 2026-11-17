@@ -1219,6 +1219,12 @@ fn items_of(tree: &Tree, layer: &str) -> Vec<Item> {
                     "addfragments".into(),
                     rest.trim().to_string(),
                 )),
+                StatementKind::AddPyLib { libdir, namespace } => out.push(item(
+                    Kind::Directive,
+                    "addpylib",
+                    format!("addpylib {namespace}"),
+                    libdir.trim().to_string(),
+                )),
                 StatementKind::Unknown { text } => out.push(item(
                     Kind::Directive,
                     "unparsed",
