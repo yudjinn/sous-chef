@@ -1,0 +1,8 @@
+---
+source: tests/recipe_item.rs
+expression: out
+---
+loc	kind	name	snippet
+meta-core:recipes-core/hello/hello.inc:15-18	function	do_install:append	do_install:append() {
+meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	function	do_install:append	do_install:append() {
+2 statements match do_install:append; call item with loc=<one of the pointers>

@@ -1,0 +1,10 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+bbappend	priority	matches	status
+meta-vendor:recipes-core/hello/hello_%.bbappend	6	meta-core:recipes-core/hello/hello_1.0.bb	applies
+meta-vendor:recipes-core/hello/hello_%.bbappend	6	meta-core:recipes-core/hello/hello_1.1.bb	applies
+meta-mine:recipes-app/orphan/orphan_9.%.bbappend	10	-	no-match
+meta-mine:recipes-core/hello/hello_1.1.bbappend	10	meta-core:recipes-core/hello/hello_1.1.bb	applies
+note: 1 bbappend matches no recipe; BitBake stops with a fatal error on these (cooker.py show_appends_with_no_recipes)

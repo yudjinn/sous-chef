@@ -1,0 +1,10 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+depth	kind	file	via
+1	inc	meta-core:recipes-core/hello/hello.inc	meta-core:recipes-core/hello/hello.inc:11
+1	bb	meta-core:recipes-core/libfoo/libfoo_2.0.bb	meta-core:recipes-core/libfoo/libfoo_2.0.bb:12
+1	bb	meta-vendor:recipes-vendor/libfoo-alt/libfoo-alt_1.0.bb	meta-vendor:recipes-vendor/libfoo-alt/libfoo-alt_1.0.bb:11
+2	bb	meta-core:recipes-core/hello/hello_1.0.bb	meta-core:recipes-core/hello/hello_1.0.bb:1
+2	bb	meta-core:recipes-core/hello/hello_1.1.bb	meta-core:recipes-core/hello/hello_1.1.bb:1

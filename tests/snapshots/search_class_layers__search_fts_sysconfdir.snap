@@ -1,0 +1,7 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+loc	kind	item	snippet
+meta-core:conf/bitbake.conf:21	assign	[sysconfdir 21]	sysconfdir = "/etc"
+meta-core:recipes-core/hello/hello.inc:20	assign	[FILES:${PN} 20]	FILES:${PN} += "${sysconfdir}/hello.conf"

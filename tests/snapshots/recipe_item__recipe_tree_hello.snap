@@ -1,0 +1,11 @@
+---
+source: tests/recipe_item.rs
+expression: out
+---
+depth	kind	name	file	via	state
+0	recipe	hello_1.1.bb	meta-core:recipes-core/hello/hello_1.1.bb	-	-
+1	require	hello.inc	meta-core:recipes-core/hello/hello.inc	meta-core:recipes-core/hello/hello_1.1.bb:1	-
+2	inherit	autotoolsish	meta-core:classes-recipe/autotoolsish.bbclass	meta-core:recipes-core/hello/hello.inc:11	-
+0	bbappend	hello_%.bbappend	meta-vendor:recipes-core/hello/hello_%.bbappend	-	-
+0	bbappend	hello_1.1.bbappend	meta-mine:recipes-core/hello/hello_1.1.bbappend	-	-
+note: static parse order (recipe, then bbappends in application order, then deferred inherits); base.bbclass and INHERIT classes are parsed before the recipe and not shown

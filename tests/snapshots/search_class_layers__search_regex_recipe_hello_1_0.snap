@@ -1,0 +1,8 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+loc	kind	item	snippet
+meta-core:recipes-core/hello/hello.inc:16	function	[do_install:append 15-18]	install -d ${D}${sysconfdir}
+meta-core:recipes-core/hello/hello.inc:17	function	[do_install:append 15-18]	echo "greeting=hello" > ${D}${sysconfdir}/hello.conf
+meta-core:recipes-core/hello/hello.inc:20	assign	[FILES:${PN} 20]	FILES:${PN} += "${sysconfdir}/hello.conf"

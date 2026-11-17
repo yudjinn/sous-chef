@@ -1,0 +1,9 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+loc	kind	item	snippet
+meta-mine:recipes-app/app/app_0.1.bb:21-23	function	[do_compile 21-23]	do_compile() {
+meta-mine:recipes-app/app/app_0.1.bb:25-29	function	[do_install 25-29]	fakeroot do_install() {
+meta-mine:recipes-app/app/app_0.1.bb:31-33	function	[do_report 31-33]	python do_report() {
+meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	function	[do_install:append 8-10]	do_install:append() {

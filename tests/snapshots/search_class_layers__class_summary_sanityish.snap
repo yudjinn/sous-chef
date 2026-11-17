@@ -1,0 +1,9 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+field	value	loc
+file	wins (INHERIT), meta-core priority 5	meta-core:classes-global/sanityish.bbclass
+interface	SANITY_REQUIRED_UTILITIES ?= "patch diffstat git"	meta-core:classes-global/sanityish.bbclass:3
+handler	addhandler sanityish_check	meta-core:classes-global/sanityish.bbclass:5
+note: global class: ranked as INHERIT finds it (classes-global/, then classes/)
