@@ -91,9 +91,15 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Command::Lint(args) => {
-            let cfg = load_config(&cli)?;
-            let code = sous_chef::lint::cli(&cfg, args)?;
-            Ok(ExitCode::from(u8::try_from(code).unwrap_or(2)))
+            // Exit status: 0 clean, 1 a finding at or above --fail-on, 2 lint could not run.
+            let result = load_config(&cli).and_then(|cfg| Ok(sous_chef::lint::cli(&cfg, args)?));
+            match result {
+                Ok(code) => Ok(ExitCode::from(u8::try_from(code).unwrap_or(2))),
+                Err(e) => {
+                    eprintln!("sous-chef lint: {e:#}");
+                    Ok(ExitCode::from(2))
+                }
+            }
         }
         Command::Hook => {
             // Hooks fail open: any error means no output and exit status 0.
