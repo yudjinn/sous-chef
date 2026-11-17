@@ -105,6 +105,7 @@ VAR:foo = "x"          if "foo" is in OVERRIDES, this replaces VAR
 VAR:append:foo = " x"  appended to VAR only if "foo" is in OVERRIDES
 VAR:foo:append = " x"  appended to the variable VAR:foo (which then replaces VAR if foo is active)
 VAR:foo += "x"         operates on VAR:foo at parse time; it does NOT append to VAR
+                       (if VAR:foo was unset, VAR:foo becomes " x", leading space included)
 ```
 
 `OVERRIDES` is a colon-separated list. **Entries to the right have higher priority.** For a
@@ -112,9 +113,96 @@ variable with several active override variants, the one whose override is furthe
 `OVERRIDES` wins. Multiple overrides can be chained (`VAR:a:b`); all must be active.
 
 Finalisation order for a variable: choose the winning override variant (or the plain value),
-then apply every active `:append`, then every active `:prepend`, then every active `:remove`.
-*Verify* the exact relative order of append and prepend application against
-`data_smart.py`; the result does not depend on it except for flags.
+then apply every active `:append`, then every active `:prepend`, then expand, then apply every
+active `:remove`.
+
+Verified (T3.3) against BitBake `master` 2026-11, `lib/bb/data_smart.py` (`getVarFlag`,
+`setVar`, `_setvar_update_overrides`, `need_overrides`, `delVar`, `renameVar`) and
+`lib/bb/parse/ast.py` (`DataNode.eval`, `finalize`), `lib/bb/data.py` (`expandKeys`). This is
+what `src/eval/overrides.rs` and `src/eval/datastore.rs` reproduce:
+
+- **Storage.** A name containing `:append`, `:prepend` or `:remove` is not a variable. The
+  regex `(?P<base>.*?)(?P<keyword>:append|:prepend|:remove)(:(?P<add>[^A-Z]*))?$` splits it:
+  `VAR:append:a:b = " x"` adds `(" x", "a:b")` to the append list of `VAR`; `VAR:a:append`
+  adds `(" x", none)` to the list of `VAR:a`. Any other name with `:` is an ordinary variable
+  that is also registered as a *variant* of each shorter name, from the right, while the
+  override text starts with `[a-z0-9]` (`VAR:a:b` is a variant of `VAR:a` with `b` and of
+  `VAR` with `a:b`; `VAR:Foo:bar` only of `VAR:Foo`; `FILES:${PN}-dev` of nothing until its
+  name is expanded). `VAR:a:append` alone also registers `VAR:a` as a variant of `VAR`, so
+  with `a` active it replaces `VAR` even though `VAR:a` has no value of its own (the result
+  is just the appended text).
+- **Variant selection.** A variant is active if its override is in `OVERRIDES`, or, chained,
+  every element is. BitBake then runs this loop over the active ones (`active` maps override
+  -> variant name, in registration order):
+
+  ```
+  while modified:
+      for o in OVERRIDES (left to right):
+          for a in active: if a ends with ":"+o: rename a to a.replace(":"+o, "")  (modified)
+                           elif a == o: match = active[a]; delete a
+  ```
+
+  The last match wins: in practice the override furthest right in `OVERRIDES`, and a chained
+  variant (`VAR:a:b`) beats its prefix (`VAR:a`) whatever the order of `a` and `b`. The
+  winner's value is computed recursively (its own variants, appends, prepends). If it has no
+  value at all, the plain value of `VAR` is used. The plain value falls back to the last `??=`.
+- **Append / prepend order (the former *verify* item).** Appends first, each active one
+  concatenated at the end in the order recorded; then prepends, each active one concatenated
+  at the front in the order recorded, so the **last** `:prepend` ends up leftmost. Both work
+  on the unexpanded text. An append / prepend condition (`:append:a:b`) needs every element
+  in `OVERRIDES`. `:append` on a variable with no value gives just the appended text.
+- **Remove.** Only if the expanded value is non-empty: each active `:remove` value is
+  expanded and split on whitespace; the value is split on single whitespace characters
+  (keeping them) and every word equal to a remove word is dropped, so `"a x b"` minus `x` is
+  `"a  b"` (two spaces). A winning variant's own removes are carried to the end, but only
+  those that removed something from the variant's own value.
+- **`OVERRIDES`** is expanded once with no overrides active, then again with that result.
+  If the two differ, BitBake stops ("could not be expanded into a stable state"). An empty
+  entry (`a::b`) is kept by BitBake; it only matters for an empty condition element.
+- **Parse time.** `=` (and every other operator) during parsing does **not** clear
+  appends, prepends, removes or variants (`setVar(..., parsing=True)`); `VAR:append = " x"`
+  before `VAR = "a"` still gives `"a x"`. `VAR:foo:append` with `foo` inactive is ignored;
+  `VAR:append:foo` with `foo` inactive too.
+
+### Datastore (parse-time operators)
+
+Verified (T3.1) against `ast.py` `DataNode.eval` and `data_smart.py`, `master` 2026-11:
+
+- `?=`, `+=`, `=+`, `.=`, `=.` read the current value of **exactly the name written**
+  (`getVar(key, expand=False, noweakdefault=True, parsing=True)`): no overrides, no appends,
+  and a `??=` default does not count. So `VAR:foo += "x"` builds on `VAR:foo` only, and
+  `A ??= "w"` then `A += "x"` gives `" x"`.
+- `+=` / `=+` always insert the space: on an unset variable `A += "x"` stores `" x"` and
+  `A =+ "x"` stores `"x "`. `.=` / `=.` add nothing.
+- `?=` on a variable that has a value re-stores the same value (no effect).
+- `??=` stores a separate default (`_defaultval`); the last one wins; it is used only when the
+  variable has no plain value at the end.
+- `:=` expands the value immediately against a copy of the current datastore (overrides and
+  appends included). Undefined references stay as `${X}` text and can still expand later.
+- `VAR:append += "x"` is legal (with a warning) and appends `" x"`: the current value of the
+  name `VAR:append` is always unset.
+- Flags (`VAR[f] op "v"`) take every operator; they have no overrides or appends of their own.
+  `VAR[f] ??= "v"` is a separate flag default. `export VAR = ...` sets the `export` flag.
+- `unset VAR` (`delVar`) clears the value, the default, every flag and the append / prepend /
+  remove lists of `VAR`, and drops `VAR`'s variant registrations (`VAR:foo` keeps its value
+  but no longer replaces `VAR` unless it is assigned again). `unset VAR[f]` removes the flag
+  (and its `??=` default, but only if the flag itself was set).
+- **Names with `${...}`** (`FILES:${PN}-dev`) are stored as written. At the end of the recipe
+  (`ast.finalize`, after deferred inherits, before anonymous python) `expandKeys` expands
+  every such name, in sorted order, and renames the variable: its value replaces any value
+  already under the expanded name, its append / prepend / remove lists are added to the
+  target's, its other flags are dropped.
+- **Expansion** (`expandWithRefs`, T3.2): every `${NAME}` with `NAME` matching
+  `[a-zA-Z0-9\-_+./~:]+` is replaced by the finalised value of `NAME` (overrides, appends,
+  removes applied); undefined references stay as written. Then `${@...}`
+  (`\$\{@(?:\{.*?\}|.)+?\}`) is evaluated as python, and the whole pass repeats until the text
+  stops changing (so `${${A}}` works). References inside `${@...}` are substituted before the
+  python runs. A variable referencing itself is an error; deeper cycles end in a recursion
+  error. sous-chef never runs the python (the value is flagged `unevaluated_python`) and
+  leaves a reference that closes a cycle in place, listing it in `unresolved`.
+- Legacy `_` override names: any name containing `_append`, `_prepend` or `_remove` is fatal;
+  others (`RDEPENDS_${PN}`) are just different variables. sous-chef records them in the
+  history (status `InactiveOverride`) and does not apply them.
 
 `OVERRIDES` itself is defined in `conf/bitbake.conf`. In OE-Core it is, in shape:
 
