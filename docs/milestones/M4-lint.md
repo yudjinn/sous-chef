@@ -33,6 +33,10 @@ Rules for rule authors:
 - `run(target, options) -> Vec<Finding>`: resolve the target (file pointer, recipe, layer,
   or whole workspace), pick rules by scope, apply `disable` and severity overrides from
   config, sort findings by file then line, de-duplicate.
+- Releases (see "Release contract" in architecture.md; needs T1.6): add
+  `Rule::releases()` with a default of all releases and `LintContext.releases`; for each
+  layer compute `Layer::lint_releases` and skip rules whose range includes none of them.
+  Severity overrides come from `[lint.severity]`.
 - Inline suppression: a comment `# sous-chef: allow <rule-id>` on the line before a statement.
 - Upstream layers (not writable) are skipped by default when linting the whole workspace;
   `--all` includes them.
@@ -42,7 +46,9 @@ Rules for rule authors:
   heuristic), package-scoped variable list, known-override set from the index.
 
 **Done when:** tests for target resolution, disable by id and by group, inline suppression,
-sorting, exit codes; `hygiene/parse-error` (trivial, implemented here as the sample rule)
+sorting, exit codes; a rule limited to a release range runs for a layer that claims a
+release in the range (including one older than the workspace's) and not otherwise; a
+severity override; `hygiene/parse-error` (trivial, implemented here as the sample rule)
 passes its fixture test.
 
 ## T4.2 Rules: group `override`
@@ -98,8 +104,14 @@ Notes:
 - `host-path`: scan shell function bodies; ignore comments, `${...}` paths and here-docs that
   write config files under `${D}`.
 - `variable-order` is disabled by default.
-- `workdir-s`: confirm which release rejects `S = "${WORKDIR}"` and only report for layers
-  whose compat includes it.
+- `workdir-s`: confirm which release rejects `S = "${WORKDIR}"`, declare that range with
+  `Rule::releases()`, and name the affected releases in the message. It is an error for a
+  release that rejects it.
+- New rule `hygiene/release-syntax` (E, file): a statement or directive that one of the
+  layer's releases does not have (`inherit_defer` before Scarthgap, `include_all` before
+  Walnascar, `classes-recipe/` and `classes-global/` directories on Kirkstone), driven by
+  the `Feature` table and not by a list of its own. This task adds its file, its registry
+  entry and its row in lint-rules.md (a declared edit outside the owned files).
 
 **Done when:** as T4.2.
 

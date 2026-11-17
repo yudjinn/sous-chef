@@ -113,3 +113,24 @@ and `hello_1.1.bbappend` matching, `orphan_9.%.bbappend` matching nothing.
 - Sensible defaults when no file exists.
 
 **Done when:** tests cover missing file, full file, flag override, and each validation error.
+
+## T1.6 Release detection
+
+Added 2026-11-17, after wave 1. Done by the orchestrator during wave 2 integration, because
+it changes shared contracts and wave 3 (lint engine, jobs) builds on it.
+
+**Depends on:** T1.3, T1.5. **Owns:** `src/release.rs` (new), and small declared edits to
+`src/config.rs` (`release`, `[lint.severity]`), `src/workspace/` (`Workspace.release`,
+`Layer::lint_releases`) and `src/mcp/tools/status.rs` (the `release:` line).
+
+- `Release`, `Feature`, `ReleaseInfo` and detection as in "Release contract" in
+  architecture.md.
+- The "Releases" table in bitbake-semantics.md: one row per `Feature`, with the first and
+  last release that has it and the source checked (migration guide or source). A row that
+  could not be checked is marked *verify* and its `Feature` is not used to produce errors.
+- The fixture workspace declares Wrynose (`LAYERSERIES_CORENAMES` in its core layer).
+
+**Done when:** tests for each detection source and their order, an unknown newer codename,
+a codename older than the floor, `lint_releases` for a writable layer claiming
+`kirkstone scarthgap` in a Wrynose workspace and for a non-writable layer, and `has()` for
+every `Feature` at Kirkstone, Scarthgap and Wrynose.

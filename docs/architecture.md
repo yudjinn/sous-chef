@@ -199,6 +199,68 @@ pub fn find_class(ws: &Workspace, name: &str, global: bool) -> Option<PathBuf>;
 pub fn append_matches(append_file: &Path, recipe_file: &Path) -> bool;             // handles %
 ```
 
+## Release contract (`src/release.rs`, task T1.6)
+
+Decided 2026-11-17 (see overview.md): Wrynose primary, Scarthgap fully supported, Kirkstone
+the floor. Nothing outside `src/release.rs` compares codenames or version numbers; code asks
+for a `Feature`.
+
+```rust
+/// Ordered oldest to newest, so `Release::Scarthgap < Release::Wrynose`.
+pub enum Release { Kirkstone, Langdale, Mickledore, Nanbield, Scarthgap, Styhead, Walnascar,
+                   Whinlatter, Wrynose }
+
+impl Release {
+    pub const FLOOR: Release = Release::Kirkstone;
+    pub const DEFAULT: Release = Release::Wrynose;     // assumed when nothing can be detected
+    pub fn from_codename(s: &str) -> Option<Release>;
+    pub fn codename(self) -> &'static str;
+    pub fn version(self) -> &'static str;              // "5.0"
+    pub fn is_lts(self) -> bool;
+    pub fn has(self, f: Feature) -> bool;
+}
+
+/// One variant per behaviour that differs between supported releases. Each has a row in the
+/// "Releases" table of bitbake-semantics.md: first release, last release, source checked.
+pub enum Feature { /* e.g. SplitClassDirs, InheritDefer, IncludeAll, UnpackDir,
+                      WorkdirAsSourceDir, PrInWorkdir */ }
+
+pub struct ReleaseInfo { pub release: Release, pub source: ReleaseSource, pub note: Option<String> }
+pub enum ReleaseSource { Config, CoreNames, LayerCompat, Assumed }
+```
+
+`Workspace` gains `pub release: ReleaseInfo`, filled by `Workspace::discover` in this order:
+
+1. `release = "<codename>"` in `sous-chef.toml` (`Config.release`);
+2. `LAYERSERIES_CORENAMES` of the core layer's `conf/layer.conf` (the newest known name in it);
+3. the newest supported release named in the `LAYERSERIES_COMPAT` of the writable layers
+   (all layers if none is writable), for a layer repository checked out without OE-core;
+4. `Release::DEFAULT`, with `source: Assumed`.
+
+A codename newer than the table is treated as the newest known release, and one older than
+the floor as the floor; both set `note`. `status` prints `release: <codename> (<source>)` and
+the note.
+
+`Layer::lint_releases(&self, ws: &Workspace) -> Vec<Release>`: the supported releases in the
+layer's `compat`, plus `ws.release.release`, sorted and de-duplicated. For a layer that is
+not writable it is the workspace release alone.
+
+Who reads it:
+
+- **Lint.** `Rule` gains `fn releases(&self) -> RangeInclusive<Release>` (default: all).
+  The engine skips a rule for a layer when none of `lint_releases` is in the range, and
+  `LintContext` gains `releases: &'a [Release]` so a rule can say which of them a finding
+  applies to ("`inherit_defer` is not available in kirkstone, which this layer claims").
+  Rule ids, the catalogue and `[lint] disable` are unchanged.
+- **Parser.** Not release-aware: it accepts the union of the syntax of all supported
+  releases. Syntax a release lacks is reported by lint.
+- **Workspace, evaluator, logs.** Class directory search, the `WORKDIR` layout and similar
+  go through `Feature`.
+- **Scaffold.** Generated files follow `ws.release` (the `LAYERSERIES_COMPAT` value, `S` /
+  `UNPACKDIR` conventions) and must lint clean for it.
+- **BitBake backend.** How the build environment is initialised may differ per release
+  (*verify* for Wrynose).
+
 ## Index contract (`src/index`)
 
 Location: `$XDG_CACHE_HOME/sous-chef/<sha256 of workspace roots, 16 hex>/index.sqlite`.
@@ -477,6 +539,7 @@ build_dir = "build"                       # where conf/bblayers.conf lives; opti
 layers = ["../meta-extra"]                # extra layer roots, used when there is no build dir
 writable_layers = ["meta-mycompany"]      # scaffold may write only here
 init_script = "poky/oe-init-build-env"    # sourced before any bitbake command
+release = "scarthgap"                     # optional; overrides detection (T1.6, not in Config yet)
 
 [bitbake]
 enabled = true
@@ -484,6 +547,9 @@ allow_destructive = false                 # cleansstate, cleanall, devtool reset
 
 [lint]
 disable = ["style/variable-order"]
+
+[lint.severity]                           # optional per-rule override (T1.6, not in Config yet)
+"hygiene/workdir-s" = "error"
 
 [output]
 budget_tokens = 600

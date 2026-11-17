@@ -11,6 +11,14 @@ evaluated recipe tree), `layer` (index queries over a layer).
 Severity: **E** error (will break or is no longer accepted), **W** warning (likely bug or
 convention breach), **I** info (style).
 
+Releases: there is one rule set for all supported Yocto releases (Kirkstone to Wrynose). A
+rule whose subject exists only in some releases declares that range, and the engine runs it
+for a layer only when the range includes one of the releases the layer is checked against:
+every supported release in its `LAYERSERIES_COMPAT`, down to the oldest, plus the
+workspace's release. A finding that holds for only some of them names them. See "Release
+contract" in architecture.md. A user changes behaviour with `release`, `[lint] disable` and
+`[lint.severity]` in `sous-chef.toml`; there are no user-defined rules.
+
 ## Group `override` (task T4.2)
 
 | Id | Sev | Scope | Flags |

@@ -6,6 +6,9 @@ unless `write: true`.
 Read first: `scaffold` in [mcp-tools.md](../mcp-tools.md), the `org` rules in
 [lint-rules.md](../lint-rules.md) (generated output must pass them).
 
+Releases: generated files follow the workspace release (`ws.release`, see "Release contract"
+in architecture.md): the `LAYERSERIES_COMPAT` value and the `S` / `UNPACKDIR` conventions.
+
 Parallelism: **T6.1** first (wave 2, needs the workspace and config only). Then **T6.2 to
 T6.5** are independent files and can go to separate agents; T6.4 and T6.5 need M3.
 
