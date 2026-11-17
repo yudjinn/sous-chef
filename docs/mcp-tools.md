@@ -1197,8 +1197,8 @@ Unknown values are `null` (a revision git could not give, a layer that is not in
 The fixture's JSON is `tests/snapshots/audit__audit_fixture_json.snap`.
 
 **On the live workspace** (live-environment.md, the kas build, `--config` a copy of
-`scratch/sous-chef.toml` with the two kas files added, 2026-11-17): 15 to 30 s, 39.6 KB of
-Markdown (383 lines), 75 KB of JSON. The report holds no absolute path; the excerpt
+`scratch/sous-chef.toml` with the two kas files added, 2026-11-17): 16 to 31 s, 39.3 KB of
+Markdown (385 lines), 76 KB of JSON. The report holds no absolute path; the excerpt
 below is cut, not edited:
 
 ```
