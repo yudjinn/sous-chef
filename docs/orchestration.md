@@ -638,3 +638,47 @@ Open items, most important first (the T8.5 hand-off has the full list):
   not cleaned up.
 - The repository has no license file and no remote; the CI workflow has never run.
 - T8.4 (release diff) and T8.6 (workspace audit report) are not built.
+
+## After wave 5: audit report and open-item fixes
+
+Merged on `worktree-w2-integration` after the wave 5 close-out: `w6-audit` (T8.6, the
+`audit` command and MCP tool) and `w6-fix` (open items). The gate passes with 925 tests;
+the 14 live verification tests and the live audit test pass against yocto-kiss. Both
+agents were stopped once from Remote Control before committing anything and were
+relaunched with briefs that ask for a commit after each part.
+
+Resolved from the wave 5 open items:
+
+- `override/shadowed` no longer reads the virtual-provider rewrite of `DEPENDS` as a
+  replacement (`OpKind::VirtualProviderRewrite`); on yocto-kiss with `--all` it went from
+  83 to 65 findings, all 18 removed ones being this false positive.
+- A `.bb` that no `BBFILES` glob matches gets one `org/recipe-path` finding and no other
+  rule; `org/layer-conf` keeps the `.bbappend` case.
+- `BBFILES_DYNAMIC` is folded into the index, so dynamic-layer bbappends are evaluated and
+  linted; the `layers` view reads the index.
+- `conf/ccache.conf` and similar unreferenced, unparsable `.conf` files are data;
+  `hygiene/parse-error` with `--all` is 0.
+- Every value split in lint goes through `parse::words`.
+- Notes, not models: `<pn>-native` / `nativesdk-<pn>` / multilib names are said to be
+  class-extended variants; a static `BBMASK` marks files not collected; `SKIP_RECIPE` and
+  `COMPATIBLE_*` add a "BitBake would skip this recipe" note when decidable.
+
+Still open:
+
+- **`addpylib`** is still an `Unknown` statement: making it a `StatementKind` needs one arm
+  in `src/scaffold/inc_split.rs` (`StatementKind::AddPyLib { .. } => e.opaque = true`) and
+  a `Feature` (it first appears in BitBake 2.4, so Kirkstone lacks it).
+- **`inherit` inside a `classes/` class used through `INHERIT`** is resolved as a recipe
+  inherit, so `inherit sanity` in OE-core's `sign_*.bbclass` shows as unresolved in the
+  audit report (`src/index/scan.rs`).
+- The audit report duplicates `org_upstream_edit`'s git helper and reads the `BBLAYERS`
+  order rows through the `layers` tool's JSON, because both are private; make them public.
+- The skip notes never fire on yocto-kiss (its `MACHINEOVERRIDES` holds python);
+  `INCOMPATIBLE_LICENSE` is not modelled; `BBMASK` uses the default machine and distro.
+- `BBFILES_DYNAMIC` set inside an included file or under an override is not followed.
+- One timing test (`bitbake_kas::a_timeout_kills_the_whole_kas_process_group`) failed
+  once in a full run and passed on repeat; `tests/plugin_packaging.rs` did the same in
+  wave 5. Watch both.
+- Carried forward unchanged: hook events not captured live for Bash and Edit; the `.inc`
+  split's static safety check; kas defaults applied before `bitbake.conf`; T8.4 (release
+  diff) not built; no license file, no remote, CI never run.
