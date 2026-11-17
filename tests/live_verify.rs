@@ -696,8 +696,8 @@ fn live_bash_hook_digests_real_fetch_failure() {
     ] {
         assert!(text.contains(want), "{want} missing in {text}");
     }
-    // Known miss (T9.3 adds it): the same output under `kas shell -c '...'` is not seen.
-    assert!(!sous_chef::hook::bash::runs_bitbake(
+    // The same command under `kas shell -c '...'` is recognised too (T9.3).
+    assert!(sous_chef::hook::bash::runs_bitbake(
         "kas shell kas/kiss.yaml -c 'bitbake -c fetch broken-fetch'"
     ));
 }
