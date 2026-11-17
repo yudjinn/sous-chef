@@ -975,8 +975,11 @@ fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
             continue;
         };
         let (edge_kind, ref_kind) = if kind == "inherit" {
+            // A class in `classes-global/` inherits in global context, but only on a release
+            // that has that directory (`resolve::class_dir`, as the resolver searches).
             let global = info.kind == Some(FileKind::Conf)
-                || (info.kind == Some(FileKind::Class) && info.rel.starts_with("classes-global/"));
+                || (info.kind == Some(FileKind::Class)
+                    && resolve::class_dir(ws, Path::new(&info.rel)) == resolve::ClassDir::Global);
             ("inherit", RefKind::Inherit { global })
         } else {
             let mode = match op.as_str() {

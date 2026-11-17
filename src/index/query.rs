@@ -750,8 +750,10 @@ fn walk_tree(
 
 /// Every indexed `<name>.bbclass`, in BitBake's precedence for an `inherit` (`global ==
 /// false`) or an `INHERIT` (`global == true`): files on the search path first, ranked as
-/// `workspace::resolve` searches (`classes-<type>/` along all of `BBPATH`, then `classes/`),
-/// then the others with `rank == None`.
+/// `workspace::resolve` searches (`classes-<type>/` along all of `BBPATH`, then `classes/`;
+/// only `classes/` on a release without `Feature::SplitClassDirs`), then the others with
+/// `rank == None`. A file BitBake cannot find by name on this release (for example
+/// `classes-recipe/` on Kirkstone) is listed, never ranked.
 pub fn class_files(
     index: &Index,
     ws: &Workspace,
@@ -896,7 +898,9 @@ pub fn layer_stats(index: &Index) -> Result<Vec<LayerStats>> {
 ///   priority the later one in collection order (`l.id`, path).
 /// - Classes: the same `.bbclass` file name in several layers, ranked by
 ///   [`class_files`] for a recipe inherit (a class only in `classes-global/` by the global
-///   order). Files off the search path come last.
+///   order). Files off the search path come last. A class file BitBake cannot find by name
+///   on the workspace release (`classes-recipe/` or `classes-global/` before Langdale, see
+///   [`resolve::class_dir`]) is not a candidate and takes no part.
 pub fn shadowed(index: &Index, ws: &Workspace) -> Result<Vec<ShadowRow>> {
     let sql = format!(
         "SELECT {FILE_COLS} FROM {FILE_FROM} WHERE f.kind IN ('bb', 'bbclass') ORDER BY l.id, f.path"
@@ -904,6 +908,11 @@ pub fn shadowed(index: &Index, ws: &Workspace) -> Result<Vec<ShadowRow>> {
     let files = collect(index, &sql, &[], |r| file_row(r, 0))?;
     let mut groups: Vec<(String, String, Vec<FileRow>)> = Vec::new();
     for f in files {
+        if f.kind == FileKind::Class
+            && resolve::class_dir(ws, &f.path) == resolve::ClassDir::Unsearched
+        {
+            continue;
+        }
         let name = f
             .path
             .file_name()
@@ -936,7 +945,9 @@ pub fn shadowed(index: &Index, ws: &Workspace) -> Result<Vec<ShadowRow>> {
             });
         } else {
             let class = name.trim_end_matches(".bbclass");
-            let only_global = files.iter().all(|f| f.path.starts_with("classes-global"));
+            let only_global = files
+                .iter()
+                .all(|f| resolve::class_dir(ws, &f.path) == resolve::ClassDir::Global);
             files = class_files(index, ws, class, only_global)?
                 .into_iter()
                 .map(|c| c.file)

@@ -60,6 +60,32 @@ pub fn temp_ws() -> (tempfile::TempDir, PathBuf) {
     (tmp, root)
 }
 
+/// A writable copy of the fixture workspace whose `sous-chef.toml` sets
+/// `release = "<codename>"`, with the configuration loaded from that file. `edit(ws root)`
+/// runs before discovery. Keep the `TempDir` alive while the workspace is used.
+pub fn temp_ws_release(
+    codename: &str,
+    edit: impl FnOnce(&Path),
+) -> (tempfile::TempDir, PathBuf, Config, Workspace) {
+    let (tmp, root) = temp_ws();
+    let root = fs::canonicalize(root).unwrap();
+    let toml = root.join("sous-chef.toml");
+    let mut text = fs::read_to_string(&toml).unwrap();
+    // Top-level keys must come before the first table.
+    text = format!("release = \"{codename}\"\n{text}");
+    fs::write(&toml, text).unwrap();
+    edit(&root);
+    let cfg = Config::load(&sous_chef::config::CliOverrides {
+        config: Some(toml),
+        work_dir: root.clone(),
+        ..Default::default()
+    })
+    .unwrap();
+    let ws = Workspace::discover(&cfg).unwrap();
+    assert_eq!(ws.release.release.codename(), codename);
+    (tmp, root, cfg, ws)
+}
+
 /// Recursively copies a directory (regular files and directories only).
 pub fn copy_dir(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();

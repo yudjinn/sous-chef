@@ -907,3 +907,97 @@ fn recipe_and_class_names_like() {
             .is_empty()
     );
 }
+
+/// The fixture copy configured as Kirkstone (no `classes-recipe/` / `classes-global/`
+/// search), with a second `autotoolsish` and `base` in meta-vendor.
+fn kirkstone_with_duplicates() -> Fx {
+    let (tmp, _root, _cfg, ws) = temp_ws_release("kirkstone", |root| {
+        write(
+            &root.join("meta-vendor/classes-recipe/autotoolsish.bbclass"),
+            "X = \"1\"\n",
+        );
+        write(
+            &root.join("meta-vendor/classes/base.bbclass"),
+            "Y = \"1\"\n",
+        );
+    });
+    indexed(ws, Some(tmp))
+}
+
+#[test]
+fn kirkstone_split_class_dirs_are_indexed_but_never_candidates() {
+    let fx = kirkstone_with_duplicates();
+    // Still indexed.
+    let auto = id(&fx, "meta-core", "classes-recipe/autotoolsish.bbclass");
+    id(&fx, "meta-core", "classes-global/sanityish.bbclass");
+    // Listed by class_files, but never ranked, for inherit or INHERIT.
+    for global in [false, true] {
+        for name in ["autotoolsish", "sanityish"] {
+            let files = query::class_files(&fx.idx, &fx.ws, name, global).unwrap();
+            assert!(!files.is_empty(), "{name}");
+            assert!(files.iter().all(|c| c.rank.is_none()), "{name}: {files:?}");
+        }
+        let base = query::class_files(&fx.idx, &fx.ws, "base", global).unwrap();
+        assert_eq!(base.iter().filter(|c| c.rank.is_some()).count(), 2);
+    }
+    // `inherit autotoolsish` in hello.inc does not resolve; nothing points at the class.
+    let inc = id(&fx, "meta-core", "recipes-core/hello/hello.inc");
+    let edge = query::edges_from(&fx.idx, inc)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.kind == "inherit")
+        .unwrap();
+    assert_eq!(edge.target_text, "autotoolsish");
+    assert_eq!(edge.target, None);
+    assert!(query::edges_to(&fx.idx, auto).unwrap().is_empty());
+    assert!(
+        query::inheritors(&fx.idx, "autotoolsish", true)
+            .unwrap()
+            .is_empty()
+    );
+    // Shadowing: base (classes/) is reported, autotoolsish (classes-recipe/) is not.
+    let got: Vec<(String, Vec<String>)> = query::shadowed(&fx.idx, &fx.ws)
+        .unwrap()
+        .iter()
+        .map(|s| (s.name.clone(), s.files.iter().map(lp).collect()))
+        .collect();
+    assert_eq!(
+        got,
+        [(
+            "base.bbclass".to_string(),
+            vec![
+                "meta-core:classes/base.bbclass".to_string(),
+                "meta-vendor:classes/base.bbclass".to_string(),
+            ]
+        )]
+    );
+}
+
+#[test]
+fn split_class_dirs_are_candidates_from_langdale() {
+    // The same files on the default release: both duplicates are shadowing groups and the
+    // inherit resolves.
+    let (tmp, _root, _cfg, ws) = temp_ws_release("scarthgap", |root| {
+        write(
+            &root.join("meta-vendor/classes-recipe/autotoolsish.bbclass"),
+            "X = \"1\"\n",
+        );
+    });
+    let fx = indexed(ws, Some(tmp));
+    let names: Vec<String> = query::shadowed(&fx.idx, &fx.ws)
+        .unwrap()
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert_eq!(names, ["autotoolsish.bbclass"]);
+    let inc = id(&fx, "meta-core", "recipes-core/hello/hello.inc");
+    let edge = query::edges_from(&fx.idx, inc)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.kind == "inherit")
+        .unwrap();
+    assert_eq!(
+        edge.target.map(|t| lp(&t)).as_deref(),
+        Some("meta-core:classes-recipe/autotoolsish.bbclass")
+    );
+}
