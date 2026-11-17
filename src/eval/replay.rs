@@ -396,21 +396,110 @@ fn evaluate_inner(
 ) -> Result<DataStore> {
     let overlay = overlay.filter(|o| !o.is_empty());
     let files = Files::load(index, ws)?;
+    let config = |cache: &ConfigCache| -> Result<DataStore> {
+        let mut c = configuration(cache, index, ws, &files, target, overlay)?;
+        if target.machine.is_some() || target.distro.is_some() {
+            bbmask_note(index, ws, &mut c)?;
+        }
+        Ok(c)
+    };
     let Some(name) = &target.recipe else {
-        return configuration(cache, index, ws, &files, target, overlay);
+        return config(cache);
     };
     // A path is resolved before the configuration pass; a recipe name needs it, because
     // the choice of file reads PREFERRED_VERSION (providers.rs).
     if let Some(r) = find_recipe_file(index, ws, name)? {
-        let config = configuration(cache, index, ws, &files, target, overlay)?;
+        let config = config(cache)?;
         return recipe_pass(index, ws, &files, &config, &r, overlay);
     }
-    let config = configuration(cache, index, ws, &files, target, overlay)?;
+    let config = config(cache)?;
     let version = target.version.as_deref();
     let chosen = super::providers::Providers::with_config(cache, index, ws, target, config.fork())?
         .best_version(name, version)?
         .ok_or_else(|| recipe_not_found(name, version))?;
     recipe_pass(index, ws, &files, &config, &chosen.recipe.file, overlay)
+}
+
+/// Most files listed by name in the `BBMASK` note.
+const MAX_MASK_LISTED: usize = 10;
+
+/// For an evaluation with an explicit machine or distro: when the `BBMASK` of this
+/// configuration masks a different set of files than the one the index was marked with
+/// (the default machine and distro, `files.not_collected = 'bbmask'`), a target note naming
+/// the files it would additionally mask and those it would unmask. The candidates are the
+/// files the index collects plus those it marked as masked (the `BBFILES` collection before
+/// masking); `re.search` on their workspace paths, as the index does. A mask sous-chef
+/// cannot apply already has its own note (`config_pass`).
+fn bbmask_note(index: &Index, ws: &Workspace, config: &mut DataStore) -> Result<()> {
+    let mask = match super::bbmask(config) {
+        super::BbMask::Static(re) => Some(re),
+        super::BbMask::None => None,
+        super::BbMask::Unusable(_) => return Ok(()),
+    };
+    let masked_now: Vec<FileRow> = query::uncollected_recipe_files(index)?
+        .into_iter()
+        .filter(|(_, why)| why == crate::index::schema::NOT_COLLECTED_BBMASK)
+        .map(|(f, _)| f)
+        .collect();
+    if mask.is_none() && masked_now.is_empty() {
+        return Ok(());
+    }
+    let hit = |f: &FileRow| -> bool {
+        let Some(re) = &mask else { return false };
+        ws.abs_path(&f.loc(LineSpan::line(1)))
+            .is_some_and(|p| re.is_match(&p.to_string_lossy()))
+    };
+    let label = |f: &FileRow| format!("{}:{}", f.layer, f.path.display());
+    let more: Vec<String> = match &mask {
+        None => Vec::new(),
+        Some(_) => query::files_by_kind_in(
+            index,
+            &[FileKind::Recipe, FileKind::Append],
+            query::FileSet::COLLECTED,
+        )?
+        .iter()
+        .filter(|f| hit(f))
+        .map(label)
+        .collect(),
+    };
+    let fewer: Vec<String> = masked_now.iter().filter(|f| !hit(f)).map(label).collect();
+    if more.is_empty() && fewer.is_empty() {
+        return Ok(());
+    }
+    let list = |v: &[String]| -> String {
+        let mut s = v
+            .iter()
+            .take(MAX_MASK_LISTED)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        if v.len() > MAX_MASK_LISTED {
+            s.push_str(&format!(" (+{} more)", v.len() - MAX_MASK_LISTED));
+        }
+        s
+    };
+    let mut parts = Vec::new();
+    if !more.is_empty() {
+        parts.push(format!(
+            "it would also mask {} file{}: {}",
+            more.len(),
+            if more.len() == 1 { "" } else { "s" },
+            list(&more)
+        ));
+    }
+    if !fewer.is_empty() {
+        parts.push(format!(
+            "it would not mask {} file{} the index treats as masked: {}",
+            fewer.len(),
+            if fewer.len() == 1 { "" } else { "s" },
+            list(&fewer)
+        ));
+    }
+    Arc::make_mut(&mut config.notes).target_notes.push(format!(
+        "note: BBMASK for this machine and distro differs from the one the index applied (default machine and distro): {}; recipe names, providers and bbappends here still follow the index's mask",
+        parts.join("; ")
+    ));
+    Ok(())
 }
 
 /// The configuration pass: the cached one, unless an overlay path could have changed it

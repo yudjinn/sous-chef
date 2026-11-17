@@ -37,7 +37,11 @@ Common to every tool:
   undefined variables) could still decide it, `note: BitBake may skip this recipe: ...`
   names them (`COMPATIBLE_MACHINE = "^qemu.*$" matches none of the known machine overrides
   (none is known); 1 part of MACHINEOVERRIDES is not evaluated`); a check that passes on
-  known values (a match on a known `MACHINEOVERRIDES` entry) says nothing.
+  known values (a match on a known `MACHINEOVERRIDES` entry) says nothing. An evaluation
+  for an explicit `machine` or `distro` whose `BBMASK` masks other files than the index's
+  (made with the default machine and distro) says which: `note: BBMASK for this machine and
+  distro differs from the one the index applied (...): it would also mask 1 file:
+  meta-mine:recipes-app/app/app_0.1.bb; ...`.
 - `machine` and `distro`, where a tool takes them, default to what the evaluated
   configuration sets (`local.conf`, and OE configuration fragments such as bitbake-setup's
   `OE_FRAGMENTS` in `conf/toolcfg.conf`). In a kas project whose build directory does not

@@ -414,6 +414,72 @@ fn incompatible_license_obsolete_name_and_native() {
     assert!(skip_notes(&fx, "tool-native").is_empty());
 }
 
+// ---------------------------------------------------------------------------------------
+// Item 5: BBMASK per machine
+// ---------------------------------------------------------------------------------------
+
+fn mask_notes(fx: &Fx, machine: Option<&str>) -> Vec<String> {
+    let t = Target {
+        recipe: Some("hello".into()),
+        machine: machine.map(str::to_string),
+        ..Target::default()
+    };
+    eval(fx, &t)
+        .replay()
+        .target_notes
+        .iter()
+        .filter(|n| n.contains("BBMASK"))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn a_bbmask_that_depends_on_the_machine_is_said() {
+    // Masked for boardx only: the index (default machine qemux86) masks nothing.
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-core/conf/distro/testdistro.conf",
+            "BBMASK:boardx = \"meta-mine/recipes-app/app/\"\n",
+        );
+    });
+    assert!(mask_notes(&fx, None).is_empty());
+    assert!(mask_notes(&fx, Some("qemux86")).is_empty());
+    let n = mask_notes(&fx, Some("boardx"));
+    assert_eq!(n.len(), 1, "{n:?}");
+    assert!(
+        n[0].contains("BBMASK for this machine and distro differs")
+            && n[0].contains("it would also mask 1 file: meta-mine:recipes-app/app/app_0.1.bb"),
+        "{n:?}"
+    );
+
+    // Masked by default, not for boardx (whose machine conf clears the mask variable; an
+    // override variant would make the configuration's BBMASK uncertain, because OVERRIDES
+    // holds pn-${PN} there).
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-core/conf/distro/testdistro.conf",
+            "BOARD_MASK ?= \"meta-mine/recipes-app/app/\"\nBBMASK = \"${BOARD_MASK}\"\n",
+        );
+        append_to(
+            r,
+            "meta-core/conf/machine/boardx.conf",
+            "\nBOARD_MASK = \"\"\n",
+        );
+    });
+    let n = mask_notes(&fx, Some("qemux86"));
+    assert!(n.is_empty(), "{n:?}");
+    let n = mask_notes(&fx, Some("boardx"));
+    assert!(
+        n.len() == 1
+            && n[0].contains(
+                "it would not mask 1 file the index treats as masked: meta-mine:recipes-app/app/app_0.1.bb"
+            ),
+        "{n:?}"
+    );
+}
+
 /// Live counts (ignored; starts no BitBake): every collected recipe of the bitbake-setup
 /// build evaluated with the configuration's machine and distro, and the notes counted by
 /// kind. `SOUS_CHEF_LIVE` is the live environment; the index goes to

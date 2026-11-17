@@ -1817,7 +1817,16 @@ in the live environment:
   are the workspace's canonical ones, not the `BBLAYERS` spelling (the `LAYERDIR` gap). A
   value with python or undefined variables, or a word Rust's `regex` cannot compile, is not
   applied and every evaluation says so (`note: BBMASK is set but sous-chef does not apply
-  it`).
+  it`). (w8) An evaluation for an explicit `machine` or `distro` compares its own static
+  `BBMASK` with the index's marks: the files the index collects plus those it marked
+  `bbmask` are searched with the evaluation's mask, and when the masked set differs the
+  evaluation gets `note: BBMASK for this machine and distro differs from the one the index
+  applied (...): it would also mask N files: ...; it would not mask N files the index
+  treats as masked: ...` (`replay::bbmask_note`); recipe names, providers and bbappends
+  still follow the index's mask. A `BBMASK` written with an override variant
+  (`BBMASK:boardx`) is often not static in the configuration pass, because `OVERRIDES`
+  holds `pn-${PN}` and `layer-${FILE_LAYERNAME}` there; it then gets the "does not apply"
+  note instead.
 - **Skipped recipes** (OE-core `classes-global/base.bbclass`, Wrynose, anonymous python):
   `SKIP_RECIPE[<PN>]` non-empty; `COMPATIBLE_MACHINE` set (and `PARSE_ALL_RECIPES` not
   true) that `re.match`es (anchored at the start only) no entry of
