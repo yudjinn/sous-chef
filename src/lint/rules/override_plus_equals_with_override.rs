@@ -20,10 +20,6 @@ use crate::types::{AssignOp, LineSpan, VarRef};
 
 pub struct OverridePlusEqualsWithOverride;
 
-/// Package-scoped variables beyond [`helpers::PACKAGE_VARS`] that commonly take a package
-/// override with `+=`.
-const MORE_PACKAGE_VARS: &[&str] = &["INSANE_SKIP", "QA_EMPTY_DIRS"];
-
 impl Rule for OverridePlusEqualsWithOverride {
     fn id(&self) -> &'static str {
         "override/plus-equals-with-override"
@@ -80,8 +76,7 @@ impl Rule for OverridePlusEqualsWithOverride {
 /// stays before `:append`) and the conditions, or `None` when nothing is conditional (only
 /// a package override, or only `${...}` overrides).
 fn conditional_overrides(var: &VarRef, known: &KnownOverrides) -> Option<Split> {
-    let package_var =
-        helpers::is_package_var(&var.base) || MORE_PACKAGE_VARS.contains(&var.base.as_str());
+    let package_var = helpers::is_package_var(&var.base);
     let is_conditional = |o: &str| !o.contains("${") && known.contains(o);
     let mut found = false;
     let mut package = false;
@@ -123,12 +118,7 @@ fn message(var: &VarRef, op: AssignOp, keyword: &str, split: &Split, value: &str
     }
     let name = format!("{target}:{}", split.conditions.join(":"));
     let spaced = matches!(op, AssignOp::Append | AssignOp::Prepend);
-    let v: String = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    let v = if v.chars().count() > 40 {
-        v.chars().take(37).collect::<String>() + "..."
-    } else {
-        v
-    };
+    let v = helpers::short_value(value, false);
     // `+=` / `=+` add the space; `.=` / `=.` keep whatever the value has.
     let lead = spaced || value.starts_with(char::is_whitespace);
     let trail = spaced || value.ends_with(char::is_whitespace);

@@ -70,29 +70,21 @@ fn matches(pattern: &str, name: &str) -> bool {
 /// evaluation, as a `*` pattern.
 fn dynamic_patterns(cx: &LintContext<'_>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let Ok(files) = query::all_files(cx.index) else {
+    let Ok(edges) = query::unresolved_include_edges(cx.index) else {
         return out;
     };
-    for f in files {
-        let Ok(edges) = query::edges_from(cx.index, f.id) else {
+    for e in edges {
+        if !e.target_text.contains("${") {
             continue;
+        }
+        let w = wildcard(&e.target_text);
+        // The last component; a `*` that spans a `/` makes it `*` as a whole.
+        let last = match w.rsplit_once('/') {
+            Some((_, l)) => l.to_string(),
+            None => w,
         };
-        for e in edges {
-            if !matches!(e.kind.as_str(), "require" | "include" | "include_all")
-                || e.target.is_some()
-                || !e.target_text.contains("${")
-            {
-                continue;
-            }
-            let w = wildcard(&e.target_text);
-            // The last component; a `*` that spans a `/` makes it `*` as a whole.
-            let last = match w.rsplit_once('/') {
-                Some((_, l)) => l.to_string(),
-                None => w,
-            };
-            if !out.contains(&last) {
-                out.push(last);
-            }
+        if !out.contains(&last) {
+            out.push(last);
         }
     }
     out

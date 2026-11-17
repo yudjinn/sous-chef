@@ -68,11 +68,7 @@ impl Rule for OverrideAppendVsPlusEquals {
             } else {
                 (".=", value.as_str())
             };
-            let text: String = if text.chars().count() > 40 {
-                text.chars().take(37).collect::<String>() + "..."
-            } else {
-                text.to_string()
-            };
+            let text = helpers::clip(text);
             out.push(helpers::finding(
                 self,
                 cx,

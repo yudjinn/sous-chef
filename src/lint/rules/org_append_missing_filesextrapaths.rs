@@ -74,7 +74,7 @@ fn find_below(dir: &Path, name: &str) -> Option<String> {
 
 /// Whether `FILESEXTRAPATHS` is touched in a file the append requires or includes.
 fn extended_in_includes(cx: &LintContext<'_>) -> bool {
-    let Ok(Some(row)) = query::file_by_path(cx.index, &cx.loc.layer, &cx.loc.path) else {
+    let Ok(Some(row)) = query::file_for_loc(cx.index, &cx.loc) else {
         return false;
     };
     let Ok(tree) = query::tree(cx.index, row.id) else {
@@ -96,7 +96,7 @@ fn extended_in_includes(cx: &LintContext<'_>) -> bool {
 /// Whether the append sits in the directory of a recipe it applies to: the recipe's own
 /// `FILESPATH` directories (`${BP}`, `${BPN}`, `files` next to it) are then the append's too.
 fn next_to_recipe(cx: &LintContext<'_>) -> bool {
-    let Ok(Some(row)) = query::file_by_path(cx.index, &cx.loc.layer, &cx.loc.path) else {
+    let Ok(Some(row)) = query::file_for_loc(cx.index, &cx.loc) else {
         return false;
     };
     query::edges_from(cx.index, row.id)

@@ -20,7 +20,7 @@
 use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 
-use crate::eval::{DataStore, OpStatus};
+use crate::eval::OpStatus;
 use crate::index::query::{self, StatementFilter, StatementRow};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
@@ -43,7 +43,7 @@ impl Rule for OverrideShadowed {
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
         let Some(data) = cx.data else { return };
-        let (tree, all) = recipe_files(cx, data);
+        let (tree, all) = helpers::recipe_pass_files(cx, data);
         if tree.is_empty() {
             return;
         }
@@ -82,10 +82,10 @@ impl Rule for OverrideShadowed {
                 if !tree.contains(&key) {
                     continue;
                 }
-                let name = written(&op.var);
+                let name = helpers::colon_name(&op.var);
                 let Some(later) = history[i + 1..].iter().map(|(o, _)| o).find(|o| {
                     plain_set(&o.var, o.op)
-                        && written(&o.var) == name
+                        && helpers::colon_name(&o.var) == name
                         && (FileKind::from_path(&o.loc.path) != Some(FileKind::Append)
                             || (o.loc.layer == op.loc.layer && o.loc.path == op.loc.path))
                 }) else {
@@ -147,33 +147,6 @@ fn read_somewhere(name: &str, readers: &[StatementRow]) -> bool {
     })
 }
 
-/// Files as `(layer, path)`.
-type FileSet = HashSet<(String, PathBuf)>;
-
-/// `(tree, all)`: the recipe's own files (`.bb`, `.inc`, bbappends) and every file of the
-/// recipe pass (classes included), from the recipe's own visit on.
-fn recipe_files(cx: &LintContext<'_>, data: &DataStore) -> (FileSet, FileSet) {
-    let visits = data.files();
-    let Some(start) = visits.iter().position(|v| {
-        v.kind == FileKind::Recipe && v.loc.layer == cx.loc.layer && v.loc.path == cx.loc.path
-    }) else {
-        return (HashSet::new(), HashSet::new());
-    };
-    let mut tree = HashSet::new();
-    let mut all = HashSet::new();
-    for v in &visits[start..] {
-        let key = (v.loc.layer.clone(), v.loc.path.clone());
-        if matches!(
-            v.kind,
-            FileKind::Recipe | FileKind::Append | FileKind::Include
-        ) {
-            tree.insert(key.clone());
-        }
-        all.insert(key);
-    }
-    (tree, all)
-}
-
 fn statements(cx: &LintContext<'_>, files: &HashSet<(String, PathBuf)>) -> Vec<StatementRow> {
     let mut out = Vec::new();
     for (layer, path) in files {
@@ -185,13 +158,4 @@ fn statements(cx: &LintContext<'_>, files: &HashSet<(String, PathBuf)>) -> Vec<S
         );
     }
     out
-}
-
-fn written(var: &VarRef) -> String {
-    let mut s = var.base.clone();
-    for o in &var.overrides {
-        s.push(':');
-        s.push_str(o);
-    }
-    s
 }

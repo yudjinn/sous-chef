@@ -32,12 +32,9 @@ use crate::eval::{DataStore, OpStatus};
 use crate::index::query::{self, StatementFilter};
 use crate::lint::helpers::{self, KnownOverrides};
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
-use crate::types::{FileKind, Loc, VarRef};
+use crate::types::{Loc, VarRef};
 
 pub struct OverrideDead;
-
-/// Package-scoped variables beyond [`helpers::PACKAGE_VARS`] that take a package override.
-const MORE_PACKAGE_VARS: &[&str] = &["INSANE_SKIP", "QA_EMPTY_DIRS"];
 
 /// Variables whose values feed `OVERRIDES` in OE-core.
 const OVERRIDE_VARS: &[&str] = &[
@@ -67,7 +64,7 @@ impl Rule for OverrideDead {
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
         let Some(data) = cx.data else { return };
-        let tree = recipe_tree(cx, data);
+        let (tree, _) = helpers::recipe_pass_files(cx, data);
         if tree.is_empty() {
             return;
         }
@@ -87,7 +84,7 @@ impl Rule for OverrideDead {
                 let Some(dead) = dead_element(&op.var, &known) else {
                     continue;
                 };
-                let name = written(&op.var);
+                let name = helpers::colon_name(&op.var);
                 let hint = known
                     .closest(dead)
                     .map(|c| format!(" (`{c}`?)"))
@@ -113,29 +110,6 @@ impl Rule for OverrideDead {
             }
         }
     }
-}
-
-/// `(layer, path)` of the files the recipe pass visited that belong to the recipe: the
-/// `.bb`, `.inc` files and bbappends from the recipe's own visit on (classes and
-/// configuration files excluded).
-fn recipe_tree(cx: &LintContext<'_>, data: &DataStore) -> HashSet<(String, PathBuf)> {
-    let visits = data.files();
-    let start = visits.iter().position(|v| {
-        v.kind == FileKind::Recipe && v.loc.layer == cx.loc.layer && v.loc.path == cx.loc.path
-    });
-    let Some(start) = start else {
-        return HashSet::new();
-    };
-    visits[start..]
-        .iter()
-        .filter(|v| {
-            matches!(
-                v.kind,
-                FileKind::Recipe | FileKind::Append | FileKind::Include
-            )
-        })
-        .map(|v| (v.loc.layer.clone(), v.loc.path.clone()))
-        .collect()
 }
 
 /// Bases of the assignments and functions with overrides in the tree's files (index).
@@ -242,8 +216,7 @@ fn tokens(value: &str) -> Vec<String> {
 
 /// The first override element of `var` that is dead, if any.
 fn dead_element<'a>(var: &'a VarRef, known: &Known) -> Option<&'a str> {
-    let package_var =
-        helpers::is_package_var(&var.base) || MORE_PACKAGE_VARS.contains(&var.base.as_str());
+    let package_var = helpers::is_package_var(&var.base);
     for (i, o) in var.overrides.iter().enumerate() {
         let o = o.as_str();
         if matches!(o, "append" | "prepend" | "remove")
@@ -260,15 +233,6 @@ fn dead_element<'a>(var: &'a VarRef, known: &Known) -> Option<&'a str> {
         }
     }
     None
-}
-
-fn written(var: &VarRef) -> String {
-    let mut s = var.base.clone();
-    for o in &var.overrides {
-        s.push(':');
-        s.push_str(o);
-    }
-    s
 }
 
 /// Levenshtein distance.

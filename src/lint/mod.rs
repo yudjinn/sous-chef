@@ -17,9 +17,14 @@
 //!    of the target (for a recipe or file target, the layers the files are in, and only the
 //!    findings located in those files are kept).
 //! 4. **Releases.** Each unit is checked against the releases of its layer
-//!    ([`Layer::lint_releases`]); a file outside every layer (the build directory's
-//!    `conf/*.conf`) against the workspace release alone. A rule runs for a unit only when its
-//!    [`Rule::releases`] range contains one of them.
+//!    ([`Layer::lint_releases_as`]): every supported release the layer claims in
+//!    `LAYERSERIES_COMPAT` plus the workspace release, except for a layer that is not
+//!    writable, swept in by a whole-workspace run ([`Target::Workspace`] with
+//!    [`Options::all`]) in a workspace with a writable layer, which gets the workspace release
+//!    alone. A layer, recipe or file target reaches its layers as [`LintReach::Target`]. A
+//!    file outside every layer (the build directory's `conf/*.conf`) is checked against the
+//!    workspace release alone. A rule runs for a unit only when its [`Rule::releases`] range
+//!    contains one of them.
 //! 5. **Post-processing**: `[lint.severity]` overrides (by id, or by group; an id wins over
 //!    its group), inline suppression, the minimum severity, then sorting by file (layer name,
 //!    path), line, rule id and message, with exact duplicates removed.
@@ -54,7 +59,7 @@ use crate::error::{Error, Result};
 use crate::eval::DataStore;
 use crate::index::{Index, query};
 use crate::parse::{ParsedFile, lexer};
-use crate::release::Release;
+use crate::release::{LintReach, Release};
 use crate::render::{self, Format, Table};
 use crate::types::{FileKind, LineSpan, Loc};
 use crate::workspace::{BUILD_LAYER, Layer, Workspace};
@@ -129,8 +134,8 @@ pub struct Finding {
 /// - `Layer`: `layer`; `loc` points at the layer's `conf/layer.conf`, line 1.
 ///
 /// `index`, `ws` and `releases` are always set. `releases` (oldest first, never empty) are
-/// the releases the unit is checked against: [`Layer::lint_releases`] of its layer, or the
-/// workspace release alone for a file outside every layer. A rule that holds for only some
+/// the releases the unit is checked against: [`Layer::lint_releases_as`] of its layer (see
+/// step 4 of the module doc), or the workspace release alone for a file outside every layer. A rule that holds for only some
 /// of them names them in the message (see [`helpers::release_list`]).
 pub struct LintContext<'a> {
     pub file: Option<&'a ParsedFile>,
@@ -485,7 +490,11 @@ pub fn run_with(
     report.files = plan.files.len();
     report.layers = plan.layers_checked.clone();
 
-    let releases_of = ReleaseCache::new(ws);
+    let reach = match target {
+        Target::Workspace => LintReach::Sweep,
+        Target::Layer(_) | Target::Recipe { .. } | Target::Files { .. } => LintReach::Target,
+    };
+    let releases_of = ReleaseCache::new(ws, reach);
     let mut raw: Vec<Finding> = Vec::new();
     let mut sources = SourceCache::default();
     let mut eval_unavailable = false;
@@ -934,26 +943,28 @@ fn files_plan(ws: &Workspace, files: Vec<PathBuf>, lines: Option<LineSpan>) -> P
 
 struct ReleaseCache<'a> {
     ws: &'a Workspace,
+    reach: LintReach,
 }
 
 impl<'a> ReleaseCache<'a> {
-    fn new(ws: &'a Workspace) -> Self {
-        ReleaseCache { ws }
+    fn new(ws: &'a Workspace, reach: LintReach) -> Self {
+        ReleaseCache { ws, reach }
     }
 
     /// The releases a layer is linted against; the workspace release alone for the build
     /// directory or anything that is not a layer.
     fn get(&self, layer: &str) -> Vec<Release> {
         match self.ws.layer(layer) {
-            Some(l) => l.lint_releases(self.ws),
+            Some(l) => l.lint_releases_as(self.ws, self.reach),
             None => vec![self.ws.release.release],
         }
     }
 }
 
-/// The releases a pointer's layer is checked against (see [`LintContext::releases`]).
+/// The releases a pointer's layer is checked against when it is (in) the lint target (see
+/// [`LintContext::releases`]); the workspace release alone for the build directory.
 pub fn releases_for(ws: &Workspace, layer: &str) -> Vec<Release> {
-    ReleaseCache::new(ws).get(layer)
+    ReleaseCache::new(ws, LintReach::Target).get(layer)
 }
 
 struct Source {

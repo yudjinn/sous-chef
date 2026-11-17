@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::release::{self, Release, ReleaseInfo};
+use crate::release::{self, LintReach, Release, ReleaseInfo};
 use crate::types::{LineSpan, Loc};
 
 /// The pseudo-layer name `loc_for` uses for files in the build directory.
@@ -223,11 +223,20 @@ impl Workspace {
 }
 
 impl Layer {
-    /// The releases this layer is linted against ([`release::lint_releases`]): every
-    /// supported release in `compat` plus the workspace release, oldest first; the
-    /// workspace release alone for a layer that is not writable.
+    /// The releases this layer is linted against when it is the lint target or contains it
+    /// ([`release::lint_releases`] with [`LintReach::Target`]): every supported release in
+    /// `compat` plus the workspace release, oldest first. This is also what a writable
+    /// layer is always checked against, so scaffold asks it.
     pub fn lint_releases(&self, ws: &Workspace) -> Vec<Release> {
-        release::lint_releases(self, ws.release.release)
+        self.lint_releases_as(ws, LintReach::Target)
+    }
+
+    /// [`release::lint_releases`] for this layer reached as `reach`: the workspace release
+    /// alone only for a layer that is not writable, swept in by a whole-workspace run in a
+    /// workspace with a writable layer.
+    pub fn lint_releases_as(&self, ws: &Workspace, reach: LintReach) -> Vec<Release> {
+        let any_writable = ws.layers.iter().any(|l| l.writable);
+        release::lint_releases(self, ws.release.release, any_writable, reach)
     }
 }
 

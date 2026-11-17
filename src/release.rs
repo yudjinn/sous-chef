@@ -334,12 +334,38 @@ pub fn detect(
     Ok(ReleaseInfo::default())
 }
 
-/// The releases a layer is linted against: every supported release it claims in
-/// `LAYERSERIES_COMPAT`, down to the oldest, plus the workspace's release; sorted oldest
-/// first. A layer that is not writable is checked against the workspace's release alone.
-pub fn lint_releases(layer: &Layer, workspace: Release) -> Vec<Release> {
+/// How a layer came to be linted, for [`lint_releases`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LintReach {
+    /// The layer is the lint target or contains it: a layer named as the target, a file of
+    /// a file target, a file of a recipe target. Also the answer for code outside lint that
+    /// asks what a layer must be valid for (scaffold, which writes into a writable layer).
+    Target,
+    /// The layer is part of a whole-workspace run.
+    Sweep,
+}
+
+/// The releases a layer is linted against, oldest first, de-duplicated (decided
+/// 2026-11-17, overview.md "Lint and multi-release layers"):
+///
+/// - every supported release the layer claims in `LAYERSERIES_COMPAT`, plus the workspace's
+///   release, when the layer is writable, when it is reached as the target
+///   ([`LintReach::Target`]), or when the workspace has no writable layer
+///   (`any_writable == false`);
+/// - the workspace's release alone for a layer that is not writable, swept in by a
+///   whole-workspace run ([`LintReach::Sweep`], which only reaches such a layer with `--all`)
+///   in a workspace with at least one writable layer.
+///
+/// Names older than the floor or newer than the table are ignored.
+pub fn lint_releases(
+    layer: &Layer,
+    workspace: Release,
+    any_writable: bool,
+    reach: LintReach,
+) -> Vec<Release> {
     let mut out = vec![workspace];
-    if layer.writable {
+    let workspace_only = !layer.writable && any_writable && reach == LintReach::Sweep;
+    if !workspace_only {
         out.extend(
             layer
                 .compat
@@ -504,17 +530,33 @@ mod tests {
 
     #[test]
     fn lint_releases_for_writable_and_upstream_layers() {
+        use LintReach::{Sweep, Target};
         let mine = layer("mine", &["kirkstone", "scarthgap", "dunfell"], true);
-        assert_eq!(
-            lint_releases(&mine, Release::Wrynose),
-            [Release::Kirkstone, Release::Scarthgap, Release::Wrynose]
-        );
+        let claimed = [Release::Kirkstone, Release::Scarthgap, Release::Wrynose];
+        for reach in [Target, Sweep] {
+            for any in [true, false] {
+                assert_eq!(lint_releases(&mine, Release::Wrynose, any, reach), claimed);
+            }
+        }
         let upstream = layer("upstream", &["kirkstone", "scarthgap"], false);
+        // Named as the target, or nothing writable: every claim.
         assert_eq!(
-            lint_releases(&upstream, Release::Wrynose),
+            lint_releases(&upstream, Release::Wrynose, true, Target),
+            claimed
+        );
+        assert_eq!(
+            lint_releases(&upstream, Release::Wrynose, false, Sweep),
+            claimed
+        );
+        // Swept in by --all next to a writable layer: the workspace release alone.
+        assert_eq!(
+            lint_releases(&upstream, Release::Wrynose, true, Sweep),
             [Release::Wrynose]
         );
         let same = layer("mine", &["wrynose"], true);
-        assert_eq!(lint_releases(&same, Release::Wrynose), [Release::Wrynose]);
+        assert_eq!(
+            lint_releases(&same, Release::Wrynose, true, Target),
+            [Release::Wrynose]
+        );
     }
 }

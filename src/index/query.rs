@@ -23,6 +23,20 @@ use crate::types::{FileKind, LineSpan, Loc};
 use crate::workspace::Workspace;
 use crate::workspace::resolve;
 
+/// The release the index's edges were resolved for (`meta.release`), `None` for an index
+/// that has never been refreshed. A codename this build does not know reads as `None` too.
+pub fn indexed_release(index: &Index) -> Result<Option<crate::release::Release>> {
+    let name: Option<String> = index
+        .conn()
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            [super::schema::META_RELEASE],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(name.and_then(|n| crate::release::Release::from_codename(&n)))
+}
+
 /// One indexed file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FileRow {
@@ -267,6 +281,11 @@ pub fn file_by_path(index: &Index, layer: &str, path: &Path) -> Result<Option<Fi
             file_row(r, 0)
         })
         .optional()?)
+}
+
+/// The file a pointer names (its layer and path; the lines are ignored).
+pub fn file_for_loc(index: &Index, loc: &Loc) -> Result<Option<FileRow>> {
+    file_by_path(index, &loc.layer, &loc.path)
 }
 
 /// A file by absolute path (as hooks see it), through [`Workspace::loc_for`].
@@ -718,6 +737,16 @@ fn edge_row(r: &Row<'_>) -> rusqlite::Result<EdgeRow> {
 pub fn edges_from(index: &Index, file: i64) -> Result<Vec<EdgeRow>> {
     let sql = format!("{EDGE_SELECT} WHERE e.src_file = ?1 ORDER BY e.line IS NULL, e.line, e.id");
     collect(index, &sql, &[&file], edge_row)
+}
+
+/// Every `require` / `include` / `include_all` edge whose target is not resolved (missing,
+/// or needing evaluation), by source layer, path and line.
+pub fn unresolved_include_edges(index: &Index) -> Result<Vec<EdgeRow>> {
+    let sql = format!(
+        "{EDGE_SELECT} WHERE e.kind IN ('require', 'include', 'include_all') \
+         AND e.target_file IS NULL ORDER BY ls.id, fs.path, e.line, e.id"
+    );
+    collect(index, &sql, &[], edge_row)
 }
 
 /// Edges pointing at `file`, by source layer and path.

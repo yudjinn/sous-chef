@@ -737,7 +737,8 @@ fn release_range_runs_for_a_layer_that_claims_a_release_in_it() {
         mine.findings
     );
 
-    // meta-core is not writable: checked against the workspace release alone.
+    // meta-core is not writable and named as the target: checked against what it claims
+    // (wrynose only) plus the workspace release.
     let core = env.run(
         &Target::Layer("meta-core".into()),
         &Options::default(),
@@ -786,6 +787,107 @@ fn release_range_gates_layer_scope_rules_too() {
         &[&layer_rule],
     );
     assert!(core.findings.is_empty());
+}
+
+/// The distinct release lists (`line_one` messages) reported in `layer`.
+fn releases_reported(report: &Report, layer: &str) -> Vec<String> {
+    let mut v: Vec<String> = report
+        .findings
+        .iter()
+        .filter(|f| f.loc.layer == layer)
+        .map(|f| f.message.clone())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+// meta-vendor is not writable and claims `scarthgap wrynose`; the workspace is wrynose.
+
+#[test]
+fn an_upstream_layer_named_as_the_target_is_checked_against_every_release_it_claims() {
+    let env = Env::new();
+    let file_rule = TestRule::file("hygiene/test-each", line_one);
+    let layer_rule = TestRule {
+        scope: Scope::Layer,
+        ..TestRule::file("org/test-layer", line_one)
+    };
+    let report = env.run(
+        &Target::Layer("meta-vendor".into()),
+        &Options::default(),
+        &[&file_rule, &layer_rule],
+    );
+    assert!(report.findings.iter().any(|f| f.rule == "org/test-layer"));
+    assert_eq!(
+        releases_reported(&report, "meta-vendor"),
+        ["scarthgap wrynose"]
+    );
+}
+
+#[test]
+fn a_file_or_recipe_target_in_an_upstream_layer_checks_that_layer_against_its_claims() {
+    let mut env = Env::new();
+    let abs = env.add(
+        "meta-vendor/recipes-x/vx/vx_1.0.bb",
+        "SUMMARY = \"x\"\nLICENSE = \"MIT\"\n",
+    );
+    let rule = TestRule::file("hygiene/test-each", line_one);
+    let files = Target::Files {
+        files: vec![abs],
+        lines: None,
+    };
+    let report = env.run(&files, &Options::default(), &[&rule]);
+    assert_eq!(
+        rows(&report),
+        ["warning hygiene/test-each meta-vendor:recipes-x/vx/vx_1.0.bb:1"]
+    );
+    assert_eq!(
+        releases_reported(&report, "meta-vendor"),
+        ["scarthgap wrynose"]
+    );
+
+    let recipe = Target::Recipe {
+        name: "vx".into(),
+        version: None,
+    };
+    let report = env.run(&recipe, &Options::default(), &[&rule]);
+    assert_eq!(
+        releases_reported(&report, "meta-vendor"),
+        ["scarthgap wrynose"]
+    );
+}
+
+#[test]
+fn every_layer_gets_its_claims_when_no_layer_is_writable() {
+    let env = Env::with(|c| c.writable_layers.clear());
+    let rule = TestRule::file("hygiene/test-each", line_one);
+    let report = env.run(&Target::Workspace, &Options::default(), &[&rule]);
+    assert_eq!(
+        releases_reported(&report, "meta-vendor"),
+        ["scarthgap wrynose"]
+    );
+    assert_eq!(
+        releases_reported(&report, "meta-mine"),
+        ["kirkstone scarthgap wrynose"]
+    );
+    assert_eq!(releases_reported(&report, "build"), ["wrynose"]);
+}
+
+#[test]
+fn an_upstream_layer_swept_in_by_all_gets_the_workspace_release_alone() {
+    let env = Env::new();
+    let rule = TestRule::file("hygiene/test-each", line_one);
+    let all = Options {
+        all: true,
+        ..Options::default()
+    };
+    let report = env.run(&Target::Workspace, &all, &[&rule]);
+    assert_eq!(releases_reported(&report, "meta-vendor"), ["wrynose"]);
+    // The writable layer keeps every release it claims in the same run.
+    assert_eq!(
+        releases_reported(&report, "meta-mine"),
+        ["kirkstone scarthgap wrynose"]
+    );
 }
 
 // ---------------------------------------------------------------------------------------

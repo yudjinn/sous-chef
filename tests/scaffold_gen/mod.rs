@@ -10,9 +10,10 @@ use std::path::{Path, PathBuf};
 use sous_chef::config::Config;
 use sous_chef::error::Result;
 use sous_chef::index::Index;
-use sous_chef::lint::Severity;
+use sous_chef::lint::{self, Finding, Options, Severity, Target};
 use sous_chef::parse::{StatementKind, parse};
 use sous_chef::scaffold::{self, Kind, Outcome, Request, RuleLint};
+use sous_chef::types::LineSpan;
 use sous_chef::workspace::Workspace;
 
 use crate::common;
@@ -103,6 +104,66 @@ impl Env {
         o
     }
 
+    /// Refreshes the index and lints the workspace files `rels` (relative to the root) with
+    /// exactly rule `id` selected, at every severity. Asserts that each file is in a layer
+    /// of the workspace, that the rule runs for that layer's releases, and that every file
+    /// was linted, so an empty result means the rule looked and found nothing.
+    pub fn lint_rule(&mut self, id: &str, rels: &[&str]) -> Vec<Finding> {
+        self.index.refresh(&self.ws).unwrap();
+        let rule = lint::all_rules()
+            .iter()
+            .copied()
+            .find(|r| r.id() == id)
+            .unwrap_or_else(|| panic!("no rule {id}"));
+        let files: Vec<PathBuf> = rels.iter().map(|r| self.path(r)).collect();
+        for f in &files {
+            let loc = self
+                .ws
+                .loc_for(f, LineSpan::line(1))
+                .unwrap_or_else(|| panic!("{} is not in the workspace", f.display()));
+            let releases = lint::releases_for(&self.ws, &loc.layer);
+            assert!(
+                lint::applies(rule, &releases),
+                "{id} does not run for {} ({releases:?})",
+                loc.layer
+            );
+        }
+        let report = lint::run(
+            &self.ws,
+            &self.index,
+            &self.cfg,
+            &Target::Files { files, lines: None },
+            &Options {
+                rules: vec![id.to_string()],
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(report.files, rels.len(), "{:?}", report.notes);
+        report.findings
+    }
+
+    /// Refreshes the index and lints `target` with the default rule set; returns the
+    /// findings at warning or above, rendered, and asserts at least one file was linted.
+    pub fn lint_default(&mut self, target: &Target) -> Vec<String> {
+        self.index.refresh(&self.ws).unwrap();
+        let report = lint::run(
+            &self.ws,
+            &self.index,
+            &self.cfg,
+            target,
+            &Options::default(),
+        )
+        .unwrap();
+        assert!(report.files > 0, "{:?}", report.notes);
+        report
+            .findings
+            .iter()
+            .filter(|f| f.severity >= Severity::Warning)
+            .map(render_finding)
+            .collect()
+    }
+
     /// The outcome as snapshot text: each file (action, display path, content), then the
     /// notes, with the temporary root replaced by `<ws>`.
     pub fn render(&self, o: &Outcome) -> String {
@@ -173,11 +234,16 @@ pub fn assert_lint_clean(o: &Outcome) {
     let bad: Vec<String> = findings
         .iter()
         .filter(|f| f.severity >= Severity::Warning)
-        .map(|f| format!("{} {} {} {}", f.severity.as_str(), f.rule, f.loc, f.message))
+        .map(render_finding)
         .collect();
     assert!(
         bad.is_empty(),
         "lint findings on generated files:\n{}",
         bad.join("\n")
     );
+}
+
+/// `severity rule pointer message`.
+pub fn render_finding(f: &Finding) -> String {
+    format!("{} {} {} {}", f.severity.as_str(), f.rule, f.loc, f.message)
 }

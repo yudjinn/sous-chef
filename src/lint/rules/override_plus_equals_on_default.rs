@@ -109,12 +109,7 @@ impl Rule for OverridePlusEqualsOnDefault {
                 AssignOp::Append | AssignOp::AppendDot => "append",
                 _ => "prepend",
             };
-            let v: String = value.split_whitespace().collect::<Vec<_>>().join(" ");
-            let v = if v.chars().count() > 40 {
-                v.chars().take(37).collect::<String>() + "..."
-            } else {
-                v
-            };
+            let v = helpers::short_value(value, false);
             // `+=` / `=+` add the space; `.=` / `=.` keep whatever the value has.
             let v = match op {
                 AssignOp::Append => format!(" {v}"),

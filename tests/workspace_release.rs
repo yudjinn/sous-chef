@@ -9,7 +9,7 @@ use std::path::Path;
 use common::*;
 use sous_chef::config::Config;
 use sous_chef::error::Error;
-use sous_chef::release::{Release, ReleaseInfo, ReleaseSource};
+use sous_chef::release::{LintReach, Release, ReleaseInfo, ReleaseSource};
 use sous_chef::workspace::{Workspace, layers};
 
 use Release::{Kirkstone, Scarthgap, Wrynose};
@@ -57,10 +57,16 @@ fn fixture_lint_releases() {
     let mine = ws.layer("meta-mine").unwrap();
     assert!(mine.writable);
     assert_eq!(mine.lint_releases(&ws), [Kirkstone, Scarthgap, Wrynose]);
-    // Not writable: the workspace release alone, whatever it claims.
+    assert_eq!(
+        mine.lint_releases_as(&ws, LintReach::Sweep),
+        [Kirkstone, Scarthgap, Wrynose]
+    );
+    // Not writable: every claim as the target; the workspace release alone when swept in
+    // by a whole-workspace run (there is a writable layer).
     let vendor = ws.layer("meta-vendor").unwrap();
     assert_eq!(vendor.compat, ["scarthgap", "wrynose"]);
-    assert_eq!(vendor.lint_releases(&ws), [Wrynose]);
+    assert_eq!(vendor.lint_releases(&ws), [Scarthgap, Wrynose]);
+    assert_eq!(vendor.lint_releases_as(&ws, LintReach::Sweep), [Wrynose]);
     assert_eq!(ws.layer("meta-core").unwrap().lint_releases(&ws), [Wrynose]);
 }
 
@@ -71,7 +77,8 @@ fn writable_layer_claiming_kirkstone_scarthgap_in_a_wrynose_workspace() {
     layer.compat = vec!["kirkstone".into(), "scarthgap".into()];
     assert_eq!(layer.lint_releases(&ws), [Kirkstone, Scarthgap, Wrynose]);
     layer.writable = false;
-    assert_eq!(layer.lint_releases(&ws), [Wrynose]);
+    assert_eq!(layer.lint_releases(&ws), [Kirkstone, Scarthgap, Wrynose]);
+    assert_eq!(layer.lint_releases_as(&ws, LintReach::Sweep), [Wrynose]);
 }
 
 #[test]
@@ -128,10 +135,9 @@ fn config_release_overrides_corenames() {
     // meta-mine still claims kirkstone and wrynose.
     let mine = ws.layer("meta-mine").unwrap();
     assert_eq!(mine.lint_releases(&ws), [Kirkstone, Scarthgap, Wrynose]);
-    assert_eq!(
-        ws.layer("meta-vendor").unwrap().lint_releases(&ws),
-        [Scarthgap]
-    );
+    let vendor = ws.layer("meta-vendor").unwrap();
+    assert_eq!(vendor.lint_releases(&ws), [Scarthgap, Wrynose]);
+    assert_eq!(vendor.lint_releases_as(&ws, LintReach::Sweep), [Scarthgap]);
 }
 
 #[test]

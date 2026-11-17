@@ -1001,3 +1001,45 @@ fn split_class_dirs_are_candidates_from_langdale() {
         Some("meta-core:classes-recipe/autotoolsish.bbclass")
     );
 }
+
+#[test]
+fn unresolved_include_edges_and_file_for_loc() {
+    let fx = modified(|root| {
+        write(
+            &root.join("meta-mine/recipes-app/inc/inc_1.0.bb"),
+            "require missing.inc\ninclude ${BPN}-extra.inc\ninherit nosuchclass\n",
+        );
+    });
+    // The same edges as filtering every file's edges.
+    let mut want = Vec::new();
+    for f in query::all_files(&fx.idx).unwrap() {
+        for e in query::edges_from(&fx.idx, f.id).unwrap() {
+            if matches!(e.kind.as_str(), "require" | "include" | "include_all")
+                && e.target.is_none()
+            {
+                want.push(e.id);
+            }
+        }
+    }
+    let mut got: Vec<i64> = query::unresolved_include_edges(&fx.idx)
+        .unwrap()
+        .iter()
+        .map(|e| e.id)
+        .collect();
+    got.sort_unstable();
+    want.sort_unstable();
+    assert_eq!(got, want);
+    let texts: Vec<String> = query::unresolved_include_edges(&fx.idx)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.src.path == Path::new("recipes-app/inc/inc_1.0.bb"))
+        .map(|e| e.target_text)
+        .collect();
+    assert_eq!(texts, ["missing.inc", "${BPN}-extra.inc"]);
+
+    let loc: sous_chef::types::Loc = "meta-mine:recipes-app/inc/inc_1.0.bb:2-3".parse().unwrap();
+    let row = query::file_for_loc(&fx.idx, &loc).unwrap().unwrap();
+    assert_eq!(lp(&row), "meta-mine:recipes-app/inc/inc_1.0.bb");
+    let none: sous_chef::types::Loc = "meta-mine:nope.bb:1".parse().unwrap();
+    assert!(query::file_for_loc(&fx.idx, &none).unwrap().is_none());
+}

@@ -18,9 +18,9 @@
 //! pointers (at most five, then a count).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 
 use crate::index::query;
+use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
 use crate::types::{FileKind, LineSpan};
@@ -31,21 +31,6 @@ const MIN_BODY_LINES: usize = 5;
 const BLOCK: usize = 5;
 const MIN_RECIPES: usize = 3;
 const MAX_LISTED: usize = 5;
-
-fn version_data(base: &str, flag: Option<&str>) -> bool {
-    matches!(base, "PV" | "PR" | "PE" | "LIC_FILES_CHKSUM")
-        || base == "SRCREV"
-        || base.starts_with("SRCREV_")
-        || (base == "SRC_URI" && flag.is_some_and(|f| f.ends_with("sum")))
-}
-
-fn normalise_lines(text: &str) -> Vec<String> {
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
-        .collect()
-}
 
 /// One occurrence: file index, lines, and (for a body) the function name.
 #[derive(Debug, Clone)]
@@ -59,15 +44,6 @@ struct Unit {
     row: query::FileRow,
     /// `PN` for recipes and appends, the path for an `.inc`.
     recipe: String,
-}
-
-fn read(cx: &LintContext<'_>, f: &query::FileRow) -> Option<String> {
-    let abs = cx
-        .ws
-        .confine(&cx.ws.abs_path(&f.loc(LineSpan::line(1)))?)
-        .ok()?;
-    let bytes = fs::read(abs).ok()?;
-    Some(crate::parse::lexer::decode(&bytes).into_owned())
 }
 
 /// The text of lines `span` (1-based, inclusive) of `text`.
@@ -151,11 +127,10 @@ impl Rule for OrgRepeatedLogic {
         let mut windows: Vec<Vec<(Vec<String>, LineSpan)>> = Vec::new();
         for (i, u) in units.iter().enumerate() {
             let mut mine = Vec::new();
-            let Some(text) = read(cx, &u.row) else {
+            let Some((text, parsed)) = helpers::read_indexed(cx, &u.row) else {
                 windows.push(mine);
                 continue;
             };
-            let parsed = crate::parse::parse(&text);
             let mut run: Vec<(String, LineSpan)> = Vec::new();
             let mut runs: Vec<Vec<(String, LineSpan)>> = Vec::new();
             for st in &parsed.statements {
@@ -169,7 +144,7 @@ impl Rule for OrgRepeatedLogic {
                     _ => (None, String::new()),
                 };
                 if let Some(body) = body {
-                    let key = normalise_lines(&lines_of(&text, body));
+                    let key = helpers::normalise_lines(&lines_of(&text, body));
                     if key.len() >= MIN_BODY_LINES {
                         bodies.entry(key).or_default().push(Hit {
                             file: i,
@@ -180,9 +155,10 @@ impl Rule for OrgRepeatedLogic {
                 }
                 match &st.kind {
                     StatementKind::Assign { var, .. } => {
-                        if !version_data(&var.base, var.flag.as_deref()) {
+                        if !helpers::is_version_data(&var.base, var.flag.as_deref()) {
                             let t =
-                                normalise_lines(text.get(st.bytes.clone()).unwrap_or("")).join(" ");
+                                helpers::normalise_lines(text.get(st.bytes.clone()).unwrap_or(""))
+                                    .join(" ");
                             run.push((t, st.span));
                         }
                     }

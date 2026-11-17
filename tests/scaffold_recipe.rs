@@ -111,6 +111,44 @@ fn local_files_on_a_layer_spanning_the_unpackdir_change() {
 }
 
 #[test]
+fn a_local_files_recipe_passes_the_release_rules_on_kirkstone_scarthgap_wrynose() {
+    let mut env = Env::new();
+    let req = request(
+        Kind::Recipe,
+        "tool",
+        Some("0.1"),
+        json!({"category": "app", "source": "file://tool.c file://Makefile", "license": "CLOSED", "summary": "t"}),
+    );
+    env.write_clean(&req);
+    let rel = "meta-mine/recipes-app/tool/tool_0.1.bb";
+    let releases = sous_chef::lint::releases_for(&env.ws, "meta-mine");
+    assert_eq!(releases.len(), 3, "{releases:?}");
+    for id in ["hygiene/release-syntax", "hygiene/workdir-s"] {
+        let f = env.lint_rule(id, &[rel]);
+        assert!(f.is_empty(), "{id}: {f:?}");
+    }
+
+    // Controls in the same layer: each rule reports what one of the claimed releases lacks.
+    let text = std::fs::read_to_string(env.path(rel)).unwrap();
+    let bad = "meta-mine/recipes-app/tool/tool_0.2.bb";
+    std::fs::write(
+        env.path(bad),
+        format!("{text}S = \"${{WORKDIR}}\"\ninherit_defer native\n"),
+    )
+    .unwrap();
+    let ws = env.lint_rule("hygiene/workdir-s", &[bad]);
+    assert!(
+        ws.iter().any(|f| f.message.contains("wrynose")),
+        "control: {ws:?}"
+    );
+    let rs = env.lint_rule("hygiene/release-syntax", &[bad]);
+    assert!(
+        rs.iter().any(|f| f.message.contains("kirkstone")),
+        "control: {rs:?}"
+    );
+}
+
+#[test]
 fn local_files_follow_the_layer_releases() {
     // Only Styhead and later: S = "${UNPACKDIR}".
     let mut env = Env::edited(|root| set_compat(root, "scarthgap wrynose"));
@@ -131,12 +169,18 @@ fn local_files_follow_the_layer_releases() {
     assert_plan_parses(&o);
     env.write_clean(&req);
 
-    // A Kirkstone workspace and layer: S = "${WORKDIR}".
+    // A Kirkstone workspace and layer: S = "${WORKDIR}", which Kirkstone accepts.
     let mut env = Env::release("kirkstone", |root| set_compat(root, "kirkstone"));
     let o = env.plan(&req);
     let text = env.render(&o);
     assert!(text.contains("S = \"${WORKDIR}\""), "{text}");
     assert_plan_parses(&o);
+    env.write_clean(&req);
+    let rel = "meta-mine/recipes-app/tool/tool_0.1.bb";
+    for id in ["hygiene/release-syntax", "hygiene/workdir-s"] {
+        let f = env.lint_rule(id, &[rel]);
+        assert!(f.is_empty(), "{id}: {f:?}");
+    }
 }
 
 #[test]
@@ -153,10 +197,13 @@ fn go_follows_the_workspace_release_when_the_layer_spans_unpackdir() {
         "{text}"
     );
 
+    env.write_clean(&req);
+
     let mut env = Env::release("kirkstone", |root| set_compat(root, "kirkstone"));
     let text = env.show(&req);
     assert!(!text.contains("destsuffix"), "{text}");
     assert!(!text.contains("will not work"), "{text}");
+    env.write_clean(&req);
 }
 
 #[test]
@@ -179,6 +226,24 @@ fn missing_facts_are_comments_and_notes() {
     assert!(text.contains("# sous-chef: supply SRCREV"), "{text}");
     assert!(text.contains("note: supply SRCREV"), "{text}");
     assert!(text.contains("branch=dev"), "{text}");
+    // Written as it is, the facts the notes ask for are what lint reports, at warning: the
+    // generator does not invent them and the rules do not let the gap pass.
+    let o = env.run(&req, true).unwrap();
+    let mut warned: Vec<(&str, String)> = o
+        .lint
+        .as_ref()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .iter()
+        .filter(|f| f.severity >= sous_chef::lint::Severity::Warning)
+        .map(|f| (f.rule, f.message.clone()))
+        .collect();
+    warned.sort();
+    assert_eq!(warned.len(), 2, "{warned:?}");
+    assert!(warned[0].1.contains("no LIC_FILES_CHKSUM"), "{warned:?}");
+    assert_eq!(warned[1].0, "hygiene/src-uri-checksum", "{warned:?}");
+    assert!(warned[1].1.contains("set SRCREV"), "{warned:?}");
 
     let req = request(
         Kind::Recipe,
@@ -238,7 +303,9 @@ fn the_inc_in_the_target_layer_is_required_by_name() {
     let mut env = Env::edited(|root| {
         let dir = root.join("meta-mine/recipes-app/thing");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("thing.inc"), "SUMMARY = \"t\"\nLICENSE = \"MIT\"\nSRC_URI = \"git://example.org/t.git;protocol=https;branch=main\"\n").unwrap();
+        // A complete .inc, so the post-write lint of the new version judges only what the
+        // generator wrote.
+        std::fs::write(dir.join("thing.inc"), "SUMMARY = \"t\"\nLICENSE = \"MIT\"\nLIC_FILES_CHKSUM = \"file://LICENSE;md5=0835ade698e0bcf8506ecda2f7b4f302\"\nSRC_URI = \"git://example.org/t.git;protocol=https;branch=main\"\n").unwrap();
         std::fs::write(
             dir.join("thing_1.0.bb"),
             "require thing.inc\nSRCREV = \"aaaa\"\n",
@@ -257,6 +324,7 @@ fn the_inc_in_the_target_layer_is_required_by_name() {
     assert!(text.contains(&format!("SRCREV = \"{REV}\"")), "{text}");
     assert!(!text.contains("sha256sum"), "{text}");
     assert_plan_parses(&o);
+    env.write_clean(&req);
 }
 
 #[test]

@@ -216,7 +216,6 @@ fn a_locked_index_fails_open() {
 }
 
 #[test]
-#[ignore = "needs override/legacy-syntax (T4.2); enabled at integration"]
 fn an_edit_introducing_legacy_syntax_yields_the_finding() {
     let f = fx();
     let rel = "meta-mine/recipes-core/hello/hello_1.1.bbappend";
@@ -229,6 +228,7 @@ fn an_edit_introducing_legacy_syntax_yields_the_finding() {
         ),
         "{ctx}"
     );
+    assert!(ctx.contains("write `EXTRA_OECONF:append`"), "{ctx}");
 }
 
 #[test]

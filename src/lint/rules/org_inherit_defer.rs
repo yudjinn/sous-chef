@@ -13,7 +13,6 @@
 //! only for layers checked against such a release, and stays silent when any of the layer's
 //! releases lacks it (the suggestion would not parse there).
 
-use std::fs;
 use std::ops::RangeInclusive;
 
 use crate::index::query;
@@ -94,17 +93,11 @@ fn changes(parsed: &ParsedFile, text: &str, var: &str, after: u32) -> Option<u32
 
 /// Where a bbappend of the recipe changes `var`: its pointer.
 fn changed_in_appends(cx: &LintContext<'_>, var: &str) -> Option<Loc> {
-    let row = query::file_by_path(cx.index, &cx.loc.layer, &cx.loc.path).ok()??;
+    let row = query::file_for_loc(cx.index, &cx.loc).ok()??;
     for a in query::appends_for(cx.index, row.id).ok()? {
-        let Some(abs) = cx.ws.abs_path(&a.loc(LineSpan::line(1))) else {
+        let Some((text, parsed)) = helpers::read_indexed(cx, &a) else {
             continue;
         };
-        let Ok(abs) = cx.ws.confine(&abs) else {
-            continue;
-        };
-        let Ok(bytes) = fs::read(&abs) else { continue };
-        let text = crate::parse::lexer::decode(&bytes).into_owned();
-        let parsed = crate::parse::parse(&text);
         if let Some(line) = changes(&parsed, &text, var, 0) {
             return Some(a.loc(LineSpan::line(line)));
         }
