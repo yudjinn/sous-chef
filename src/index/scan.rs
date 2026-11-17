@@ -1379,6 +1379,16 @@ fn insert_ref_edges(
         let Some(info) = files.get(&file_id) else {
             continue;
         };
+        if kind == "inherit" && info.kind == Some(FileKind::Conf) {
+            // `ConfHandler` has no `inherit`: BitBake stops on the line as unparsed (BitBake
+            // 2.18 `ConfHandler.feeder`). No edge; `hygiene/parse-error` reports it.
+            continue;
+        }
+        if kind == "inherit" && info.kind == Some(FileKind::Include) {
+            // Its class context follows whoever reaches the `.inc`: resolved after every
+            // include edge is in (`insert_inc_inherit_edges`).
+            continue;
+        }
         if kind == "addfragments" {
             // Which files it includes follows from the evaluated fragments variable
             // (`OE_FRAGMENTS`), never from the file alone: always unresolved here, the replay
@@ -1419,8 +1429,7 @@ fn insert_ref_edges(
         let (edge_kind, ref_kind) = if kind == "inherit" {
             // A class in `classes-global/` inherits in global context, but only on a release
             // that has that directory (`resolve::class_dir`, as the resolver searches).
-            let global =
-                info.kind == Some(FileKind::Conf) || class_dir == Some(resolve::ClassDir::Global);
+            let global = class_dir == Some(resolve::ClassDir::Global);
             ("inherit", RefKind::Inherit { global })
         } else {
             let mode = match op.as_str() {
@@ -1443,6 +1452,200 @@ fn insert_ref_edges(
             Some(_) => {}
             None => {
                 ins.execute(params![file_id, edge_kind, text, Option::<i64>::None, line])?;
+            }
+        }
+    }
+    drop(ins);
+    drop(ins_ctx);
+    insert_inc_inherit_edges(tx, ws, ecx, only.is_some())
+}
+
+/// The class contexts that reach a file through `require` / `include` / `include_all`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Reach {
+    recipe: bool,
+    global: bool,
+}
+
+/// The class context a file parses its own statements in, when it is not an `.inc`: a
+/// `.conf` and a class in `classes-global/` are global, a recipe, a bbappend and a class in
+/// `classes-recipe/` recipe; a class in `classes/` either (both, on a release that has the
+/// context directories; recipe before, where the two searches are the same).
+fn own_reach(ws: &Workspace, info: &FileInfo) -> Option<Reach> {
+    let recipe = Reach {
+        recipe: true,
+        global: false,
+    };
+    match info.kind? {
+        FileKind::Conf => Some(Reach {
+            recipe: false,
+            global: true,
+        }),
+        FileKind::Recipe | FileKind::Append => Some(recipe),
+        FileKind::Class => Some(match resolve::class_dir(ws, Path::new(&info.rel)) {
+            resolve::ClassDir::Global => Reach {
+                recipe: false,
+                global: true,
+            },
+            resolve::ClassDir::Shared if ws.release.release.has(Feature::SplitClassDirs) => Reach {
+                recipe: true,
+                global: true,
+            },
+            _ => recipe,
+        }),
+        FileKind::Include => None,
+    }
+}
+
+/// For every `.inc` some other file reaches through any chain of include edges, which class
+/// contexts reach it, from the include edges in the table.
+fn inc_reach(tx: &Transaction<'_>, ws: &Workspace, ecx: &EdgeCtx) -> Result<HashMap<i64, Reach>> {
+    let edges: Vec<(i64, i64)> = {
+        let mut st = tx.prepare_cached(
+            "SELECT src_file, target_file FROM edges \
+             WHERE kind IN ('require', 'include', 'include_all') AND target_file IS NOT NULL",
+        )?;
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    let is_inc = |id: i64| {
+        ecx.files
+            .get(&id)
+            .is_some_and(|f| f.kind == Some(FileKind::Include))
+    };
+    let mut reach: HashMap<i64, Reach> = HashMap::new();
+    // Seeds: an edge from a file that has a context of its own into an `.inc`.
+    for &(src, dst) in &edges {
+        if !is_inc(dst) {
+            continue;
+        }
+        if let Some(r) = ecx.files.get(&src).and_then(|f| own_reach(ws, f)) {
+            let e = reach.entry(dst).or_default();
+            e.recipe |= r.recipe;
+            e.global |= r.global;
+        }
+    }
+    // Then along `.inc` to `.inc` edges until nothing changes (each pass can only add).
+    loop {
+        let mut changed = false;
+        for &(src, dst) in &edges {
+            if !is_inc(dst) || !is_inc(src) {
+                continue;
+            }
+            let Some(r) = reach.get(&src).copied() else {
+                continue;
+            };
+            let e = reach.entry(dst).or_default();
+            let next = Reach {
+                recipe: e.recipe | r.recipe,
+                global: e.global | r.global,
+            };
+            if next != *e {
+                *e = next;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    Ok(reach)
+}
+
+/// The `inherit` edges of every `.inc`. BitBake parses an `.inc` with whatever reaches it
+/// and searches its `inherit`s in that parse's class context (`__bbclasstype`: global for
+/// the whole configuration parse, recipe for a recipe; bitbake-semantics.md "Finding
+/// files"), so the index resolves them statically by what reaches the file through include
+/// edges ([`inc_reach`]): global from a `.conf` or a global class, recipe from a recipe, a
+/// bbappend or a recipe class, both (as for a class in `classes/`, with `edges.context`) when
+/// both reach it or through a class in `classes/`; recipe when nothing reaches it.
+///
+/// A change to one file can change what reaches any `.inc`, so with `replace` (one file's
+/// edges were rebuilt) every `.inc` `inherit` edge is recomputed.
+fn insert_inc_inherit_edges(
+    tx: &Transaction<'_>,
+    ws: &Workspace,
+    ecx: &EdgeCtx,
+    replace: bool,
+) -> Result<()> {
+    if replace {
+        tx.execute(
+            "DELETE FROM edges WHERE kind = 'inherit' \
+             AND src_file IN (SELECT id FROM files WHERE kind = 'inc')",
+            [],
+        )?;
+    }
+    let refs: Vec<(i64, String, u32)> = {
+        let mut st = tx.prepare_cached(
+            "SELECT s.file_id, s.name, s.start_line FROM statements s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.kind = 'inherit' AND s.name IS NOT NULL AND f.kind = 'inc' \
+             ORDER BY s.file_id, s.ord",
+        )?;
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    if refs.is_empty() {
+        return Ok(());
+    }
+    let reach = inc_reach(tx, ws, ecx)?;
+    let mut ins = tx.prepare_cached(
+        "INSERT INTO edges(src_file, kind, target_text, target_file, line, context) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
+    for (file_id, text, line) in refs {
+        let Some(info) = ecx.files.get(&file_id) else {
+            continue;
+        };
+        let r = reach.get(&file_id).copied().unwrap_or_default();
+        let vars = |name: &str| static_var(name, info, ecx.corebase.as_deref());
+        if r.recipe && r.global {
+            for (target_text, target, context) in
+                neutral_inherit_edges(ws, &ecx.resolver, &ecx.by_path, &text, &info.abs, &vars)
+            {
+                ins.execute(params![
+                    file_id,
+                    "inherit",
+                    target_text,
+                    target,
+                    line,
+                    context
+                ])?;
+            }
+            continue;
+        }
+        let ref_kind = RefKind::Inherit {
+            global: r.global && !r.recipe,
+        };
+        match ecx
+            .resolver
+            .resolve_with(ws, ref_kind, &text, &info.abs, &vars)
+        {
+            Some(targets) if !targets.is_empty() => {
+                let single = targets.len() == 1;
+                for t in targets {
+                    let target_text = if single { text.clone() } else { t.text };
+                    let target = t.file.and_then(|p| ecx.by_path.get(&p).copied());
+                    ins.execute(params![
+                        file_id,
+                        "inherit",
+                        target_text,
+                        target,
+                        line,
+                        Option::<&str>::None
+                    ])?;
+                }
+            }
+            Some(_) => {}
+            None => {
+                ins.execute(params![
+                    file_id,
+                    "inherit",
+                    text,
+                    Option::<i64>::None,
+                    line,
+                    Option::<&str>::None
+                ])?;
             }
         }
     }
