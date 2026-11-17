@@ -3,7 +3,8 @@
 //! Four modes:
 //!
 //! - **init script**: every command is
-//!   `bash -c 'source "$1" "$2" >/dev/null && shift 2 && exec "$@"' -- <init> <build_dir> <program> <args...>`,
+//!   `bash -c '<save argv>; source "$1" "$2" >/dev/null && exec <saved argv from 3>' -- <init> <build_dir> <program> <args...>`
+//!   ([`WRAPPER`]),
 //!   so the script, the build directory, the program and every argument travel as argv and
 //!   are never interpolated into shell text;
 //! - **bitbake-setup**: the init script is a `bitbake-setup` `init-build-env` (it takes no
@@ -48,8 +49,13 @@ pub const ALLOWED_PROGRAMS: [&str; 5] = [
 /// The init script searched for next to the layers when `init_script` is not configured.
 pub const INIT_SCRIPT_NAME: &str = "oe-init-build-env";
 
-/// The wrapper run by `bash -c` in init-script mode. Positional parameters only.
-pub const WRAPPER: &str = r#"source "$1" "$2" >/dev/null && shift 2 && exec "$@""#;
+/// The wrapper run by `bash -c` in init-script mode. Positional parameters only. The argv is
+/// saved in an array before the script is sourced: bash keeps the positional parameters a
+/// sourced file changes (`set --` at the end of bitbake-setup's `init-build-env`, also when
+/// another script sources it), so `shift 2 && exec "$@"` would run nothing (live
+/// verification B7).
+pub const WRAPPER: &str =
+    r#"__sous_chef_argv=("$@"); source "$1" "$2" >/dev/null && exec "${__sous_chef_argv[@]:2}""#;
 
 /// The script `bitbake-setup` writes into the build directory of each setup.
 pub const SETUP_SCRIPT_NAME: &str = "init-build-env";

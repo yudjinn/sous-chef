@@ -1336,9 +1336,14 @@ set --
 build directory with `BUILDDIR`, `BBPATH`, `BB_ENV_PASSTHROUGH_ADDITIONS`, `OE_ADDED_PATHS`,
 `PYTHONPATH` set and `PATH` extended. Bash keeps positional parameters that a sourced file
 changes even when `source` was given arguments (checked with bash 5.3: after
-`source s.sh x` where `s.sh` runs `set --`, `$#` is 0), so the `init-script` wrapper
-(`source "$1" "$2" && shift 2 && exec "$@"`) loses the program with this script; the
-`bitbake-setup` mode saves the argv in an array before sourcing. The setup directory is
+`source s.sh x` where `s.sh` runs `set --`, `$#` is 0), so a wrapper of the form
+`source "$1" "$2" && shift 2 && exec "$@"` loses the program with this script (live
+verification B7). The `bitbake-setup` mode (a script named `init-build-env`, found in the
+build directory or configured as `init_script`) saves the argv in an array before
+sourcing, and since w5-fix-eval2 so does the `init-script` wrapper
+(`__sous_chef_argv=("$@"); source "$1" "$2" && exec "${__sous_chef_argv[@]:2}"`), so an
+`init_script` under another name that ends with, or sources a script ending with, `set --`
+works too (`tests/bitbake_env.rs`, `runs_through_a_script_that_ends_with_set_dashdash`). The setup directory is
 `bitbake-builds/<config>-<machine>` (T9.1); `conf/` holds `bblayers.conf` with absolute
 paths, a `local.conf` with only a comment, `site.conf` as a symlink, and fragments in
 `conf/toolcfg.conf` (T9.1).
