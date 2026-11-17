@@ -1,0 +1,33 @@
+---
+source: tests/audit.rs
+expression: "section(&md, \"## 1. Inventory\")"
+---
+## 1. Inventory
+
+4 layers enabled (2 own, 2 upstream), 0 present but not enabled; 4 repositories
+
+### Layers
+
+| # | layer | path | role | collection | priority | LAYERSERIES_COMPAT | LAYERDEPENDS | bb / bbappend / inc / bbclass / conf |
+|---|---|---|---|---|---|---|---|---|
+| 1 | meta-vendor | meta-vendor | upstream | vendor | 6 | wrynose | core | 0 / 0 / 0 / 0 / 1 |
+| 2 | meta | openembedded-core/meta | upstream | core | 5 | wrynose | - | 0 / 0 / 0 / 0 / 1 |
+| 3 | meta-proj | meta-proj | own | proj | 10 | wrynose | core | 1 / 0 / 0 / 0 / 2 |
+| 4 | meta-proj-bsp | meta-proj-bsp | own | proj-bsp | 10 | wrynose | core | 0 / 0 / 0 / 0 / 2 |
+
+### Repositories
+
+| repository | remote | revision | status | submodule | kas repo | kas pin | layers |
+|---|---|---|---|---|---|---|---|
+| . | - | unknown | unknown | - | proj, proj-bsp | own repository (kas does not check it out) | meta-proj meta-proj-bsp |
+| bitbake | https://git.openembedded.org/bitbake | not checked out | unknown | - | bitbake | not pinned | - |
+| meta-vendor | https://example.com/git/meta-vendor | unknown | unknown | - | meta-vendor | 0123456789ab (kas/base.yaml): unknown | meta-vendor |
+| openembedded-core | https://git.openembedded.org/openembedded-core | unknown | unknown | - | openembedded-core | 89e6c98d9288 (kas/base.lock.yaml): unknown | meta |
+
+### kas project
+
+- files: kas/base.yaml:kas/board.yaml (from kas in sous-chef.toml)
+- lock files: kas/base.lock.yaml
+- kas files without a lock file: kas/board.yaml
+
+- Note: git facts are unknown: no git repository was found inside the root (or git is not available); a repository enclosing the root is not reported

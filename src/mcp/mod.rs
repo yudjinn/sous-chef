@@ -279,7 +279,7 @@ pub static TOOLS: &[ToolEntry] = &[
     tool!(
         audit,
         Deferred,
-        "Whole-repository audit report (layers, releases, structure, lint, parse problems) stored under a handle; returns a digest."
+        "Findings report over every layer of the repository, stored under a handle; returns a digest."
     ),
 ];
 

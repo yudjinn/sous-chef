@@ -169,7 +169,7 @@ impl SeverityCounts {
         }
     }
 
-    fn total(&self) -> usize {
+    pub fn total(&self) -> usize {
         self.error + self.warning + self.info
     }
 
@@ -267,6 +267,8 @@ pub struct Repository {
     pub pin_from: Option<String>,
     /// The checkout is at the pin; `None` when there is no pin or the revision is unknown.
     pub at_pin: Option<bool>,
+    /// Every kas repo here is the project's own (no `url`: kas does no version control on it).
+    pub kas_own: bool,
     /// The repository is on disk (a kas repo may not be checked out yet).
     pub checked_out: bool,
     /// Names of the layers in it (enabled or not).
@@ -414,6 +416,10 @@ pub struct RuleFindings {
     /// The worst severity among its findings.
     pub severity: String,
     pub count: usize,
+    /// [`RuleFindings::count`] by severity (a rule's severity can depend on the case).
+    pub counts: SeverityCounts,
+    /// Every finding (own layers), or the first [`UPSTREAM_EXAMPLES`] with the worst
+    /// severity first (upstream layers).
     pub findings: Vec<FindingOut>,
     /// Findings not listed.
     pub more: usize,
@@ -663,14 +669,25 @@ pub struct FoundLayer {
     pub enabled: Option<String>,
 }
 
-/// Whether the walk skips a directory: hidden ones (`.git`), build output (`tmp*`,
-/// `sstate-cache`, `downloads`) and build directories (a `conf/bblayers.conf` or kas's
-/// `CACHEDIR.TAG`).
+/// Directories the walk never enters: build output, and code and test data that hold
+/// sample layers no build uses (BitBake's `lib/layerindexlib/tests/testdata/layer1`,
+/// `scripts/lib/...` templates).
+const SKIP_NAMES: &[&str] = &[
+    "sstate-cache",
+    "downloads",
+    "lib",
+    "scripts",
+    "test",
+    "tests",
+    "testdata",
+];
+
+/// Whether the walk skips a directory: hidden ones (`.git`), [`SKIP_NAMES`], build output
+/// (`tmp*`) and build directories (a `conf/bblayers.conf` or kas's `CACHEDIR.TAG`).
 fn skip_dir(name: &str, path: &Path) -> bool {
     name.starts_with('.')
         || name.starts_with("tmp")
-        || name == "sstate-cache"
-        || name == "downloads"
+        || SKIP_NAMES.contains(&name)
         || path.join("conf").join("bblayers.conf").is_file()
         || path.join("CACHEDIR.TAG").is_file()
 }
@@ -987,6 +1004,7 @@ fn inventory(
         .collect();
     let mut notes = Vec::new();
     let mut layers_out = Vec::new();
+    let mut layer_roots: Vec<PathBuf> = Vec::new();
     let mut repo_layers: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
     let mut not_enabled_names: BTreeSet<String> = BTreeSet::new();
     for (i, l) in ws.layers.iter().enumerate() {
@@ -1004,6 +1022,7 @@ fn inventory(
             bbclass: s.classes,
             conf: s.confs,
         });
+        layer_roots.push(l.root.clone());
         layers_out.push(LayerEntry {
             name: l.name.clone(),
             path: paths.show(&l.root),
@@ -1053,6 +1072,7 @@ fn inventory(
                     Some(format!("conf/layer.conf could not be read: {e}")),
                 ),
             };
+        layer_roots.push(f.root.clone());
         layers_out.push(LayerEntry {
             name,
             path,
@@ -1074,7 +1094,7 @@ fn inventory(
     if let Some(t) = git.toplevel(root, root) {
         tops.insert(t);
     }
-    let mut kas_by_path: BTreeMap<PathBuf, &kas::KasRepo> = BTreeMap::new();
+    let mut kas_by_path: BTreeMap<PathBuf, Vec<&kas::KasRepo>> = BTreeMap::new();
     if let Some(k) = &ws.kas {
         for r in &k.repos {
             let p = fs::canonicalize(&r.path).unwrap_or_else(|_| r.path.clone());
@@ -1085,9 +1105,26 @@ fn inventory(
             } else {
                 p
             };
-            kas_by_path.entry(key).or_insert(r);
+            kas_by_path.entry(key).or_default().push(r);
         }
         tops.extend(kas_by_path.keys().filter(|p| p.starts_with(root)).cloned());
+        // Without git, a layer belongs to the deepest kas repository holding it.
+        for (l, entry) in layer_roots.iter().zip(layers_out.iter_mut()) {
+            if entry.repository.is_some() {
+                continue;
+            }
+            let holder = kas_by_path
+                .keys()
+                .filter(|p| p.starts_with(root) && l.starts_with(p))
+                .max_by_key(|p| p.components().count());
+            if let Some(h) = holder {
+                entry.repository = Some(paths.show(h));
+                repo_layers
+                    .entry(h.clone())
+                    .or_default()
+                    .push(entry.name.clone());
+            }
+        }
     }
     let submodules = submodule_index(&tops, root);
     let mut repositories = Vec::new();
@@ -1098,12 +1135,10 @@ fn inventory(
         } else {
             GitFacts::default()
         };
-        let kas_repo = kas_by_path.get(top);
-        let (pin, pin_from) = match (kas_repo, &ws.kas) {
-            (Some(r), Some(k)) => match &r.commit {
-                Some(c) => (Some(c.clone()), Some(pin_source(k, r, paths))),
-                None => (None, None),
-            },
+        let kas_repos: &[&kas::KasRepo] = kas_by_path.get(top).map_or(&[], Vec::as_slice);
+        let pinned = kas_repos.iter().find(|r| r.commit.is_some());
+        let (pin, pin_from) = match (pinned, &ws.kas) {
+            (Some(r), Some(k)) => (r.commit.clone(), Some(pin_source(k, r, paths))),
             _ => (None, None),
         };
         let at = match (&pin, &facts.revision) {
@@ -1115,18 +1150,26 @@ fn inventory(
         repositories.push(Repository {
             path: paths.show(top),
             remote: facts.remote.or_else(|| {
-                kas_repo
-                    .and_then(|r| r.url.as_deref())
+                kas_repos
+                    .iter()
+                    .find_map(|r| r.url.as_deref())
                     .map(strip_credentials)
             }),
             revision: facts.revision,
             branch: facts.branch,
             dirty: facts.dirty,
             submodule: submodules.get(top).cloned(),
-            kas_repo: kas_repo.map(|r| r.id.clone()),
+            kas_repo: (!kas_repos.is_empty()).then(|| {
+                kas_repos
+                    .iter()
+                    .map(|r| r.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }),
             pin,
             pin_from,
             at_pin: at,
+            kas_own: !kas_repos.is_empty() && kas_repos.iter().all(|r| r.own),
             checked_out,
             layers: names,
         });
@@ -1154,22 +1197,45 @@ fn inventory(
             "git facts are unknown: no git repository was found inside the root (or git is not available); a repository enclosing the root is not reported".into(),
         );
     }
+    // A layer that is not enabled and depends on a collection no layer on disk adds cannot
+    // be enabled as it is (BitBake: "depends on layer ..., but this layer is not enabled").
+    let on_disk_collections: BTreeSet<&str> = layers_out
+        .iter()
+        .flat_map(|l| l.collections.iter().map(String::as_str))
+        .collect();
+    for l in layers_out.iter().filter(|l| !l.enabled) {
+        let missing: Vec<&str> = l
+            .depends
+            .iter()
+            .map(String::as_str)
+            .filter(|d| !on_disk_collections.contains(d))
+            .collect();
+        if !missing.is_empty() {
+            notes.push(format!(
+                "{} (not enabled) has LAYERDEPENDS on {}, which no layer under the root adds: it cannot be enabled until a layer providing {} is added",
+                l.name,
+                missing.join(", "),
+                if missing.len() == 1 { "it" } else { "them" }
+            ));
+        }
+    }
     let n_enabled = ws.layers.len();
     let n_not = layers_out.len() - n_enabled;
     if n_not > 0 {
         notes.push(format!(
-            "{n_not} layer(s) present but not enabled: not in the index, so their files are not counted, linted or resolved; collection, priority, compat and depends come from their conf/layer.conf alone"
+            "{} present but not enabled: not in the index, so their files are not counted, linted or resolved; collection, priority, compat and depends come from their conf/layer.conf alone",
+            count(n_not, "layer", "layers")
         ));
     }
 
     let kas = ws.kas.as_ref().map(|k| kas_info(k, paths));
     let summary = format!(
-        "{} layers enabled ({} own, {} upstream), {} present but not enabled; {} git repositories{}",
-        n_enabled,
+        "{} enabled ({} own, {} upstream), {} present but not enabled; {}{}",
+        count(n_enabled, "layer", "layers"),
         ws.layers.iter().filter(|l| l.writable).count(),
         ws.layers.iter().filter(|l| !l.writable).count(),
         n_not,
-        repositories.len(),
+        count(repositories.len(), "repository", "repositories"),
         dirty_summary(&repositories)
     );
     Ok(Inventory {
@@ -1307,16 +1373,21 @@ fn releases(ws: &Workspace, inv: &Inventory) -> Releases {
             "workspace release {wsr} ({}); every enabled layer claims it{}",
             ws.release.source.as_str(),
             if missing_off > 0 {
-                format!("; {missing_off} layer(s) present but not enabled do not")
+                format!(
+                    "; {} present but not enabled {} not",
+                    count(missing_off, "layer", "layers"),
+                    if missing_off == 1 { "does" } else { "do" }
+                )
             } else {
                 String::new()
             }
         )
     } else {
         format!(
-            "workspace release {wsr} ({}); {} enabled layer(s) do not claim it: {}",
+            "workspace release {wsr} ({}); {} {} not claim it: {}",
             ws.release.source.as_str(),
-            missing.len(),
+            count(missing.len(), "enabled layer", "enabled layers"),
+            if missing.len() == 1 { "does" } else { "do" },
             missing
                 .iter()
                 .map(|r| r.layer.as_str())
@@ -1443,7 +1514,7 @@ fn structure(
         .filter(|p| own.contains(p.split(':').next().unwrap_or_default()))
         .count();
     let summary = format!(
-        "{} layer.conf and order problems ({}); {} shadowed recipe or class names; {} bbappends match no recipe ({} in own layers); {} bbappends not collected; {} over-broad bbappend and duplicate version findings",
+        "layer.conf and BBLAYERS order: {} ({}); shadowed recipe or class names: {}; bbappends matching no recipe: {} ({} in own layers); bbappends not collected: {}; over-broad bbappends and duplicate versions: {}",
         problems.len() + order.len(),
         sev.describe(),
         shadowed.len(),
@@ -1519,18 +1590,26 @@ fn lint_section(ws: &Workspace, report: &lint::Report, own: &BTreeSet<String>) -
         }
         let mut rules: Vec<RuleFindings> = by_rule
             .into_iter()
-            .map(|(rule, fs)| {
+            .map(|(rule, mut fs)| {
                 let worst = fs
                     .iter()
                     .map(|f| f.severity)
                     .max()
                     .unwrap_or(Severity::Info);
+                let mut rule_counts = SeverityCounts::default();
+                fs.iter().for_each(|f| rule_counts.add(f.severity));
                 let shown = if is_own { fs.len() } else { UPSTREAM_EXAMPLES };
                 let more = fs.len().saturating_sub(shown);
+                // The examples of a cut list: the worst severity first, then file order
+                // (stable, so file order within a severity).
+                if more > 0 {
+                    fs.sort_by_key(|f| std::cmp::Reverse(f.severity));
+                }
                 RuleFindings {
                     rule: rule.into(),
                     severity: worst.as_str().into(),
                     count: fs.len(),
+                    counts: rule_counts,
                     findings: fs.iter().take(shown).map(|f| FindingOut::of(f)).collect(),
                     more,
                     command: (more > 0).then(|| rule_command(rule)),
@@ -1605,7 +1684,14 @@ fn listing(ws: &Workspace, own: &BTreeSet<String>, items: Vec<(String, Item)>) -
     let mut out = Listing::default();
     for l in order {
         let Some(mut v) = by.remove(&l) else { continue };
-        v.sort_by(|a, b| cmp_pointer(&a.pointer, &b.pointer).then(a.text.cmp(&b.text)));
+        // What BitBake stops on first, so a cut list keeps it.
+        let stops = |i: &Item| !i.text.contains(BITBAKE_STOPS);
+        v.sort_by(|a, b| {
+            stops(a)
+                .cmp(&stops(b))
+                .then(cmp_pointer(&a.pointer, &b.pointer))
+                .then(a.text.cmp(&b.text))
+        });
         out.total += v.len();
         out.by_layer.push(LayerCount {
             layer: l.clone(),
@@ -1621,6 +1707,10 @@ fn listing(ws: &Workspace, own: &BTreeSet<String>, items: Vec<(String, Item)>) -
     }
     out
 }
+
+/// Marks a problem BitBake stops on (listed first in a [`Listing`]).
+const BITBAKE_STOPS: &str = "BitBake stops";
+const BITBAKE_STOPS_NOT_FOUND: &str = "not found; BitBake stops on this";
 
 /// Pointers sorted by layer, path, then line numerically.
 fn cmp_pointer(a: &str, b: &str) -> std::cmp::Ordering {
@@ -1667,11 +1757,16 @@ fn parse_section(ws: &Workspace, index: &Index, own: &BTreeSet<String>) -> Resul
     );
     // Data files are not metadata: their edges are not BitBake's.
     let metadata: BTreeSet<i64> = query::all_files(index)?.iter().map(|f| f.id).collect();
+    // What BitBake does with each (bitbake-semantics.md, "Directives").
     let edge_item = |e: &query::EdgeRow| {
         let why = if e.target_text.contains("${") {
-            "needs evaluation"
+            "needs evaluation, not followed"
         } else {
-            "not found"
+            match e.kind.as_str() {
+                "include" => "not found; BitBake skips a missing include silently",
+                "include_all" => "found in no BBPATH entry; BitBake includes nothing",
+                _ => BITBAKE_STOPS_NOT_FOUND,
+            }
         };
         (
             e.src.layer.clone(),
@@ -1774,12 +1869,14 @@ fn not_checked(ws: &Workspace, index: &Index, cfg: &Config, inv: &Inventory) -> 
         .copied()
         .unwrap_or(0);
     let summary = format!(
-        "build environment {}; {recipes} recipes and {classes} classes have anonymous python, which is not run; {} layers present but not enabled were not analysed",
+        "build environment {}; anonymous python, which is not run, in {} and {}; layers present but not enabled, not analysed: {}",
         if state.env.is_some() {
             "found"
         } else {
             "not found"
         },
+        count(recipes, "recipe", "recipes"),
+        count(classes, "class", "classes"),
         layers_not_analysed.len()
     );
     Ok(NotChecked {
@@ -1794,7 +1891,7 @@ fn not_checked(ws: &Workspace, index: &Index, cfg: &Config, inv: &Inventory) -> 
 // ---- Summary
 
 /// The stated rule [`attention`] follows.
-pub const ATTENTION_RULE: &str = "errors in own layers (by rule, most findings first); then layer structure errors outside own layers (org/layer-conf errors, bbappends that match no recipe: BitBake stops on both); then warnings in own layers (by rule, most findings first); if that gives fewer than 3, errors in upstream layers by rule, then layer structure warnings; at most 10";
+pub const ATTENTION_RULE: &str = "errors in own layers, by rule, most findings first; then layer structure errors (org/layer-conf errors outside own layers, bbappends outside own layers that match no recipe: BitBake stops on these); then warnings in own layers, by rule; while that gives fewer than 3: errors in upstream layers by rule, then layer structure warnings, then infos in own layers by rule; at most 10";
 
 /// What [`summary`] reads from the other sections.
 struct SummaryInput<'a> {
@@ -1846,20 +1943,20 @@ fn summary(
         .map(|k| k.files.iter().map(|f| paths.show(f)).collect())
         .unwrap_or_default();
     let line = format!(
-        "{} release {}: {} layers enabled ({} own), {} present but not enabled; {} files; findings in own layers: {}; upstream: {}; {} items worth attention",
+        "{}, release {}: {} enabled ({} own), {} present but not enabled; {} indexed files; findings in own layers: {}; in upstream layers: {}; {} worth attention",
         if ws.kas.is_some() {
-            "kas project,"
+            "kas project"
         } else {
-            "workspace,"
+            "workspace"
         },
         ws.release.release,
-        counts.layers_enabled,
+        count(counts.layers_enabled, "layer", "layers"),
         counts.layers_own,
         counts.layers_not_enabled,
         counts.files_total,
         counts.findings_own.describe(),
         counts.findings_upstream.describe(),
-        attention.len()
+        count(attention.len(), "item", "items")
     );
     Ok(Summary {
         line,
@@ -1906,10 +2003,17 @@ fn rule_items(findings: &[Finding], sev: Severity, keep: impl Fn(&str) -> bool) 
 fn structure_items(st: &Structure, sev: &str, own_layers: &BTreeSet<String>) -> Vec<Attention> {
     let mut by: BTreeMap<String, Attention> = BTreeMap::new();
     for p in st.problems.iter().chain(&st.order) {
-        if p.severity != sev || own_layers.contains(&p.layer) {
+        // org/layer-conf problems of own layers are lint findings, counted there; the
+        // BBLAYERS order is no rule's.
+        let in_lint = p.check != "order" && own_layers.contains(&p.layer);
+        if p.severity != sev || in_lint {
             continue;
         }
-        let key = format!("layer.conf {}", p.check);
+        let key = if p.check == "order" {
+            "BBLAYERS order".to_string()
+        } else {
+            format!("layer.conf {}", p.check)
+        };
         let e = by.entry(key.clone()).or_insert_with(|| Attention {
             section: "structure".into(),
             severity: sev.into(),
@@ -1963,6 +2067,9 @@ fn attention(findings: &[Finding], own: &BTreeSet<String>, st: &Structure) -> Ve
     }
     if out.len() < 3 {
         out.extend(structure_items(st, "warning", own));
+    }
+    if out.len() < 3 {
+        out.extend(rule_items(findings, Severity::Info, is_own));
     }
     out.truncate(MAX_ATTENTION);
     out
@@ -2055,6 +2162,11 @@ fn cell(s: &str) -> String {
 /// Text for a Markdown list item or paragraph (line breaks removed).
 fn inline(s: &str) -> String {
     s.replace(['\n', '\r'], " ")
+}
+
+/// `1 layer`, `2 layers`.
+fn count(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 fn or_dash(v: &[String]) -> String {
@@ -2180,7 +2292,7 @@ fn render_summary(md: &mut Md, s: &Summary) {
         "findings, upstream layers".into(),
         c.findings_upstream.describe(),
     ]);
-    md.table(&["", ""], &rows);
+    md.table(&["", "value"], &rows);
     md.line("### Most worth attention");
     md.blank();
     md.line(&format!("Chosen by rule: {}.", s.attention_rule));
@@ -2234,11 +2346,11 @@ fn render_inventory(md: &mut Md, inv: &Inventory) {
                 l.priority.map_or("-".into(), |p| p.to_string()),
                 or_dash(&l.compat),
                 or_dash(&l.depends),
-                l.repository.clone().unwrap_or_else(|| "-".into()),
                 files,
             ]
         })
         .collect();
+    // The repository of each layer is in the next table.
     md.table(
         &[
             "#",
@@ -2249,7 +2361,6 @@ fn render_inventory(md: &mut Md, inv: &Inventory) {
             "priority",
             "LAYERSERIES_COMPAT",
             "LAYERDEPENDS",
-            "repository",
             "bb / bbappend / inc / bbclass / conf",
         ],
         &rows,
@@ -2294,6 +2405,7 @@ fn render_inventory(md: &mut Md, inv: &Inventory) {
                             };
                             format!("{} ({f}): {at}", short_rev(p))
                         }
+                        _ if r.kas_own => "own repository (kas does not check it out)".into(),
                         _ if r.kas_repo.is_some() => "not pinned".into(),
                         _ => "-".into(),
                     };
@@ -2314,23 +2426,27 @@ fn render_inventory(md: &mut Md, inv: &Inventory) {
     if let Some(k) = &inv.kas {
         md.line("### kas project");
         md.blank();
-        md.line(&format!(
-            "- files: {} ({})",
-            if k.files.is_empty() {
-                "none".into()
-            } else {
-                k.files.join(":")
-            },
-            inline(&k.source)
-        ));
-        md.line(&format!(
-            "- lock files: {}",
-            if k.lock_files.is_empty() {
-                "none (the layers are pinned only where the kas files give a commit)".into()
-            } else {
-                k.lock_files.join(", ")
-            }
-        ));
+        if k.files.is_empty() {
+            // Not known: no repos, pins or lock files can be read.
+            md.line(&format!(
+                "- kas files not known: {}. The kas repositories, their pins and lock files are not shown; pass the kas files to see them.",
+                inline(&k.source)
+            ));
+        } else {
+            md.line(&format!(
+                "- files: {} ({})",
+                k.files.join(":"),
+                inline(&k.source)
+            ));
+            md.line(&format!(
+                "- lock files: {}",
+                if k.lock_files.is_empty() {
+                    "none (repositories are pinned only where the kas files give a commit)".into()
+                } else {
+                    k.lock_files.join(", ")
+                }
+            ));
+        }
         if !k.without_lock.is_empty() && !k.lock_files.is_empty() {
             md.line(&format!(
                 "- kas files without a lock file: {}",
@@ -2500,22 +2616,35 @@ fn render_structure(md: &mut Md, s: &Structure) {
 fn render_layer_findings(md: &mut Md, l: &LayerFindings) {
     md.blank();
     md.line(&format!(
-        "#### {} ({} findings: {})",
+        "#### {} ({}: {})",
         l.layer,
-        l.counts.total(),
+        count(l.counts.total(), "finding", "findings"),
         l.counts.describe()
     ));
     for r in &l.rules {
         md.blank();
         let shown = if r.more > 0 {
-            format!(", first {}", r.findings.len())
+            format!("; first {}", r.findings.len())
         } else {
             String::new()
         };
-        md.line(&format!(
-            "- `{}` ({}, {}{shown})",
-            r.rule, r.severity, r.count
-        ));
+        // One severity: `(warning, 3)`; several: `(86: 10 warning, 76 info)`.
+        let c = &r.counts;
+        let parts: Vec<String> = [(c.error, "error"), (c.warning, "warning"), (c.info, "info")]
+            .iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, s)| format!("{n} {s}"))
+            .collect();
+        let counts = if parts.len() == 1 {
+            format!("{}, {}", r.severity, r.count)
+        } else {
+            format!("{}: {}", r.count, parts.join(", "))
+        };
+        if STRUCTURE_RULES.contains(&r.rule.as_str()) {
+            md.line(&format!("- `{}` ({counts}): listed in section 3", r.rule));
+            continue;
+        }
+        md.line(&format!("- `{}` ({counts}{shown})", r.rule));
         for f in &r.findings {
             let sev = if f.severity != r.severity {
                 format!("**{}** ", f.severity)
@@ -2564,12 +2693,14 @@ fn render_lint(md: &mut Md, l: &LintSection) {
             .upstream
             .iter()
             .map(|x| {
+                let mut by_count: Vec<&RuleFindings> = x.rules.iter().collect();
+                by_count.sort_by(|a, b| b.count.cmp(&a.count).then(a.rule.cmp(&b.rule)));
                 vec![
                     x.layer.clone(),
                     x.counts.error.to_string(),
                     x.counts.warning.to_string(),
                     x.counts.info.to_string(),
-                    x.rules
+                    by_count
                         .iter()
                         .take(5)
                         .map(|r| format!("{} {}", r.rule, r.count))
@@ -2590,9 +2721,9 @@ fn render_lint(md: &mut Md, l: &LintSection) {
     notes(md, &l.notes);
 }
 
-fn render_listing(md: &mut Md, title: &str, l: &Listing) {
+fn render_listing(md: &mut Md, heading: &str, title: &str, l: &Listing) {
     md.blank();
-    md.line(&format!("### {title} ({})", l.total));
+    md.line(&format!("{heading} {title} ({})", l.total));
     md.blank();
     if l.total == 0 {
         md.line("None.");
@@ -2623,9 +2754,14 @@ fn render_parse(md: &mut Md, p: &ParseSection) {
     md.line("## 5. Parse and resolution problems");
     md.blank();
     md.line(&inline(&p.summary));
-    render_listing(md, "Unparsed statements", &p.unparsed);
-    render_listing(md, "Unresolved include and require", &p.unresolved_includes);
-    render_listing(md, "Unresolved inherit", &p.unresolved_inherits);
+    render_listing(md, "###", "Unparsed statements", &p.unparsed);
+    render_listing(
+        md,
+        "###",
+        "Unresolved include and require",
+        &p.unresolved_includes,
+    );
+    render_listing(md, "###", "Unresolved inherit", &p.unresolved_inherits);
     md.blank();
     md.line("### Files BitBake does not collect");
     if p.not_collected.is_empty() {
@@ -2633,7 +2769,15 @@ fn render_parse(md: &mut Md, p: &ParseSection) {
         md.line("None.");
     }
     for n in &p.not_collected {
-        render_listing(md, &n.reason, &n.files);
+        let title = if n.reason.starts_with("not BitBake metadata") {
+            "Data files"
+        } else if n.reason.contains("BBFILES") {
+            "Recipe files no BBFILES glob matches"
+        } else {
+            "Not collected"
+        };
+        render_listing(md, "####", title, &n.files);
+        md.line(&format!("- Why: {}.", inline(&n.reason)));
     }
 }
 
@@ -2705,7 +2849,7 @@ fn progress_to_stderr(msg: &str) {
 /// be produced (`main.rs` exits 2).
 pub fn cli(cfg: &Config, args: &AuditCliArgs) -> Result<i32> {
     let started = Instant::now();
-    let root = cfg.work_dir.clone();
+    let root = canonical_dir(&cfg.work_dir)?;
     progress_to_stderr(&format!(
         "discovering the workspace from {}",
         root.display()

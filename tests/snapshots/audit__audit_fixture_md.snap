@@ -1,0 +1,172 @@
+---
+source: tests/audit.rs
+expression: md
+---
+Generated: [masked]
+
+# Workspace audit
+
+Paths are relative to the audited root; pointers are `layer:path:line`, the path relative to the layer. Each section starts with a one-line summary.
+
+## Summary
+
+workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled; 21 indexed files; findings in own layers: 0 error, 3 warning, 1 info; in upstream layers: 0 error, 1 warning, 2 info; 3 items worth attention
+
+|  | value |
+|---|---|
+| root | . |
+| build directory | build |
+| release | wrynose (from LAYERSERIES_CORENAMES) |
+| layers | 3 enabled (1 own, 2 upstream), 1 present but not enabled |
+| files | 21 (5 bb, 3 bbappend, 3 bbclass, 9 conf, 1 inc) |
+| findings, own layers | 0 error, 3 warning, 1 info |
+| findings, upstream layers | 0 error, 1 warning, 2 info |
+
+### Most worth attention
+
+Chosen by rule: errors in own layers, by rule, most findings first; then layer structure errors (org/layer-conf errors outside own layers, bbappends outside own layers that match no recipe: BitBake stops on these); then warnings in own layers, by rule; while that gives fewer than 3: errors in upstream layers by rule, then layer structure warnings, then infos in own layers by rule; at most 10.
+
+1. **warning** `hygiene/release-syntax` (1 finding, in meta-mine): `meta-mine:recipes-app/app/app_0.1.bb:22` `${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
+2. **warning** `org/append-no-match` (1 finding, in meta-mine): `meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1` orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer
+3. **warning** `override/plus-equals-on-default` (1 finding, in build): `build:conf/local.conf:13` `DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = " wayland"`
+
+## 1. Inventory
+
+3 layers enabled (1 own, 2 upstream), 1 present but not enabled; 0 repositories
+
+### Layers
+
+| # | layer | path | role | collection | priority | LAYERSERIES_COMPAT | LAYERDEPENDS | bb / bbappend / inc / bbclass / conf |
+|---|---|---|---|---|---|---|---|---|
+| 1 | meta-core | meta-core | upstream | core | 5 | wrynose | - | 3 / 0 / 1 / 3 / 5 |
+| 2 | meta-vendor | meta-vendor | upstream | vendor | 6 | scarthgap wrynose | core | 1 / 1 / 0 / 0 / 1 |
+| 3 | meta-mine | meta-mine | own | mine | 10 | kirkstone scarthgap wrynose | core | 1 / 2 / 0 / 0 / 1 |
+| - | meta-legacy | meta-legacy | not enabled | legacy | 7 | dunfell | core | not indexed |
+
+### Repositories
+
+None found (git facts unknown).
+
+- Note: git facts are unknown: no git repository was found inside the root (or git is not available); a repository enclosing the root is not reported
+- Note: 1 layer present but not enabled: not in the index, so their files are not counted, linted or resolved; collection, priority, compat and depends come from their conf/layer.conf alone
+
+## 2. Releases
+
+workspace release wrynose (LAYERSERIES_CORENAMES); every enabled layer claims it; 1 layer present but not enabled does not
+
+Workspace release: **wrynose** (from LAYERSERIES_CORENAMES).
+Supported: kirkstone 4.0 LTS, langdale 4.1, mickledore 4.2, nanbield 4.3, scarthgap 5.0 LTS, styhead 5.1, walnascar 5.2, whinlatter 5.3, wrynose 6.0 LTS; kirkstone is the floor, and names older than it are not checked.
+
+| layer | enabled | kirkstone | scarthgap | wrynose (workspace) | older than the floor / unknown |
+|---|---|---|---|---|---|
+| meta-core | yes |  |  | x | - |
+| meta-vendor | yes |  | x | x | - |
+| meta-mine | yes | x | x | x | - |
+| meta-legacy | no |  |  | **missing** | dunfell |
+
+## 3. Layer structure
+
+layer.conf and BBLAYERS order: 0 (0 error, 0 warning, 0 info); shadowed recipe or class names: 0; bbappends matching no recipe: 1 (1 in own layers); bbappends not collected: 0; over-broad bbappends and duplicate versions: 1
+
+### layer.conf checks (org/layer-conf) and BBLAYERS order
+
+None.
+
+### Shadowed recipes and classes
+
+None: no recipe or class file name is provided by more than one layer.
+
+### bbappends
+
+- Match no recipe (BitBake stops on these): `meta-mine:recipes-app/orphan/orphan_9.%.bbappend`
+- Every bbappend is collected by a BBFILES glob.
+
+### Over-broad bbappends and duplicate versions (from the lint run)
+
+- **info** org/append-wildcard-broad `meta-vendor:recipes-core/hello/hello_%.bbappend:4`: hello_%.bbappend applies to hello 1.0 and 1.1 but pins a patch, which usually fits one version; name the append after that version (hello_1.1.bbappend), or check that it fits every version
+
+## 4. Lint findings
+
+7 findings in 21 files: own layers and build directory 4 (0 error, 3 warning, 1 info); upstream layers 3 (0 error, 1 warning, 2 info)
+
+Every enabled rule over every layer, as `sous-chef lint --all`: upstream layers are checked against the workspace release alone, own layers against every release they claim. Commands below assume the global flags this audit was run with (`--config`, `--build-dir`), run from the root.
+
+### Own layers and the build directory
+
+#### build (2 findings: 0 error, 1 warning, 1 info)
+
+- `override/plus-equals-on-default` (warning, 1)
+  - `build:conf/local.conf:13`: `DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = " wayland"`
+
+- `org/recipe-change-in-local-conf` (info, 1)
+  - `build:conf/local.conf:9`: `EXTRA_OECONF:append:pn-hello` in local.conf changes only recipe hello, and only in this build directory; move it to a hello_%.bbappend in your layer as `EXTRA_OECONF:append`, or to your distro conf if it is policy
+
+#### meta-mine (2 findings: 0 error, 2 warning, 0 info)
+
+- `hygiene/release-syntax` (warning, 1)
+  - `meta-mine:recipes-app/app/app_0.1.bb:22`: `${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
+
+- `org/append-no-match` (warning, 1)
+  - `meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1`: orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer
+
+### Upstream layers
+
+Per rule: the count and the first 3 findings; the command after them lists every finding of that rule. Naming a layer (`sous-chef lint <layer>`) checks it against every release it claims and may report more.
+
+| layer | error | warning | info | most frequent rules |
+|---|---|---|---|---|
+| meta-core | 0 | 0 | 1 | org/class-location 1 |
+| meta-vendor | 0 | 1 | 1 | org/append-wildcard-broad 1, override/dead 1 |
+
+#### meta-core (1 finding: 0 error, 0 warning, 1 info)
+
+- `org/class-location` (info, 1)
+  - `meta-core:classes/base.bbclass:1`: class base is in classes/, but every release this layer is checked against (wrynose) searches classes-recipe/ and classes-global/ first; move it to classes-global/ (it is used through INHERIT) and keep the name
+
+#### meta-vendor (2 findings: 0 error, 1 warning, 1 info)
+
+- `override/dead` (warning, 1)
+  - `meta-vendor:recipes-core/hello/hello_%.bbappend:9`: override `boradx` in `EXTRA_OECONF:append:boradx` is no machine, distro, class, package or OVERRIDES entry in the workspace, so this never applies; fix the name (`boardx`?) or remove the line
+
+- `org/append-wildcard-broad` (info, 1): listed in section 3
+
+## 5. Parse and resolution problems
+
+0 unparsed statements, 4 unresolved include/require, 0 unresolved inherits, 0 indexed files BitBake does not collect
+
+### Unparsed statements (0)
+
+None.
+
+### Unresolved include and require (4)
+
+Per layer: meta-core 4.
+
+- `meta-core:conf/bitbake.conf:48`: include conf/site.conf: not found; BitBake skips a missing include silently
+- `meta-core:conf/bitbake.conf:49`: include conf/auto.conf: not found; BitBake skips a missing include silently
+- `meta-core:conf/bitbake.conf:51`: include conf/machine/${MACHINE}.conf: needs evaluation, not followed
+- `meta-core:conf/bitbake.conf:52`: include conf/distro/${DISTRO}.conf: needs evaluation, not followed
+
+### Unresolved inherit (0)
+
+None.
+
+### Files BitBake does not collect
+
+None.
+
+## 6. What was not checked
+
+build environment not found; anonymous python, which is not run, in 1 recipe and 0 classes; layers present but not enabled, not analysed: 1
+
+- Build environment: not found: disabled in sous-chef.toml ([bitbake] enabled = false).
+- Files with anonymous python: 1 bb.
+- Not analysed (present, not enabled): meta-legacy.
+- Python is never run: `${@...}` expansions, anonymous python (`python () { ... }`) and `d.setVar` / `d.appendVar` in classes are not evaluated; values that depend on them are marked `depends on python, not evaluated` by `var`, `recipe` and the other evaluated tools, and `var authoritative=true` asks BitBake (needs a build environment).
+- How many values depend on python is not counted here: that needs evaluating every recipe (`var` and `recipe` mark them per recipe).
+- Recipe-scope lint rules evaluate each recipe for the default MACHINE and DISTRO only; other machines and distros are not checked.
+- OVERRIDES entries that come from python are not known, so overrides on them may be reported as dead (`override/dead`).
+- Tasks added or deleted by anonymous python, `do_x[deps]` set directly and dependencies on other recipes' tasks are not modelled (`recipe show=tasks`).
+- bbappends collected only through BBFILES_DYNAMIC are matched by file name but not applied by the evaluation.
+- Nothing was fetched, built or parsed by BitBake: SRC_URI reachability, checksums, licenses and QA checks are BitBake's.
+- Layers present but not enabled are not indexed: only their conf/layer.conf was read.
