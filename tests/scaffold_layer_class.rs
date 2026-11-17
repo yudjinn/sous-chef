@@ -153,6 +153,88 @@ fn a_written_layer_is_discovered() {
     );
 }
 
+/// Writes a layer, lists it in `bblayers.conf` (the plan does) and discovers the workspace
+/// again, without making it writable: its files are then in the workspace and linted.
+fn written_layer(env: &mut Env, name: &str, opts: serde_json::Value) {
+    env.write_clean(&request(Kind::Layer, name, None, opts));
+    env.rediscover();
+    assert!(env.ws.layer(name).is_some(), "{name} discovered");
+}
+
+#[test]
+fn a_generated_layer_conf_passes_the_real_rules() {
+    let mut env = Env::new();
+    written_layer(&mut env, "meta-new", json!({}));
+    let conf = "meta-new/conf/layer.conf";
+    let text = fs::read_to_string(env.path(conf)).unwrap();
+    // A collection name with a dash, as a `_<collection>` suffix.
+    for line in [
+        "BBFILE_PATTERN_meta-new = \"^${LAYERDIR}/\"",
+        "BBFILE_PRIORITY_meta-new = \"6\"",
+        "LAYERSERIES_COMPAT_meta-new = \"wrynose\"",
+    ] {
+        assert!(text.contains(line), "{text}");
+    }
+    let legacy = env.lint_rule("override/legacy-syntax", &[conf]);
+    assert!(legacy.is_empty(), "{legacy:?}");
+    let layer_conf = env.lint_rule("org/layer-conf", &[conf]);
+    assert!(layer_conf.is_empty(), "{layer_conf:?}");
+    // Every default rule on the whole layer, not writable (named as the target).
+    let bad = env.lint_default(&sous_chef::lint::Target::Layer("meta-new".into()));
+    assert!(bad.is_empty(), "{bad:#?}");
+
+    // Controls: the same rules do report a broken layer.conf of the same layer.
+    fs::write(
+        env.path(conf),
+        text.replace("LAYERSERIES_COMPAT_meta-new = \"wrynose\"\n", "")
+            .replace(
+                "BBFILE_PRIORITY_meta-new",
+                "BBFILE_PRIORITY_meta-new_append",
+            ),
+    )
+    .unwrap();
+    env.rediscover();
+    let legacy = env.lint_rule("override/legacy-syntax", &[conf]);
+    assert_eq!(legacy.len(), 1, "{legacy:?}");
+    let layer_conf = env.lint_rule("org/layer-conf", &[conf]);
+    assert!(
+        layer_conf
+            .iter()
+            .any(|f| f.message.contains("LAYERSERIES_COMPAT")),
+        "{layer_conf:?}"
+    );
+}
+
+#[test]
+fn a_generated_layer_with_every_option_passes_the_real_rules() {
+    let mut env = Env::new();
+    written_layer(
+        &mut env,
+        "meta-board",
+        json!({
+            "priority": 12,
+            "depends": "core vendor",
+            "compat": ["scarthgap", "wrynose"],
+            "copying": true,
+            "example": true,
+        }),
+    );
+    // Named as the target: checked against scarthgap and wrynose.
+    assert_eq!(
+        sous_chef::lint::releases_for(&env.ws, "meta-board"),
+        [
+            sous_chef::release::Release::Scarthgap,
+            sous_chef::release::Release::Wrynose
+        ]
+    );
+    let conf = "meta-board/conf/layer.conf";
+    assert!(env.lint_rule("override/legacy-syntax", &[conf]).is_empty());
+    let layer_conf = env.lint_rule("org/layer-conf", &[conf]);
+    assert!(layer_conf.is_empty(), "{layer_conf:?}");
+    let bad = env.lint_default(&sous_chef::lint::Target::Layer("meta-board".into()));
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
 #[test]
 fn layer_refusals() {
     let mut env = Env::new();
@@ -330,6 +412,69 @@ fn class_in_a_kirkstone_workspace_is_found() {
         sous_chef::index::query::class_files(&env.index, &env.ws, "widget_docs", false).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].rank, Some(0));
+}
+
+/// The generated class passes `org/class-export-functions` and `org/class-location`, and
+/// both rules report a broken copy of it in the same layer (so they really ran).
+fn class_rules_accept(env: &mut Env, rel: &str) {
+    let ef = env.lint_rule("org/class-export-functions", &[rel]);
+    assert!(ef.is_empty(), "{ef:?}");
+    let cl = env.lint_rule("org/class-location", &[rel]);
+    assert!(cl.is_empty(), "{cl:?}");
+
+    // Control: without its EXPORT_FUNCTIONS line, in another class.
+    let text = fs::read_to_string(env.path(rel)).unwrap();
+    assert!(text.contains("EXPORT_FUNCTIONS "), "{text}");
+    let stripped: String = text
+        .replace("widget_docs", "other_docs")
+        .lines()
+        .filter(|l| !l.starts_with("EXPORT_FUNCTIONS "))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let dir = Path::new(rel).parent().unwrap();
+    let other = dir.join("other_docs.bbclass");
+    let other = other.to_str().unwrap();
+    fs::write(env.path(other), stripped).unwrap();
+    let ef = env.lint_rule("org/class-export-functions", &[other]);
+    assert!(!ef.is_empty(), "control: no finding for {other}");
+}
+
+#[test]
+fn generated_classes_pass_the_class_rules_with_and_without_kirkstone() {
+    // meta-mine claims kirkstone: classes/.
+    let mut env = Env::new();
+    env.write_clean(&class_req("widget_docs", full_class_opts()));
+    class_rules_accept(&mut env, "meta-mine/classes/widget_docs.bbclass");
+
+    // meta-mine claims scarthgap wrynose: classes-recipe/. The same class in classes/ is
+    // reported there by org/class-location.
+    let mut env = Env::edited(|root| set_compat(root, "scarthgap wrynose"));
+    env.write_clean(&class_req("widget_docs", full_class_opts()));
+    let rel = "meta-mine/classes-recipe/widget_docs.bbclass";
+    class_rules_accept(&mut env, rel);
+    let moved = "meta-mine/classes/moved_docs.bbclass";
+    fs::create_dir_all(env.path("meta-mine/classes")).unwrap();
+    fs::write(
+        env.path(moved),
+        fs::read_to_string(env.path(rel))
+            .unwrap()
+            .replace("widget_docs", "moved_docs"),
+    )
+    .unwrap();
+    let cl = env.lint_rule("org/class-location", &[moved]);
+    assert_eq!(cl.len(), 1, "control: {cl:?}");
+
+    // A global class there: classes-global/.
+    env.write_clean(&class_req(
+        "site_policy",
+        json!({"scope": "global", "variables": ["SITE_POLICY_LEVEL=strict"]}),
+    ));
+    let rel = "meta-mine/classes-global/site_policy.bbclass";
+    assert!(env.lint_rule("org/class-location", &[rel]).is_empty());
+    assert!(
+        env.lint_rule("org/class-export-functions", &[rel])
+            .is_empty()
+    );
 }
 
 #[test]
