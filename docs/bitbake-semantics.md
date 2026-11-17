@@ -428,9 +428,9 @@ fragment"; `cfddce7ab` error for a built-in fragment next to an assignment; `5ed
     Not found: `bb.fatal("Could not find fragment ...")` on 2.16 and later, `bb.error` (and
     go on) on 2.12.
 - **sous-chef** (`src/eval/replay.rs` `add_fragments`, `Release::has(Feature::AddFragments)`
-  / `Feature::BuiltinFragments`): the parser keeps the line as an unknown statement with a
-  diagnostic starting `` `addfragments` `` (a `StatementKind` variant of its own needs an
-  arm in `src/scaffold/inc_split.rs`, which this change could not edit) and
+  / `Feature::BuiltinFragments`): the parser makes a line with at least three arguments a
+  `StatementKind::AddFragments { rest }` (since w5-fix-eval2; no diagnostic; fewer
+  arguments stay an unknown statement with "unparsed line"), and
   `Statement::add_fragments` / `AddFragments::groups` reproduce the regex; the index stores
   it as kind `addfragments` with an `addfragments` edge whose target is always unresolved
   (the files follow from the evaluated fragments variable, never from the file alone). The

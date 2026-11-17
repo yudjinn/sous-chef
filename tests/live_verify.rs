@@ -289,7 +289,8 @@ fn live_parser_has_no_diagnostics_on_real_metadata() {
         }
     }
     assert!(files > 1600, "{files}");
-    // Real BitBake directives the replay does not model: noted, not errors.
+    // Real BitBake directives the replay does not model: noted, not errors. (`addfragments`
+    // is a statement kind of its own since w5-fix-eval2 and has no diagnostic.)
     let not_modelled: Vec<&String> = diags
         .iter()
         .filter(|d| d.contains("is not modelled by sous-chef"))
@@ -298,7 +299,6 @@ fn live_parser_has_no_diagnostics_on_real_metadata() {
         not_modelled,
         [
             "meta-arm:conf/layer.conf:21 `addpylib` is not modelled by sous-chef",
-            "meta:conf/bitbake.conf:822 `addfragments` is not modelled by sous-chef",
             "meta:conf/layer.conf:147 `addpylib` is not modelled by sous-chef",
         ]
     );
@@ -307,7 +307,7 @@ fn live_parser_has_no_diagnostics_on_real_metadata() {
         .filter(|d| !d.contains("whitespace after") && !d.contains("is not modelled"))
         .collect();
     assert!(odd.is_empty(), "{odd:#?}");
-    assert_eq!(diags.len(), 6 + 3, "{diags:#?}");
+    assert_eq!(diags.len(), 6 + 2, "{diags:#?}");
 }
 
 /// The scanner indexes `.conf` / `.inc` files that are not BitBake metadata (a recipe's

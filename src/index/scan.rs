@@ -844,14 +844,15 @@ fn file_rows(text: &str, kind: FileKind, file_name: &str) -> FileRows {
                 row.kind = "export_functions";
                 row.name = Some(names.join(" "));
             }
+            StatementKind::AddFragments { rest } => {
+                // `value` keeps the whole line, as for an unknown statement: the replay
+                // reads it back with `ast::add_fragments_line` (no schema change).
+                row.kind = "addfragments";
+                row.name = Some(rest.trim_start_matches(lexer::py_space).to_string());
+                row.value = Some(format!("addfragments{rest}"));
+            }
             StatementKind::Unknown { text } => {
-                match st.add_fragments() {
-                    Some(af) => {
-                        row.kind = "addfragments";
-                        row.name = Some(af.rest.trim_start_matches(lexer::py_space).to_string());
-                    }
-                    None => row.kind = "unknown",
-                }
+                row.kind = "unknown";
                 row.value = Some(text.clone());
             }
         }

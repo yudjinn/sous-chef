@@ -83,6 +83,14 @@ pub enum StatementKind {
     ExportFunctions {
         names: Vec<String>,
     },
+    /// `addfragments <args>` (OE configuration fragments; BitBake 2.12 and later), with at
+    /// least three arguments. `rest` is everything after the keyword, the separating
+    /// whitespace included, unexpanded; [`AddFragments::groups`] splits it the way the
+    /// release's regular expression does (three groups in 2.12, four from 2.16). A line with
+    /// fewer arguments matches no release and is [`StatementKind::Unknown`].
+    AddFragments {
+        rest: String,
+    },
     /// Anything the parser did not recognise.
     Unknown {
         text: String,
@@ -92,11 +100,10 @@ pub enum StatementKind {
 /// The `addfragments` directive (OE configuration fragments; BitBake 2.12 and later). See
 /// docs/bitbake-semantics.md, "Configuration fragments".
 ///
-/// The parser keeps the line as [`StatementKind::Unknown`] with a diagnostic starting with
-/// `` `addfragments` `` (a variant of its own needs an arm in every exhaustive match on
-/// [`StatementKind`]); [`Statement::add_fragments`] reads it back. How the argument splits
-/// depends on the release (three capture groups in BitBake 2.12, four from 2.16), so the
-/// text is kept whole and [`AddFragments::groups`] applies either regular expression.
+/// The parser makes the line a [`StatementKind::AddFragments`] (no diagnostic);
+/// [`Statement::add_fragments`] reads it as this type. How the argument splits depends on
+/// the release (three capture groups in BitBake 2.12, four from 2.16), so the text is kept
+/// whole and [`AddFragments::groups`] applies either regular expression.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AddFragments {
     /// Everything after the keyword, the separating whitespace included.
@@ -149,15 +156,14 @@ fn match_groups(s: &[char], pos: usize, n: usize) -> Option<Vec<(usize, usize)>>
 }
 
 impl Statement {
-    /// The `addfragments` directive this statement is, if it is one: an
-    /// [`StatementKind::Unknown`] line that starts with `addfragments` and whitespace
-    /// (`re.match(r"addfragments\s+...")`). Whether its arguments match the release's
-    /// regular expression is [`AddFragments::groups`]'s answer.
+    /// The `addfragments` directive this statement is, if it is one
+    /// ([`StatementKind::AddFragments`]). Whether its arguments match the release's regular
+    /// expression is [`AddFragments::groups`]'s answer.
     pub fn add_fragments(&self) -> Option<AddFragments> {
-        let StatementKind::Unknown { text } = &self.kind else {
+        let StatementKind::AddFragments { rest } = &self.kind else {
             return None;
         };
-        add_fragments_line(text)
+        Some(AddFragments { rest: rest.clone() })
     }
 }
 
