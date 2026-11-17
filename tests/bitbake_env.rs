@@ -522,6 +522,8 @@ async fn timeout_kills_the_process_group() {
         .await
         .unwrap();
     assert_eq!(finish, Finish::TimedOut);
+    // When wait returns, the group is empty: no polling needed (GROUP_EXIT_WAIT).
+    assert!(!proc.group().exists(), "the group outlived the wait");
     assert!(
         started.elapsed() < Duration::from_secs(10),
         "{:?}",
@@ -547,6 +549,7 @@ async fn timeout_kills_a_group_that_ignores_sigterm() {
         .await
         .unwrap();
     assert_eq!(finish, Finish::TimedOut);
+    assert!(!proc.group().exists(), "the group outlived the wait");
     let (fake, sleeper) = read_pids(&pidfile);
     assert!(dead(fake), "fake bitbake {fake} survived");
     assert!(dead(sleeper), "its child {sleeper} survived");
@@ -575,6 +578,7 @@ async fn cancellation_kills_the_process_group() {
         .await
         .unwrap();
     assert_eq!(finish, Finish::Cancelled);
+    assert!(!proc.group().exists(), "the group outlived the wait");
     let (fake, sleeper) = read_pids(&pidfile);
     assert!(dead(fake));
     assert!(dead(sleeper));

@@ -20,8 +20,10 @@
 //!   literally ([`kas_command_string`]).
 //!
 //! Only allowlisted programs run, and every argument is validated. Each command runs in its
-//! own process group, so a timeout or cancellation ([`Supervised`]) kills the whole tree
-//! (bash, bitbake and whatever they started), not just the direct child.
+//! own process group, so a timeout or cancellation ([`Supervised`]) signals the whole tree
+//! (bash, bitbake and whatever they started), not just the direct child, and waits (up to
+//! [`GROUP_EXIT_WAIT`]) until no process is left in the group. A process that left the
+//! group (`setsid`, a daemon) is not reached.
 
 use std::ffi::OsString;
 use std::future::Future;
@@ -85,6 +87,11 @@ pub struct KasRun {
 
 /// How long a terminated process group gets between SIGTERM and SIGKILL.
 pub const KILL_GRACE: Duration = Duration::from_secs(2);
+
+/// How long [`Supervised::terminate`] waits, after SIGKILL, for the group to be empty. A
+/// killed process is gone once the kernel has scheduled its exit, and a member whose parent
+/// was the leader is reaped by init; on a loaded machine that took over 20 ms in tests.
+pub const GROUP_EXIT_WAIT: Duration = Duration::from_secs(5);
 
 /// A usable BitBake environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -567,11 +574,41 @@ impl ProcessGroup {
             sys::signal_group(p, sys::SIGKILL);
         }
     }
+
+    /// Whether any process (a zombie included) is still in the group: `kill(-pgid, 0)`
+    /// succeeds, or fails with anything but `ESRCH` (`EPERM`: a member we may not signal).
+    /// Without a group id (or off Unix), false.
+    pub fn exists(&self) -> bool {
+        self.pgid.is_some_and(sys::group_exists)
+    }
+
+    /// Polls until no process is left in the group, at most `timeout`. Returns whether the
+    /// group was seen empty.
+    pub async fn wait_gone(&self, timeout: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if !self.exists() {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+}
+
+/// Whether a process with this pid exists (`kill(pid, 0)` succeeds or fails with `EPERM`).
+/// True for an unusable pid (0, 1, out of range) and off Unix, so a caller that removes
+/// what belongs to a dead process never removes anything it cannot check.
+pub fn process_alive(pid: u32) -> bool {
+    sys::process_alive(pid)
 }
 
 /// A spawned command that owns its process group. Waiting with a timeout or a cancel
-/// future terminates the group (SIGTERM, then SIGKILL after [`KILL_GRACE`]). Dropping it
-/// before the process was reaped kills the group.
+/// future terminates the group ([`Supervised::terminate`]). Dropping it before the process
+/// was reaped sends SIGKILL to the group and waits for nothing (this is what happens to a
+/// running job when the server exits and the runtime drops its task).
 #[derive(Debug)]
 pub struct Supervised {
     child: Child,
@@ -606,7 +643,10 @@ impl Supervised {
     }
 
     /// Waits for the process to exit, at most `timeout`, or until `cancel` completes. On
-    /// timeout or cancellation the whole group is terminated before this returns.
+    /// timeout or cancellation the group is terminated ([`Supervised::terminate`]) before
+    /// this returns: the leader has been reaped and the group was seen empty, or
+    /// [`GROUP_EXIT_WAIT`] passed after SIGKILL. When the process exits on its own, the rest
+    /// of its group is left alone.
     pub async fn wait(
         &mut self,
         timeout: Option<Duration>,
@@ -629,21 +669,26 @@ impl Supervised {
                 Ok(Finish::Exited(status?))
             }
             Err(finish) => {
-                self.terminate().await?;
+                // A member that outlives the wait (one in uninterruptible sleep, say) is not
+                // reported; SIGKILL has been sent to it.
+                let _gone = self.terminate().await?;
                 Ok(finish)
             }
         }
     }
 
     /// SIGTERM to the group, up to [`KILL_GRACE`] for the leader to exit, then SIGKILL to
-    /// the group (for anything that ignored SIGTERM) and reap the leader.
-    pub async fn terminate(&mut self) -> Result<()> {
+    /// the group (for anything that ignored SIGTERM), reap the leader, and wait up to
+    /// [`GROUP_EXIT_WAIT`] until no process is left in the group. Signals are delivered
+    /// asynchronously and only the leader is our child, so the other members may still be
+    /// exiting when SIGKILL has been sent; returns whether the group was seen empty.
+    pub async fn terminate(&mut self) -> Result<bool> {
         self.group.terminate();
         let _ = tokio::time::timeout(KILL_GRACE, self.child.wait()).await;
         self.group.kill();
         self.child.wait().await?;
         self.reaped = true;
-        Ok(())
+        Ok(self.group.wait_gone(GROUP_EXIT_WAIT).await)
     }
 }
 
@@ -700,9 +745,34 @@ impl Collector {
 mod sys {
     pub const SIGTERM: i32 = 15;
     pub const SIGKILL: i32 = 9;
+    /// `ESRCH`, "no such process": 3 on Linux and the BSDs (`errno.h`).
+    const ESRCH: i32 = 3;
 
     unsafe extern "C" {
         fn kill(pid: i32, sig: i32) -> i32;
+    }
+
+    /// `kill(target, 0)`: true unless it fails with `ESRCH`.
+    fn exists(target: i32) -> bool {
+        // SAFETY: as in `signal_group`; signal 0 sends nothing, it only checks.
+        let r = unsafe { kill(target, 0) };
+        r == 0 || std::io::Error::last_os_error().raw_os_error() != Some(ESRCH)
+    }
+
+    /// Whether a process is in group `pgid` (module docs of `ProcessGroup::exists`).
+    pub fn group_exists(pgid: u32) -> bool {
+        match i32::try_from(pgid) {
+            Ok(p) if p > 1 => exists(-p),
+            _ => false,
+        }
+    }
+
+    /// Whether process `pid` exists; true for a pid that cannot be checked.
+    pub fn process_alive(pid: u32) -> bool {
+        match i32::try_from(pid) {
+            Ok(p) if p > 1 => exists(p),
+            _ => true,
+        }
     }
 
     /// `kill(-pgid, sig)`. Refuses group ids that are not a real child's (0 and 1 would
@@ -725,6 +795,12 @@ mod sys {
     pub const SIGTERM: i32 = 15;
     pub const SIGKILL: i32 = 9;
     pub fn signal_group(_pgid: u32, _sig: i32) {}
+    pub fn group_exists(_pgid: u32) -> bool {
+        false
+    }
+    pub fn process_alive(_pid: u32) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

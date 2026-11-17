@@ -1025,8 +1025,21 @@ notifications; poll with `op: status`.
 output lines; a finished job that did not fail shows the last 3 and a `slice` hint; a
 failed job is followed by a digest of the console output and, for operations that run
 tasks, a `log job=` hint. JSON: `{job, tail, digest, notes}`. `cancel` terminates the job's
-process group (SIGTERM, then SIGKILL after 2 s) and reports the job. A finished job's output
-becomes a handle the next time the `bitbake` tool, or `log` with `job`, is called.
+process group (SIGTERM, then SIGKILL after 2 s, then up to 5 s until no process is left in
+the group; a process that left the group, such as a daemon that called `setsid`, is not
+reached) and reports the job, which is `cancelled` once that is done; a `bitbake -e` that
+times out is ended the same way. A finished job's output becomes a handle the next time the
+`bitbake` tool, or `log` with `job`, is called.
+
+Jobs live in the server process. `status` of a job, finished or not, is reachable only
+while that server runs; a new server starts with no jobs. When the server exits because the
+client closed the connection, a running job's process group is sent SIGKILL (nothing waits
+for it; checked by `tests/bitbake_jobs.rs`,
+`a_running_job_is_killed_when_the_server_runtime_is_dropped`) and its output is not stored.
+A server killed by a signal kills nothing: the job's group is a group of its own and keeps
+running. The output being written lies in `<cache dir>/jobs/<pid>-<n>.out`; the next
+server's first job removes such files when the pid is not a live process and the file was
+last written more than 24 hours ago (a file of a live pid is never removed).
 
 ### `log`
 | Arg | Notes |

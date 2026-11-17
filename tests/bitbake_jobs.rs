@@ -608,6 +608,65 @@ async fn cancel_kills_a_job_that_ignores_sigterm() {
     }
 }
 
+/// The pid of a child that has exited and been reaped.
+fn dead_pid() -> u32 {
+    let mut c = std::process::Command::new("true").spawn().unwrap();
+    let pid = c.id();
+    c.wait().unwrap();
+    pid
+}
+
+#[tokio::test]
+async fn the_first_job_removes_output_files_of_dead_servers() {
+    let f = fixture();
+    let jobs = f.ctx.handles.dir().parent().unwrap().join("jobs");
+    fs::create_dir_all(&jobs).unwrap();
+    let two_days_ago = std::time::SystemTime::now() - Duration::from_secs(2 * 24 * 3600);
+    let put = |name: String| {
+        let p = jobs.join(name);
+        fs::File::create(&p)
+            .unwrap()
+            .set_modified(two_days_ago)
+            .unwrap();
+        p
+    };
+    // A crashed server's file, and one of a live process (this test's parent).
+    let stale = put(format!("{}-7.out", dead_pid()));
+    let live = put(format!("{}-7.out", std::os::unix::process::parent_id()));
+    f.fake(&[]);
+    f.call(target(Op::Build, "hello")).await.unwrap();
+    f.wait_done("job:1").await;
+    assert!(!stale.exists(), "{}", stale.display());
+    assert!(live.exists(), "{}", live.display());
+}
+
+#[test]
+fn a_running_job_is_killed_when_the_server_runtime_is_dropped() {
+    // What happens when the server exits: `serve` returns and `main` drops the runtime,
+    // which drops the task supervising the job.
+    let f = fixture();
+    let pidfile = f.root.join("fake.pids");
+    f.fake(&[
+        ("FAKEBB_SLEEP", "60"),
+        ("FAKEBB_PIDFILE", &pidfile.display().to_string()),
+    ]);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        f.call(target(Op::Build, "hello")).await.unwrap();
+        wait_for_file(&pidfile).await;
+    });
+    let pids = fs::read_to_string(&pidfile).unwrap();
+    let pids: Vec<&str> = pids.split_whitespace().collect();
+    assert!(pids.iter().all(|p| alive(p)), "{pids:?}");
+    drop(rt);
+    // SIGKILL was sent to the group; nothing waited, so poll.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while pids.iter().any(|p| alive(p)) {
+        assert!(Instant::now() < deadline, "{pids:?} survived the runtime");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[tokio::test]
 async fn one_job_at_a_time() {
     let f = fixture();
