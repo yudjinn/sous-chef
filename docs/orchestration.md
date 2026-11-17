@@ -117,7 +117,7 @@ Every agent prompt contains, in this order:
 |---|---|---|
 | 0 | **done** (commit `2879e75` on `dev`, gate passes) | See "Wave 0 hand-off notes" below. |
 | 1 | **done** (all five streams merged, gate passes, 170 tests) | Integrated on branch `worktree-orchestrator`; `dev` must be fast-forwarded to it before wave 2 (`git merge --ff-only worktree-orchestrator`). Paused here at the user's request; wave 2 not launched. See "Wave 1 hand-off notes" below. |
-| 2 | not started | |
+| 2 | **done** (five streams and T1.6 merged, gate passes, 418 tests) | Integrated on branch `worktree-w2-integration`; `dev` must be fast-forwarded to it before wave 3 (`git merge --ff-only worktree-w2-integration`). Wave 3 not launched. See "Wave 2 hand-off notes" below. |
 | 3 | not started | |
 | 4 | not started | |
 | 5 | not started | |
@@ -284,6 +284,26 @@ Things wave 3 briefs must say:
   Bash hook; `query::enclosing_item` is ready.
 - **Wave 4 scaffold generators (T6.2, T6.3):** each registers itself with a one-line edit
   in `scaffold::generator()`; the brief must allow it. Generated files follow `ws.release`.
+
+T1.6 (release detection, branch `w2-t16`, merged last): `Workspace.release`,
+`Layer::lint_releases`, `Config.release`, `[lint.severity]`, a `release` row in `status`.
+The fixture workspace is now Wrynose; `meta-mine` claims `kirkstone scarthgap wrynose`, so
+it is linted against all three. Gaps it left:
+
+- `src/bitbake/logs.rs` decides the `PV-PR` work directory layout itself and its comments
+  say "before scarthgap"; the layout changed in Nanbield. It should ask
+  `Feature::PrInWorkdir` (wave 3 stream D owns the BitBake backend; add it to that brief).
+- `src/index/scan.rs` and `src/index/query.rs` classify a file under `classes-global/` by
+  its directory on every release; only the resolver honours `SplitClassDirs`.
+- `[lint.severity]` is read but not applied or checked for unknown rule ids (T4.1).
+- `docs/mcp-tools.md` does not list the `release` field of `status`.
+- Some fixture recipes use pre-Styhead `WORKDIR` conventions in what is now a Wrynose
+  workspace (`libfoo`, `app_0.1.bb`); no test depends on it, but lint rule fixtures in
+  wave 4 will notice.
+- Wrynose build environment: the 6.0 release notes mention `bitbake-setup init` and an
+  `init-build-env` script that devtool looks for before `oe-init-build-env`. Where it lives
+  and whether `oe-init-build-env` still works was not checked; `BbEnv` detection may need a
+  third mode.
 
 Open items and gaps (not resolved in wave 2):
 

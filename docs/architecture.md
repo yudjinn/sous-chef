@@ -241,6 +241,19 @@ A codename newer than the table is treated as the newest known release, and one 
 the floor as the floor; both set `note`. `status` prints `release: <codename> (<source>)` and
 the note.
 
+As implemented (T1.6): `release::detect(configured, corenames, layers) -> Result<ReleaseInfo>`;
+a configured name that is neither supported nor a known older release is a config error
+listing the supported names. `Release::{ALL, NEWEST, is_older_than_floor}`,
+`Feature::{ALL, first, last, verified}`, `ReleaseSource::as_str`, `ReleaseInfo::describe`
+(what `status` prints, as one string in JSON too), `release::lint_releases(layer, release)`.
+`LAYERSERIES_CORENAMES` is read from the shared datastore once every `layer.conf` has been
+read (`layers::read_layer_confs_with_corenames`, `read_corenames`). The features are
+`SplitClassDirs` (from Langdale), `InheritDefer` (from Scarthgap), `IncludeAll` (from
+Walnascar), `UnpackDir` (from Styhead), `WorkdirAsSourceDir` (until Scarthgap) and
+`PrInWorkdir` (until Mickledore); all are verified, with sources in the "Releases" section
+of bitbake-semantics.md. `find_class` / `class_candidates` honour `SplitClassDirs`.
+`Config.release: Option<String>`, `LintConfig.severity: BTreeMap<String, Severity>`.
+
 `Layer::lint_releases(&self, ws: &Workspace) -> Vec<Release>`: the supported releases in the
 layer's `compat`, plus `ws.release.release`, sorted and de-duplicated. For a layer that is
 not writable it is the workspace release alone.
@@ -631,7 +644,7 @@ build_dir = "build"                       # where conf/bblayers.conf lives; opti
 layers = ["../meta-extra"]                # extra layer roots, used when there is no build dir
 writable_layers = ["meta-mycompany"]      # scaffold may write only here
 init_script = "poky/oe-init-build-env"    # sourced before any bitbake command
-release = "scarthgap"                     # optional; overrides detection (T1.6, not in Config yet)
+release = "scarthgap"                     # optional; overrides detection
 
 [bitbake]
 enabled = true
@@ -640,7 +653,7 @@ allow_destructive = false                 # cleansstate, cleanall, devtool reset
 [lint]
 disable = ["style/variable-order"]
 
-[lint.severity]                           # optional per-rule override (T1.6, not in Config yet)
+[lint.severity]                           # optional per-rule override (read; applied by T4.1)
 "hygiene/workdir-s" = "error"
 
 [output]
