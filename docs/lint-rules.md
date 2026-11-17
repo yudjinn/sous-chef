@@ -150,7 +150,7 @@ Notes:
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `org/recipe-path` | W/I | layer | Recipe not at `recipes-<category>/<dir>/<file>.bb` (W); `<dir>` holds only this recipe and is neither its `PN` nor a prefix of it (I); file name with more than one `_` (W) or no `_<pv>` (I); upper-case letters in `PN` (W). Recipes under `dynamic-layers/` are skipped; the no-version check skips `packagegroup-*` and recipes that directly inherit an image class (`image`, `core-image`, `*-image`) or `packagegroup`; the directory check skips such an image in `images/` and such a packagegroup in `packagegroups/`. |
+| `org/recipe-path` | W/I | layer | Recipe not at `recipes-<category>/<dir>/<file>.bb` (W); `<dir>` holds only this recipe and is neither its `PN` nor a prefix of it (I); file name with more than one `_` (W) or no `_<pv>` (I); upper-case letters in `PN` (W). Recipes under `dynamic-layers/` are skipped; the no-version check skips `packagegroup-*` and recipes whose static tree (their own lines and the files they require) inherits an image class (`image`, `core-image`, `*-image`) or `packagegroup`; the directory check skips such an image in `images/` and such a packagegroup in `packagegroups/`. |
 | `org/duplicate-versions` | I | layer | Two or more versions of a recipe whose statements are mostly identical (at least 60 percent of the longer one, and at least 3): suggest a shared `<pn>.inc`. Version data and `require` / `include` lines are left out of the comparison. Reported on the newest version. |
 | `org/inc-has-version-data` | W/I | file | An `.inc` that `.bb` files of two or more versions require or include directly sets `PV`, `SRCREV` / `SRCREV_<name>` (not with `AUTOREV`) or a `SRC_URI` checksum flag (W), or `LIC_FILES_CHKSUM` (I: fine while the license text is the same). Appending to `PV` is not flagged. |
 | `org/inc-unused` | I | layer | A `.inc` that no `require`, `include` or `include_all` of the workspace resolves to. An unresolved argument with `${...}` that could match the file name keeps it from being reported. |
@@ -175,9 +175,11 @@ Notes:
   `PN`s (`images/`, `packagegroups/`) are not reported, nor is a directory whose name is a
   prefix of the `PN` (`linux/linux-foo_6.6.bb`), nor an image recipe alone in `images/` or
   a packagegroup alone in `packagegroups/` (OE-core's `recipes-core/images/` layout; the
-  directory names the kind). An image recipe is one that directly inherits a class
-  `helpers::image_class` accepts, as for `hygiene/missing-metadata`. A file name with more than one `_` makes
-  BitBake read `PN`, `PV` and `PR` from it (`bb.parse.vars_from_file`).
+  directory names the kind). An image recipe is one whose static tree inherits a class
+  `helpers::image_class` accepts, as for `hygiene/missing-metadata`
+  (`core-image-minimal-dev.bb` only requires `core-image-minimal.bb`). A file name with
+  more than one `_` makes BitBake read `PN`, `PV` and `PR` from it
+  (`bb.parse.vars_from_file`).
 - **`duplicate-versions`.** Statements are normalised (lines trimmed, blank and comment
   lines dropped, whitespace collapsed) and compared as a multiset. Left out: `require` and
   `include` lines, `PV`, `PR`, `PE`, `SRCREV*`, `LIC_FILES_CHKSUM` and `SRC_URI` checksum
