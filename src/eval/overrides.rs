@@ -153,6 +153,11 @@ impl Eval<'_> {
         if self.ds.notes.python_vars.contains(base_of(name)) {
             v.unevaluated_python = true;
         }
+        // A file reached through a reference whose value is not certain changes it
+        // (`inherit_defer toolchain/${TOOLCHAIN}` while `OVERRIDES` holds python).
+        if self.ds.notes.uncertain_vars.contains(base_of(name)) {
+            v.unevaluated_python = true;
+        }
         // A statement the replay could not apply may set it (`addfragments`).
         if let Some(us) = self.ds.notes.unresolved_vars.get(base_of(name)) {
             for u in us {

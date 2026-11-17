@@ -730,6 +730,34 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
 - **Inherit** (`BBHandler.inherit`): the argument is expanded and split; a word listed in
   `BB_DEFER_BBCLASSES` is deferred (unless already deferred); a class file in
   `__inherit_cache` is not parsed again. Not found is a parse error.
+- **When a deferred inherit's argument is expanded** (verified, w5-fix-eval2 B5, BitBake
+  2.18.0 `lib/bb/parse/parse_py/BBHandler.py` `inherit_defer` and `inherit`, `lib/bb/parse/ast.py`
+  `InheritDeferredNode.eval` and `finalize`): `inherit_defer` stores the argument **as
+  written** (`(expression, fn, lineno)` appended to `__BBDEFINHERITS`); `finalize` pops the
+  entries in order and calls `inherit(..., deferred=True)`, which does `d.expand(files)` then,
+  with the recipe and its bbappends fully parsed, so `${TOOLCHAIN}` is read with the recipe's
+  own value (`kernel-arch.bbclass` sets `TOOLCHAIN = "gcc"`) and `getVar` semantics
+  (override variants, `:append`). A word with `/` is a path under the class directories:
+  `toolchain/gcc` is `classes-<type>/toolchain/gcc.bbclass` or `classes/toolchain/gcc.bbclass`
+  along `BBPATH`, as for any name without `.bbclass`. OE-core Wrynose `base.bbclass:22-36`:
+  `PREFERRED_TOOLCHAIN = "${PREFERRED_TOOLCHAIN_TARGET}"` with `:class-native`,
+  `:class-cross`, `:class-crosssdk`, `:class-nativesdk` variants, `TOOLCHAIN ??=
+  "${PREFERRED_TOOLCHAIN}"`, `inherit_defer toolchain/${TOOLCHAIN}`; `classes/toolchain/gcc.bbclass`
+  sets `TCOVERRIDE = "toolchain-gcc"`, which `OVERRIDES` (`bitbake.conf:800`) references.
+  So when BitBake expands `${TOOLCHAIN}`, `TCOVERRIDE` is still unset and `OVERRIDES` holds
+  the literal `${TCOVERRIDE}` (no `class-*` override can come from it).
+  
+  sous-chef (`Replay::expand_ref`): a reference is refused (recorded in `references`) only
+  when the expanded text itself still holds `${@...}` or an undefined `${VAR}`: then the file
+  is not known. When the text is complete but the value is flagged (an override variant was
+  judged inactive while `OVERRIDES` holds python or unresolved names, or a variable python
+  may change), the file is read, the reference is recorded in
+  `ReplayNotes::uncertain_references`, and every variable the files read under it change is
+  flagged `unevaluated_python` (`ReplayNotes::uncertain_vars`; unresolved names go to
+  `unresolved_vars`). An unresolved name that the file itself sets (`TCOVERRIDE`) is dropped
+  from that uncertainty, because it was unset when BitBake expanded the argument too; if
+  nothing else is uncertain the reference counts as exact. Not covered: variables only
+  another candidate (`toolchain/clang`) would have set are not flagged.
 - **Include** (`include_single_file`): skipped only when the written name equals the
   including file's path text, so `require self.inc` inside `self.inc` recurses (BitBake
   fails eventually).
@@ -753,7 +781,8 @@ only in the recipe pass and only while their stored value is python or absent (t
 is assumed to be OE-Core's); `BP` is set to `${BPN}-${PV}` when absent. Target `MACHINE` /
 `DISTRO` are set before `bblayers.conf` and again after every configuration assignment to
 them. A function's stored value is a pointer per piece instead of the body. A reference
-that needs python or an undefined variable is not followed (BitBake would expand the
+whose expanded text still needs python or an undefined variable is not followed (one whose
+text is complete but whose value is uncertain is followed and flagged, see above; BitBake would expand the
 python, or look for a file with `${X}` in its name) and is recorded; `include` of a missing
 file is silent, as in BitBake; a missing `require` / class and an include cycle are recorded
 instead of failing the parse; so is an `inherit_defer` on a release without it (see

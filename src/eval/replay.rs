@@ -48,9 +48,13 @@
 //! and the like) are recorded in [`ReplayNotes::python_vars`] and their values are flagged
 //! `unevaluated_python`.
 //!
-//! Nothing here fails on bad metadata: a reference that needs python, names an undefined
-//! variable, is not found or closes a cycle is recorded in [`ReplayNotes::references`] and
-//! skipped.
+//! Nothing here fails on bad metadata: a reference whose expanded text needs python or names
+//! an undefined variable, is not found or closes a cycle is recorded in
+//! [`ReplayNotes::references`] and skipped. A reference whose text expands completely but
+//! whose value is uncertain (override decisions that depend on unknown `OVERRIDES` entries:
+//! `inherit_defer toolchain/${TOOLCHAIN}` in OE-core) is followed, recorded in
+//! [`ReplayNotes::uncertain_references`], and the variables its files change are flagged
+//! ([`ReplayNotes::uncertain_vars`]).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -109,6 +113,17 @@ pub struct ReplayNotes {
     /// References (`include`, `require`, `include_all`, `inherit`, `inherit_defer`,
     /// `INHERIT`) that were not followed, and why.
     pub references: Vec<RefIssue>,
+    /// References that were followed although the value of their argument is not certain:
+    /// the expansion is complete text, but its value depends on override entries that are
+    /// not all known or on variables python may change (`inherit_defer
+    /// toolchain/${TOOLCHAIN}` while `OVERRIDES` holds python). See
+    /// [`ReplayNotes::uncertain_vars`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub uncertain_references: Vec<UncertainRef>,
+    /// Base names of variables that a file reached through an [`UncertainRef`] changes;
+    /// their values carry `unevaluated_python` when the reference's value did.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub uncertain_vars: BTreeSet<String>,
     /// Names with `${...}` that `expand_keys` could not expand (python or undefined
     /// variables); they stay under their written name.
     pub incomplete_keys: Vec<String>,
@@ -158,6 +173,26 @@ pub struct RefIssue {
     pub problem: RefProblem,
 }
 
+/// A reference statement the replay followed with a value that may be wrong.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UncertainRef {
+    /// The statement (`None` as for [`RefIssue::loc`]).
+    pub loc: Option<Loc>,
+    pub via: Vec<Loc>,
+    /// `include`, `require`, `include_all`, `inherit`, `inherit_defer`.
+    pub kind: String,
+    /// The argument as written.
+    pub text: String,
+    /// The argument as the replay expanded it (what it followed).
+    pub expanded: String,
+    /// The expansion carried `unevaluated_python` (python in `OVERRIDES`, or a variable
+    /// python may change).
+    pub python: bool,
+    /// Unresolved names the expansion carried that are still unset after the file was
+    /// read (a name the file itself sets, `TCOVERRIDE` for `toolchain/gcc`, is dropped).
+    pub unresolved: Vec<String>,
+}
+
 /// Why a reference was not followed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -188,6 +223,20 @@ pub struct FunctionPiece {
     pub loc: Loc,
     /// For an `EXPORT_FUNCTIONS` stub: the function it calls (`autotoolsish_do_install`).
     pub calls: Option<String>,
+}
+
+/// An uncertain reference being followed (see `Replay::under_taint`).
+#[derive(Debug, Clone)]
+struct Taint {
+    loc: Option<Loc>,
+    via: Vec<Loc>,
+    kind: String,
+    text: String,
+    expanded: String,
+    python: bool,
+    unresolved: Vec<String>,
+    /// Base names the files read under it changed.
+    bases: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1031,6 +1080,8 @@ struct Replay<'a> {
     recipe_pass: bool,
     pins: Vec<(&'static str, String)>,
     resolver: Option<(Vec<PathBuf>, Resolver)>,
+    /// Uncertain references being followed, innermost last.
+    taint: Vec<Taint>,
 }
 
 impl<'a> Replay<'a> {
@@ -1053,6 +1104,7 @@ impl<'a> Replay<'a> {
             recipe_pass,
             pins,
             resolver: None,
+            taint: Vec::new(),
         }
     }
 
@@ -1204,6 +1256,7 @@ impl<'a> Replay<'a> {
             }
             "unset" => {
                 if let Some(n) = &st.name {
+                    self.tainted(n);
                     self.ds
                         .unset(n, st.flag.as_deref(), st.loc.clone(), via.to_vec());
                     self.after_write(n, &[], st.flag.as_deref(), true);
@@ -1263,6 +1316,7 @@ impl<'a> Replay<'a> {
             legacy_syntax: st.legacy,
         };
         let name = full_name(&var);
+        self.tainted(base);
         let exported = is_exported(st);
         let overrides = var.overrides.clone();
         let flag = var.flag.clone();
@@ -1287,6 +1341,22 @@ impl<'a> Replay<'a> {
             .get(base.as_str())
             .and_then(|v| v.content.clone());
         self.after_write(base, &overrides, flag.as_deref(), before != after);
+    }
+
+    /// Records that the file being read under an uncertain reference changes `base` (a
+    /// name with `${...}` is recorded as its expanded base).
+    fn tainted(&mut self, base: &str) {
+        if self.taint.is_empty() {
+            return;
+        }
+        let b = if base.contains("${") {
+            base_of(&self.ds.expand(base).text).to_string()
+        } else {
+            base_of(base).to_string()
+        };
+        if let Some(t) = self.taint.last_mut() {
+            t.bases.insert(b);
+        }
     }
 
     /// Keeps target pins and computed values in force after a write to `base` (`changed`:
@@ -1470,25 +1540,103 @@ impl<'a> Replay<'a> {
         });
     }
 
-    /// Expands a reference argument; `None` (and an issue) if it needs python or undefined
-    /// variables.
+    /// Expands a reference argument the way BitBake does when the statement runs
+    /// (`d.expand(...)`: for `inherit_defer`, at the end of the recipe, `ast.finalize`).
+    /// `None` (and an issue) if the expanded text still holds `${@...}` or an undefined
+    /// `${VAR}`: the file to read is not known. When the text is complete but the value is
+    /// not certain (it carries `unevaluated_python` or unresolved names because an override
+    /// decision depends on unknown `OVERRIDES` entries, or a variable python may change), the
+    /// text is returned with the flags, and the caller follows it under a [`Taint`].
     fn expand_ref(
         &mut self,
         text: &str,
         loc: Option<&Loc>,
         via: &[Loc],
         kind: &str,
-    ) -> Option<String> {
+    ) -> Option<(String, Option<Taint>)> {
         let e = self.ds.expand(text);
-        if e.unevaluated_python {
+        if has_python(&e.text) {
             self.issue(loc, via, kind, text, RefProblem::Python);
             return None;
         }
-        if !e.unresolved.is_empty() {
+        if e.text.contains("${") && !e.unresolved.is_empty() {
             self.issue(loc, via, kind, text, RefProblem::Undefined(e.unresolved));
             return None;
         }
-        Some(e.text)
+        let taint = (e.unevaluated_python || !e.unresolved.is_empty()).then(|| Taint {
+            loc: loc.cloned(),
+            via: via.to_vec(),
+            kind: kind.to_string(),
+            text: text.to_string(),
+            expanded: e.text.clone(),
+            python: e.unevaluated_python,
+            unresolved: e.unresolved.clone(),
+            bases: BTreeSet::new(),
+        });
+        Some((e.text, taint))
+    }
+
+    /// Runs `f` (which reads the files of one uncertain reference) with `taint` on the
+    /// stack, then records the reference and flags every variable those files changed.
+    fn under_taint(
+        &mut self,
+        taint: Option<Taint>,
+        f: impl FnOnce(&mut Self) -> Result<()>,
+    ) -> Result<()> {
+        let Some(t) = taint else {
+            return f(self);
+        };
+        self.taint.push(t);
+        let r = f(self);
+        let Some(t) = self.taint.pop() else {
+            return r;
+        };
+        // A name the files set is no longer undefined (`TCOVERRIDE`, set by the
+        // `toolchain/gcc` class that `${TOOLCHAIN}`'s uncertainty was partly about).
+        let unresolved: Vec<String> = t
+            .unresolved
+            .iter()
+            .filter(|u| self.ds.raw(u).is_none())
+            .cloned()
+            .collect();
+        if !t.python && unresolved.is_empty() {
+            // Only names the files themselves set stood in the way: the value was certain
+            // after all (BitBake expands the argument before the file is read, when those
+            // names are unset there too).
+            if let Some(outer) = self.taint.last_mut() {
+                outer.bases.extend(t.bases);
+            }
+            return r;
+        }
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        if t.python {
+            notes.uncertain_vars.extend(t.bases.iter().cloned());
+        }
+        if !unresolved.is_empty() {
+            for b in &t.bases {
+                let e = notes.unresolved_vars.entry(b.clone()).or_default();
+                for u in &unresolved {
+                    if !e.contains(u) {
+                        e.push(u.clone());
+                    }
+                }
+            }
+        }
+        notes.uncertain_references.push(UncertainRef {
+            loc: t.loc,
+            via: t.via,
+            kind: t.kind,
+            text: t.text,
+            expanded: t.expanded,
+            python: t.python,
+            unresolved,
+        });
+        // An outer uncertain reference covers what this one changed too.
+        if let Some(outer) = self.taint.last_mut() {
+            outer.bases.extend(t.bases);
+        }
+        self.ds.ovr_cache = OnceLock::new();
+        r
     }
 
     /// `BBPATH` as the store has it now (absolute entries, canonical when they exist);
@@ -1538,9 +1686,24 @@ impl<'a> Replay<'a> {
     fn include(&mut self, st: &StatementRow, via: &[Loc], from: &Path) -> Result<()> {
         let mode = st.op.clone().unwrap_or_else(|| "include".into());
         let text = st.name.clone().unwrap_or_default();
-        let Some(expanded) = self.expand_ref(&text, Some(&st.loc), via, &mode) else {
+        let Some((expanded, taint)) = self.expand_ref(&text, Some(&st.loc), via, &mode) else {
             return Ok(());
         };
+        self.under_taint(taint, |r| {
+            r.include_words(st, via, from, &mode, &text, &expanded)
+        })
+    }
+
+    fn include_words(
+        &mut self,
+        st: &StatementRow,
+        via: &[Loc],
+        from: &Path,
+        mode: &str,
+        text: &str,
+        expanded: &str,
+    ) -> Result<()> {
+        let (mode, text) = (mode.to_string(), text.to_string());
         let words: Vec<String> = if mode == "include_all" {
             let w = expanded.trim();
             if w.is_empty() {
@@ -1719,7 +1882,7 @@ impl<'a> Replay<'a> {
                 self.builtin_fragment(st, via, frag_var, &f, var, name);
                 continue;
             }
-            let Some(rel) =
+            let Some((rel, taint)) =
                 self.expand_ref(&format!("{prefix}/{name}.conf"), Some(&st.loc), via, KIND)
             else {
                 continue;
@@ -1729,7 +1892,8 @@ impl<'a> Replay<'a> {
                     if self.cycle(&path, &st.loc, via, KIND, &f) {
                         continue;
                     }
-                    self.visit(&path, FileKind::Conf, child_via.clone(), true)?;
+                    let cv = child_via.clone();
+                    self.under_taint(taint, |r| r.visit(&path, FileKind::Conf, cv, true))?;
                     for v in &flagged {
                         // setVarFlag(v, f, getVar(v)); setVar(v, None)
                         if let Some(val) = self.ds.value(v) {
@@ -1897,9 +2061,23 @@ impl<'a> Replay<'a> {
         deferred: bool,
         kind: &str,
     ) -> Result<()> {
-        let Some(expanded) = self.expand_ref(text, loc, via, kind) else {
+        let Some((expanded, taint)) = self.expand_ref(text, loc, via, kind) else {
             return Ok(());
         };
+        self.under_taint(taint, |r| {
+            r.inherit_words(text, loc, via, deferred, kind, &expanded)
+        })
+    }
+
+    fn inherit_words(
+        &mut self,
+        text: &str,
+        loc: Option<&Loc>,
+        via: &[Loc],
+        deferred: bool,
+        kind: &str,
+        expanded: &str,
+    ) -> Result<()> {
         let mut child_via = via.to_vec();
         if let Some(l) = loc {
             child_via.push(l.clone());

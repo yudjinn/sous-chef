@@ -222,6 +222,25 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
             if n == 1 { "reference was" } else { "references were" }
         ));
     }
+    for u in &notes.uncertain_references {
+        let at = u
+            .loc
+            .as_ref()
+            .map(|l| format!(" at {l}"))
+            .unwrap_or_default();
+        let why = if u.unresolved.is_empty() {
+            "it depends on python or on overrides that are not all known".to_string()
+        } else {
+            format!(
+                "it depends on unresolved {} or on overrides that are not all known",
+                u.unresolved.join(", ")
+            )
+        };
+        out.push(format!(
+            "note: `{} {}`{at} was followed as {:?}, but {why}; values its files set are flagged",
+            u.kind, u.text, u.expanded
+        ));
+    }
     out
 }
 
