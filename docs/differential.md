@@ -1,0 +1,285 @@
+# Differential test against BitBake (T8.1)
+
+How often the static answer (`eval::evaluate`: own parser, index, replay in BitBake's order,
+override finalisation) equals BitBake's real answer (`bitbake -e`), on a real workspace, and
+what every difference is.
+
+Measured on 2026-11-17 on the live environment ([live-environment.md](live-environment.md)):
+yocto-kiss at `cc621c5d`, BitBake 2.18.0, OE-core / meta-arm / meta-yocto at the pins listed
+there, MACHINE `dogbonedark`, DISTRO `kiss`, in the **bitbake-setup build**
+(`bitbake-builds/kiss-wrynose-dogbonedark/build`; 7 layers: core, yoctobsp, yocto,
+arm-toolchain, meta-arm, meta-kiss, meta-kiss-ti). sous-chef at `67909a3`.
+
+## How to run it
+
+```sh
+export SOUS_CHEF_LIVE=~/Development/sous-chef-live
+scripts/differential.sh                       # BitBake side: parse-only, ~5 s per recipe
+cargo test --release --test differential -- --ignored --nocapture
+```
+
+- `scripts/differential.sh` sources the build's `init-build-env` and runs
+  `bitbake-layers show-layers`, `bitbake-layers show-appends` and `bitbake -e <target>` for
+  every target in its list, writing the raw output to `$SOUS_CHEF_LIVE/runs/differential/`
+  (`env/<target>.env`, about 2 MB each) and one line per command to `commands.log`. A dump
+  that exists is kept (`FORCE=1` reruns). Arguments name targets to run instead of the list.
+  It runs nothing but parse-only commands. Use the bitbake-setup build, not the kas build:
+  BitBake allows one client per build directory.
+- `tests/differential.rs` (ignored unless run with `--ignored`; it returns at once when
+  `SOUS_CHEF_LIVE` is unset) runs the script for any dump that is missing, discovers the
+  workspace from the same build directory, refreshes an index kept in
+  `$SOUS_CHEF_LIVE/runs/differential/cache` (never the user's cache), evaluates each target,
+  compares, and writes the full report to `$SOUS_CHEF_LIVE/runs/differential/report.txt`.
+  The comparison itself takes about 6 s.
+- Recorded results, with the live prefix replaced by `{{LIVE}}`, are in
+  `tests/fixtures/outputs/live/differential/`: `summary.txt` (per-target table, totals,
+  variables by number of differences), `classes.tsv` (every compared value with its class and
+  cause), `workspace.txt` (history files, layers, bbappend order, recipe files, configuration
+  without a machine).
+- The dump reader in the test is minimal (final `VAR="value"` and `export VAR="value"` lines,
+  ` \`-continued values, the `# $VAR` history comments; functions skipped). Replace it with
+  the `bitbake -e` parser of `src/bitbake/envdump.rs` (T5.5) and its compare helper once that
+  is merged.
+
+**The test fails only on what the milestone names:** a value classified **bug** on a tracked
+variable (`SRC_URI`, `DEPENDS`, `RDEPENDS:*`, `FILES:*`, `PACKAGECONFIG`, `EXTRA_OECONF`,
+`EXTRA_OECMAKE`, `S`, `B`, `PV`, `LICENSE`, `OVERRIDES`, `FILESPATH`, `PREFERRED_PROVIDER_*`)
+in the sample evaluated with the build's machine and distro. It passes today. The expected
+classes never fail it, and the `@default` probe (below) is reported, not asserted.
+
+## What is compared
+
+**Targets (25).** Ordinary target recipes `curl` (autotools, `PACKAGECONFIG`), `zlib`,
+`openssl`, `ncurses`, `bash`, `expat` (cmake), `glib-2.0` and `dbus` (meson), `util-linux`,
+`python3`, `busybox` (bbappend from meta-poky), `dropbear`, `base-files` (bbappend from
+meta-poky); `systemd-boot` (bbappend from meta-arm); `opencsd` (meta-arm); the
+workspace's own recipes `sl`, `linux-kiss` (kernel, bbappend from meta-kiss-ti),
+`u-boot-kiss` (bootloader) and `kiss-image` (image; `bitbake -e` of an image only parses); a
+packagegroup `packagegroup-core-boot`; `quilt-native` (a `-native` recipe file);
+`gmp-native` and `nativesdk-zlib` (`BBCLASSEXTEND` variants); and the providers
+`virtual/kernel` and `virtual/bootloader` (BitBake's `FILE` against sous-chef's provider
+selection). `inherit_defer` is exercised by every target (base, kernel, image,
+packagegroup, useradd classes use it). meta-kiss and meta-kiss-ti are the workspace's own
+layers in this build (meta-kiss-amd, -nxp and -st are not in `BBLAYERS` for this machine).
+
+**Variables.** For every target: `PN`, `PV`, `PR`, `FILE`, `FILE_LAYERNAME`, `SRC_URI`,
+`DEPENDS`, `RDEPENDS:${PN}`, `PACKAGECONFIG`, `PACKAGES`, `FILES:${PN}`, `OVERRIDES`,
+`MACHINEOVERRIDES`, `DISTROOVERRIDES`, `S`, `B`, `WORKDIR`, `LICENSE`, `INHERIT`,
+`PROVIDES`, `EXTRA_OECONF`, `EXTRA_OECMAKE`, `CFLAGS`, `FILESPATH`, `MACHINE`, `DISTRO`,
+`TMPDIR`; plus every variable the recipe's own files (the `.bb`, the `.inc` files it
+includes, its bbappends; not classes, not configuration) assign: the base name, or
+`VAR:${PN}...` for a package override. Functions are not compared (the static side stores
+them as pointers). `${PN}` in a name is expanded with each side's `PN`. A name unset on both
+sides is listed as `unset` and not counted.
+
+**Machine and distro.** In this build MACHINE and DISTRO are not in `local.conf`; they come
+from `OE_FRAGMENTS += "distro/kiss machine/dogbonedark"` in `conf/toolcfg.conf` (see bug 1).
+The sample is evaluated with `Target { machine: "dogbonedark", distro: "kiss" }`, as BitBake
+ran. Three targets are also evaluated with `machine` and `distro` left `None`, as a tool call
+without those arguments does (`curl@default`, `sl@default`, `virtual/kernel@default`).
+
+## Classes
+
+Each compared value is in exactly one class, decided in this order:
+
+| Class | Meaning |
+|---|---|
+| **equal** | the same text |
+| **equal-ws** | the same after collapsing whitespace (an unset value equals `""`) |
+| **flagged** | differs, and the static value carries `unevaluated_python` or a non-empty `unresolved`: sous-chef said it may be wrong. Sub-class **flagged-literal-differs**: even the text outside the unevaluated parts disagrees with BitBake (each `${@...}` / `${VAR}` left in the static text is allowed to stand for any text) |
+| **known gap** | differs, not flagged, and the cause is a documented limitation, named |
+| **bug** | differs, not flagged, no documented cause: a wrong answer presented as a fact |
+
+Causes are found by rule, not by hand: a difference that disappears when the
+`layers/<x>` symlinks of the bitbake-setup build are mapped to their canonical targets is
+`layerdir-canonical`; otherwise the variables referenced by BitBake's pre-expansion value
+and the static raw value are classified first and the first that differs gives its class
+(`via ${X}`); otherwise a BitBake history operation made by python at parse time (`[func]`
+in the history, other than BitBake's `expandKeys`) makes it `python-at-parse`; a `DEPENDS`
+that still holds a word of `BB_RECIPE_VIRTUAL_PROVIDERS` is bug 3; anything else is a bug
+and the report gives both sides' last operation.
+
+## Results
+
+### Per target (explicit machine and distro)
+
+| Target | Compared | Equal | Flagged (of which literal differs) | Known gap | Bug |
+|---|---|---|---|---|---|
+| curl | 38 | 24 | 13 (1) | 1 | 0 |
+| sl | 30 | 19 | 10 | 1 | 0 |
+| linux-kiss | 27 | 13 | 12 (2) | 2 | 0 |
+| u-boot-kiss | 46 | 29 | 16 (1) | 1 | 0 |
+| kiss-image | 27 | 16 | 10 (1) | 1 | 0 |
+| packagegroup-core-boot | 31 | 15 | 15 (1) | 1 | 0 |
+| zlib | 35 | 22 | 12 | 1 | 0 |
+| openssl | 48 | 34 | 13 (1) | 1 | 0 |
+| busybox | 64 | 41 | 22 (1) | 1 | 0 |
+| dropbear | 46 | 31 | 14 (1) | 1 | 0 |
+| ncurses | 54 | 40 | 13 (1) | 1 | 0 |
+| dbus | 45 | 28 | 16 (1) | 1 | 0 |
+| systemd-boot | 42 | 26 | 14 | 2 | 0 |
+| util-linux | 98 | 76 | 20 | 2 | 0 |
+| quilt-native | 38 | 25 | 12 | 1 | 0 |
+| expat | 36 | 22 | 13 | 1 | 0 |
+| glib-2.0 | 53 | 36 | 16 | 1 | 0 |
+| base-files | 46 | 30 | 15 | 1 | 0 |
+| python3 | 69 | 41 | 27 (8) | 1 | 0 |
+| bash | 42 | 27 | 14 | 1 | 0 |
+| opencsd | 31 | 19 | 11 | 1 | 0 |
+| virtual/kernel (linux-kiss) | 27 | 13 | 12 (2) | 2 | 0 |
+| virtual/bootloader (u-boot-kiss) | 46 | 29 | 16 (1) | 1 | 0 |
+| gmp-native | 0 | | | not evaluable: `BBCLASSEXTEND` | |
+| nativesdk-zlib | 0 | | | not evaluable: `BBCLASSEXTEND` | |
+| **Total** | **1019** | **656** | **336 (22)** | **27** | **0** |
+
+No value was equal only after whitespace normalisation. 58 names were unset on both sides
+and are not counted. Of the 656 equal values, 135 carried a flag although they were right
+(over-caution, not an error).
+
+By variable, over the 23 evaluable targets: `PN`, `PV`, `PR`, `FILE_LAYERNAME`, `LICENSE`,
+`INHERIT`, `PROVIDES`, `TMPDIR` were equal for all 23 (and `MACHINE`, `DISTRO`, which the
+target sets); `SRC_URI` equal 16, flagged 7; `EXTRA_OECONF` equal 14, flagged 9 (3 literal
+differs); `PACKAGES` equal 9, flagged 14 (4); `FILES:*` equal 37, flagged 27 (3);
+`RDEPENDS:*` equal 26, flagged 10 (2); `PACKAGECONFIG` equal 2, flagged 7 (unset in 14);
+`DEPENDS` flagged in all 23 (8 literal differs); `OVERRIDES`, `DISTROOVERRIDES`, `S`, `B`,
+`WORKDIR`, `CFLAGS`, `FILESPATH` flagged in all 23; `MACHINEOVERRIDES` flagged 22, equal 1;
+`FILE` a known gap in all 23. Variables the recipes' own files assign: 320 equal, 56 flagged
+(2 literal differs), 4 known gap.
+
+**Files in the history** (for the 832 compared names without an override): the set of files
+in BitBake's history (statements only; python operations and flag operations left out)
+equals the set of files in the static history for 784. The 48 others: `MACHINE` and
+`DISTRO` in every target, where BitBake's history names `conf/toolcfg.conf` (the fragment)
+and the static side has the explicit target instead (46); and two in `kiss-image`
+(`DEPENDS` from `image_types_wic.bbclass`, `B` from `populate_sdk_ext.bbclass`), classes the
+replay did not inherit because their `inherit_defer` argument (`${IMGCLASSES}`,
+`${SDK_CLASSES}`) needs python; the replay lists both in its unfollowed references and the
+two values are flagged.
+
+### The `@default` probe (machine and distro not given)
+
+| Target | Compared | Equal | Flagged | Known gap | Bug |
+|---|---|---|---|---|---|
+| curl@default | 38 | 22 | 13 | 1 | 2 (`MACHINE`, `DISTRO`) |
+| sl@default | 30 | 17 | 10 | 1 | 2 (`MACHINE`, `DISTRO`) |
+| virtual/kernel@default | 32 | 8 | 14 | 2 | 8 (`PN`, `PV`, `SRC_URI`, `PROVIDES`, `MACHINE`, `DISTRO`, `LIC_FILES_CHKSUM`, `PACKAGES_DYNAMIC`) |
+
+All 12 come from bug 1.
+
+## Bugs (unflagged wrong answers), most serious first
+
+**1. `addfragments` (OE configuration fragments) is not replayed, so a bitbake-setup build
+has the wrong MACHINE and DISTRO.** Wrynose's `bitbake-setup` writes MACHINE and DISTRO as
+fragments: `conf/toolcfg.conf` has `OE_FRAGMENTS += "distro/kiss machine/dogbonedark"`, and
+`meta/conf/bitbake.conf:822` has `addfragments ${OE_FRAGMENTS_PREFIX} OE_FRAGMENTS
+OE_FRAGMENTS_METADATA_VARS OE_FRAGMENTS_BUILTIN` with `OE_FRAGMENTS_BUILTIN ?=
+"machine:MACHINE distro:DISTRO"` (line 821), so BitBake sets `MACHINE = "dogbonedark"` and
+`DISTRO = "kiss"` (its history: `set .../build/conf/toolcfg.conf:6 "kiss (OE_FRAGMENTS
+contains "distro/kiss")"`). The parser recognises `addfragments` but the replay ignores it.
+Reproduction: in this build, `eval::evaluate` with `Target { recipe: None, machine: None,
+distro: None }` gives `MACHINE` = unset and `DISTRO` = `"nodistro"`, `unevaluated_python:
+false`, `unresolved: []`; `bitbake -e` gives `dogbonedark` and `kiss`. Consequences in the
+probe: `virtual/kernel` resolves to `linux-dummy` (`FirstOfSeveral`) instead of `linux-kiss`
+(`PREFERRED_PROVIDER_virtual/kernel ?= "linux-kiss"` is in `dogbonedark.conf`, which is never
+read), and `PN` = `linux-dummy`, `PV` = `1.0`, `SRC_URI` = `file://COPYING.GPL` are
+presented as facts. Every tool call without `machine` / `distro` in such a build is
+affected, and `deps`, which has no machine argument, always is; so is lint's recipe-scope
+evaluation. Named fragments (`conf/fragments/<layer>/<name>.conf` files) are not read
+either. The kas build is not affected (kas writes `MACHINE ??=` into `local.conf`). Not in
+any "Open items" list or in bitbake-semantics.md.
+
+**2. Files matched by one `BBFILES` glob are ordered by path components, not as strings,
+so bbappends can apply in the wrong order.** BitBake's `collect_bbfiles` (`cooker.py`)
+does `for g in sorted(globbed)`: a Python string sort, in which `-` (0x2D) sorts before `/`
+(0x2F). `workspace::resolve::recipe_files` sorts the glob results as `Vec<PathBuf>`
+(`m.sort()`, `src/workspace/resolve.rs:445`), and `Path` compares component by component,
+so `optee` sorts before `optee-ftpm`. Reproduction from `bitbake-layers show-appends` in this
+workspace: for `optee-os_4.9.0.bb` and `optee-os_git.bb` BitBake applies
+`meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend` then
+`meta-arm/recipes-security/optee/optee-os_%.bbappend`; `query::appends_for` returns them the
+other way round. Minimal case: one layer with `recipes-x/foo/a_%.bbappend` and
+`recipes-x/foo-bar/a_%.bbappend` that both assign `X`; BitBake's final `X` is the one from
+`foo/` (applied last), sous-chef's the one from `foo-bar/`, unflagged. No value differed in
+this sample because both optee recipes are skipped on this machine. The other 24 recipes
+with bbappends have the same order on both sides. bitbake-semantics.md describes the sort
+correctly ("expanded with `glob.glob` ... and sorted"); the code does not follow it.
+
+**3. BitBake 2.18 rewrites virtual providers in `DEPENDS`; the replay does not.**
+`bb.parse.ast.handleVirtRecipeProviders` (run from `finalize`) replaces each `DEPENDS` word
+listed in `BB_RECIPE_VIRTUAL_PROVIDERS` (here `virtual/cross-cc virtual/cross-c++
+virtual/cross-binutils virtual/nativesdk-cross-cc virtual/nativesdk-cross-c++
+virtual/nativesdk-cross-binutils`) with the value of `PREFERRED_PROVIDER_<word>`, and does
+the same for the recipe names in task `depends` flags. Reproduction: `linux-kiss` `DEPENDS`
+is `pkgconf-native binutils-cross-arm gcc-cross-arm kmod-native bc-native bison-native` in
+BitBake, while the static value still has `virtual/cross-binutils virtual/cross-cc`. In
+this sample the value was also flagged every time (`DEPENDS` always holds python from
+`base.bbclass`), so it counts as flagged-literal-differs, not as a bug; a recipe whose
+`DEPENDS` has no python would get a wrong unflagged answer. Neither the variable nor the
+function is mentioned in docs/ or src/.
+
+**4. A `.bb` that no `BBFILES` glob matches is indexed and evaluated as a recipe.** The
+index has 1035 `.bb` files, `recipe_files` (the `BBFILES` globs) 1034, which is the number
+BitBake parses. The extra one is OE-core's template `meta/lib/bblayers/templates/example.bb`:
+`eval::evaluate` of recipe `example` succeeds and returns that file, while `bitbake -e
+example` fails with `ERROR: Nothing PROVIDES 'example'`. Low impact (an unusual name), but
+the `recipe`, `var` and lint tools would answer for a recipe BitBake does not have. The
+index also holds `meta-arm/dynamic-layers/meta-tpm2/.../tpm2-tools_5.7.bbappend`, which is
+under `BBFILES_DYNAMIC` for a layer that is absent; that one is a known gap
+(`BBFILES_DYNAMIC` not reproduced).
+
+Smaller observation, not counted: `DataStore::is_function` returns false for
+`pkg_postinst:busybox`, `pkg_postrm:dropbear` and similar package-specific functions whose
+static value is a pointer list; the test recognises functions by the value's shape instead.
+
+## Known gaps that occurred
+
+| Gap (where documented) | Occurrences |
+|---|---|
+| `LAYERDIR` is the canonical layer root, not the `BBLAYERS` text (wave 3 "Open items", Replay) | 27 unflagged values: `FILE` in all 23 targets, `FILESEXTRAPATHS` in 4 (linux-kiss, virtual/kernel, systemd-boot, util-linux). bitbake-setup's `layers/` entries are symlinks; BitBake keeps the symlinked path, sous-chef the target. The files are the same. Paths that BitBake prints through `layers/` (also in `FILESPATH`, `THISDIR`) will not match textually. |
+| `BBCLASSEXTEND` variants not resolved (wave 3 Replay, wave 4 Provider resolution) | 2 targets: `gmp-native`, `nativesdk-zlib` give `NotFound` ("recipe gmp-native; list recipes with the recipe tool"). A refusal, not a wrong answer; the message could say why. |
+| Python in `OVERRIDES` (wave 2) | Behind most flags: `OVERRIDES` itself is flagged in all 23 targets (`TARGET_OS`, `TRANSLATED_TARGET_ARCH`, the tune `MACHINEOVERRIDES` are python). The replay also reports `inherit_defer toolchain/${TOOLCHAIN}` (base.bbclass:36; `TOOLCHAIN ??= "${PREFERRED_TOOLCHAIN}"`, which has `class-*` override variants) as needing python in 19 of the 23 targets (not in linux-kiss, u-boot-kiss and their two `virtual/` aliases, where `kernel-arch.bbclass:84` sets `TOOLCHAIN = "gcc"`), so `toolchain/gcc.bbclass` is not replayed and `TCOVERRIDE` stays unresolved (which part of the chain is python was not traced further): 156 of the 336 flagged values list `TCOVERRIDE` in `unresolved`. |
+| Anonymous python and `d.setVar` in classes not run (wave 3 Replay; bitbake-semantics.md "What the static evaluator cannot do") | Every target has 10 to 17 anonymous functions (7 to 12 opaque). Of the 22 flagged-literal-differs values, the BitBake history names the python that made the difference for 15: `kernel.bbclass` / `kernel-devicetree.bbclass` adding `kernel-image-zimage kernel-devicetree` to `PACKAGES`; `packagegroup.bbclass` adding `-dbg -dev`; `base.bbclass:508` (`appendVar`, `PACKAGECONFIG` dependencies) and `update-alternatives.bbclass:78` (`ua_extend_depends`) to `DEPENDS`; python3's manifest function to `PACKAGES`, `FILES:*`, `RDEPENDS:*`; busybox's anonymous function to `configmangle`. Of the other 7, 2 are bug 3 (`linux-kiss` and `virtual/kernel` `DEPENDS`) and 5 are values built from python-set variables or classes the replay could not inherit (`EXTRA_OECONF` of curl, dropbear and python3, `EXTRA_OEMESON` of dbus, `DEPENDS` of kiss-image). No unflagged value was caused by python. |
+| `inherit` / `inherit_defer` whose argument needs python (bitbake-semantics.md) | Every target: `require ${@...multiconfig...}` and `include conf/machine-sdk/${SDKMACHINE}.conf` (bitbake.conf:824, 826), `inherit_defer toolchain/${TOOLCHAIN}`; `kiss-image` also `${IMGCLASSES}` and `${SDK_CLASSES}`. All reported in `ReplayNotes.references`. |
+| `addtask` not replayed, `BB_DEFER_BBCLASSES` | Not observable in these variables. |
+
+## Workspace-level comparisons
+
+- **Layers and priorities** (`bitbake-layers show-layers`): agree. 7 layers, same order,
+  same collection names and priorities (core 5, yoctobsp 5, yocto 5, arm-toolchain 5,
+  meta-arm 5, meta-kiss 9, meta-kiss-ti 9); paths agree after mapping the `layers/` symlinks.
+- **bbappend order** (`bitbake-layers show-appends`): 24 recipes agree, 2 differ
+  (`optee-os_4.9.0.bb`, `optee-os_git.bb`: bug 2). `show-appends` lists `u-boot_2026.01.bb`
+  and `linux-yocto_6.18.bb` twice with the same appends; the second listing is ignored.
+- **Provider choices** (`FILE` in the dump): `virtual/kernel` -> `linux-kiss_7.0.bb` and
+  `virtual/bootloader` -> `u-boot-kiss_git.bb`, the same files as BitBake (selected through
+  `PREFERRED_PROVIDER_*` from `dogbonedark.conf`), for all 23 recipe targets the same file
+  as BitBake. Without an explicit machine, `virtual/kernel` is wrong (bug 1).
+- **Recipe files**: 1034 on both sides once the `BBFILES` globs are applied; the index
+  holds one more (bug 4).
+
+## How far to trust static mode
+
+On this workspace, with the machine and distro given:
+
+- **Nothing was wrong without a warning.** 1019 values compared, 0 bugs: every value that
+  differed from BitBake either carried `unevaluated_python` / `unresolved` (336) or was a
+  documented path-spelling difference (27). That is the property sous-chef promises.
+- **About two thirds are exactly right** (656 of 1019, 64%). Names, versions, licence,
+  `PROVIDES`, `INHERIT`, `FILE_LAYERNAME` and most variables the recipe itself sets were
+  right everywhere; `SRC_URI` in 16 of 23 targets.
+- **A flag means "probably wrong", not "might be slightly off".** Build paths (`S`, `B`,
+  `WORKDIR`), `DEPENDS`, `OVERRIDES`, `CFLAGS` and `FILESPATH` were flagged in every target,
+  and in 22 flagged values even the part sous-chef could expand was incomplete (python adds
+  packages, dependencies and files). 135 correct values were flagged too. For a flagged
+  value, use `var` with `authoritative: true` (or `bitbake -e`).
+- **Give the machine and distro in a bitbake-setup build.** Until bug 1 is fixed, a tool
+  call without `machine` / `distro` evaluates MACHINE unset and DISTRO `nodistro`, and some of
+  the resulting wrong values (provider choice, `PN`, `PV`, `SRC_URI`) carry no flag. `deps`
+  cannot be told the machine at all.
+- Bug 2 matters only when two bbappends for one recipe sit in sibling directories whose
+  names share a prefix and assign the same variable; bug 3 only for a `DEPENDS` without
+  python that names a cross-toolchain virtual provider.
+
+Limits of this measurement: one machine, one distro, 23 evaluable targets, one release
+(Wrynose); functions and variable flags were not compared; the classification follows
+references one level at a time and takes the first differing one as the cause.
