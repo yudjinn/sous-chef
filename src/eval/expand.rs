@@ -79,6 +79,24 @@ impl Expander {
         v
     }
 
+    /// Marks `name` as being computed, so a reference to it from now on is a cycle. Returns
+    /// whether it was pushed; pass that to [`Expander::leave`].
+    pub fn enter(&mut self, name: &str) -> bool {
+        if self.in_progress(name) {
+            false
+        } else {
+            self.stack.push(name.to_string());
+            true
+        }
+    }
+
+    /// Undoes [`Expander::enter`].
+    pub fn leave(&mut self, entered: bool) {
+        if entered {
+            self.stack.pop();
+        }
+    }
+
     /// True if `name` is currently being computed (a lookup of it now would be a cycle).
     pub fn in_progress(&self, name: &str) -> bool {
         self.stack.iter().any(|s| s == name)
