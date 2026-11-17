@@ -116,7 +116,11 @@ Notes:
   order relative to the two assignments is not checked.
 - **`missing-package`.** The variables are those of OE-core's `pkgvarcheck` QA check, which
   rejects them set without a package. That check runs only when `PACKAGES` is not empty, so
-  recipes that produce no packages (image recipes) are not treated like other recipes.
+  a file is not reported when every recipe it belongs to statically has an empty
+  `PACKAGES`: an unconditional `PACKAGES = ""`, or `inherit image` / `core-image`, and
+  nothing that could give `PACKAGES` a value. Packagegroups are checked
+  (`packagegroup.bbclass` sets `PACKAGES = "${PN}"`). A file reached from a class or a
+  `.conf`, or from no recipe, keeps its findings.
 - **`plus-equals-on-default`.** A `?=` in a recipe, bbappend, recipe class or
   non-configuration `.inc` is always parsed after every `.conf`; a `?=` later in the same
   file is after by line; between `.conf` files the order is the history of the evaluated

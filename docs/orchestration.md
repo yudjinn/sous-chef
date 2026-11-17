@@ -119,7 +119,7 @@ Every agent prompt contains, in this order:
 | 1 | **done** (all five streams merged, gate passes, 170 tests) | Integrated on branch `worktree-orchestrator`; `dev` must be fast-forwarded to it before wave 2 (`git merge --ff-only worktree-orchestrator`). Paused here at the user's request; wave 2 not launched. See "Wave 1 hand-off notes" below. |
 | 2 | **done** (five streams and T1.6 merged, gate passes, 418 tests) | Integrated on branch `worktree-w2-integration`; `dev` must be fast-forwarded to it before wave 3 (`git merge --ff-only worktree-w2-integration`). Wave 3 not launched. See "Wave 2 hand-off notes" below. |
 | 3 | **done** (five streams plus `w3-cleanup` and `w3-docs` merged, gate passes, 548 tests) | Integrated on branch `worktree-w2-integration`. See "Wave 3 hand-off notes" below. |
-| 4 | not started | |
+| 4 | **done** (five streams plus `w4-followup` and `w4-docs` merged, gate passes, 696 tests) | Integrated on branch `worktree-w2-integration`. Wave 5 not launched. See "Wave 4 hand-off notes" below. |
 | 5 | not started | |
 
 ## Wave 0 hand-off notes (for whoever launches wave 1)
@@ -459,3 +459,99 @@ Open items and gaps (not resolved in wave 3):
 - Still open from earlier waves: the CI workflow has never run on GitHub; handle retention
   limits are not in `Config`; `validate_name` rejects `:` (a T5.5 decision); python in
   `OVERRIDES` (check on a real poky checkout in T8.1).
+
+## Wave 4 hand-off notes (for whoever launches wave 5)
+
+State: T3.5, T3.6, T3.7, T4.2, T4.3, T4.4, T7.3, T7.4, T6.2 and T6.3 are merged (branches
+`w4-a` .. `w4-e`, one `--no-ff` merge each, gate after each) on the integration branch
+`worktree-w2-integration`, started from `573b9c0`. The only conflicts were in
+`tests/lint_engine.rs` and `tests/lint_tool.rs`, where three rule streams changed the same
+total-finding counts; the per-rule assertions were kept and the totals dropped. Two
+follow-up branches were merged after the streams: `w4-followup` (code) and `w4-docs`. Read
+"As implemented in wave 4" in `docs/architecture.md` before briefing wave 5.
+
+All 38 lint rules, all 14 tools except the `inc-split` and `where` scaffold kinds and
+authoritative `var`, and the three hooks now exist.
+
+What `w4-followup` did:
+
+- **Multi-release lint for layers that are not writable** (the user's decision): a layer
+  named as the lint target or containing it, and every layer when none is writable, is
+  checked against every release it claims; only a non-writable layer swept in by `--all`
+  gets the workspace release alone. `release::LintReach { Target, Sweep }`.
+- **The release is stored in the index** (`meta` table, `SCHEMA_VERSION` 2): changing
+  `release` in `sous-chef.toml` recomputes every edge on the next refresh. This closes the
+  stale-index item in the wave 3 notes.
+- The edit hook's acceptance test for `override/legacy-syntax` is enabled and passes.
+- Generated scaffold output was run through every real rule: no rule objected to correct
+  output. A recipe generated without a license checksum or source revision gets two
+  warnings, as intended; every generated recipe without a `homepage` option gets one
+  info-level finding.
+- `override/missing-package` no longer reports in a file whose recipes all have an empty
+  `PACKAGES` (image recipes); packagegroups are still checked.
+- Duplicated rule helpers moved into `src/lint/helpers.rs` and `src/index/query.rs`.
+
+Things wave 5 briefs must say:
+
+- **Stream A (T5.5 authoritative `var`):** `var::run` calls
+  `var_authoritative::run(ctx, &args)` when `authoritative` is true; fill that file.
+  `validate_name` rejects `:` and `%`, so a variable name such as `FILES:${PN}` cannot be
+  passed to `bitbake-getvar` and a wildcard version cannot be a target: T5.5 must decide
+  how to pass names safely. T5.5 needs a real `bitbake -e` sample; none is available, so
+  the parser is built against the format in bitbake-semantics.md, the *verify* marker
+  stays, and the hand-off says so. `slice var=` assumed a layout for that output which is
+  also unverified; make the two agree.
+- **Stream B (T6.4 `.inc` split, T6.5 placement advice):** register with a one-line edit
+  in `scaffold::generator()`. `execute` refreshes the index before `plan`. Generated files
+  follow `ws.release` and the releases the target layer claims; they are linted by the
+  real rules after a write.
+- **Stream C (T8.3 extra views):** new `show` modes in `recipe.rs` and `layers.rs`.
+  `eval::providers` resolves a recipe name; `DataStore::function(name)` gives a task's
+  composed pieces. `layers show=compat` overlaps `org/layer-conf`; share the checks.
+- **Stream D (T7.5 plugin, T8.5 docs):** register the matchers `Grep|Read`, `Bash` and
+  `Edit|Write|MultiEdit`. The Bash hook replaces output with `updatedToolOutput`; the
+  others add context. **The recorded hook events were written by hand from the Claude Code
+  2.1.326 docs: capture real events from a live session first** and correct the handlers if
+  the shapes differ (Grep's `content` text, Read's `startLine`).
+- **Stream E (T8.1 differential test, T8.2 scale check):** both need a real poky build
+  directory (`SOUS_CHEF_POKY`); write the harness and run it only if one is available. The
+  known places where static evaluation departs from BitBake are listed under "Open items"
+  in the wave 2, 3 and 4 notes; the differential test should classify them, not rediscover
+  them.
+
+Open items and gaps (not resolved in wave 4):
+
+- **Recipe names resolve differently across tools.** `recipe`, `var`, `overrides`, `deps`
+  and lint go through provider selection (`PREFERRED_VERSION`, `DEFAULT_PREFERENCE`);
+  `item`, `search`, the bbappend generator and `bitbake::logs` use
+  `query::preferred_recipe` (layer priority and version only). The log locator and the
+  hooks stay on the fast path on purpose; `item`, `search` and the bbappend generator
+  should agree with `recipe`. Give this to a wave 5 stream.
+- **The edit hook suggests `scaffold kind=where`**, which is not implemented until T6.5.
+- A recipe target gives every layer it touches the full release list, including a
+  non-writable layer that holds only an `.inc` the recipe includes. When the release
+  changed, one edit-hook call pays for a full edge rebuild.
+- **Provider resolution** does not handle `BBCLASSEXTEND` variants (`-native` and the
+  like), `BBMASK`, `SKIP_RECIPE` or `COMPATIBLE_*`; a `PROVIDES` that needs expansion to
+  name the item, or one set in a global class, is not found.
+- **Lint on real layers:** `override/dead` drops to info whenever the override list is
+  only partly known, which is the usual case with OE-core's python in `OVERRIDES`;
+  `org/class-recipe-specific` and `org/class-export-functions` will flag some OE-core
+  classes that do those things on purpose (visible only with `--all`);
+  `org/include-must-exist` does not check a `require` whose text contains `${`;
+  `override/legacy-syntax` misses `VAR_<o>` when `<o>` has no `.conf` in the workspace.
+- **Hooks:** the Bash hook misses quoted inner commands (`kas shell -c "bitbake x"`); edit
+  hook timing was not measured on a new file (which recomputes every edge) or on a real
+  poky checkout; `Index::refresh_file` does not sync the `layers` table after a
+  `layer.conf` edit.
+- **Scaffold:** a new layer is not visible to a running server until it re-discovers the
+  workspace; bbappend `set` covers variables only; files given by name only are not
+  created; there is no `Feature` for the Whinlatter git unpack default, so git recipes use
+  the same form on every release.
+- **Unverified BitBake / OE-core behaviour**, added this wave: the release that dropped
+  `BB_DANGLINGAPPENDS_WARNONLY`; that BitBake uses the first eligible provider when several
+  remain; how `bitbake-layers add-layer` edits `bblayers.conf`; when `python_hatchling`
+  first appeared; the fetcher's checksum and `SRCREV` lookup order.
+- Carried forward: everything under "Open items" in the wave 3 notes that is not marked
+  resolved here (hook events not captured live, jobs, replay, the Wrynose `bitbake-setup`
+  environment, the CI workflow, handle retention limits, `BB_DEFER_BBCLASSES`).

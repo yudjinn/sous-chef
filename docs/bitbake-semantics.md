@@ -296,8 +296,8 @@ Verified (T1.2) against BitBake `master` 2026-11 and the release branches on Git
   `export` or `unset`, so it raises `ParseError("unparsed line: 'inherit_defer x'")`. The file
   fails to parse. The replay records such a line as a reference issue
   (`RefProblem::NotInRelease(InheritDefer)`), inherits nothing for it and goes on with the
-  rest of the file. Reporting the directive to the user is lint's job (M4, syntax a
-  layer's releases lack); no rule does it yet.
+  rest of the file. Lint reports the directive to the user: `hygiene/release-syntax`, for
+  a layer checked against a release without it.
 - `BB_DEFER_BBCLASSES` is newer still: absent from `BBHandler.py` on branches `2.8`, `2.10`
   and `2.12`, present on `master` (2026-11). The first release that has it is not yet
   recorded (*verify* 2.14 / 2.16); the replay currently honours it on every release.

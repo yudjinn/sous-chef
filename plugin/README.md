@@ -94,8 +94,8 @@ milliseconds (measured below), so a process per event fits the budget.
 ## How `sous-chef hook` uses it
 
 - Dispatch on `hook_event_name` and `tool_name` (`src/hook.rs`, `HANDLERS`). Only
-  `PostToolUse` on `Grep`, `Read` (T7.2), `Bash` (stub, T7.3) and `Edit` / `Write` /
-  `MultiEdit` (stub, T7.4) have handlers; everything else is a no-op.
+  `PostToolUse` on `Grep`, `Read` (T7.2), `Bash` (T7.3) and `Edit` / `Write` /
+  `MultiEdit` (T7.4) have handlers; everything else is a no-op.
 - The workspace is discovered from the event's `cwd` (its `sous-chef.toml`, or the global
   flags `--build-dir`, `--config`, `--layer` given in the hook command line, relative to
   `cwd`). The index must already exist (`sous-chef index`, or the MCP server, builds it);

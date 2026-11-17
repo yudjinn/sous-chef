@@ -255,7 +255,13 @@ of bitbake-semantics.md. `find_class` / `class_candidates` honour `SplitClassDir
 `Config.release: Option<String>`, `LintConfig.severity: BTreeMap<String, Severity>`.
 
 `Layer::lint_releases(&self, ws: &Workspace) -> Vec<Release>`: the supported releases in the
-layer's `compat`, plus `ws.release.release`, sorted and de-duplicated.
+layer's `compat`, plus `ws.release.release`, sorted and de-duplicated. This is the answer
+for a layer reached as a lint target. `Layer::lint_releases_as(&self, ws, LintReach)` and
+`release::lint_releases(layer, workspace, any_writable, reach)` take
+`LintReach { Target, Sweep }`: the engine reaches the layers of a whole-workspace run as
+`Sweep` and those of a layer, recipe or file target as `Target`. A layer gets the workspace
+release alone only when it is not writable, was reached by a sweep, and the workspace has a
+writable layer. `lint::releases_for(ws, layer)` is the `Target` answer.
 
 Which layers get the full list (decided 2026-11-17, overview.md "Lint and multi-release
 layers"): a writable layer; a layer that is the lint target or contains it (a named layer,
@@ -284,8 +290,10 @@ Who reads it:
 
 Location: `$XDG_CACHE_HOME/sous-chef/<sha256 of workspace roots, 16 hex>/index.sqlite`.
 The index is derived: any schema change bumps `user_version` and rebuilds from scratch. The
-index also records the workspace release, and is rebuilt when the release changes (a new
-`release` in `sous-chef.toml`), so what depends on it is recomputed.
+index also records the workspace release (table `meta`, key `release`; `SCHEMA_VERSION` is
+2), and every edge is recomputed when the release changes (a new `release` in
+`sous-chef.toml`), by `Index::refresh` and by `Index::refresh_file`.
+`query::indexed_release(&Index)` reads it.
 
 ```sql
 layers(id INTEGER PK, name TEXT UNIQUE, root TEXT, priority INT, collections TEXT,

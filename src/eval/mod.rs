@@ -57,7 +57,7 @@ pub struct FileVisit {
 /// Replays configuration (and the recipe, if any) and returns the datastore.
 ///
 /// `target.recipe` is a recipe name (`hello`; `target.version` picks a version, `%`
-/// allowed, else the preferred one by layer priority and version), an absolute path to a
+/// allowed, else the one provider selection prefers, see `providers`), an absolute path to a
 /// `.bb`, or `layer:path` (`meta-core:recipes-core/hello/hello_1.1.bb`). `None` evaluates
 /// the configuration only. `machine` / `distro` override the configured values.
 ///
