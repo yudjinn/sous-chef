@@ -1141,7 +1141,11 @@ impl Node {
             Value::Seq(items) => items.iter().map(Node::last_line).max().unwrap_or(self.line),
             Value::Map(entries) => entries
                 .iter()
-                .map(|(k, v)| k.line.max(v.last_line()))
+                .map(|(k, v)| match v.value {
+                    // An empty value is marked where the next token starts, maybe a later line.
+                    Value::Null => k.line,
+                    _ => k.line.max(v.last_line()),
+                })
                 .max()
                 .unwrap_or(self.line),
         }
@@ -1367,7 +1371,11 @@ pub fn plan_add_layer(project: &KasProject, layer_root: &Path) -> LayerEdit {
         .repos
         .iter()
         .filter(|r| r.own && layer_root.starts_with(&r.path))
-        .max_by_key(|r| r.path.components().count());
+        .fold(None::<&KasRepo>, |best, r| match best {
+            // The deepest repository; among equals the first, in merge order.
+            Some(b) if b.path.components().count() >= r.path.components().count() => Some(b),
+            _ => Some(r),
+        });
     let Some(repo) = own else {
         return LayerEdit::Manual {
             lines: format!(

@@ -3,6 +3,10 @@
 //! Creates `<path>/<name>/` with `conf/layer.conf` and `README.md` (plus `COPYING.MIT` and
 //! an empty `recipes-example/` when asked), and adds the layer to `BBLAYERS` in the build
 //! directory's `conf/bblayers.conf` as a second, separate change of the same plan. The
+//! In a kas project (`ws.kas` with files, generating the build directory if there is one),
+//! the layer is added to a kas file instead (`workspace::kas::plan_add_layer`: one line
+//! inserted under `layers` of the own repository, comments and order kept), or, when no
+//! file can be edited safely, the lines to add are given in the notes. The
 //! tool's `name` is the layer directory (`meta-...`), which is also the collection name, as
 //! `bitbake-layers create-layer` makes it. Options: [`OPTIONS`].
 //!
@@ -26,6 +30,7 @@ use crate::parse::{StatementKind, parse};
 use crate::release::Release;
 use crate::types::AssignOp;
 use crate::workspace::Workspace;
+use crate::workspace::kas::{self, LayerEdit};
 
 /// Every option `layer` accepts.
 pub const OPTIONS: &[&str] = &[
@@ -235,8 +240,41 @@ fn plan(cx: &GenContext<'_>) -> Result<Plan> {
         });
     }
 
-    match &ws.build_dir {
-        Some(build) => {
+    let kas = ws
+        .kas
+        .as_ref()
+        .filter(|k| !k.files.is_empty() && ws.build_dir.as_ref().is_none_or(|b| k.generates(b)));
+    match (kas, &ws.build_dir) {
+        (Some(k), _) => {
+            let shown = |f: &Path| f.strip_prefix(&k.root).unwrap_or(f).display().to_string();
+            match kas::plan_add_layer(k, &root) {
+                LayerEdit::Modify { file, content } => {
+                    notes.push(format!(
+                        "this is a kas project: the layer is added to {} (a separate change in this plan), not to bblayers.conf, which kas generates; run kas checkout {} to regenerate bblayers.conf",
+                        shown(&file),
+                        k.files_arg(&k.work_dir)
+                    ));
+                    files.push(PlannedFile {
+                        action: FileAction::Modify {
+                            before_sha: file_sha256(&file)?,
+                        },
+                        path: file,
+                        content,
+                    });
+                }
+                LayerEdit::Manual { lines, why } => {
+                    let target = k
+                        .files
+                        .first()
+                        .map(|f| shown(f))
+                        .unwrap_or_else(|| "your kas file".into());
+                    notes.push(format!(
+                        "this is a kas project, so bblayers.conf (which kas generates) is left alone, but no kas file was changed: {why}; add these lines to {target} (merging with its repos), then run kas checkout:\n{lines}"
+                    ));
+                }
+            }
+        }
+        (None, Some(build)) => {
             let conf = build.join("conf").join("bblayers.conf");
             let old = std::fs::read_to_string(ws.confine(&conf)?)?;
             let entry = match build.parent().and_then(|b| root.strip_prefix(b).ok()) {
@@ -256,7 +294,7 @@ fn plan(cx: &GenContext<'_>) -> Result<Plan> {
                 "BBLAYERS in build:conf/bblayers.conf gets the new layer (a separate change in this plan)".into(),
             );
         }
-        None => notes.push(format!(
+        (None, None) => notes.push(format!(
             "no build directory: add {} to BBLAYERS of your build, or to `layers` in sous-chef.toml",
             root.display()
         )),
