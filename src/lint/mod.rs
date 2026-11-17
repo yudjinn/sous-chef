@@ -300,11 +300,14 @@ pub fn resolve_target(
         if let Some(l) = ws.layers.iter().find(|l| l.root == abs) {
             return Ok(Target::Layer(l.name.clone()));
         }
-        let files: Vec<PathBuf> = target_layers_all(ws)
-            .iter()
-            .flat_map(|layer| layer_files(ws, index, layer).unwrap_or_default())
-            .filter(|p| p.starts_with(&abs))
-            .collect();
+        let mut files: Vec<PathBuf> = Vec::new();
+        for layer in target_layers_all(ws) {
+            files.extend(
+                layer_files(ws, index, &layer)?
+                    .into_iter()
+                    .filter(|p| p.starts_with(&abs)),
+            );
+        }
         if files.is_empty() {
             return Err(Error::NotFound {
                 what: format!("indexed BitBake files under {}", abs.display()),
