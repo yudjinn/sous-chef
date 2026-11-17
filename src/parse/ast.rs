@@ -91,6 +91,17 @@ pub enum StatementKind {
     AddFragments {
         rest: String,
     },
+    /// `addpylib <libdir> <namespace>` (BitBake 2.4 and later): the two capture groups of
+    /// `ConfHandler`'s `addpylib\s+(.+)\s+(.+)`, unexpanded, as Python's greedy match splits
+    /// them (with more than two words, `libdir` takes the extra ones). BitBake accepts it
+    /// only while parsing the base configuration (`bblayers.conf`, each `layer.conf`,
+    /// `bitbake.conf`; not a file they include) and raises "unparsed line" anywhere else;
+    /// the parser records it wherever it appears and `hygiene/parse-error` judges the place.
+    /// A line with fewer than two arguments is [`StatementKind::Unknown`].
+    AddPyLib {
+        libdir: String,
+        namespace: String,
+    },
     /// Anything the parser did not recognise.
     Unknown {
         text: String,
@@ -165,6 +176,24 @@ impl Statement {
         };
         Some(AddFragments { rest: rest.clone() })
     }
+}
+
+/// For a logical line starting with `addpylib` and whitespace: `Some(Some((libdir,
+/// namespace)))` when `addpylib\s+(.+)\s+(.+)` matches (`re.match`, greedy), `Some(None)`
+/// when it does not (one argument: "unparsed line"), `None` for any other line.
+pub(crate) fn add_pylib_line(text: &str) -> Option<Option<(String, String)>> {
+    let rest = text.strip_prefix("addpylib")?;
+    if !rest.starts_with(crate::parse::lexer::py_space) {
+        return None;
+    }
+    let chars: Vec<char> = rest.chars().collect();
+    Some(match_groups(&chars, 0, 2).and_then(|g| match g.as_slice() {
+        [(a, b), (c, d)] => Some((
+            chars[*a..*b].iter().collect(),
+            chars[*c..*d].iter().collect(),
+        )),
+        _ => None,
+    }))
 }
 
 /// [`AddFragments`] for a logical line starting with `addfragments` and whitespace.

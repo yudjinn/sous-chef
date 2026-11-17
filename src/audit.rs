@@ -1737,19 +1737,11 @@ fn parse_section(ws: &Workspace, index: &Index, own: &BTreeSet<String>) -> Resul
         unparsed_rows
             .into_iter()
             .map(|s| {
-                let text = if s.snippet.split_whitespace().next() == Some("addpylib") {
-                    format!(
-                        "{} (not modelled by sous-chef; BitBake reads it)",
-                        s.snippet
-                    )
-                } else {
-                    s.snippet.clone()
-                };
                 (
                     s.loc.layer.clone(),
                     Item {
                         pointer: s.loc.to_string(),
-                        text,
+                        text: s.snippet.clone(),
                     },
                 )
             })

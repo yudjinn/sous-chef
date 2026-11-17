@@ -161,6 +161,7 @@ pub enum StatementKind {
     AddHandler { name: String },
     ExportFunctions { names: Vec<String> },
     AddFragments { rest: String },                    // `addfragments` with 3+ arguments (M9)
+    AddPyLib { libdir: String, namespace: String },   // `addpylib` with 2+ arguments (w7)
     Unknown  { text: String },
 }
 
@@ -993,8 +994,9 @@ one `realpath` of the whole path first): 104 ms to 19 ms on the live workspace.
 
 Parser (w5 fixes, `parse`): `StatementKind::AddFragments { rest }` for `addfragments` with
 three or more arguments (`Statement::add_fragments() -> Option<AddFragments>`,
-`AddFragments::groups(n)` applies the release's regular expression); `addpylib` is still an
-`Unknown` statement with a "not modelled" diagnostic. `parse::words`: `words`,
+`AddFragments::groups(n)` applies the release's regular expression); `addpylib` was still an
+`Unknown` statement with a "not modelled" diagnostic until w7 (`StatementKind::AddPyLib`,
+below). `parse::words`: `words`,
 `colon_parts`, `comma_fields`, `split_outside`, `split_keep_whitespace`, `known_words`,
 `is_unevaluated`, `abbreviate`: a `${...}` group is never split and a word holding one is
 unevaluated. **Every place that splits a list or colon-separated value must use
@@ -1031,6 +1033,16 @@ Lint (M9, w5 fixes): the 39th rule, `org/generated-conf-edit` (kas-generated `lo
 `org/layer-conf` reports a copied `LAYERSERIES_COMPAT` as an error (a warning on Kirkstone
 and Langdale workspaces). The fix rounds changed what several rules report (lint-rules.md,
 "On a real workspace").
+
+### After wave 6 (w7 fixes)
+
+Parser: `StatementKind::AddPyLib { libdir, namespace }` for `addpylib` with two or more
+arguments (the groups of `addpylib\s+(.+)\s+(.+)`, unexpanded; no diagnostic); with fewer it
+is `Unknown` with an "unparsed line" diagnostic. The index records it as statement kind
+`addpylib` (`name` = the directory, `value` = the namespace) and makes **no edge**: it adds a
+python library directory, not a metadata file. `hygiene/parse-error` judges where it is
+(base configuration only) and the release (`Feature::AddPyLib`, BitBake 2.4 on;
+`Feature::ALL` has ten). The `.inc` split treats it as opaque.
 
 ## Errors
 

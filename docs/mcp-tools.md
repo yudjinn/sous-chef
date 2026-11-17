@@ -1186,9 +1186,9 @@ that differs between two runs on the same repository state), then:
   frequent rules, and per rule its count by severity and the first 3 findings (worst
   severity first) followed by the command that lists all of them (`sous-chef lint --all
   --rule <id>`). Release-dependent findings name the release in their message.
-- `## 5. Parse and resolution problems`: unparsed statements (`addpylib`, which the
-  parser does not model, is marked), unresolved `include` / `require` and `inherit`
-  (whether the argument needs evaluation, or what BitBake does with a missing file), files
+- `## 5. Parse and resolution problems`: unparsed statements, unresolved `include` /
+  `require` and `inherit` (whether the argument needs evaluation, or what BitBake does with
+  a missing file), files
   BitBake does not collect and why. Own layers in full, at most 5 per upstream layer, what
   BitBake stops on first.
 - `## 6. What was not checked`: whether a build environment was found, files with

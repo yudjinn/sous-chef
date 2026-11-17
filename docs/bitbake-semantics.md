@@ -383,6 +383,27 @@ Checked against BitBake master (2026-11) and the release branches on GitHub
   space-separated names; the AST `name` field holds them joined with single spaces.
   `deltask` expands its argument; `addhandler` does not.
 - `EXPORT_FUNCTIONS` takes space-separated names.
+- `addpylib` (`__addpylib_regexp__ = addpylib\s+(.+)\s+(.+)`, `re.match`, greedy: with
+  more than two words the first group takes all but the last). Checked in BitBake
+  `lib/bb/parse/parse_py/ConfHandler.py` `feeder` and `lib/bb/cookerdata.py` on branch
+  `2.18` (`6e260eb6a`), branches `2.0`, `2.2` and `2.4`, and `git describe --contains
+  afb8478d3` = `2.3.1~96` (the commit that added it). **First release: BitBake 2.4
+  (Mickledore)**: on `2.0` (Kirkstone) and `2.2` (Langdale) `feeder` has no such pattern
+  and the line ends in `raise ParseError("unparsed line: ...")`, so the file fails to parse.
+  From 2.4 on, `feeder` accepts it only `if baseconfig and conffile and m`: `conffile` is
+  false when `BBHandler.feeder` (recipes, classes, `.inc`) falls through to
+  `ConfHandler.feeder`, and `baseconfig` is true only for the files `cookerdata` passes to
+  `parse_config_file` (`bb.parse.handle(fn, data, include, baseconfig=True)`): the
+  `-r` prerun files, `conf/bblayers.conf`, each layer's `conf/layer.conf`,
+  `conf/bitbake.conf` and the `-R` postrun files. A file any of those *includes* is parsed by
+  `ConfHandler.include_single_file` with `bb.parse.handle(fn, data, True)`, `baseconfig`
+  false, so `addpylib` in `local.conf`, a machine or distro conf, or a file `layer.conf`
+  includes is an "unparsed line" too. `ast.PyLibNode.eval` expands the directory, appends it
+  to `sys.path` and imports the namespace (and the modules its `BBIMPORTS` lists); it sets no
+  variable. sous-chef: `StatementKind::AddPyLib`, no edge, no effect on the replay;
+  `hygiene/parse-error` reports it outside `conf/layer.conf` / `conf/bitbake.conf` /
+  `conf/bblayers.conf` on every release, and there on a release without
+  `Feature::AddPyLib`. (The prerun and postrun files are not known to sous-chef.)
 
 ### Configuration fragments
 
@@ -1512,6 +1533,7 @@ and must not be used to report an error. No row is marked *verify* at present.
 | `AddFragments` | the `addfragments` directive (three-argument form) | 5.2 walnascar (BitBake 2.12) | (current) | BitBake `ConfHandler.py` `__addfragments_regexp__` and `ast.py` `AddFragmentsNode`: absent on branch `2.10` and tag `yocto-5.1.4`, present on branch `2.12` (`ac0973009`) and tag `yocto-5.2.4`; added by `f68774670` (see "Configuration fragments") |
 | `BuiltinFragments` | `addfragments` takes a fourth argument, the built-in fragments variable (`machine/x` sets `MACHINE`); the three-argument form is an unparsed line | 5.3 whinlatter (BitBake 2.16) | (current) | `3b9d7bea9` "parse/ast: add support for 'built-in' fragments", first in tag `yocto-5.3`; the four-group regex on branches `2.16` (`713fbbdb9`) and `2.18`, the three-group one on `2.12` and `yocto-5.2.4` |
 | `RecipeVirtualProviders` | `DEPENDS` words in `BB_RECIPE_VIRTUAL_PROVIDERS` are replaced with `PREFERRED_PROVIDER_<word>` at finalisation | 5.2 walnascar (BitBake 2.12) | (current) | `ast.py` `handleVirtRecipeProviders`: absent on branch `2.10`, present on `2.12`, `2.16`, `2.18`; added by `fb119c788` "parse/ast: Add support for BB_RECIPE_VIRTUAL_PROVIDERS" (2025-01-21, in tag `2.12.0`) (see "Replay") |
+| `AddPyLib` | the `addpylib` directive (base configuration only) | 4.2 mickledore (BitBake 2.4) | (current) | BitBake `ConfHandler.py` `feeder`: absent on branches `2.0` and `2.2`, present on `2.4` and `2.18`; added by `afb8478d3` (`2.3.1~96`) (see "Directives") |
 | `PrInWorkdir` | `WORKDIR` ends in `${EXTENDPE}${PV}-${PR}` (later: `${PV}`) | 4.0 kirkstone (floor) | 4.2 mickledore | OE-core `meta/conf/bitbake.conf` on branches `kirkstone`, `langdale`, `mickledore` (`.../${PN}/${EXTENDPE}${PV}-${PR}`) and `nanbield`, `scarthgap` (`.../${PN}/${PV}`); Yocto migration guide 4.3, "Versioning changes" ("PE and PR are no longer included in the work directory path") |
 
 Details:

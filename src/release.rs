@@ -158,10 +158,12 @@ pub enum Feature {
     /// `PREFERRED_PROVIDER_<word>` when a recipe is finalised
     /// (`ast.handleVirtRecipeProviders`).
     RecipeVirtualProviders,
+    /// The `addpylib` directive (base configuration only).
+    AddPyLib,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 9] = [
+    pub const ALL: [Feature; 10] = [
         Feature::SplitClassDirs,
         Feature::InheritDefer,
         Feature::IncludeAll,
@@ -171,12 +173,14 @@ impl Feature {
         Feature::AddFragments,
         Feature::BuiltinFragments,
         Feature::RecipeVirtualProviders,
+        Feature::AddPyLib,
     ];
 
     /// The first supported release that has the feature.
     pub fn first(self) -> Release {
         match self {
             Feature::SplitClassDirs => Release::Langdale,
+            Feature::AddPyLib => Release::Mickledore,
             Feature::InheritDefer => Release::Scarthgap,
             Feature::IncludeAll | Feature::AddFragments | Feature::RecipeVirtualProviders => {
                 Release::Walnascar
@@ -210,7 +214,8 @@ impl Feature {
             | Feature::PrInWorkdir
             | Feature::AddFragments
             | Feature::BuiltinFragments
-            | Feature::RecipeVirtualProviders => true,
+            | Feature::RecipeVirtualProviders
+            | Feature::AddPyLib => true,
         }
     }
 }
@@ -455,6 +460,7 @@ mod tests {
             (AddFragments, false, false, true),
             (BuiltinFragments, false, false, true),
             (RecipeVirtualProviders, false, false, true),
+            (AddPyLib, false, true, true),
         ];
         assert_eq!(table.len(), Feature::ALL.len());
         for (f, k, s, w) in table {
@@ -477,6 +483,8 @@ mod tests {
         assert!(Release::Whinlatter.has(BuiltinFragments));
         assert!(!Release::Styhead.has(RecipeVirtualProviders));
         assert!(Release::Walnascar.has(RecipeVirtualProviders));
+        assert!(!Release::Langdale.has(AddPyLib));
+        assert!(Release::Mickledore.has(AddPyLib));
         assert!(Feature::ALL.iter().all(|f| f.verified()));
     }
 

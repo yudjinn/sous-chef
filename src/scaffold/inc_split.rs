@@ -700,6 +700,7 @@ fn effects_of(kind: &StatementKind, ds: Option<&DataStore>) -> Effects {
         }
         StatementKind::Unknown { .. } => e.opaque = true,
         StatementKind::AddFragments { .. } => e.opaque = true,
+        StatementKind::AddPyLib { .. } => e.opaque = true,
     }
     e
 }

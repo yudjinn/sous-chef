@@ -1324,9 +1324,8 @@ fn explode_version(s: &str) -> Vec<(i32, Part)> {
 
 // ---- whole-workspace problem lists (added by T8.6, the audit report) ----
 
-/// Every `unknown` statement (a line the parser could not read as any statement, or a
-/// directive it does not model such as `addpylib`), by layer row id, path and position;
-/// data files left out ([`FileSet::DEFAULT`]).
+/// Every `unknown` statement (a line the parser could not read as any statement), by layer
+/// row id, path and position; data files left out ([`FileSet::DEFAULT`]).
 pub fn unknown_statements(index: &Index) -> Result<Vec<StatementRow>> {
     let sql = format!(
         "SELECT {STMT_COLS} FROM {STMT_FROM} WHERE s.kind = 'unknown' AND {} \

@@ -6,11 +6,9 @@
 //! (the fixture test pins every message it relies on):
 //!
 //! - **Not reported:** whitespace after a trailing `\` (BitBake right-strips the line and
-//!   still continues it; `hygiene/continuation` owns that finding); `addpylib` in a
-//!   `.conf` file (configuration only). (`addfragments` is a statement kind of its own and
-//!   has no diagnostic; with fewer than three arguments it is an "unparsed line" error.
-//!   `addpylib` is still an `Unknown` statement with a diagnostic: making it a statement kind
-//!   needs an arm in `scaffold/inc_split.rs` `effects_of`, a file this rule does not own.)
+//!   still continues it; `hygiene/continuation` owns that finding). (`addfragments` and
+//!   `addpylib` are statement kinds of their own and have no diagnostic; with too few
+//!   arguments each is an "unparsed line" error.)
 //! - **Warning:** the `addtask` quirk that glues two `before` / `after` groups together.
 //!   BitBake accepts the line, but the resulting task name is almost certainly not meant.
 //! - **Error:** everything else, including `Unknown` statements without a diagnostic.
@@ -20,11 +18,23 @@
 //! `EXPORT_FUNCTIONS`. `ConfHandler.feeder` (BitBake master 2026-11) accepts assignments,
 //! `include`, `require`, `include_all`, `export`, `unset`, `addpylib` (base configuration)
 //! and `addfragments`, and raises "unparsed line" for anything else.
+//!
+//! `addpylib` (`StatementKind::AddPyLib`) is judged by where it is and by release
+//! (bitbake-semantics.md, "Directives"): `ConfHandler.feeder` accepts it only when
+//! `baseconfig and conffile`, that is in a file `cookerdata` parses directly with
+//! `parse_config_file` (`conf/bblayers.conf`, each layer's `conf/layer.conf`,
+//! `conf/bitbake.conf`), never in a file those include and never through `BBHandler`
+//! (recipes, classes, `.inc`). Anywhere else it is an error on every release. In the base
+//! configuration it is an error on a release without `Feature::AddPyLib` (BitBake 2.0 and
+//! 2.2 have no such pattern, and the line is "unparsed").
+
+use std::path::Path;
 
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::{ParseDiagnostic, StatementKind};
-use crate::types::FileKind;
+use crate::release::Feature;
+use crate::types::{FileKind, LineSpan};
 
 pub struct HygieneParseError;
 
@@ -35,18 +45,12 @@ pub enum Class {
     Report(Severity),
 }
 
-/// Classifies a parser diagnostic for a file of `kind` (see the module docs).
-pub fn classify(d: &ParseDiagnostic, kind: Option<FileKind>) -> Class {
+/// Classifies a parser diagnostic for a file of `kind` (see the module docs). No message
+/// depends on the kind at present; the argument is kept for callers.
+pub fn classify(d: &ParseDiagnostic, _kind: Option<FileKind>) -> Class {
     let m = d.message.as_str();
     if m.starts_with("whitespace after `\\`") {
         return Class::Skip;
-    }
-    if m.starts_with("`addpylib` ") {
-        return if kind == Some(FileKind::Conf) {
-            Class::Skip
-        } else {
-            Class::Report(Severity::Error)
-        };
     }
     if m.starts_with("addtask: `before`/`after` groups") {
         return Class::Report(Severity::Warning);
@@ -58,8 +62,6 @@ pub fn classify(d: &ParseDiagnostic, kind: Option<FileKind>) -> Class {
 fn advice(m: &str) -> &'static str {
     if m.starts_with("addtask:") {
         "write all `after` tasks in one group and all `before` tasks in another"
-    } else if m.starts_with("`addpylib`") {
-        "move `addpylib` to conf/layer.conf"
     } else if m.contains("byte order mark") {
         "save the file as UTF-8 without a BOM"
     } else if m.starts_with("indented comment") {
@@ -102,7 +104,7 @@ impl Rule for HygieneParseError {
             out.push(f);
         }
         for s in &file.statements {
-            let covered = |span: crate::types::LineSpan| {
+            let covered = |span: LineSpan| {
                 file.diagnostics
                     .iter()
                     .any(|d| d.span.start <= span.end && span.start <= d.span.end)
@@ -116,12 +118,17 @@ impl Rule for HygieneParseError {
                         "unparsed line; fix the line so BitBake can parse it, or remove it",
                     ));
                 }
+                StatementKind::AddPyLib { .. } => {
+                    if let Some(f) = self.addpylib(cx, s.span.start) {
+                        out.push(f);
+                    }
+                }
                 k if cx.kind == Some(FileKind::Conf) => {
                     if let Some(what) = recipe_only(k) {
                         out.push(helpers::finding(
                             self,
                             cx,
-                            crate::types::LineSpan::line(s.span.start),
+                            LineSpan::line(s.span.start),
                             format!(
                                 "{what} in a .conf file: BitBake's configuration parser \
                                  rejects it as an unparsed line; move it to a class or recipe \
@@ -134,6 +141,47 @@ impl Rule for HygieneParseError {
             }
         }
     }
+}
+
+impl HygieneParseError {
+    /// The finding for an `addpylib` statement on `line`, if BitBake rejects it there.
+    fn addpylib(&self, cx: &LintContext<'_>, line: u32) -> Option<Finding> {
+        let at = LineSpan::line(line);
+        if !is_base_config(cx) {
+            return Some(helpers::finding(
+                self,
+                cx,
+                at,
+                "unparsed line: BitBake accepts `addpylib` only in the base configuration \
+                 (conf/bblayers.conf, a layer's conf/layer.conf, conf/bitbake.conf), not in a \
+                 recipe, a class or a file they include; move it to conf/layer.conf",
+            ));
+        }
+        let lacking = helpers::releases_lacking(cx, Feature::AddPyLib);
+        (!lacking.is_empty()).then(|| {
+            helpers::finding(
+                self,
+                cx,
+                at,
+                format!(
+                    "unparsed line: `addpylib` is not available in {}, which this layer is \
+                     checked against (BitBake there has no such directive); remove it while \
+                     the layer claims that release",
+                    helpers::release_list(&lacking)
+                ),
+            )
+        })
+    }
+}
+
+/// Whether the file is one BitBake parses as base configuration (`cookerdata`
+/// `parse_config_file`): `conf/layer.conf`, `conf/bitbake.conf` or `conf/bblayers.conf` at
+/// the root of its layer (or of the build directory).
+fn is_base_config(cx: &LintContext<'_>) -> bool {
+    cx.kind == Some(FileKind::Conf)
+        && ["conf/layer.conf", "conf/bitbake.conf", "conf/bblayers.conf"]
+            .iter()
+            .any(|p| cx.loc.path == Path::new(p))
 }
 
 /// The statements only BitBake's recipe parser accepts.
@@ -156,7 +204,6 @@ fn recipe_only(k: &StatementKind) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::LineSpan;
 
     fn diag(m: &str) -> ParseDiagnostic {
         ParseDiagnostic {
@@ -166,8 +213,9 @@ mod tests {
     }
 
     #[test]
-    fn no_addfragments_special_case() {
-        // The parser makes `addfragments` a statement kind; no message about it is skipped.
+    fn no_addfragments_or_addpylib_special_case() {
+        // The parser makes `addfragments` and `addpylib` statement kinds; no message about
+        // them is skipped.
         assert_eq!(
             classify(&diag("`addfragments` x"), Some(FileKind::Conf)),
             Class::Report(Severity::Error)
@@ -181,10 +229,10 @@ mod tests {
         );
         assert_eq!(
             classify(
-                &diag("`addpylib` is not modelled by sous-chef"),
+                &diag("unparsed line: `addpylib` needs two arguments"),
                 Some(FileKind::Conf)
             ),
-            Class::Skip
+            Class::Report(Severity::Error)
         );
     }
 }
