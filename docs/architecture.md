@@ -765,7 +765,13 @@ Jobs and the `bitbake` tool (T5.4, `bitbake::jobs`, `mcp::tools::bitbake`): `Job
 `cancel`, `wait(id, timeout)`, `process_group`, `settle(&HandleStore)`), `JobInfo`,
 `JobSpec { op, target, program, args, kind }` (`command_line`), `JobState { Running,
 Succeeded, Failed, Cancelled }`, `Started { Started, AlreadyRunning }` (these five are
-re-exported from `bitbake`), `tail`, `tail_of`. One job of any kind runs at a time. A job's output goes to
+re-exported from `bitbake`), `tail`, `tail_of`. One job of any kind runs at a time. Since
+w10 `JobTable::start_or_queue(&BbEnv, JobSpec, dir, max_wait, tick)` waits for a running
+read-only job (`JobInfo::is_read_only`: operation `env` or `layers`) up to `max_wait`
+(`QUEUE_WAIT` = 30 s) and then starts, and returns `AlreadyRunning` at once behind any
+other job; `wait_with(id, timeout, tick)` is `wait` calling `tick` while the job runs. The
+`bitbake` tool and the authoritative `var` start through it (mcp-tools.md, `bitbake`, says
+why: a second BitBake client gives up after about 20 s). A job's output goes to
 `<cache dir>/jobs/<pid>-<n>.out`; **a finished job's output becomes a handle only when
 `settle` is next called, which the `bitbake` tool does on every call and `log` does with
 `job`.** Cancellation terminates the process group (SIGTERM, SIGKILL after `KILL_GRACE`;

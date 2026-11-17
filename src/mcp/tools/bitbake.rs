@@ -11,8 +11,9 @@
 //! [`validate_name`] before any argv is built: [`crate::bitbake::BbEnv::command`] cannot
 //! tell a target from an option.
 //!
-//! No MCP progress notifications: tool functions do not see the rmcp request context
-//! (`mcp::Server` dispatches through its own table), so the agent polls with `op: status`.
+//! One job at a time ([`crate::bitbake::jobs`], module docs): a new operation while a
+//! read-only job (`env`, `layers`) runs waits for it, up to [`QUEUE_WAIT`], then starts;
+//! while any other job runs it is refused at once with [`not_started_note`].
 
 use std::time::Duration;
 
@@ -20,7 +21,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::bitbake::env::KILL_GRACE;
-use crate::bitbake::jobs::{self, JobInfo, JobSpec, JobState, Started};
+use crate::bitbake::jobs::{self, JobInfo, JobSpec, JobState, QUEUE_WAIT, Started};
 use crate::bitbake::logs::{self, Digest, DigestInput};
 use crate::bitbake::{BbEnv, HostEnv, validate_name};
 use crate::config::Config;
@@ -159,7 +160,11 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
                     msg: format!("no bitbake environment: {reason}"),
                 },
             )?;
-            match ctx.jobs.start(&env, plan.spec, &ctx.jobs_dir())? {
+            let started = ctx
+                .jobs
+                .start_or_queue(&env, plan.spec, &ctx.jobs_dir(), QUEUE_WAIT, |_| {})
+                .await?;
+            match started {
                 Started::Started(job) => {
                     let notes = [format!(
                         "started; poll with bitbake op=status job={}, stop with op=cancel",
@@ -168,15 +173,37 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
                     report(ctx, &job, &notes, format, budget)
                 }
                 Started::AlreadyRunning(job) => {
-                    let notes = [format!(
-                        "not started: {} is already running (one job at a time); poll with \
-                         op=status job={} or stop it with op=cancel",
-                        job.id, job.id
-                    )];
-                    report(ctx, &job, &notes, format, budget)
+                    report(ctx, &job, &[not_started_note(&job)], format, budget)
                 }
             }
         }
+    }
+}
+
+/// Why nothing was started while `job` runs (module docs of [`crate::bitbake::jobs`]).
+pub fn not_started_note(job: &JobInfo) -> String {
+    let what = match &job.target {
+        Some(t) => format!("{} {t}", job.op),
+        None => job.op.clone(),
+    };
+    if job.is_read_only() {
+        format!(
+            "not started: {} ({what}) is already running (one job at a time) and did not end \
+             within {} s of waiting; poll with op=status job={} and call again once it has \
+             ended, or stop it with op=cancel",
+            job.id,
+            QUEUE_WAIT.as_secs(),
+            job.id
+        )
+    } else {
+        format!(
+            "not started: {} ({what}) is already running (one job at a time): it holds \
+             BitBake's lock on the build directory, and a second BitBake client waits for \
+             that lock and gives up after about 20 s, so sous-chef starts nothing while a \
+             build, task, clean or devtool job runs; poll with op=status job={} and call \
+             again once it has ended, or stop it with op=cancel",
+            job.id, job.id
+        )
     }
 }
 

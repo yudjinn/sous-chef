@@ -5,9 +5,11 @@
 //! it up to [`WAIT`] (about 15 s on a real environment). The job table runs one job at a
 //! time because BitBake allows one client per build directory, so:
 //!
-//! - when another job is running (a build, say), nothing is started and the tool returns an
-//!   error naming that job, unless a cached dump for the unchanged tree exists, which is
-//!   used without running anything;
+//! - when another job is running, a cached dump for the unchanged tree is used without
+//!   running anything; otherwise, behind a read-only job (another `bitbake -e`, a
+//!   `bitbake-layers`) the tool waits for it up to [`QUEUE_WAIT`] and then starts its own,
+//!   and behind a build, task, clean or devtool job it returns an error naming that job at
+//!   once ([`crate::bitbake::jobs`], module docs);
 //! - when its own job is still running after [`WAIT`], the tool returns a note with the job
 //!   id; the next call with the same recipe and an unchanged tree waits for that job
 //!   instead of starting another.
@@ -51,6 +53,7 @@ use sha2::{Digest, Sha256};
 
 use super::var::{Args, MAX_FINAL_CHARS, status_str};
 use crate::bitbake::envdump::{self, EnvOp, Export, OpKind, Variable};
+use crate::bitbake::jobs::QUEUE_WAIT;
 use crate::bitbake::{BbEnv, HostEnv, JobInfo, JobSpec, JobState, Started, validate_name};
 use crate::error::{Error, Result};
 use crate::eval::OpStatus;
@@ -630,9 +633,6 @@ async fn obtain(
         }
     }
 
-    if let Some(running) = ctx.jobs.running() {
-        return Err(busy(&running));
-    }
     let mut args = vec!["-e".to_string()];
     args.extend(recipe.map(str::to_string));
     let spec = JobSpec {
@@ -642,7 +642,11 @@ async fn obtain(
         args,
         kind: HandleKind::Env,
     };
-    let job = match ctx.jobs.start(env, spec, &ctx.jobs_dir())? {
+    let started = ctx
+        .jobs
+        .start_or_queue(env, spec, &ctx.jobs_dir(), QUEUE_WAIT, |_| {})
+        .await?;
+    let job = match started {
         Started::Started(j) => j,
         Started::AlreadyRunning(j) => return Err(busy(&j)),
     };
@@ -742,9 +746,17 @@ fn first_errors(ctx: &Ctx, handle: &Handle) -> Vec<String> {
 }
 
 fn busy(job: &JobInfo) -> Error {
+    let why = if job.is_read_only() {
+        format!(
+            "and did not end within {} s of waiting",
+            QUEUE_WAIT.as_secs()
+        )
+    } else {
+        "and holds BitBake's lock on the build directory (BitBake allows one client per build directory; a second one gives up after about 20 s)".to_string()
+    };
     Error::Invalid {
         msg: format!(
-            "cannot run bitbake -e now: {} ({}{}) is running, and BitBake allows one client per build directory; wait for it (bitbake op=status job={}) or use static mode (authoritative=false)",
+            "cannot run bitbake -e now: {} ({}{}) is running {why}; wait for it (bitbake op=status job={}) or use static mode (authoritative=false)",
             job.id,
             job.op,
             job.target

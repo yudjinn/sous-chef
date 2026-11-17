@@ -295,8 +295,9 @@ The decisions and non-goals are in [docs/overview.md](docs/overview.md).
   that a static `BBMASK` masks is indexed but is no recipe; a `.conf` / `.inc` a recipe
   installs (a data file) is not searched or linted. `item` says which applies.
 - **`authoritative: true` says it cannot run.** BitBake allows one client per build
-  directory: while a `bitbake` job runs, authoritative `var` answers only from a cached dump.
-  Wait for the job (`bitbake op=status`) or use static mode.
+  directory: while a build, task, clean or devtool job runs, authoritative `var` answers
+  only from a cached dump (behind a `bitbake -e` or `bitbake-layers` job it waits up to
+  30 s instead). Wait for the job (`bitbake op=status`) or use static mode.
 - **No annotations from the hooks.** The hooks never build the index: run `sous-chef index`
   (or use any tool) first. A file edited since the last refresh gets no Grep / Read
   annotation until the next one. Check `hook.log`, and run `claude --debug=hooks`.

@@ -264,9 +264,11 @@ instead of the static evaluator:
 - **Running.** `bitbake -e` runs as a background job (operation `env`, visible to
   `bitbake op=status` / `op=cancel`) and the tool waits up to 120 s for it (about 15 s on a
   real environment). One job runs at a time because BitBake allows one client per build
-  directory: while another job (a build) runs, the tool answers from a cached dump if the
-  tree is unchanged, and otherwise returns an error naming the running job and suggesting
-  static mode. If its own job is still running after 120 s it returns the job id; the next
+  directory (see `bitbake`): while another job runs, the tool answers from a cached dump if
+  the tree is unchanged; otherwise, behind a read-only job (`bitbake op=env`, `op=layers`,
+  another authoritative `var`) it waits for that job, up to 30 s, and then runs, and behind
+  a build, task, clean or devtool job it returns at once an error naming the running job
+  and suggesting static mode. If its own job is still running after 120 s it returns the job id; the next
   call for the same recipe waits for that job instead of starting another. A failed run is
   an error with the first `ERROR:` lines and the output's handle.
 - **Cache.** The output is stored as an `env` handle, one per recipe (and one for the
@@ -1040,8 +1042,19 @@ sourced and the program run by a wrapper that takes every name as argv; in `kas`
 command string is made only of validated words, each single-quoted.
 
 Every operation except `status` and `cancel` starts a background job and returns at once
-with `job:<n>`. One job of any kind runs at a time: a second request of any operation starts
-nothing and returns the running job with "already running". There are no MCP progress
+with `job:<n>`. One job of any kind runs at a time, because BitBake allows one client per
+build directory: a second client finds the lock taken, waits and retries, and fails with
+"Unable to connect to bitbake server, or start one" after about 20 s (BitBake
+`lib/bb/main.py`; live, a `bitbake-layers` started during a 4 s `bitbake -e` waited and
+succeeded, live-verification.md "Two clients"). So sous-chef never starts a second BitBake
+client, and what happens to a request depends on the running job:
+
+- while a read-only job runs (`env`, `layers`, or the `bitbake -e` of an authoritative
+  `var`; seconds to a minute), the request waits for it, up to 30 s, and then starts;
+- while a `build`, `task`, `clean` or `devtool` job runs (minutes to hours), the request
+  starts nothing and returns at once the running job, with "already running (one job at a
+  time)" and why; call again once `op=status` shows it ended, or `op=cancel` it;
+- a read-only job still running after the 30 s gets the same answer. There are no MCP progress
 notifications; poll with `op: status`.
 
 `status` reports `job`, `op`, `target`, `command`, `state` (`running`, `succeeded`,
