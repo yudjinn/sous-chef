@@ -17,6 +17,27 @@
 //! The walk is static, like `query::tree`: an `include` or `inherit` whose argument needs
 //! evaluation is unresolved, and the global configuration (`base.bbclass` and the `INHERIT`
 //! classes, parsed before every recipe) is not part of it.
+//!
+//! **Why this is not the replay's visit list.** `eval::evaluate` also walks the recipe
+//! (`DataStore::files`), with the live datastore. The two are kept apart because the tools
+//! show what the visit list does not record (unresolved, cycle and "already inherited" rows,
+//! the edge kind and the argument as written) and because they differ on real metadata:
+//!
+//! - an argument with a variable other than those that follow from the file's own path
+//!   (`PN`, `PV`, `BPN`, `BP`, `THISDIR`, `COREBASE`; `PN` and friends only in a `.bb` /
+//!   `.bbappend`, so not in an `.inc`) is unresolved here and followed by the replay; a
+//!   recipe that sets `PN` itself expands differently;
+//! - classes the configuration inherited (`base`, `INHERIT`) are in the replay's
+//!   `__inherit_cache`, so a recipe's `inherit base` is parsed again here and skipped there;
+//! - an `inherit_defer` inside a deferred class is dropped here and run by the replay;
+//!   classes named in `BB_DEFER_BBCLASSES` are deferred only by the replay;
+//! - lookups: here edges were resolved by the scanner along the configured `BBPATH`; the
+//!   replay resolves along `BBPATH` as the store has it at that point;
+//! - a missing `include` is a row here and silent in the replay (a missing `require` is a
+//!   `RefIssue` there); `MAX_DEPTH` stops nesting here, only a cycle stops the replay.
+//!
+//! A class inherited by both the recipe and a bbappend is parsed once by both. On the fixture
+//! recipes the two agree (`tests/eval_replay.rs`, `static_walk_and_replay_*`).
 
 use std::collections::HashSet;
 use std::path::PathBuf;
