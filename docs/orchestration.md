@@ -70,6 +70,9 @@ Notes:
   against the format in `bitbake-semantics.md`, leaves the *verify* marker in place, and says
   so.
 - T8.4 (release diff) is optional and not scheduled.
+- T8.6 (workspace audit report: one large findings report over a whole build repository
+  and its submodule layers) is not scheduled; it goes after wave 5, since it needs all of
+  M4 and T8.3.
 
 ## Agent brief (template)
 
