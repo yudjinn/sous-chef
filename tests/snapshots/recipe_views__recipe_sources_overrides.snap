@@ -1,0 +1,33 @@
+---
+source: tests/recipe_views.rs
+expression: out
+---
+entry	type	state	file	status	loc
+https://example.org/releases/hello-1.1.tar.gz	https	active	-	-	meta-core:recipes-core/hello/hello.inc:9
+file://hello.patch	file (patch)	active	meta-core:recipes-core/hello/files/qemux86/hello.patch	Upstream-Status: Backport [x]	meta-core:recipes-core/hello/hello_1.1.bb:5
+file://absent.cfg	file	active	not found (20 paths searched, below)	-	meta-core:recipes-core/hello/hello_1.1.bb:10
+file://vendor.patch	file (patch)	active	meta-vendor:recipes-core/hello/hello/vendor.patch	Upstream-Status: Inappropriate [vendor specific]	meta-vendor:recipes-core/hello/hello_%.bbappend:4
+file://mine.patch	file (patch)	active	meta-mine:recipes-core/hello/hello/mine.patch	Upstream-Status: Submitted [https://example.org/hello/pull/1]	meta-mine:recipes-core/hello/hello_1.1.bbappend:4
+file://boardx.cfg	file	inactive (override boardx not active)	meta-vendor:recipes-core/hello/hello/boardx.cfg	-	meta-vendor:recipes-core/hello/hello_%.bbappend:5
+file://absent.cfg	searched	#1	meta-mine:recipes-core/hello/hello/testdistro	missing	-
+file://absent.cfg	searched	#2	meta-vendor:recipes-core/hello/hello/testdistro	missing	-
+file://absent.cfg	searched	#3	meta-core:recipes-core/hello/hello-1.1/testdistro	missing	-
+file://absent.cfg	searched	#4	meta-core:recipes-core/hello/hello/testdistro	missing	-
+file://absent.cfg	searched	#5	meta-core:recipes-core/hello/files/testdistro	missing	-
+file://absent.cfg	searched	#6	meta-mine:recipes-core/hello/hello/qemux86	missing	-
+file://absent.cfg	searched	#7	meta-vendor:recipes-core/hello/hello/qemux86	missing	-
+file://absent.cfg	searched	#8	meta-core:recipes-core/hello/hello-1.1/qemux86	missing	-
+file://absent.cfg	searched	#9	meta-core:recipes-core/hello/hello/qemux86	missing	-
+file://absent.cfg	searched	#10	meta-core:recipes-core/hello/files/qemux86	missing	-
+file://absent.cfg	searched	#11	meta-mine:recipes-core/hello/hello/i686	missing	-
+file://absent.cfg	searched	#12	meta-vendor:recipes-core/hello/hello/i686	missing	-
+file://absent.cfg	searched	#13	meta-core:recipes-core/hello/hello-1.1/i686	missing	-
+file://absent.cfg	searched	#14	meta-core:recipes-core/hello/hello/i686	missing	-
+file://absent.cfg	searched	#15	meta-core:recipes-core/hello/files/i686	missing	-
+file://absent.cfg	searched	#16	meta-mine:recipes-core/hello/hello/	missing	-
+file://absent.cfg	searched	#17	meta-vendor:recipes-core/hello/hello/	missing	-
+file://absent.cfg	searched	#18	meta-core:recipes-core/hello/hello-1.1/	missing	-
+file://absent.cfg	searched	#19	meta-core:recipes-core/hello/hello/	missing	-
+file://absent.cfg	searched	#20	meta-core:recipes-core/hello/files/	missing	-
+note: FILESPATH is built by OE-Core's base_set_filespath (python), which is not run; the search order is reconstructed: FILESEXTRAPATHS, then the recipe's ${BP}, ${BPN} and files directories, each tried with every FILESOVERRIDES entry (last first; 3 entries) and then without
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)

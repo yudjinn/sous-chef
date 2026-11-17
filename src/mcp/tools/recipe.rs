@@ -66,6 +66,12 @@ pub enum Show {
     Tree,
     /// Every task and function across the tree.
     Outline,
+    /// Each `SRC_URI` entry: type, the file a `file://` entry resolves to, patch status.
+    Sources,
+    /// The task graph in order, each task with the pieces that compose it.
+    Tasks,
+    /// `PACKAGES`, and per package `FILES`, `RDEPENDS`, `RPROVIDES`.
+    Packages,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -74,7 +80,7 @@ pub struct Args {
     pub name: String,
     /// Default: the preferred version.
     pub version: Option<String>,
-    /// `summary` (default), `tree` or `outline`.
+    /// `summary` (default), `tree`, `outline`, `sources`, `tasks` or `packages`.
     #[serde(default)]
     pub show: Show,
     /// Output budget in tokens (default 600).
@@ -98,6 +104,18 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         )?,
         Show::Tree => tree_table(&index, &recipe)?,
         Show::Outline => outline(&index, &recipe)?,
+        Show::Sources | Show::Tasks | Show::Packages => {
+            let target = Target {
+                recipe: Some(file_label(&recipe.file)),
+                ..Target::default()
+            };
+            let ds = eval::evaluate(&index, &ctx.workspace, &target)?;
+            match args.show {
+                Show::Sources => views::sources(&ctx.workspace, &ds)?,
+                Show::Tasks => views::tasks(&index, &ds)?,
+                _ => views::packages(&ds),
+            }
+        }
     };
     if let Some(line) = render::freshness_line(&report) {
         table.note(&line);
@@ -664,4 +682,990 @@ fn outline(index: &Index, recipe: &RecipeRow) -> Result<Table> {
         ]);
     }
     Ok(t)
+}
+
+// ---- show=sources, show=tasks, show=packages (T8.3) ----
+
+/// The evaluated views: each takes the datastore of `eval::evaluate` for the chosen file
+/// (default machine and distro) and states what it does not evaluate.
+mod views {
+    use std::collections::{HashMap, HashSet};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    use regex::Regex;
+
+    use crate::error::Result;
+    use crate::eval::{DataStore, OpStatus};
+    use crate::index::Index;
+    use crate::index::query::{self, StatementFilter, StatementRow};
+    use crate::render::{self, Table};
+    use crate::types::{FileKind, LineSpan, Loc};
+    use crate::workspace::Workspace;
+
+    // ---- shared ----
+
+    /// `note: evaluated for MACHINE=.. DISTRO=..` and the warnings about anonymous python
+    /// (stronger for an opaque function) and about references the replay did not follow.
+    /// `vars` are the base names the view shows.
+    fn replay_notes(t: &mut Table, ds: &DataStore, vars: &[&str], what: &str) {
+        let machine = ds.value("MACHINE").map(|v| v.text).unwrap_or_default();
+        let distro = ds.value("DISTRO").map(|v| v.text).unwrap_or_default();
+        t.note(&format!(
+            "note: evaluated for MACHINE={machine} DISTRO={distro} (static replay of the configuration, classes, recipe and bbappends; python not run)"
+        ));
+        let notes = ds.replay();
+        let mut other = 0usize;
+        for a in &notes.anonymous {
+            let named: Vec<&str> = a
+                .sets
+                .iter()
+                .map(|s| s.split(':').next().unwrap_or(s))
+                .filter(|b| vars.contains(b))
+                .collect();
+            if a.opaque {
+                t.note(&format!(
+                    "warning: anonymous python at {} changes variables through computed names or hands d to other code; it is not run, so {what}",
+                    a.loc
+                ));
+            } else if !named.is_empty() {
+                let mut named = named;
+                named.dedup();
+                t.note(&format!(
+                    "warning: anonymous python at {} changes {}; it is not run, so the values shown are the ones before it",
+                    a.loc,
+                    named.join(", ")
+                ));
+            } else {
+                other += 1;
+            }
+        }
+        if other > 0 {
+            let functions = if other == 1 {
+                "function was"
+            } else {
+                "functions were"
+            };
+            if vars.is_empty() {
+                t.note(&format!(
+                    "warning: {other} anonymous python {functions} not run, so {what}"
+                ));
+            } else {
+                t.note(&format!(
+                    "note: {other} anonymous python {functions} not run (none changes {} by name)",
+                    vars.join(", ")
+                ));
+            }
+        }
+        if !notes.references.is_empty() {
+            let n = notes.references.len();
+            t.note(&format!(
+                "note: {n} include/inherit {} not followed (python, undefined variables or missing files); values from those files are missing",
+                if n == 1 { "reference was" } else { "references were" }
+            ));
+        }
+    }
+
+    /// The words of a value; a `${...}` (python included) stays inside one word.
+    pub(super) fn split_words(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur = String::new();
+        let mut depth = 0usize;
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '$' && chars.peek() == Some(&'{') {
+                chars.next();
+                depth += 1;
+                cur.push_str("${");
+                continue;
+            }
+            if depth > 0 {
+                match c {
+                    '{' => depth += 1,
+                    '}' => depth -= 1,
+                    _ => {}
+                }
+                cur.push(c);
+                continue;
+            }
+            if c.is_whitespace() {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            } else {
+                cur.push(c);
+            }
+        }
+        if !cur.is_empty() {
+            out.push(cur);
+        }
+        out
+    }
+
+    /// The applied operations on `name` (no flag), in parse order.
+    fn applied_locs(ds: &DataStore, name: &str) -> Vec<Loc> {
+        ds.history(name)
+            .into_iter()
+            .filter(|(op, st)| *st == OpStatus::Applied && op.var.flag.is_none())
+            .map(|(op, _)| op.loc)
+            .collect()
+    }
+
+    fn locs_cell(locs: &[Loc]) -> String {
+        if locs.is_empty() {
+            "-".into()
+        } else {
+            locs.iter()
+                .map(Loc::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    }
+
+    /// `layer:path` for an absolute path in the workspace (a trailing `/` kept), else the
+    /// path as it is.
+    fn shown_path(ws: &Workspace, p: &str) -> String {
+        let slash = if p.ends_with('/') { "/" } else { "" };
+        match ws.loc_for(Path::new(p), LineSpan::line(1)) {
+            Some(l) if l.path.as_os_str().is_empty() => format!("{}:{slash}", l.layer),
+            Some(l) => format!("{}:{}{slash}", l.layer, l.path.display()),
+            None => p.to_string(),
+        }
+    }
+
+    // ---- sources ----
+
+    /// One `SRC_URI` word: scheme, the path part (before the first `;`) and parameters.
+    struct Uri {
+        scheme: String,
+        path: String,
+        params: Vec<(String, String)>,
+    }
+
+    /// `bb.fetch.decodeurl` for what this view needs: `scheme://location;k=v;...`. For
+    /// `file://a/b` the path is `a/b` (relative, searched along `FILESPATH`); for
+    /// `file:///a/b` it is `/a/b`.
+    fn parse_uri(word: &str) -> Option<Uri> {
+        let (scheme, rest) = word.split_once("://")?;
+        let mut parts = rest.split(';');
+        let path = parts.next().unwrap_or("").to_string();
+        let params = parts
+            .filter(|p| !p.is_empty())
+            .map(|p| match p.split_once('=') {
+                Some((k, v)) => (k.to_string(), v.to_string()),
+                None => (p.to_string(), String::new()),
+            })
+            .collect();
+        Some(Uri {
+            scheme: scheme.to_string(),
+            path,
+            params,
+        })
+    }
+
+    impl Uri {
+        fn param(&self, key: &str) -> Option<&str> {
+            self.params
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.as_str())
+        }
+
+        /// OE-Core `oe.patch.patch_path`: `apply=` decides when given (`oe.types.boolean`);
+        /// otherwise the extension, after a `.gz` / `.bz2` / `.xz` / `.Z`, is `.patch` or
+        /// `.diff`. (A `file://` entry that is a directory is never a patch; the caller
+        /// checks that.)
+        fn is_patch(&self) -> bool {
+            if let Some(v) = self.param("apply") {
+                return matches!(v.to_lowercase().as_str(), "yes" | "y" | "true" | "t" | "1");
+            }
+            let base = self.path.rsplit('/').next().unwrap_or(&self.path);
+            let base = [".gz", ".bz2", ".xz", ".Z"]
+                .iter()
+                .find_map(|c| base.strip_suffix(c))
+                .unwrap_or(base);
+            base.ends_with(".patch") || base.ends_with(".diff")
+        }
+
+        fn compressed(&self) -> bool {
+            [".gz", ".bz2", ".xz", ".Z"]
+                .iter()
+                .any(|c| self.path.ends_with(c))
+        }
+    }
+
+    /// The `FILESPATH` search list and how it was obtained.
+    struct SearchPath {
+        dirs: Vec<String>,
+        reconstructed: bool,
+        python: bool,
+    }
+
+    /// The arguments of OE-Core's `base_set_filespath([...], d)` in the expanded
+    /// `FILESPATH` text: the quoted strings inside the list.
+    fn filespath_args(text: &str) -> Option<Vec<String>> {
+        let start = text.find("base_set_filespath(")? + "base_set_filespath(".len();
+        let rest = &text[start..];
+        let open = rest.find('[')?;
+        let close = rest.find(']')?;
+        let list = rest.get(open + 1..close)?;
+        let re = Regex::new(r#""([^"]*)"|'([^']*)'"#).ok()?;
+        let out: Vec<String> = re
+            .captures_iter(list)
+            .filter_map(|c| {
+                c.get(1)
+                    .or_else(|| c.get(2))
+                    .map(|m| m.as_str().to_string())
+            })
+            .collect();
+        (!out.is_empty()).then_some(out)
+    }
+
+    /// `FILESPATH` as OE-Core's `oe.utils.base_set_filespath(path, d)` builds it: the
+    /// `FILESEXTRAPATHS` entries (with `__default:` removed) before `path`, and for every
+    /// override of `":" + FILESOVERRIDES`, last override first and the empty override last,
+    /// each entry of that list joined with the override (`os.path.join(p, o)`), empty
+    /// entries skipped. A `FILESPATH` without python is used as it is.
+    fn search_path(ds: &DataStore) -> Option<SearchPath> {
+        let fp = ds.value("FILESPATH")?;
+        if !fp.unevaluated_python {
+            return Some(SearchPath {
+                dirs: fp
+                    .text
+                    .split(':')
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+                reconstructed: false,
+                python: false,
+            });
+        }
+        let dir = ds.value("FILE_DIRNAME").map(|v| v.text).unwrap_or_default();
+        let base = filespath_args(&fp.text).unwrap_or_else(|| {
+            ["${BP}", "${BPN}", "files"]
+                .iter()
+                .map(|d| format!("{dir}/{}", ds.expand(d).text))
+                .collect()
+        });
+        let extra = ds.value("FILESEXTRAPATHS");
+        let overrides = ds.value("FILESOVERRIDES");
+        let python = extra.as_ref().is_some_and(|v| v.unevaluated_python)
+            || overrides.as_ref().is_some_and(|v| v.unevaluated_python)
+            || base.iter().any(|b| b.contains("${@"));
+        let extra = extra
+            .map(|v| v.text)
+            .unwrap_or_default()
+            .replace("__default:", "");
+        let mut path: Vec<String> = Vec::new();
+        if !extra.is_empty() {
+            path.extend(extra.split(':').map(str::to_string));
+        }
+        path.extend(base);
+        let mut ovr: Vec<String> = format!(":{}", overrides.map(|v| v.text).unwrap_or_default())
+            .split(':')
+            .map(str::to_string)
+            .collect();
+        ovr.reverse();
+        let mut dirs = Vec::new();
+        for o in &ovr {
+            for p in path.iter().filter(|p| !p.is_empty()) {
+                dirs.push(if o.is_empty() {
+                    format!("{}/", p.trim_end_matches('/'))
+                } else {
+                    format!("{}/{o}", p.trim_end_matches('/'))
+                });
+            }
+        }
+        Some(SearchPath {
+            dirs,
+            reconstructed: true,
+            python,
+        })
+    }
+
+    enum Found {
+        File(PathBuf),
+        Dir(PathBuf),
+        Missing,
+    }
+
+    /// `bb.utils.which(FILESPATH, path)`: the first `<dir>/<path>` that exists
+    /// (`os.path.exists`, so a directory counts); an absolute path is used as it is. Every
+    /// probe goes through `Workspace::confine`; candidates outside the workspace are
+    /// counted in `outside` and not probed.
+    fn find(ws: &Workspace, sp: &SearchPath, rel: &str, outside: &mut usize) -> Found {
+        let probe = |p: &Path, outside: &mut usize| -> Option<Found> {
+            match ws.confine(p) {
+                Ok(c) if c.is_dir() => Some(Found::Dir(p.to_path_buf())),
+                Ok(c) if c.exists() => Some(Found::File(p.to_path_buf())),
+                Ok(_) => None,
+                Err(_) => {
+                    *outside += 1;
+                    None
+                }
+            }
+        };
+        if rel.starts_with('/') {
+            return probe(Path::new(rel), outside).unwrap_or(Found::Missing);
+        }
+        for d in &sp.dirs {
+            let cand = Path::new(d).join(rel);
+            if let Some(f) = probe(&cand, outside) {
+                return f;
+            }
+        }
+        Found::Missing
+    }
+
+    /// OE-Core `oe.qa.check_upstream_status`: the strict header line, else a line that
+    /// looks like one (malformed), else missing. Read through `Workspace::confine`.
+    fn upstream_status(ws: &Workspace, path: &Path) -> String {
+        let Ok(p) = ws.confine(path) else {
+            return "not read (outside the workspace)".into();
+        };
+        let Ok(bytes) = fs::read(&p) else {
+            return "not read".into();
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        let strict = Regex::new(
+            r"(?m)^Upstream-Status: (Pending|Submitted|Denied|Inappropriate|Backport|Inactive-Upstream)( .+)?$",
+        );
+        let kinda = Regex::new(r"(?im)^.*upstream.*status.*$");
+        if let Ok(re) = strict
+            && let Some(m) = re.find(&text)
+        {
+            return render::snippet(m.as_str().trim_end_matches('\r'));
+        }
+        if let Ok(re) = kinda
+            && let Some(m) = re.find(&text)
+        {
+            return format!(
+                "malformed: {}",
+                render::snippet(m.as_str().trim_end_matches('\r'))
+            );
+        }
+        "missing Upstream-Status".into()
+    }
+
+    /// One `SRC_URI` word with the operation it came from and its state.
+    struct Entry {
+        word: String,
+        state: String,
+        loc: Option<Loc>,
+    }
+
+    /// The override condition of an operation (`append:boardx` -> `boardx`).
+    fn condition(overrides: &[String]) -> String {
+        overrides
+            .iter()
+            .filter(|o| !matches!(o.as_str(), "append" | "prepend" | "remove"))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(":")
+    }
+
+    /// The final words of `SRC_URI`, each attributed to the first applied operation (in
+    /// parse order) whose expanded value has it and has not given it already; then the
+    /// words of inactive and removed operations.
+    fn entries(ds: &DataStore) -> (Vec<Entry>, bool, usize) {
+        let value = ds.value("SRC_URI");
+        let python = value.as_ref().is_some_and(|v| v.unevaluated_python);
+        let words = value.map(|v| split_words(&v.text)).unwrap_or_default();
+        let history: Vec<_> = ds
+            .history("SRC_URI")
+            .into_iter()
+            .filter(|(op, _)| op.var.flag.is_none())
+            .collect();
+        let mut pool: Vec<(Loc, Vec<String>)> = history
+            .iter()
+            .filter(|(_, st)| *st == OpStatus::Applied)
+            .map(|(op, _)| (op.loc.clone(), split_words(&ds.expand(&op.value).text)))
+            .collect();
+        let mut out = Vec::new();
+        for w in words {
+            let loc = pool.iter_mut().find_map(|(l, ws)| {
+                let i = ws.iter().position(|x| *x == w)?;
+                ws.remove(i);
+                Some(l.clone())
+            });
+            out.push(Entry {
+                word: w,
+                state: "active".into(),
+                loc,
+            });
+        }
+        let mut shadowed = 0;
+        for (op, st) in &history {
+            let state = match st {
+                OpStatus::InactiveOverride => {
+                    let c = condition(&op.var.overrides);
+                    if op.var.legacy_syntax {
+                        "inactive (legacy _ syntax)".to_string()
+                    } else {
+                        format!("inactive (override {c} not active)")
+                    }
+                }
+                OpStatus::Removed => "removed by :remove".to_string(),
+                OpStatus::Shadowed => {
+                    shadowed += 1;
+                    continue;
+                }
+                OpStatus::Applied => continue,
+            };
+            for w in split_words(&ds.expand(&op.value).text) {
+                out.push(Entry {
+                    word: w,
+                    state: state.clone(),
+                    loc: Some(op.loc.clone()),
+                });
+            }
+        }
+        (out, python, shadowed)
+    }
+
+    pub fn sources(ws: &Workspace, ds: &DataStore) -> Result<Table> {
+        let mut t = Table::new(&["entry", "type", "state", "file", "status", "loc"]);
+        let (entries, python, shadowed) = entries(ds);
+        let sp = search_path(ds);
+        let mut outside = 0usize;
+        let mut missing: Vec<String> = Vec::new();
+        let mut any_file = false;
+        let mut python_words = 0usize;
+        for e in &entries {
+            let loc = e.loc.as_ref().map_or("-".into(), Loc::to_string);
+            if e.word.contains("${@") {
+                python_words += 1;
+                t.row(&[
+                    &render::snippet(&e.word),
+                    "-",
+                    &format!("{} (depends on python, not evaluated)", e.state),
+                    "-",
+                    "-",
+                    &loc,
+                ]);
+                continue;
+            }
+            let Some(uri) = parse_uri(&e.word) else {
+                t.row(&[
+                    &render::snippet(&e.word),
+                    "-",
+                    &format!("{} (not a URL)", e.state),
+                    "-",
+                    "-",
+                    &loc,
+                ]);
+                continue;
+            };
+            let mut kind = uri.scheme.clone();
+            let mut file = "-".to_string();
+            let mut status = "-".to_string();
+            let mut patch = uri.is_patch();
+            if uri.scheme == "file" {
+                any_file = true;
+                match &sp {
+                    None => file = "not searched (FILESPATH is not set)".into(),
+                    Some(sp) => match find(ws, sp, &uri.path, &mut outside) {
+                        Found::File(p) => {
+                            file = shown_path(ws, &p.display().to_string());
+                            if patch {
+                                status = if uri.compressed() {
+                                    "not read (compressed)".into()
+                                } else {
+                                    upstream_status(ws, &p)
+                                };
+                            }
+                        }
+                        Found::Dir(p) => {
+                            patch = false;
+                            file =
+                                format!("{} (directory)", shown_path(ws, &p.display().to_string()));
+                        }
+                        Found::Missing => {
+                            file = if uri.path.starts_with('/') {
+                                "not found".into()
+                            } else {
+                                format!("not found ({} paths searched, below)", sp.dirs.len())
+                            };
+                            if e.state == "active" && !uri.path.starts_with('/') {
+                                missing.push(uri.path.clone());
+                            }
+                        }
+                    },
+                }
+            } else if patch {
+                status = "not read (remote)".into();
+            }
+            if patch {
+                kind.push_str(" (patch)");
+            }
+            t.row(&[
+                &render::snippet(&e.word),
+                &kind,
+                &e.state,
+                &file,
+                &status,
+                &loc,
+            ]);
+        }
+        // The search order for each active file:// entry that was not found.
+        if let Some(sp) = &sp {
+            for m in &missing {
+                for (i, d) in sp.dirs.iter().enumerate() {
+                    t.row(&[
+                        &format!("file://{m}"),
+                        "searched",
+                        &format!("#{}", i + 1),
+                        &shown_path(ws, d),
+                        "missing",
+                        "-",
+                    ]);
+                }
+            }
+        }
+        if t.is_empty() {
+            t.note("note: SRC_URI is empty or not set");
+        }
+        if any_file && let Some(sp) = &sp {
+            if sp.reconstructed {
+                let n = ds
+                    .value("FILESOVERRIDES")
+                    .map(|v| v.text.split(':').filter(|s| !s.is_empty()).count())
+                    .unwrap_or(0);
+                t.note(&format!(
+                    "note: FILESPATH is built by OE-Core's base_set_filespath (python), which is not run; the search order is reconstructed: FILESEXTRAPATHS, then the recipe's ${{BP}}, ${{BPN}} and files directories, each tried with every FILESOVERRIDES entry (last first; {n} {}) and then without",
+                    if n == 1 { "entry" } else { "entries" }
+                ));
+                if n == 0 {
+                    t.note("note: FILESOVERRIDES is empty or not set, so no override subdirectory is searched; \":\" + \"\" splits into two empty overrides, so each directory is searched twice, as in OE-Core");
+                }
+            }
+            if sp.python {
+                t.note("warning: FILESEXTRAPATHS or FILESOVERRIDES depends on python, which is not evaluated; the search order may be wrong");
+            }
+        }
+        if outside > 0 {
+            t.note(&format!(
+                "note: {outside} search {} outside the workspace and not checked",
+                if outside == 1 { "path is" } else { "paths are" }
+            ));
+        }
+        if shadowed > 0 {
+            t.note(&format!(
+                "note: {shadowed} shadowed SRC_URI {} not shown; use var SRC_URI",
+                if shadowed == 1 {
+                    "operation is"
+                } else {
+                    "operations are"
+                }
+            ));
+        }
+        if python || python_words > 0 {
+            t.note(&render::python_note(python_words.max(1)).unwrap_or_default());
+        }
+        replay_notes(
+            &mut t,
+            ds,
+            &["SRC_URI", "FILESEXTRAPATHS", "FILESOVERRIDES"],
+            "the sources may differ",
+        );
+        Ok(t)
+    }
+
+    // ---- tasks ----
+
+    enum Event {
+        Add {
+            name: String,
+            before: Vec<String>,
+            after: Vec<String>,
+            loc: Loc,
+        },
+        Del {
+            names: String,
+            loc: Loc,
+        },
+    }
+
+    /// `bb.build.ensure_task_prefix`.
+    fn prefixed(name: &str) -> String {
+        if name.starts_with("do_") {
+            name.to_string()
+        } else {
+            format!("do_{name}")
+        }
+    }
+
+    /// The `addtask` / `deltask` statements of the evaluated recipe in parse order: the
+    /// files the replay visited (`DataStore::files`), each file's statements in line order,
+    /// with an included or inherited file's statements at the `include` / `inherit` that
+    /// pulled it in. bbappends, `INHERIT` classes and deferred inherits are not nested:
+    /// they are parsed after the file that names them.
+    fn task_events(index: &Index, ds: &DataStore) -> Result<Vec<Event>> {
+        let visits = ds.files();
+        let mut ids: Vec<Option<i64>> = Vec::with_capacity(visits.len());
+        let mut stmts: HashMap<i64, Vec<StatementRow>> = HashMap::new();
+        for v in visits {
+            let id = query::file_for_loc(index, &v.loc)?.map(|f| f.id);
+            if let Some(id) = id
+                && !stmts.contains_key(&id)
+            {
+                stmts.insert(
+                    id,
+                    query::statements_in(index, id, &StatementFilter::default())?,
+                );
+            }
+            ids.push(id);
+        }
+        // parent[j] = (i, line): visit j is parsed at line `line` of visit i.
+        let mut children: HashMap<usize, Vec<(u32, usize)>> = HashMap::new();
+        let mut top: Vec<usize> = Vec::new();
+        for (j, v) in visits.iter().enumerate() {
+            let parent = match (v.kind, v.via.last()) {
+                (FileKind::Append, _) | (_, None) => None,
+                (_, Some(at)) => (0..j).rev().find_map(|i| {
+                    let p = &visits[i].loc;
+                    if p.layer != at.layer || p.path != at.path {
+                        return None;
+                    }
+                    let line = at.lines.start;
+                    let nested = ids[i].and_then(|id| stmts.get(&id)).is_some_and(|ss| {
+                        ss.iter().any(|s| {
+                            s.loc.lines.start == line
+                                && (s.kind == "include"
+                                    || (s.kind == "inherit"
+                                        && s.op.as_deref() != Some("inherit_defer")))
+                        })
+                    });
+                    nested.then_some((i, line))
+                }),
+            };
+            match parent {
+                Some((i, line)) => children.entry(i).or_default().push((line, j)),
+                None => top.push(j),
+            }
+        }
+        let mut out = Vec::new();
+        let mut tasks: HashMap<i64, Vec<query::TaskRow>> = HashMap::new();
+        for id in ids.iter().flatten() {
+            if !tasks.contains_key(id) {
+                tasks.insert(*id, query::tasks_in(index, *id)?);
+            }
+        }
+        let mut stack: Vec<usize> = top.into_iter().rev().collect();
+        // Depth-first, children at their line: an explicit work list of visits and events.
+        enum Item {
+            Visit(usize),
+            Event(Event),
+        }
+        let mut work: Vec<Item> = stack.drain(..).map(Item::Visit).collect();
+        while let Some(item) = work.pop() {
+            let i = match item {
+                Item::Event(e) => {
+                    out.push(e);
+                    continue;
+                }
+                Item::Visit(i) => i,
+            };
+            let Some(id) = ids[i] else { continue };
+            let file = &visits[i].loc;
+            let at = |line: u32| Loc {
+                layer: file.layer.clone(),
+                path: file.path.clone(),
+                lines: LineSpan::line(line),
+            };
+            // (line, rank, item): statements before a child pulled in at the same line.
+            let mut here: Vec<(u32, usize, Item)> = Vec::new();
+            for t in tasks.get(&id).into_iter().flatten() {
+                here.push((
+                    t.line,
+                    0,
+                    Item::Event(Event::Add {
+                        name: t.name.clone(),
+                        before: t.before.clone(),
+                        after: t.after.clone(),
+                        loc: at(t.line),
+                    }),
+                ));
+            }
+            for s in stmts.get(&id).into_iter().flatten() {
+                if s.kind == "deltask" {
+                    here.push((
+                        s.loc.lines.start,
+                        0,
+                        Item::Event(Event::Del {
+                            names: s.name.clone().unwrap_or_default(),
+                            loc: s.loc.clone(),
+                        }),
+                    ));
+                }
+            }
+            for (line, j) in children.get(&i).into_iter().flatten() {
+                here.push((*line, 1 + *j, Item::Visit(*j)));
+            }
+            here.sort_by_key(|(l, r, _)| (*l, *r));
+            for (_, _, item) in here.into_iter().rev() {
+                work.push(item);
+            }
+        }
+        Ok(out)
+    }
+
+    /// The pieces of a task's function as pointers; an `EXPORT_FUNCTIONS` stub also names
+    /// the pieces of the function it calls.
+    fn pieces(ds: &DataStore, task: &str) -> String {
+        if !ds.is_function(task) {
+            return "-".into();
+        }
+        let Some(ps) = ds.function(task) else {
+            return "-".into();
+        };
+        if ps.is_empty() {
+            return "-".into();
+        }
+        ps.iter()
+            .map(|p| match &p.calls {
+                Some(c) => {
+                    let inner = ds
+                        .function(c)
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|q| q.loc.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if inner.is_empty() {
+                        format!("{} -> {c}", p.loc)
+                    } else {
+                        format!("{} -> {c} ({inner})", p.loc)
+                    }
+                }
+                None => p.loc.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    pub fn tasks(index: &Index, ds: &DataStore) -> Result<Table> {
+        let mut t = Table::new(&["task", "state", "after", "pieces", "loc"]);
+        // bb.build.addtask / deltask over __BBTASKS and the deps flags.
+        let mut order: Vec<String> = Vec::new();
+        let mut deps: HashMap<String, Vec<String>> = HashMap::new();
+        let mut added: HashMap<String, Vec<Loc>> = HashMap::new();
+        let mut deleted: Vec<(String, Loc)> = Vec::new();
+        for e in task_events(index, ds)? {
+            match e {
+                Event::Add {
+                    name,
+                    before,
+                    after,
+                    loc,
+                } => {
+                    let task = prefixed(&name);
+                    if !order.contains(&task) {
+                        order.push(task.clone());
+                    }
+                    deleted.retain(|(d, _)| *d != task);
+                    added.entry(task.clone()).or_default().push(loc);
+                    let existing = deps.entry(task.clone()).or_default();
+                    for a in &after {
+                        let a = prefixed(a);
+                        if !existing.contains(&a) {
+                            existing.push(a);
+                        }
+                    }
+                    for b in &before {
+                        let b = prefixed(b);
+                        let e = deps.entry(b).or_default();
+                        if !e.contains(&task) {
+                            e.insert(0, task.clone());
+                        }
+                    }
+                }
+                Event::Del { names, loc } => {
+                    for n in ds.expand(&names).text.split_whitespace() {
+                        let task = prefixed(n);
+                        if let Some(i) = order.iter().position(|x| *x == task) {
+                            order.remove(i);
+                        }
+                        deps.remove(&task);
+                        for d in deps.values_mut() {
+                            d.retain(|x| *x != task);
+                        }
+                        deleted.push((task, loc.clone()));
+                    }
+                }
+            }
+        }
+        // Dependencies first, ties in __BBTASKS order (Kahn).
+        let tasks: HashSet<&String> = order.iter().collect();
+        let mut done: HashSet<String> = HashSet::new();
+        let mut sorted: Vec<String> = Vec::new();
+        while sorted.len() < order.len() {
+            let next = order.iter().find(|x| {
+                !done.contains(*x)
+                    && deps
+                        .get(*x)
+                        .into_iter()
+                        .flatten()
+                        .all(|d| done.contains(d) || !tasks.contains(d))
+            });
+            let Some(next) = next.or_else(|| order.iter().find(|x| !done.contains(*x))) else {
+                break;
+            };
+            done.insert(next.clone());
+            sorted.push(next.clone());
+        }
+        let mut unknown = 0usize;
+        for task in &sorted {
+            let after: Vec<String> = deps
+                .get(task)
+                .into_iter()
+                .flatten()
+                .map(|d| {
+                    if tasks.contains(d) {
+                        d.clone()
+                    } else {
+                        unknown += 1;
+                        format!("{d} (no such task)")
+                    }
+                })
+                .collect();
+            let state = if ds
+                .flag(task, "noexec")
+                .is_some_and(|v| v.text.trim() == "1")
+            {
+                "noexec"
+            } else {
+                "-"
+            };
+            let locs = added.get(task).cloned().unwrap_or_default();
+            let loc = match locs.split_first() {
+                Some((first, [])) => first.to_string(),
+                Some((first, rest)) => format!("{first} (+{} more addtask)", rest.len()),
+                None => "-".into(),
+            };
+            t.row(&[
+                task,
+                state,
+                &if after.is_empty() {
+                    "-".to_string()
+                } else {
+                    after.join(" ")
+                },
+                &pieces(ds, task),
+                &loc,
+            ]);
+        }
+        for (task, loc) in &deleted {
+            t.row(&[task, "deleted", "-", "-", &loc.to_string()]);
+        }
+        t.note("note: order from the addtask / deltask statements in parse order (the index: configuration classes, recipe, includes and classes, bbappends, deferred inherits; the replay does not run them); dependencies first");
+        t.note("note: not accounted for: tasks added or deleted by anonymous python (bb.build.addtask / deltask), do_x[deps] set directly, and dependencies on other recipes' tasks ([depends], [deptask], [rdeptask], [recrdeptask])");
+        for task in &sorted {
+            if let Some((op, _)) = ds.flag_history(task, "deps").into_iter().last() {
+                t.note(&format!(
+                    "warning: {task}[deps] is assigned at {}; the after column does not include it",
+                    op.loc
+                ));
+            }
+        }
+        if unknown > 0 {
+            t.note("note: (no such task): a dependency named in addtask that no addtask adds; BitBake ignores it");
+        }
+        replay_notes(
+            &mut t,
+            ds,
+            &[],
+            "the tasks may differ (anonymous python may add or delete tasks)",
+        );
+        Ok(t)
+    }
+
+    // ---- packages ----
+
+    pub fn packages(ds: &DataStore) -> Table {
+        let mut t = Table::new(&["package", "var", "value", "loc"]);
+        let mut python = 0usize;
+        let shown = |v: Option<crate::eval::Value>, python: &mut usize| -> String {
+            match v {
+                None => "(not set)".into(),
+                Some(v) => {
+                    let mut s = render::truncate_value(v.text.trim(), 200, None);
+                    if s.is_empty() {
+                        s = "(empty)".into();
+                    }
+                    if v.unevaluated_python {
+                        *python += 1;
+                        s.push_str(" (depends on python, not evaluated)");
+                    }
+                    s
+                }
+            }
+        };
+        let packages = ds.value("PACKAGES");
+        let words = packages
+            .as_ref()
+            .map(|v| split_words(&v.text))
+            .unwrap_or_default();
+        let value = shown(packages, &mut python);
+        t.row(&[
+            "-",
+            "PACKAGES",
+            &value,
+            &locs_cell(&applied_locs(ds, "PACKAGES")),
+        ]);
+        let dynamic = ds.value("PACKAGES_DYNAMIC");
+        let has_dynamic = dynamic.as_ref().is_some_and(|v| !v.text.trim().is_empty());
+        if has_dynamic {
+            let value = shown(dynamic, &mut python);
+            t.row(&[
+                "-",
+                "PACKAGES_DYNAMIC",
+                &value,
+                &locs_cell(&applied_locs(ds, "PACKAGES_DYNAMIC")),
+            ]);
+        }
+        let mut skipped = 0usize;
+        for pkg in &words {
+            if pkg.contains("${") {
+                skipped += 1;
+                continue;
+            }
+            for var in ["FILES", "RDEPENDS", "RPROVIDES"] {
+                let name = format!("{var}:{pkg}");
+                let v = ds.value(&name);
+                if v.is_none() && var != "FILES" {
+                    continue;
+                }
+                let value = shown(v, &mut python);
+                t.row(&[pkg, var, &value, &locs_cell(&applied_locs(ds, &name))]);
+            }
+        }
+        t.note("note: values of the evaluated datastore (PACKAGES and FILES defaults come from bitbake.conf); RDEPENDS and RPROVIDES rows only where set");
+        t.note("note: not included: what OE-Core adds while packaging (do_package: shared-library and pkg-config dependencies, packages split by python such as do_split_packages) and the RDEPENDS:${PN} that base.bbclass adds for PACKAGECONFIG with anonymous python (see deps kind=runtime)");
+        if has_dynamic {
+            t.note("note: PACKAGES_DYNAMIC names packages created by python during do_package; they are not listed");
+        }
+        if skipped > 0 {
+            t.note(&format!(
+                "note: {skipped} PACKAGES {} not expanded (python or an unresolved reference) and not shown",
+                if skipped == 1 { "word is" } else { "words are" }
+            ));
+        }
+        if let Some(n) = render::python_note(python) {
+            t.note(&n);
+        }
+        replay_notes(
+            &mut t,
+            ds,
+            &[
+                "PACKAGES",
+                "PACKAGES_DYNAMIC",
+                "FILES",
+                "RDEPENDS",
+                "RPROVIDES",
+            ],
+            "the packages may differ",
+        );
+        t
+    }
 }

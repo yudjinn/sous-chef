@@ -531,6 +531,48 @@ pub fn depends_on(index: &Index, target: &str) -> Result<Vec<DependRow>> {
     })
 }
 
+// ---- tasks (added by T8.3) ----
+
+/// One row of the `tasks` table: one task name of an `addtask` statement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TaskRow {
+    pub file_id: i64,
+    /// As written (no `do_` prefix added).
+    pub name: String,
+    /// The `before` names as the parser split them, as written.
+    pub before: Vec<String>,
+    /// The `after` names, as written.
+    pub after: Vec<String>,
+    /// Line of the `addtask` statement.
+    pub line: u32,
+}
+
+/// The `addtask` rows of one file, in file order (line, then the order of the names in the
+/// statement). `deltask` statements are in `statements` (kind `deltask`).
+pub fn tasks_in(index: &Index, file: i64) -> Result<Vec<TaskRow>> {
+    let words = |s: Option<String>| -> Vec<String> {
+        s.unwrap_or_default()
+            .split_whitespace()
+            .map(str::to_string)
+            .collect()
+    };
+    collect(
+        index,
+        "SELECT file_id, name, before, after, line FROM tasks WHERE file_id = ?1 \
+         ORDER BY line, rowid",
+        &[&file],
+        |r| {
+            Ok(TaskRow {
+                file_id: r.get(0)?,
+                name: r.get(1)?,
+                before: words(r.get(2)?),
+                after: words(r.get(3)?),
+                line: r.get::<_, Option<u32>>(4)?.unwrap_or(0),
+            })
+        },
+    )
+}
+
 // ---- statements ----
 
 fn filter_sql(filter: &StatementFilter, sql: &mut String, params: &mut Vec<Box<dyn ToSql>>) {

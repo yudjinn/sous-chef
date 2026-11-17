@@ -28,7 +28,7 @@ Resolve a recipe and show its shape.
 |---|---|---|
 | `name` | string | required: a `pn`, a `pn_pv`, or a pointer to a `.bb` or a `.bbappend` (a bbappend pointer means the recipe it applies to) |
 | `version` | string? | default: the version BitBake would use (provider selection for the default machine and distro); `%` matches any rest |
-| `show` | `"summary"` \| `"tree"` \| `"outline"` | default `summary` |
+| `show` | `"summary"` \| `"tree"` \| `"outline"` \| `"sources"` \| `"tasks"` \| `"packages"` | default `summary` |
 
 An unknown version is an error listing the versions that exist. A `pn_pv` together with a
 different `version` is an error. A bbappend that applies to several recipes is an error
@@ -54,6 +54,94 @@ listing them.
 - `outline`: every function and task statement across that tree: `name kind file_kind loc`.
   `kind` is `shell`, `python`, `fakeroot shell`, `def`, `addtask`, `deltask` or
   `addhandler`; anonymous python is named `__anonymous`.
+
+`sources`, `tasks` and `packages` are evaluated (`eval::evaluate` of the chosen file for
+the default machine and distro). Each ends with a note naming the machine and distro and
+the warnings about anonymous python that every evaluated view gives (stronger for one that
+changes variables through computed names).
+
+- `sources`: rows `entry type state file status loc`, one per word of the evaluated
+  `SRC_URI` (`state` `active`) with the operation that contributed it (`loc`, whose layer
+  is the contributing layer), then the words of inactive operations
+  (`inactive (override boardx not active)`) and of operations whose words were all removed
+  (`removed by :remove`). `type` is the URL scheme, with ` (patch)` for a patch as OE-Core
+  decides it (`apply=` parameter, else a `.patch` / `.diff` extension). A `file://` entry's
+  `file` is the first existing `<dir>/<path>` along `FILESPATH` (a directory is marked and is
+  never a patch); `status` is a local patch's `Upstream-Status` header as OE-Core's QA
+  check reads it (`malformed: <line>` or `missing Upstream-Status` otherwise). An active
+  entry that is not found is followed by its search order, one `searched` row per
+  directory. `FILESPATH` is python in OE-Core (`base_set_filespath`), which is not run: the
+  search order is reconstructed (see "Files and patches" in bitbake-semantics.md) and a
+  note says so. Files are read through the confinement check.
+- `tasks`: rows `task state after pieces loc`: the tasks of the recipe, dependencies first
+  (ties in the order they were added), from the `addtask` / `deltask` statements of the
+  configuration's classes, the recipe, its includes and classes and its bbappends, in parse
+  order (read from the index; the replay does not run them). `after` is the task's
+  dependencies as `addtask ... after` and `before` leave them; `pieces` the composed
+  function as pointers, an `EXPORT_FUNCTIONS` stub followed by the class function it calls
+  and that function's pieces; `state` `noexec` (the flag) or `deleted` (with the `deltask`
+  as `loc`); `loc` the `addtask`. Not accounted for, and said so in a note: tasks added or
+  deleted by anonymous python, `do_x[deps]` set directly (a warning names any such
+  assignment) and dependencies on other recipes' tasks.
+- `packages`: rows `package var value loc`: `PACKAGES` (and `PACKAGES_DYNAMIC` when set),
+  then per package `FILES:<pkg>` (always) and `RDEPENDS:<pkg>`, `RPROVIDES:<pkg>` (where
+  set), evaluated, with the applied operations as `loc`. A value that depends on python is
+  flagged, not guessed; a `PACKAGES` word that does not expand is counted in a note; what
+  `PACKAGES_DYNAMIC` and `do_package` add is not listed, and a note says so.
+
+`sources` of `hello` on a copy of the fixture with a missing file, patches with a malformed
+and no `Upstream-Status`, a directory and a `:remove` (search rows cut here):
+
+```
+entry	type	state	file	status	loc
+https://example.org/releases/hello-1.1.tar.gz	https	active	-	-	meta-core:recipes-core/hello/hello.inc:9
+file://hello.patch	file (patch)	active	meta-core:recipes-core/hello/files/hello.patch	Upstream-Status: Pending	meta-core:recipes-core/hello/hello_1.1.bb:5
+file://bad.patch	file (patch)	active	meta-mine:recipes-core/hello/hello/bad.patch	malformed: upstream status: maybe	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+file://none.diff	file (patch)	active	meta-mine:recipes-core/hello/hello/none.diff	missing Upstream-Status	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+file://cfgdir	file	active	meta-mine:recipes-core/hello/hello/cfgdir (directory)	-	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+file://nowhere.cfg	file	active	not found (10 paths searched, below)	-	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+file://keep.patch;apply=no	file	active	not found (10 paths searched, below)	-	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+git://example.org/x.git;branch=main	git	active	-	-	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+file://mine.patch	file (patch)	active	meta-mine:recipes-core/hello/hello/mine.patch	Upstream-Status: Submitted [https://example.org/hello/pull/1]	meta-mine:recipes-core/hello/hello_1.1.bbappend:4
+file://vendor.patch	file (patch)	removed by :remove	meta-vendor:recipes-core/hello/hello/vendor.patch	Upstream-Status: Inappropriate [vendor specific]	meta-vendor:recipes-core/hello/hello_%.bbappend:4
+file://boardx.cfg	file	inactive (override boardx not active)	meta-vendor:recipes-core/hello/hello/boardx.cfg	-	meta-vendor:recipes-core/hello/hello_%.bbappend:5
+file://nowhere.cfg	searched	#1	meta-mine:recipes-core/hello/hello/	missing	-
+file://nowhere.cfg	searched	#2	meta-vendor:recipes-core/hello/hello/	missing	-
+file://nowhere.cfg	searched	#3	meta-core:recipes-core/hello/hello-1.1/	missing	-
+...
+```
+
+`tasks` of `hello`:
+
+```
+task	state	after	pieces	loc
+do_fetch	-	-	meta-core:classes/base.bbclass:54 -> base_do_fetch (meta-core:classes/base.bbclass:15-20)	meta-core:classes/base.bbclass:13
+do_unpack	-	do_fetch	meta-core:classes/base.bbclass:54 -> base_do_unpack (meta-core:classes/base.bbclass:23-26)	meta-core:classes/base.bbclass:22
+do_patch	-	do_unpack	meta-core:classes/base.bbclass:54 -> base_do_patch (meta-core:classes/base.bbclass:29-31)	meta-core:classes/base.bbclass:28
+do_autoreconf	-	do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_autoreconf (meta-core:classes-recipe/autotoolsish.bbclass:13-15)	meta-core:classes-recipe/autotoolsish.bbclass:16
+do_configure	-	do_autoreconf do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_configure (meta-core:classes-recipe/autotoolsish.bbclass:18-20)	meta-core:classes/base.bbclass:33
+do_compile	-	do_configure	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_compile (meta-core:classes-recipe/autotoolsish.bbclass:22-24)	meta-core:classes/base.bbclass:38
+do_install	-	do_compile	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_install (meta-core:classes-recipe/autotoolsish.bbclass:26-28), meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	meta-core:classes/base.bbclass:45
+do_build	noexec	do_install	-	meta-core:classes/base.bbclass:51
+note: order from the addtask / deltask statements in parse order (the index: configuration classes, recipe, includes and classes, bbappends, deferred inherits; the replay does not run them); dependencies first
+note: not accounted for: tasks added or deleted by anonymous python (bb.build.addtask / deltask), do_x[deps] set directly, and dependencies on other recipes' tasks ([depends], [deptask], [rdeptask], [recrdeptask])
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+```
+
+`packages` of `libfoo`:
+
+```
+package	var	value	loc
+-	PACKAGES	libfoo-dbg libfoo-dev libfoo-doc libfoo	meta-core:conf/bitbake.conf:26
+libfoo-dbg	FILES	(not set)	-
+libfoo-dev	FILES	/usr/include /usr/lib/lib*.so	meta-core:conf/bitbake.conf:28
+libfoo-dev	RDEPENDS	libfoo	meta-core:recipes-core/libfoo/libfoo_2.0.bb:18
+libfoo-doc	FILES	/usr/share/doc	meta-core:conf/bitbake.conf:29
+libfoo	FILES	/usr/bin/* /usr/sbin/* /usr/lib/lib*.so.*	meta-core:conf/bitbake.conf:27
+note: values of the evaluated datastore (PACKAGES and FILES defaults come from bitbake.conf); RDEPENDS and RPROVIDES rows only where set
+note: not included: what OE-Core adds while packaging (do_package: shared-library and pkg-config dependencies, packages split by python such as do_split_packages) and the RDEPENDS:${PN} that base.bbclass adds for PACKAGECONFIG with anonymous python (see deps kind=runtime)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+```
 
 ```
 field	value	loc
