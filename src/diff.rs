@@ -1779,6 +1779,12 @@ pub fn compute(ws: &Workspace, own: &[OwnFile], opts: &Options) -> Result<Diff> 
             ));
         }
     }
+    for a in &mut appends {
+        a.detail = a
+            .detail
+            .replace("{from}", &opts.from)
+            .replace("{to}", &to_rev);
+    }
     appends.sort_by(|a, b| {
         (a.severity, &a.recipe, &a.append).cmp(&(b.severity, &b.recipe, &b.append))
     });
@@ -2601,7 +2607,7 @@ fn summary_line(d: &Diff) -> String {
             .filter(|r| r.kind == "included file" && r.status != "unchanged")
             .count();
         line.push_str(&format!(
-            "; {} files your layers include, {changed} changed",
+            "; included files your layers require: {}, {changed} changed",
             s.included_files
         ));
     }
@@ -2623,28 +2629,24 @@ fn summary_line(d: &Diff) -> String {
 
 fn notes(d: &Diff) -> Vec<String> {
     let mut n = vec![
-        "statement-level diff: statements are compared as written, not evaluated (no override resolution, no expansion, python not run); use var on a recipe for evaluated values".to_string(),
+        "statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once".to_string(),
         format!(
-            "pointers in column from are at {}, read them with `git show {}:<path>`; column to is at {}{}",
+            "column from is at {} (`git show {}:<path>`), column to at {}",
             d.from.label(),
             &d.from.commit[..d.from.commit.len().min(12)],
             d.to.label(),
-            if d.to.uncommitted.is_some() {
-                " (the files on disk, which item reads)"
-            } else {
-                ""
-            }
         ),
-        "recipe trees: the .bb and the files it requires or includes inside the layer; recipes are collected with the layer's current BBFILES (BBMASK not applied); classes are listed once, not per recipe".to_string(),
     ];
     let cosmetic: usize = d.recipes.iter().map(|r| r.whitespace_only).sum();
     let files: usize = d.recipes.iter().map(|r| r.cosmetic_files).sum();
     if cosmetic + files > 0 {
         n.push(format!(
-            "counted, not listed: {cosmetic} statements changed only in whitespace, {files} files changed only in comments, whitespace or line positions"
+            "counted, not listed: {cosmetic} statements changed only in whitespace, {files} files only in comments, whitespace or line positions"
         ));
     }
-    n.push("patches: whether a patch still applies needs the source, which is not fetched; a source change is reported as \"the source it applies to changed: check it\"".into());
+    if d.appends.iter().any(|a| !a.patches.is_empty()) {
+        n.push("patches are not checked against their source (nothing is fetched): \"check it\" means the source they apply to changed".into());
+    }
     n
 }
 
@@ -2688,12 +2690,9 @@ pub fn table(d: &Diff) -> Table {
         "-",
         "-",
     ]);
-    let fill = |s: &str| {
-        s.replace("{from}", &d.from.given)
-            .replace("{to}", &d.to.given)
-    };
+
     for a in &d.appends {
-        let mut value = fill(&a.detail);
+        let mut value = a.detail.clone();
         if !a.touches.is_empty() {
             value.push_str(&format!(
                 "; it sets {}, which changed in the recipe",
@@ -2758,7 +2757,7 @@ pub fn table(d: &Diff) -> Table {
         if !r.reason.is_empty() {
             value.push(r.reason.clone());
         }
-        if r.own_appended {
+        if r.own_appended && r.reason.is_empty() {
             value.push("appended by your layers".into());
         }
         if !r.source_changes.is_empty() {
@@ -2768,7 +2767,7 @@ pub fn table(d: &Diff) -> Table {
             &r.name,
             r.kind,
             &format!(
-                "{} files at from, {} at to",
+                "tree: {} files at from, {} at to",
                 r.tree_from.len(),
                 r.tree_to.len()
             ),
