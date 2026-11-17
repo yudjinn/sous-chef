@@ -118,10 +118,17 @@ impl Session {
 
     /// Sends a request and returns the whole response message with the same id.
     fn request(&mut self, method: &str, params: Value) -> Value {
+        self.request_noting(method, params).0
+    }
+
+    /// As [`Session::request`], also returning every message without an id (the
+    /// notifications) that arrived before the response, in order.
+    fn request_noting(&mut self, method: &str, params: Value) -> (Value, Vec<Value>) {
         let id = self.next_id;
         self.next_id += 1;
         self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
         let deadline = Instant::now() + TIMEOUT;
+        let mut notes = Vec::new();
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             let line = self
@@ -132,9 +139,42 @@ impl Session {
             let msg: Value = serde_json::from_str(&line)
                 .unwrap_or_else(|e| panic!("non-JSON line on stdout ({e}): {line}"));
             if msg["id"] == json!(id) {
-                return msg;
+                return (msg, notes);
+            }
+            if msg.get("id").is_none() {
+                notes.push(msg);
             }
         }
+    }
+
+    /// Calls a tool with `_meta` = `meta` (none: no `_meta`); returns the result and the
+    /// `notifications/progress` messages that came before it.
+    fn call_noting(&mut self, tool: &str, args: Value, meta: Option<Value>) -> (Value, Vec<Value>) {
+        let mut params = json!({"name": tool, "arguments": args});
+        if let Some(m) = meta {
+            params["_meta"] = m;
+        }
+        let (msg, notes) = self.request_noting("tools/call", params);
+        assert!(msg.get("error").is_none(), "{tool} failed: {msg}");
+        let progress = notes
+            .into_iter()
+            .filter(|n| n["method"] == "notifications/progress")
+            .collect();
+        (msg["result"].clone(), progress)
+    }
+
+    /// The lines that arrive within `d` (nothing is sent).
+    fn idle(&mut self, d: Duration) -> Vec<Value> {
+        let deadline = Instant::now() + d;
+        let mut out = Vec::new();
+        while let Ok(line) = self
+            .lines
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        {
+            self.seen.push(line.clone());
+            out.push(serde_json::from_str(&line).unwrap());
+        }
+        out
     }
 
     fn result(&mut self, method: &str, params: Value) -> Value {
@@ -334,15 +374,18 @@ fn server_start_removes_output_files_of_a_dead_server() {
     s.finish();
 }
 
-/// A server on a writable copy of the fixture workspace whose `sous-chef.toml` is the
-/// fixture's plus `extra` (TOML tables), started without flags so the file is read. Keep
-/// the returned `TempDir` alive while the session runs; the `PathBuf` is the copy's root.
+/// A server on a writable copy of the fixture workspace whose `sous-chef.toml` is
+/// `build_dir = "build"`, `writable_layers = ["meta-mine"]` and then `extra`, started
+/// without flags so the file is read. Keep the returned `TempDir` alive while the session
+/// runs; the `PathBuf` is the copy's root.
 fn configured(extra: &str) -> (Session, tempfile::TempDir, PathBuf) {
     let (tmp, root) = common::temp_ws();
     let root = std::fs::canonicalize(root).unwrap();
-    let toml = root.join("sous-chef.toml");
-    let text = std::fs::read_to_string(&toml).unwrap();
-    std::fs::write(&toml, format!("{text}\n{extra}\n")).unwrap();
+    std::fs::write(
+        root.join("sous-chef.toml"),
+        format!("build_dir = \"build\"\nwritable_layers = [\"meta-mine\"]\n{extra}\n"),
+    )
+    .unwrap();
     let mut s = Session::spawn(tempfile::tempdir().unwrap(), &root, &[]);
     initialize(&mut s);
     s.notify("notifications/initialized");
@@ -380,5 +423,151 @@ fn a_bad_handles_value_serves_degraded_with_the_reason() {
         err.contains("handles.max_age_days = 0 is out of range"),
         "{err}"
     );
+    s.finish();
+}
+
+// ---- progress notifications (w10) -------------------------------------------------------
+
+/// A server whose bitbake commands run the fake BitBake (`tests/fixtures/fakebb/`), which
+/// reads its settings from `<build>/fakebb.env`.
+fn with_fake_bitbake() -> (Session, tempfile::TempDir, PathBuf) {
+    let init = common::fixture_path("fakebb/init-with-env");
+    configured(&format!(
+        "init_script = \"{}\"\n[bitbake]\nenabled = true\n",
+        init.display()
+    ))
+}
+
+fn fake(root: &Path, vars: &[(&str, &str)]) {
+    let text: String = vars
+        .iter()
+        .map(|(k, v)| format!("export {k}='{v}'\n"))
+        .collect();
+    std::fs::write(root.join("build/fakebb.env"), text).unwrap();
+}
+
+/// The progress values of `notes`, after checking that every one carries `token`, has a
+/// message, and that the values strictly increase.
+fn progress_values(notes: &[Value], token: &Value) -> Vec<f64> {
+    let mut values = Vec::new();
+    for n in notes {
+        let p = &n["params"];
+        assert_eq!(&p["progressToken"], token, "{n}");
+        assert!(p["message"].as_str().is_some_and(|m| !m.is_empty()), "{n}");
+        values.push(p["progress"].as_f64().unwrap());
+    }
+    assert!(
+        values.windows(2).all(|w| w[1] > w[0]),
+        "progress does not increase: {values:?}"
+    );
+    values
+}
+
+#[test]
+fn a_waiting_bitbake_call_with_a_token_gets_progress_before_its_result() {
+    let (mut s, _tmp, root) = with_fake_bitbake();
+    fake(&root, &[("FAKEBB_SLEEP", "2")]);
+    let token = json!("bb-1");
+    let asked = Instant::now();
+    let (result, notes) = s.call_noting(
+        "bitbake",
+        json!({"op": "layers", "wait": 30}),
+        Some(json!({"progressToken": token})),
+    );
+    let took = asked.elapsed();
+    let text = text_of(&result);
+    assert!(text.contains("state\tsucceeded"), "{text}");
+    let values = progress_values(&notes, &token);
+    assert!(values.len() >= 2, "{notes:?}");
+    // Rate-limited: at most four a second, plus the last one.
+    assert!(
+        (values.len() as f64) <= took.as_secs_f64() * 4.0 + 2.0,
+        "{} notifications in {took:?}",
+        values.len()
+    );
+    let first = notes[0]["params"]["message"].as_str().unwrap();
+    assert!(first.starts_with("job:1 layers running"), "{first}");
+    // The fake prints its argv first: the tail line is in the message.
+    assert!(
+        notes.iter().any(|n| n["params"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("arg: show-layers")),
+        "{notes:?}"
+    );
+    // Nothing after the result.
+    let late = s.idle(Duration::from_millis(600));
+    assert!(late.is_empty(), "after the result: {late:?}");
+
+    // An integer token works the same.
+    fake(&root, &[("FAKEBB_SLEEP", "1")]);
+    let (_, notes) = s.call_noting(
+        "bitbake",
+        json!({"op": "env", "wait": 30}),
+        Some(json!({"progressToken": 7})),
+    );
+    assert!(!progress_values(&notes, &json!(7)).is_empty());
+    s.finish();
+}
+
+#[test]
+fn without_a_token_no_progress_is_sent() {
+    let (mut s, _tmp, root) = with_fake_bitbake();
+    fake(&root, &[("FAKEBB_SLEEP", "1")]);
+    let (result, notes) = s.call_noting("bitbake", json!({"op": "layers", "wait": 30}), None);
+    assert!(text_of(&result).contains("state\tsucceeded"), "{result}");
+    assert!(notes.is_empty(), "{notes:?}");
+    // `_meta` without a progress token: none either.
+    fake(&root, &[("FAKEBB_SLEEP", "1")]);
+    let (_, notes) = s.call_noting(
+        "bitbake",
+        json!({"op": "layers", "wait": 30}),
+        Some(json!({"other": 1})),
+    );
+    assert!(notes.is_empty(), "{notes:?}");
+    let (_, notes) = s.call_noting("audit", json!({}), None);
+    assert!(notes.is_empty(), "{notes:?}");
+    assert!(s.idle(Duration::from_millis(300)).is_empty());
+    s.finish();
+}
+
+#[test]
+fn authoritative_var_and_audit_send_progress_with_a_token() {
+    let (mut s, _tmp, root) = with_fake_bitbake();
+    // The fake prints no dump, so the answer is an error; the wait still reports progress.
+    fake(&root, &[("FAKEBB_SLEEP", "1")]);
+    let token = json!("var-1");
+    let (result, notes) = s.call_noting(
+        "var",
+        json!({"name": "PN", "recipe": "hello", "authoritative": true}),
+        Some(json!({"progressToken": token})),
+    );
+    assert_eq!(result["isError"], json!(true), "{result}");
+    assert!(text_of(&result).contains("no environment dump"), "{result}");
+    assert!(!progress_values(&notes, &token).is_empty(), "{notes:?}");
+    assert!(
+        notes[0]["params"]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("job:1 env hello running"),
+        "{notes:?}"
+    );
+
+    let token = json!("audit-1");
+    let (result, notes) = s.call_noting("audit", json!({}), Some(json!({"progressToken": token})));
+    assert_eq!(result["isError"], json!(false), "{result}");
+    let values = progress_values(&notes, &token);
+    // The first stage at once; the last stage flushed before the result.
+    assert!(values.len() >= 2, "{notes:?}");
+    for n in &notes {
+        let m = n["params"]["message"].as_str().unwrap();
+        assert!(m.starts_with("audit: "), "{m}");
+    }
+    assert_eq!(
+        notes[0]["params"]["message"], "audit: refreshing the index",
+        "{notes:?}"
+    );
+    let last = notes.last().unwrap()["params"]["message"].as_str().unwrap();
+    assert!(last.contains("parse and resolution problems"), "{last}");
     s.finish();
 }

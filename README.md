@@ -179,7 +179,7 @@ fakeroot do_install() {
 | `deps` | Build, runtime and `PACKAGECONFIG` dependencies; reverse dependencies; providers |
 | `lint` | Convention and syntax findings for a recipe, file, layer or the workspace |
 | `scaffold` | A new recipe, bbappend, layer or class, or an `.inc` split, as a dry run or written; or where a change belongs |
-| `bitbake` | Runs bitbake, devtool or bitbake-layers as a background job, in the build environment (init script, bitbake-setup or kas) |
+| `bitbake` | Runs bitbake, devtool or bitbake-layers as a background job, in the build environment (init script, bitbake-setup or kas); poll with `op=status`, or pass `wait` to answer when it ends, with MCP progress notifications meanwhile if the client asks for them |
 | `log` | A digest of a failed task's log |
 | `slice` | Part of a stored output, by lines, regex, variable or failures |
 | `status` | Workspace roots, release, index, build environment, kas project, running job |

@@ -53,6 +53,17 @@ Common to every tool:
   `tests/eval_w8.rs`). When nothing sets `MACHINE`, every evaluated view ends with
   `note: no MACHINE is set (...)`: machine-specific values are not applied.
 
+- **Progress.** A call whose request carries `_meta.progressToken` gets MCP
+  `notifications/progress` while a long operation runs, before its result and never after
+  it: `bitbake` with `wait` (and while a request waits behind a read-only job), the
+  authoritative `var` (waiting for its `bitbake -e`), and `audit` (one step per stage:
+  refreshing the index, finding layers and git facts, lint, lint done, parse problems).
+  `progress` increases with every notification (seconds since the call began for the waits,
+  a step count for `audit`); there is no `total`; `message` says what is happening. At most
+  four a second: intermediate updates are dropped, and the newest pending one is sent before
+  the result. A request without a token gets none. `lint` sends none (it would need a
+  per-file hook in the lint engine).
+
 The first six are always loaded. The rest are deferred (short descriptions, loaded on demand).
 
 ## Always loaded
@@ -263,7 +274,8 @@ instead of the static evaluator:
   need no relaxed validation.
 - **Running.** `bitbake -e` runs as a background job (operation `env`, visible to
   `bitbake op=status` / `op=cancel`) and the tool waits up to 120 s for it (about 15 s on a
-  real environment). One job runs at a time because BitBake allows one client per build
+  real environment; progress notifications while it waits, see the common section). One
+  job runs at a time because BitBake allows one client per build
   directory (see `bitbake`): while another job runs, the tool answers from a cached dump if
   the tree is unchanged; otherwise, behind a read-only job (`bitbake op=env`, `op=layers`,
   another authoritative `var`) it waits for that job, up to 30 s, and then runs, and behind
@@ -1006,6 +1018,7 @@ now: EXTRA_OECONF is set last at meta-mine:recipes-core/hello/hello_1.1.bbappend
 | `args` | op-specific, validated against an allowlist (below) |
 | `confirm` | required true for destructive operations |
 | `job` | for `status` and `cancel`: `job:<n>` or `<n>`; default: the running job, else the last one |
+| `wait` | seconds to wait for the job to end before answering (0 to 300, default 0); for a starting operation and `status` |
 
 | `op` | Runs | `args` | Handle kind |
 |---|---|---|---|
@@ -1054,8 +1067,14 @@ client, and what happens to a request depends on the running job:
 - while a `build`, `task`, `clean` or `devtool` job runs (minutes to hours), the request
   starts nothing and returns at once the running job, with "already running (one job at a
   time)" and why; call again once `op=status` shows it ended, or `op=cancel` it;
-- a read-only job still running after the 30 s gets the same answer. There are no MCP progress
-notifications; poll with `op: status`.
+- a read-only job still running after the 30 s gets the same answer.
+
+`wait` (seconds, 0 to 300; default 0) makes a starting operation, or `op: status`, wait
+for the job to end before answering; the answer is then the finished job (its handle, its
+tail or digest). While it waits, and while a request waits behind a read-only job, a client
+that sent a progress token gets progress notifications (common section): the seconds since
+the call began, and the job with its last output line (`job:1 build hello running 12s:
+NOTE: Running task 812 of 3301 ...`). Without `wait`, poll with `op: status`.
 
 `status` reports `job`, `op`, `target`, `command`, `state` (`running`, `succeeded`,
 `failed`, `cancelled`), `elapsed`, `exit` and `handle`. While running it shows the last 5
@@ -1196,7 +1215,8 @@ slice handle=h:XXXXXXXXXX page=1 | grep=RE | lines=A-B
 The CLI writes the report itself: `sous-chef audit [ROOT] [--format md|json] [--output
 FILE]` (ROOT default: the working directory; discovery starts there, and the global
 `--build-dir`, `--config` and `--layer` are taken relative to the working directory as
-for every command). Progress goes to stderr, never into the report. Exit status 0 when the
+for every command). Progress goes to stderr, never into the report; the `audit` tool sends
+it as MCP progress notifications when the request carries a progress token. Exit status 0 when the
 report was produced, whatever it finds (`sous-chef lint --fail-on` is the command that
 fails on findings); 2 when it could not be produced.
 

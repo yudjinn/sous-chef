@@ -525,6 +525,21 @@ The server does not use rmcp's `#[tool]` / `#[tool_router]` macros: tool files d
 on `serde`/`schemars`, and the table is served by implementing `ServerHandler::list_tools`
 and `call_tool` directly. The future returned by `run` must be `Send`.
 
+Progress (w10, `mcp::progress`): tool files still see no `rmcp` type. `call_tool` reads
+`context.meta.get_progress_token()` (rmcp 3.10.0 moves the request's `params._meta` into
+`RequestContext::meta`); with a token it makes a `progress::Sink` (a channel) and runs the
+tool inside `progress::scope`, a tokio task-local, so code anywhere in that call (also
+synchronous code, such as `audit::Options::progress`, a `fn(&str)`) calls
+`progress::{step, of, at, elapsed}` and `progress::active()`; without a token, or outside a
+tool call, they do nothing. Values are kept strictly increasing. A forwarder task
+(`progress::forward`) sends `Peer::notify_progress(ProgressNotificationParam)` at most once
+per `MIN_INTERVAL` (250 ms), the newest update, and the pending one when the tool ends;
+`call_tool` waits for it (at most `FLUSH_WAIT`, 2 s, then aborts it) before returning, so no
+notification follows the result. Senders: `bitbake::job_progress()` / `queue_progress()`
+(ticks for `JobTable::wait_with` / `start_or_queue`, used by `bitbake` with `wait` and the
+authoritative `var`), and the `audit` tool's stage hook (the audit runs in `block_in_place`
+on the multi-threaded runtime, so the forwarder runs while lint blocks its thread).
+
 As implemented in T2.5:
 
 - **Deferred tools** are still listed by `tools/list`, with a one-line description, and every
@@ -1071,7 +1086,9 @@ and Langdale workspaces). The fix rounds changed what several rules report (lint
 ### As implemented after wave 5
 
 As for wave 5: the additions of the rounds after it (w6: `w6-audit`, `w6-fix`; w7:
-`w7-diff`, `w7-fix`; w8: `w8-tools`, `w8-eval`; w9: `w9-final`); the module docs in the
+`w7-diff`, `w7-fix`; w8: `w8-tools`, `w8-eval`; w9: `w9-final`; w10: `w10-server`, which
+added MCP progress notifications (the MCP server section), `[handles]` retention
+("Configuration") and the job queue behind a read-only job ("Jobs", below)); the module docs in the
 named files are the detailed reference. Two tools were added (`audit`, `diff`, both
 deferred, so `TOOLS` has 16 rows: 6 always loaded, 10 deferred), each also a CLI subcommand.
 
@@ -1248,6 +1265,11 @@ that is gone (pid not alive, last written more than `STALE_AFTER` = 24 h ago) ar
 dir>/jobs`, now its one definition) on a thread of its own
 (`JobTable::sweep_in_background`); the first `JobTable::start` in a directory sweeps it
 only when that did not happen (no thread could be started, or another directory).
+
+Jobs (w10): `JobTable::start_or_queue` (a new job waits up to `QUEUE_WAIT` = 30 s for a
+running read-only job, `env` or `layers`, then starts; behind a build, task, clean or
+devtool job it is refused at once) and `wait_with`; the `bitbake` tool's `wait` argument
+(0 to `MAX_WAIT_SECS` = 300 s) answers once the job has ended, with progress meanwhile.
 
 Hooks: unchanged since wave 5: four handlers (`GrepRead`, `BashDigest`, `BashGrep`,
 `EditFollowUp`) and the `[hooks]` switches `grep_read`, `bash`, `edit`.

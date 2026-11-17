@@ -101,6 +101,7 @@ fn args(op: Op) -> Args {
         args: Vec::new(),
         confirm: false,
         job: None,
+        wait: None,
         budget_tokens: None,
         format: None,
     }
@@ -1037,4 +1038,53 @@ async fn queueing_gives_up_after_its_wait_and_never_runs_two_jobs() {
     for id in &ids {
         f.wait_done(id).await;
     }
+}
+
+#[tokio::test]
+async fn wait_answers_once_the_job_has_ended() {
+    let f = fixture();
+    f.fake(&[("FAKEBB_SLEEP", "1")]);
+    // A start with wait: the answer is the finished job, its output stored.
+    let out = f
+        .call(Args {
+            wait: Some(30),
+            ..args(Op::Layers)
+        })
+        .await
+        .unwrap();
+    assert!(out.contains("state\tsucceeded\n"), "{out}");
+    assert!(out.contains("handle\th:"), "{out}");
+    assert!(!out.contains("started; poll"), "{out}");
+    // A wait shorter than the job: still running, with the poll hint.
+    let out = f
+        .call(Args {
+            wait: Some(0),
+            ..args(Op::Layers)
+        })
+        .await
+        .unwrap();
+    assert!(out.contains("state\trunning\n"), "{out}");
+    assert!(out.contains("started; poll"), "{out}");
+    // status with wait: the same job, finished.
+    let out = f
+        .call(Args {
+            wait: Some(30),
+            ..status_of(Some("job:2"))
+        })
+        .await
+        .unwrap();
+    assert!(
+        out.contains("job\tjob:2\n") && out.contains("state\tsucceeded\n"),
+        "{out}"
+    );
+    // Too long a wait is refused before anything runs.
+    let e = f
+        .call(Args {
+            wait: Some(301),
+            ..args(Op::Layers)
+        })
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("wait=301 is too long"), "{e}");
+    assert_eq!(f.ctx.jobs.list().len(), 2);
 }

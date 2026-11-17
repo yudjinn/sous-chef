@@ -14,6 +14,10 @@
 //!   id; the next call with the same recipe and an unchanged tree waits for that job
 //!   instead of starting another.
 //!
+//! While it waits (for its own job, or queued behind another), a client that sent a
+//! progress token gets MCP progress notifications (`mcp::progress`): the seconds since the
+//! call began, and the job with its last output line.
+//!
 //! The output is stored under an `env` handle (when the job settles), then parsed with
 //! [`crate::bitbake::envdump`], keeping only the variable asked for, its `${...}`
 //! references and `OVERRIDES`.
@@ -644,7 +648,13 @@ async fn obtain(
     };
     let started = ctx
         .jobs
-        .start_or_queue(env, spec, &ctx.jobs_dir(), QUEUE_WAIT, |_| {})
+        .start_or_queue(
+            env,
+            spec,
+            &ctx.jobs_dir(),
+            QUEUE_WAIT,
+            super::bitbake::queue_progress(),
+        )
         .await?;
     let job = match started {
         Started::Started(j) => j,
@@ -673,7 +683,7 @@ async fn finish(
 ) -> Result<Obtained> {
     let job = ctx
         .jobs
-        .wait(id, wait)
+        .wait_with(id, wait, super::bitbake::job_progress())
         .await
         .ok_or_else(|| Error::NotFound {
             what: format!("job {id}"),

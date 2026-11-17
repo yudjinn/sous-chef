@@ -20,6 +20,174 @@
 
 pub mod tools;
 
+/// Progress of the tool call being served, as MCP `notifications/progress`, without any
+/// `rmcp` type in the tool files.
+///
+/// **What MCP says** (specification 2025-06-18, "Progress"): a request asks for progress by
+/// carrying `_meta.progressToken` (a string or an integer); the receiver MAY send
+/// `notifications/progress` with that token, `progress` (which MUST increase with each
+/// notification), and optional `total` and `message`; notifications MUST only reference
+/// the token of an active request and MUST stop after completion; both sides SHOULD rate
+/// limit.
+///
+/// **How rmcp 3.10.0 gives it to a server**: `ServerHandler::call_tool(request, context)`
+/// receives a `RequestContext<RoleServer>` whose `meta` (`RequestMetaObject`, the request's
+/// `params._meta`, moved there by the service loop in `service.rs`) has
+/// `get_progress_token() -> Option<ProgressToken>`, and whose `peer: Peer<RoleServer>` has
+/// `notify_progress(ProgressNotificationParam)` (`service/server.rs`, a `peer_not` method:
+/// it returns once the transport has written the notification).
+///
+/// **Here**: [`Server`]'s `call_tool` makes a [`Sink`] only when the request carries a
+/// token, and runs the tool inside [`scope`], a tokio task-local, so any code running in
+/// that tool call (also synchronous code, such as `audit`'s `fn(&str)` progress hook) can
+/// call [`step`] / [`of`] / [`at`]; without a sink (no token, or outside a tool call: the
+/// CLI, tests) they do nothing. Values are made strictly increasing here; a value that is
+/// not above the last one is dropped. A forwarder task ([`forward`]) sends at most one
+/// notification per [`MIN_INTERVAL`], always the newest (intermediate ones are dropped),
+/// and the newest pending one when the tool ends; `call_tool` waits for it (at most
+/// [`FLUSH_WAIT`], then aborts it) before it returns the result, so no notification follows
+/// the response.
+pub mod progress {
+    use std::future::Future;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use tokio::sync::mpsc;
+    use tokio::time::Instant;
+
+    /// Least time between two notifications of one call: at most four a second.
+    pub const MIN_INTERVAL: Duration = Duration::from_millis(250);
+
+    /// How long a finished call waits for its last notifications to be written.
+    pub const FLUSH_WAIT: Duration = Duration::from_secs(2);
+
+    /// One progress update: `progress` increases from update to update.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Update {
+        pub progress: f64,
+        pub total: Option<f64>,
+        pub message: String,
+    }
+
+    /// Where the updates of one tool call go.
+    #[derive(Debug)]
+    pub struct Sink {
+        tx: mpsc::UnboundedSender<Update>,
+        last: Mutex<f64>,
+        /// When the call began ([`elapsed`]).
+        start: std::time::Instant,
+    }
+
+    tokio::task_local! {
+        static SINK: Arc<Sink>;
+    }
+
+    /// A sink and the receiving end the forwarder reads.
+    pub fn channel() -> (Arc<Sink>, mpsc::UnboundedReceiver<Update>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (
+            Arc::new(Sink {
+                tx,
+                last: Mutex::new(0.0),
+                start: std::time::Instant::now(),
+            }),
+            rx,
+        )
+    }
+
+    /// Runs `f` with `sink` as the progress sink of the current tool call (none: progress
+    /// calls inside `f` do nothing). The sink is dropped when `f` ends, which closes the
+    /// channel.
+    pub async fn scope<F: Future>(sink: Option<Arc<Sink>>, f: F) -> F::Output {
+        match sink {
+            Some(s) => SINK.scope(s, f).await,
+            None => f.await,
+        }
+    }
+
+    /// Whether the current tool call reports progress (the client sent a token).
+    pub fn active() -> bool {
+        SINK.try_with(|_| ()).is_ok()
+    }
+
+    /// Reports `progress` (and `total`, if known) with `message`; dropped unless `progress`
+    /// is above the last value reported in this call.
+    pub fn at(progress: f64, total: Option<f64>, message: &str) {
+        let _ = SINK.try_with(|s| {
+            let mut last = s.last.lock().unwrap_or_else(|e| e.into_inner());
+            if progress.is_finite() && progress > *last {
+                *last = progress;
+                let _ = s.tx.send(Update {
+                    progress,
+                    total,
+                    message: message.to_string(),
+                });
+            }
+        });
+    }
+
+    /// Reports one more step (the last value plus one), with no total.
+    pub fn step(message: &str) {
+        let _ = SINK.try_with(|s| {
+            let mut last = s.last.lock().unwrap_or_else(|e| e.into_inner());
+            *last += 1.0;
+            let _ = s.tx.send(Update {
+                progress: *last,
+                total: None,
+                message: message.to_string(),
+            });
+        });
+    }
+
+    /// Reports the seconds since the tool call began as the progress value, with no total:
+    /// for waits whose length is not known (a job, the lock).
+    pub fn elapsed(message: &str) {
+        let Ok(secs) = SINK.try_with(|s| s.start.elapsed().as_secs_f64()) else {
+            return;
+        };
+        at(secs, None, message);
+    }
+
+    /// Reports `done` of `total` items (files, say).
+    pub fn of(done: u64, total: u64, message: &str) {
+        at(done as f64, Some(total as f64), message);
+    }
+
+    /// Reads updates from `rx` until it closes and hands them to `send`: the first at once,
+    /// then at most one per `interval`, always the newest received (older ones waiting are
+    /// dropped), and the newest pending one as soon as `rx` closes. Stops early when `send`
+    /// returns false (the transport is gone).
+    pub async fn forward<S, Fut>(
+        mut rx: mpsc::UnboundedReceiver<Update>,
+        interval: Duration,
+        mut send: S,
+    ) where
+        S: FnMut(Update) -> Fut,
+        Fut: Future<Output = bool>,
+    {
+        let mut last_sent: Option<Instant> = None;
+        while let Some(mut update) = rx.recv().await {
+            if let Some(t) = last_sent {
+                let due = t + interval;
+                loop {
+                    match tokio::time::timeout_at(due, rx.recv()).await {
+                        Ok(Some(newer)) => update = newer,
+                        Ok(None) => {
+                            send(update).await;
+                            return;
+                        }
+                        Err(_) => break,
+                    }
+                }
+            }
+            if !send(update).await {
+                return;
+            }
+            last_sent = Some(Instant::now());
+        }
+    }
+}
+
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -28,8 +196,8 @@ use std::sync::Arc;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
     JsonObject, ListResourcesResult, ListToolsResult, MetaObject, PaginatedRequestParams,
-    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
-    ResourceContents, ServerCapabilities, ServerConfig, Tool,
+    ProgressNotificationParam, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
+    Resource, ResourceContents, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
@@ -519,7 +687,7 @@ impl ServerHandler for Server {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let Some(entry) = find_tool(&request.name) else {
             let names: Vec<&str> = TOOLS.iter().map(|t| t.name).collect();
@@ -532,8 +700,41 @@ impl ServerHandler for Server {
                 None,
             ));
         };
+        // `_meta.progressToken` (module `progress`): rmcp moves the request's `_meta` into
+        // `context.meta`; the params' own copy is read too, in case it is kept there.
+        let token = context
+            .meta
+            .get_progress_token()
+            .or_else(|| request.meta.as_ref().and_then(|m| m.get_progress_token()));
         let args = request.arguments.unwrap_or_default();
-        Ok(self.run_tool(entry, args).await.into())
+        let Some(token) = token else {
+            return Ok(self.run_tool(entry, args).await.into());
+        };
+        let (sink, rx) = progress::channel();
+        let peer = context.peer.clone();
+        let mut forwarder = tokio::spawn(progress::forward(
+            rx,
+            progress::MIN_INTERVAL,
+            move |u: progress::Update| {
+                let peer = peer.clone();
+                let mut param = ProgressNotificationParam::new(token.clone(), u.progress)
+                    .with_message(u.message);
+                if let Some(total) = u.total {
+                    param = param.with_total(total);
+                }
+                async move { peer.notify_progress(param).await.is_ok() }
+            },
+        ));
+        let result = progress::scope(Some(sink), self.run_tool(entry, args)).await;
+        // The sink is gone with the scope, so the forwarder sends what is pending and ends;
+        // no notification may follow the response.
+        if tokio::time::timeout(progress::FLUSH_WAIT, &mut forwarder)
+            .await
+            .is_err()
+        {
+            forwarder.abort();
+        }
+        Ok(result.into())
     }
 
     async fn list_resources(
@@ -803,6 +1004,93 @@ mod tests {
         assert_eq!(name.len(), 16);
         assert!(name.chars().all(|c| c.is_ascii_hexdigit()));
         assert_eq!(index_path(&b).file_name().unwrap(), "index.sqlite");
+    }
+
+    #[tokio::test]
+    async fn progress_outside_a_sink_does_nothing_and_values_only_increase() {
+        assert!(!progress::active());
+        progress::step("ignored");
+        progress::at(5.0, None, "ignored");
+        let (sink, mut rx) = progress::channel();
+        progress::scope(Some(sink), async {
+            assert!(progress::active());
+            progress::step("one");
+            progress::at(1.0, None, "not above 1: dropped");
+            progress::of(3, 10, "three of ten");
+            progress::at(2.5, None, "below 3: dropped");
+            progress::at(f64::NAN, None, "not a number: dropped");
+            progress::step("four");
+        })
+        .await;
+        let mut got = Vec::new();
+        while let Some(u) = rx.recv().await {
+            got.push((u.progress, u.total, u.message));
+        }
+        assert_eq!(
+            got,
+            [
+                (1.0, None, "one".to_string()),
+                (3.0, Some(10.0), "three of ten".to_string()),
+                (4.0, None, "four".to_string()),
+            ]
+        );
+        // The scope is over: nothing reaches anyone.
+        assert!(!progress::active());
+        progress::scope(None, async { assert!(!progress::active()) }).await;
+    }
+
+    #[tokio::test]
+    async fn the_forwarder_rate_limits_keeps_the_newest_and_flushes_at_the_end() {
+        use std::sync::Mutex as StdMutex;
+        use std::time::{Duration, Instant};
+        let (sink, rx) = progress::channel();
+        let sent: Arc<StdMutex<Vec<(Instant, String)>>> = Arc::default();
+        let log = Arc::clone(&sent);
+        let interval = Duration::from_millis(100);
+        let forwarder = tokio::spawn(progress::forward(rx, interval, move |u| {
+            log.lock().unwrap().push((Instant::now(), u.message));
+            async { true }
+        }));
+        progress::scope(Some(sink), async {
+            // A burst: the first goes at once, the rest collapse into the newest.
+            for i in 0..50 {
+                progress::step(&format!("burst {i}"));
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            progress::step("late 1");
+            progress::step("late 2");
+        })
+        .await;
+        forwarder.await.unwrap();
+        let sent = sent.lock().unwrap();
+        let msgs: Vec<&str> = sent.iter().map(|(_, m)| m.as_str()).collect();
+        assert_eq!(msgs, ["burst 0", "burst 49", "late 2"], "{msgs:?}");
+        // At least one interval between the first two (the last is flushed on close).
+        assert!(sent[1].0 - sent[0].0 >= interval - Duration::from_millis(5));
+    }
+
+    #[tokio::test]
+    async fn the_forwarder_stops_when_sending_fails() {
+        let (sink, rx) = progress::channel();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let n = Arc::clone(&calls);
+        let forwarder = tokio::spawn(progress::forward(
+            rx,
+            std::time::Duration::from_millis(1),
+            move |_| {
+                n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { false }
+            },
+        ));
+        progress::scope(Some(sink), async {
+            progress::step("a");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            progress::step("b");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        })
+        .await;
+        forwarder.await.unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[test]
