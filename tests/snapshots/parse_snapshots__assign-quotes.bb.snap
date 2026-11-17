@@ -1,0 +1,7 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..45	Assign { var: VarRef { base: "SINGLE", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "single quoted with \"double\" inside", export: false }
+2	46..91	Assign { var: VarRef { base: "DOUBLE", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "double quoted with 'single' inside", export: false }
+3	92..135	Assign { var: VarRef { base: "HASH", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "a # inside quotes is not a comment", export: false }

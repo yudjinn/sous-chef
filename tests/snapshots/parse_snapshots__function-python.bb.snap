@@ -1,0 +1,6 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1-6	0..104	Function { name: Some(VarRef { base: "do_report", overrides: [], flag: None, legacy_syntax: false }), lang: Python, fakeroot: false, body: LineSpan { start: 2, end: 5 } }
+8-10	106..160	Function { name: Some(VarRef { base: "do_report", overrides: ["append"], flag: None, legacy_syntax: false }), lang: Python, fakeroot: false, body: LineSpan { start: 9, end: 9 } }

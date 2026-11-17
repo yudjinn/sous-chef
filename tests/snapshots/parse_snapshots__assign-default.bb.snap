@@ -1,0 +1,6 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..16	Assign { var: VarRef { base: "PREFIX", overrides: [], flag: None, legacy_syntax: false }, op: Default, value: "/usr", export: false }
+2	17..41	Assign { var: VarRef { base: "PREFIX", overrides: [], flag: None, legacy_syntax: false }, op: Default, value: "/opt/ignored", export: false }

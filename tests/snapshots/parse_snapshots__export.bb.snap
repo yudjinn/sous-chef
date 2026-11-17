@@ -1,0 +1,7 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..17	Assign { var: VarRef { base: "CC", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "gcc", export: true }
+2	18..40	Export { name: "PKG_CONFIG_PATH" }
+3	41..70	Assign { var: VarRef { base: "SPACED_EXPORT", overrides: [], flag: None, legacy_syntax: false }, op: Default, value: "x", export: true }

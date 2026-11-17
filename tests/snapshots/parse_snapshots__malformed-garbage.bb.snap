@@ -1,0 +1,14 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..15	Assign { var: VarRef { base: "GOOD", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "before", export: false }
+2	16..42	Unknown { text: "this is not bitbake at all" }
+3	43..59	Unknown { text: "= \"missing name\"" }
+4	60..85	Unknown { text: "VAR = \"unterminated quote" }
+5	86..87	Unknown { text: "}" }
+6	88..117	Assign { var: VarRef { base: "AFTER", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "the parser recovers", export: false }
+diagnostic 2: unparsed line
+diagnostic 3: empty variable name in assignment
+diagnostic 4: unparsed line
+diagnostic 5: unparsed line: `}` outside a function

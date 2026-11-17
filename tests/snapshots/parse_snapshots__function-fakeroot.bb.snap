@@ -1,0 +1,6 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1-3	0..48	Function { name: Some(VarRef { base: "do_bar", overrides: [], flag: None, legacy_syntax: false }), lang: Shell, fakeroot: true, body: LineSpan { start: 2, end: 2 } }
+5-8	50..134	Function { name: Some(VarRef { base: "do_baz", overrides: [], flag: None, legacy_syntax: false }), lang: Python, fakeroot: true, body: LineSpan { start: 6, end: 7 } }

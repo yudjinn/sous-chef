@@ -1,0 +1,10 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..15	Assign { var: VarRef { base: "GOOD", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "before", export: false }
+2-3	16..76	Assign { var: VarRef { base: "TRAILING", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "backslash followed by spaces     next line", export: false }
+4	77..115	Unknown { text: "DANGLING = \"continued at end of file " }
+diagnostic 2: whitespace after `\`: BitBake strips it and still continues the line
+diagnostic 4: line continuation `\` at end of file
+diagnostic 4: unparsed line

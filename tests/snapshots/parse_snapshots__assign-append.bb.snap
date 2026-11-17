@@ -1,0 +1,7 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..10	Assign { var: VarRef { base: "LIST", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "a", export: false }
+2	11..22	Assign { var: VarRef { base: "LIST", overrides: [], flag: None, legacy_syntax: false }, op: Append, value: "b", export: false }
+3	23..42	Assign { var: VarRef { base: "UNSET_BEFORE", overrides: [], flag: None, legacy_syntax: false }, op: Append, value: "c", export: false }

@@ -1,0 +1,6 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..15	Assign { var: VarRef { base: "PATHVAR", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "bin", export: false }
+2	16..34	Assign { var: VarRef { base: "PATHVAR", overrides: [], flag: None, legacy_syntax: false }, op: PrependDot, value: "/usr/", export: false }

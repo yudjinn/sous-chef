@@ -1,0 +1,9 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..33	Assign { var: VarRef { base: "FILES", overrides: ["${PN}-dev"], flag: None, legacy_syntax: false }, op: Set, value: "${includedir}", export: false }
+2	34..64	Assign { var: VarRef { base: "RDEPENDS", overrides: ["${PN}-ptest"], flag: None, legacy_syntax: false }, op: Append, value: "bash", export: false }
+3	65..114	Assign { var: VarRef { base: "PREFERRED_PROVIDER_virtual/kernel", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "linux-yocto", export: false }
+4	115..166	Assign { var: VarRef { base: "PREFERRED_VERSION_gcc-cross-${TARGET_ARCH}", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "13.%", export: false }
+5	167..199	Assign { var: VarRef { base: "MY.DOTTED+NAME", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "dots and plus", export: false }

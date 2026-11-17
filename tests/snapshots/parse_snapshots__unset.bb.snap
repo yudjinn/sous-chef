@@ -1,0 +1,8 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..9	Assign { var: VarRef { base: "FOO", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "x", export: false }
+2	10..19	Unset { name: "FOO", flag: None }
+3	20..45	Assign { var: VarRef { base: "do_compile", overrides: [], flag: Some("dirs"), legacy_syntax: false }, op: Set, value: "${B}", export: false }
+4	46..68	Unset { name: "do_compile", flag: Some("dirs") }

@@ -1,0 +1,7 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..23	Assign { var: VarRef { base: "A", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "crlf line endings", export: false }
+2-3	25..54	Assign { var: VarRef { base: "B", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "continued      value", export: false }
+4-6	56..76	Function { name: Some(VarRef { base: "do_x", overrides: [], flag: None, legacy_syntax: false }), lang: Shell, fakeroot: false, body: LineSpan { start: 5, end: 5 } }

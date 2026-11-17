@@ -23,6 +23,57 @@ Lines ending in `\` continue on the next line. `#` starts a comment at the start
 (a `#` inside a quoted value is part of the value; a comment line inside a continued
 assignment is a known source of warnings).
 
+### Lines (verified, T1.1/T1.2)
+
+Checked against the BitBake source, `master` as of 2026-11 (`lib/bb/parse/parse_py/BBHandler.py`
+`get_statements` / `feeder`, `ConfHandler.py` `handle` / `feeder`). This is what `src/parse`
+reproduces:
+
+- Files are read in Python text mode (universal newlines: `\n`, `\r\n` and a lone `\r` all
+  end a line) and **every physical line is right-stripped** (`str.rstrip()`) before anything
+  else. So `\r`, trailing blanks, and **trailing whitespace after a `\`** are removed first:
+  `VAR = "a \   ` + newline **does continue** onto the next line. (The milestone text said it
+  does not; the source says it does. We still emit a diagnostic because it is misleading.)
+- Continuation: a line whose stripped text ends in `\` is joined to the next one with the `\`
+  removed and nothing inserted (the next line's leading whitespace is kept). A `\` on the
+  last line of the file leaves "unparsed lines": an error.
+- Comments: only a `#` in **column 0** starts a comment. An indented `   # x` is *not* a
+  comment to BitBake: it reaches the assignment regex and fails with "unparsed line". We treat
+  it as a comment and emit a diagnostic. A comment line ending in `\` continues onto the next
+  line, which must also be a comment; a comment line inside a continued non-comment statement,
+  or a comment continued onto a non-comment line, is a fatal error.
+- Leading whitespace before any statement (`  VAR = "x"`) is an "unparsed line" error.
+- A UTF-8 BOM is not stripped (the file is opened without `utf-8-sig`), so line 1 of a file
+  with a BOM fails to parse in BitBake. We strip it and emit a diagnostic.
+- Function bodies are collected before continuation and comment handling: inside a body, `\`
+  does not join and `#` is body text. The body ends at the first line that is exactly `}`
+  after right-stripping (so `}   ` closes it, `  }` does not). End of file inside a body is
+  an error ("Shell function ... is never closed").
+- `def` bodies: after a line matching `def\s+(\w+).*:`, every following line that starts
+  with whitespace, is empty, **or starts with `#`** belongs to the body; the first other line
+  ends it and is parsed normally. (We leave trailing blank and comment lines out of the
+  reported body span.)
+- Function header regex: `(((python(?=(\s|\()))|(fakeroot(?=\s)))\s*)*([\w.\-+{}$:]+)?\s*\(\s*\)\s*{$`.
+  Anonymous functions (no name, or `__anonymous`) are always python (`MethodNode.eval`), so
+  `fakeroot () {` is anonymous python too.
+
+Statement match order (first match wins): function header, `def`, `EXPORT_FUNCTIONS`,
+`addtask`, `deltask`, `addhandler`, `inherit`, `inherit_defer` (BBHandler), then assignment,
+`include`, `require`, `include_all`, `export VAR`, `unset VAR`, `unset VAR[flag]`, `addpylib`
+(base configuration only), `addfragments` (ConfHandler); anything else is "unparsed line".
+Consequences: `include = "x"` is an assignment, `inherit = "x"` inherits `= "x"`. Every
+keyword needs whitespace after it (`inherit_deferred = "1"` is an assignment). `.conf` files
+use only the ConfHandler part (no functions, `inherit`, `addtask`...); `parse()` does not know
+the file kind and applies the full order to every file.
+
+Assignment regex (`__config_regexp__`, reproduced exactly including backtracking order):
+`^(export\s+)?([a-zA-Z0-9\-_+.${}/~:]*?)(\[([a-zA-Z0-9\-_+.][a-zA-Z0-9\-_+.@/]*)\])?\s*(:=|\?\?=|\?=|\+=|=\+|=\.|\.=|=)\s*(?!'[^']*'[^']*'$)(?!"[^"]*"[^"]*"$)(['"])(.*)\7$`.
+So the value runs to the **last** character of the line, which must be the opening quote
+character (`A = "x" # c` is an error; `A = "a" "b"` has value `a" "b`); a value with exactly
+three quotes of one kind is rejected; names cannot contain spaces (so no `${@...}` with spaces
+in a name); an empty name is an error. `export VAR` and `unset VAR` names use the same
+character set without `:`; an `unset` flag must be at least two characters.
+
 ### Assignments
 
 ```
@@ -88,6 +139,23 @@ Treat a name as legacy when it ends in, or contains as a `_`-separated element,
 `DESCRIPTION`, `pkg_postinst`, `pkg_prerm`, ...) is followed by `_${PN}` or `_<package name>`;
 or when the suffix is a known override (a machine, distro or class override from the index).
 
+What BitBake itself does (`data_smart.py` `setVar`, master 2026-11): any variable name that
+contains the substring `_append`, `_prepend` or `_remove` (except `__anon_*`) is fatal ("contains
+an operation using the old override syntax"). Other legacy forms (`RDEPENDS_${PN}`,
+`VAR_qemux86`) are silently a *different variable* in modern BitBake.
+
+What the parser implements (`split_var` in `src/parse/parser.rs`): it splits the part before
+the first `:` on `_` outside `${...}` and takes the first split point `i >= 1` where element
+`i` is `append` / `prepend` / `remove`, or where the first `i` elements are a package-scoped
+variable (`FILES`, `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RCONFLICTS`,
+`RREPLACES`, `ALLOW_EMPTY`, `SUMMARY`, `DESCRIPTION`, `SECTION`, `LICENSE`, `CONFFILES`,
+`INSANE_SKIP`, `PKG`, `pkg_preinst`, `pkg_postinst`, `pkg_postinst_ontarget`, `pkg_prerm`,
+`pkg_postrm`; the longest matching name wins) and element `i` starts with `${` or a lowercase
+letter (OE package names are lowercase; `FILES_SOLIBSDEV` is a real variable). Then `base` is
+the text before that point and the remaining `_` elements are the overrides. The third rule
+(suffix is a known machine/distro/class override) needs the index and is **not** applied by
+the parser; lint does it.
+
 ### Functions
 
 ```
@@ -104,21 +172,49 @@ def helper(d):                       top-level python def, body is the indented 
     ...
 ```
 
-A shell or `python` function body ends at the first line that is exactly `}` in column 0.
+A shell or `python` function body ends at the first line that is exactly `}` in column 0
+(trailing whitespace after the `}` is allowed; see "Lines").
 
 ### Directives
 
 ```
 inherit a b c                        inherit classes (names may contain ${VAR})
-inherit_defer a                      like inherit, evaluated at the end of parsing (recent releases; verify)
+inherit_defer a                      like inherit, evaluated at the end of parsing
 require path/file.inc                include; error if not found
 include path/file.inc                include; silently ignored if not found
-include_all path/file.inc            include every match on BBPATH (recent releases; verify)
-addtask do_x after do_a before do_b  (also: addtask x, "do_" optional; verify)
+include_all path/file.inc            include path/file.inc from every BBPATH entry
+addtask do_x after do_a before do_b  "do_" optional; several names allowed
 deltask do_x
 addhandler name
 EXPORT_FUNCTIONS do_x do_y           in class foo: do_x defaults to calling foo_do_x
 ```
+
+Verified (T1.2) against BitBake `master` 2026-11 and the release branches on GitHub
+(`openembedded/bitbake`), plus the BitBake User Manual
+(`doc/bitbake-user-manual/bitbake-user-manual-metadata.rst`, "inherit_defer Directive",
+"include_all Directive"):
+
+- `inherit_defer` (`inherit_defer\s+(.+)`): present in bitbake 2.8 (Yocto 5.0 scarthgap),
+  absent in 2.6. The text is stored unexpanded and inherited at the end of parsing, so
+  `${VAR}` / `${@...}` see the final values; an empty expansion is a no-op. Classes listed in
+  `BB_DEFER_BBCLASSES` are deferred even when written with plain `inherit`. The argument is
+  everything after the keyword, `#` included (no comment stripping), for both `inherit` forms.
+- `include_all` (`include_all\s+(.+)`, ConfHandler): present in bitbake 2.12 (Yocto 5.2
+  walnascar), absent in 2.10. It includes `<entry>/<path>` for every distinct `BBPATH` entry,
+  left to right; the including file's directory is **not** searched; missing files are not an
+  error.
+- `addtask` (`addtask\s+([^#\n]+)`; a `#` ends the arguments): the text is split on the
+  literal strings `" before "` and `" after "` (single spaces; a tab does not separate). The
+  task names are the text before the first keyword and may be several words (each is added).
+  `before` / `after` may come in any order and be repeated; quirk: two `after` (or `before`)
+  groups separated by the other keyword are concatenated **without a space**
+  (`addtask x after a before b after c` gives after = `ac`); the parser reproduces this and
+  emits a diagnostic. `do_` is prepended to the task and every dependency that lacks it
+  (`bb.build.ensure_task_prefix`) when the task is added; the AST keeps names as written.
+- `deltask` (`deltask\s+([^#\n]+)`) and `addhandler` (`addhandler\s+(.+)`) take several
+  space-separated names; the AST `name` field holds them joined with single spaces.
+  `deltask` expands its argument; `addhandler` does not.
+- `EXPORT_FUNCTIONS` takes space-separated names.
 
 ## Finding files
 

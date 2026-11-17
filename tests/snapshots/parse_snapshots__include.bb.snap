@@ -1,0 +1,8 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..17	Include { path: "hello.inc", mode: Require }
+2	18..62	Include { path: "recipes-core/hello/${BPN}-common.inc", mode: Require }
+3	63..83	Include { path: "optional.inc", mode: Include }
+4	84..157	Include { path: "${@bb.utils.contains('DISTRO_FEATURES', 'x11', 'x11.inc', '', d)}", mode: Include }

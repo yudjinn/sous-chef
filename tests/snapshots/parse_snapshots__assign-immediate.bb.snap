@@ -1,0 +1,7 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..12	Assign { var: VarRef { base: "BASE", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "one", export: false }
+2	13..38	Assign { var: VarRef { base: "SNAPSHOT", overrides: [], flag: None, legacy_syntax: false }, op: Immediate, value: "${BASE} two", export: false }
+3	39..55	Assign { var: VarRef { base: "BASE", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "changed", export: false }

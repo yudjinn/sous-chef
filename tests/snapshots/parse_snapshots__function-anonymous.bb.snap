@@ -1,0 +1,6 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1-3	0..44	Function { name: None, lang: Python, fakeroot: false, body: LineSpan { start: 2, end: 2 } }
+5-7	46..105	Function { name: None, lang: Python, fakeroot: false, body: LineSpan { start: 6, end: 6 } }

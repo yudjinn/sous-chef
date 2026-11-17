@@ -1,0 +1,7 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..21	AddHandler { name: "my_handler" }
+2	22..69	Assign { var: VarRef { base: "my_handler", overrides: [], flag: Some("eventmask"), legacy_syntax: false }, op: Set, value: "bb.event.BuildStarted", export: false }
+3-5	70..123	Function { name: Some(VarRef { base: "my_handler", overrides: [], flag: None, legacy_syntax: false }), lang: Python, fakeroot: false, body: LineSpan { start: 4, end: 4 } }
