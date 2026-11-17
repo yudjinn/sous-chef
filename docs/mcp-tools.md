@@ -449,7 +449,7 @@ fakeroot do_install() {
 |---|---|---|
 | `query` | string | required |
 | `mode` | `"name"` \| `"regex"` \| `"fts"` | default `name`: statement names containing `query`, case-insensitive, exact names first. `fts`: SQLite FTS5 over names and snippets |
-| `kind` | list? | `assign`, `function`, `pydef`, `inherit`, `include`, `addtask`, `deltask`, `addhandler`, `export_functions`, `export`, `unset`, `unknown`; aliases `task` (`addtask`) and `def` (`pydef`) |
+| `kind` | list? | `assign`, `function`, `pydef`, `inherit`, `include`, `addtask`, `deltask`, `addhandler`, `export_functions`, `export`, `unset`, `addfragments`, `addpylib`, `unknown` (every kind the index stores); aliases `task` (`addtask`) and `def` (`pydef`) |
 | `layer`, `file_kind`, `recipe` | filters | `recipe` restricts to that recipe's tree (the `.bb`, its includes and classes, its bbappends) |
 | `limit` | int | default 30, at most 1000 |
 
