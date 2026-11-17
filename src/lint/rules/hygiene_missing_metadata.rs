@@ -17,11 +17,12 @@
 //! marked `unevaluated_python`, or anonymous python sets the variable.
 //!
 //! **`HOMEPAGE`** is the upstream project's page, so it is asked for only when the recipe
-//! has an upstream: its evaluated `SRC_URI` (not python) has an entry with a URL scheme
-//! other than `file://`. Not asked for: an image (a class [`helpers::image_class`] names
+//! has an upstream: its evaluated `SRC_URI` has a word with a URL scheme other than
+//! `file://` (python pieces of the value do not matter then; without such a word, a value
+//! with python says nothing and `HOMEPAGE` is not asked for). Not asked for: an image (a class [`helpers::image_class`] names
 //! among the classes the recipe pass visits), a packagegroup (`packagegroup.bbclass`
 //! visited), a recipe with no `SRC_URI` or only `file://` entries (`connman-conf`,
-//! `base-files`: files of the layer itself), or one whose `SRC_URI` needs python. OE-core
+//! `base-files`: files of the layer itself). OE-core
 //! Wrynose `33a6bd6c` sets `SUMMARY` in nearly every image and packagegroup of
 //! `recipes-*/images/` and `recipes-*/packagegroups/`, but `HOMEPAGE` in only four of 37
 //! (`build-appliance-image`, `core-image-ptest`, `core-image-ptest-all`,
@@ -106,12 +107,16 @@ fn has_upstream(cx: &LintContext<'_>, data: &DataStore) -> bool {
     let Some(src_uri) = data.value("SRC_URI") else {
         return false;
     };
-    if src_uri.unevaluated_python {
-        return false;
-    }
+    // A remote URL written out in the value is an upstream whatever the python pieces add;
+    // without one, a value with python cannot be judged (and says nothing).
     src_uri.text.split_whitespace().any(|w| {
-        w.split_once("://")
-            .is_some_and(|(scheme, _)| scheme != "file" && !scheme.contains('$'))
+        w.split_once("://").is_some_and(|(scheme, _)| {
+            scheme != "file"
+                && !scheme.is_empty()
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-')
+        })
     })
 }
 

@@ -246,7 +246,7 @@ Notes:
 | `hygiene/missing-metadata` | W/I | recipe | No `SUMMARY` or `LICENSE`, or no `LIC_FILES_CHKSUM` when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (W, one finding); no `HOMEPAGE` (I) when the recipe has an upstream: a `SRC_URI` entry that is not `file://`, and not an image or a packagegroup. Configuration defaults do not count as set. Values that depend on python are not reported. |
 | `hygiene/autorev` | W | file | `SRCREV` or `SRCREV_<name>` (any operator or override, not a flag) whose value contains `${AUTOREV}`, outside `local.conf` and `auto.conf`. `SRCREV_FORMAT` is not checked. |
 | `hygiene/src-uri-checksum` | W | recipe | Remote download (`http`, `https`, `ftp`) in the evaluated `SRC_URI` without a checksum; `git://` / `gitsm://` URL without a revision, or without `branch=` (or `nobranch=1`) unless a `tag=` is given. Not reported when `SRC_URI` depends on python, or for an entry still containing `${` after expansion. |
-| `hygiene/host-path` | W | file | Absolute host paths (`/usr/lib`, `/etc`, `/home/...`) at the start of a word in `do_<task>` shell bodies, instead of `${D}`, `${S}`, `${bindir}` and friends; a `do_install` that never references `${D}` while running a command that writes files itself. Not scanned: other functions, comments, here-documents, the first word of a line, values after `=`; `/dev`, `/proc`, `/sys`, `/tmp` are never reported. |
+| `hygiene/host-path` | W | file | Absolute host paths (`/usr/lib`, `/etc`, `/home/...`) at the start of a word in `do_<task>` shell bodies, instead of `${D}`, `${S}`, `${bindir}` and friends; a `do_install` that never references `${D}` while running a command that writes files itself. Not scanned: other functions, comments, here-documents, the command word, values after `=`; `/dev`, `/proc`, `/sys`, `/tmp` are never reported. Data is not host access: the arguments of `echo`, `printf` and `bb*` messages, quoted arguments of `sed`, `grep`, `awk`, `perl` (expressions, patterns, shebangs), the target of `ln -s`; a redirection target always is. |
 | `hygiene/workdir-s` | E | file | `S = "${WORKDIR}"` (or `${WORKDIR}/`), reported only when the file's releases include one that rejects it (Styhead and later), naming them. A layer checked only against releases that accept it gets nothing. |
 | `hygiene/variable-order` | I | file | In a `.bb`, the first statement out of the OE style guide order (description block, license, dependencies, `SRC_URI`, `S`, inherit, `PACKAGECONFIG` and build options, tasks, packaging), once per file. Off by default: runs only when selected by its id, the alias `style/variable-order` or the alias group `style`. |
 | `hygiene/tabs` | I | file | Tabs in shell task bodies mixed with spaces; python bodies not indented with 4 spaces. At most one finding per function. |
@@ -264,10 +264,11 @@ Notes:
   `populate_lic_qa_checksum`. A variable whose value is python, or that anonymous python
   sets, is not reported. Both findings are on line 1 of the `.bb`. `HOMEPAGE` is the
   upstream project's page, so it is not asked of an image (a visited or directly inherited
-  class `image`, `core-image` or `*-image`), a packagegroup (`packagegroup`), a recipe whose
-  `SRC_URI` is empty or only `file://` entries (OE-core's `connman-conf`, `base-files`), or
-  one whose `SRC_URI` is python. OE-core's own images and packagegroups set `SUMMARY` and
-  get `LICENSE` from their class (`LICENSE ?= "MIT"`, which counts: a class is not
+  class `image`, `core-image` or `*-image`), a packagegroup (`packagegroup`), or a recipe
+  whose `SRC_URI` is empty or only `file://` entries (OE-core's `connman-conf`,
+  `base-files`). A remote URL written out in `SRC_URI` counts even when other parts of the
+  value are python; a value with python and no such URL counts as no upstream. OE-core's
+  own images and packagegroups set `SUMMARY` and get `LICENSE` from their class (`LICENSE ?= "MIT"`, which counts: a class is not
   configuration); only four of its 37 set `HOMEPAGE`. `SUMMARY` and `LICENSE` are asked of
   every recipe.
 - **`src-uri-checksum`.** A checksum is a `sha256sum` flag on `SRC_URI` (`<name>.sha256sum`
@@ -284,6 +285,14 @@ Notes:
   nor `$D` and runs `install`, `cp`, `mkdir`, `ln`, `mv`, `rsync`, `tar`, `touch`, `cat` or
   `echo` as the first word of a line; it is not reported when the body calls a
   `*_do_install` function, `oe_runmake`, or sets `DESTDIR`, or only calls other functions.
+  Each path is judged by the command it belongs to: the line is split into words at
+  unquoted spaces, a command starts after `|`, `||`, `&&`, `;` or `&` (keywords such as
+  `if`, `then`, `!` and `VAR=value` prefixes skipped), and a line ending in `\` carries its
+  command to the next. Still reported, and right: `cp "/etc/x" ...`, `sed -i '...' /etc/x`,
+  `grep x /etc/passwd`, `echo x > /etc/x`, the link name of `ln -s`. Not told apart (so not
+  reported): a quoted file name given to `sed` / `grep` (`sed -i '...' "/etc/x"`), and a
+  path that another command only prints or stores; a path glued to a redirection
+  (`>/etc/x`) is not at the start of a word and is missed.
 - **`workdir-s`.** Matched: an assignment to `S` (no flag; not `+=`-style, not `:append`,
   `:prepend` or `:remove`) whose value is `${WORKDIR}` or `${WORKDIR}/`. Since every layer
   is checked against the workspace's release, a Styhead or later workspace reports it

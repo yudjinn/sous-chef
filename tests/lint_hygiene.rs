@@ -216,6 +216,17 @@ fn host_path_bad_and_good() {
         check(&HygieneHostPath, "host-path", "good.bb", "x_1.0.bb", &[]),
         []
     );
+    // B13: grep patterns, echo / printf text, sed expressions, shebangs and symlink targets.
+    assert_eq!(
+        check(
+            &HygieneHostPath,
+            "host-path",
+            "good-data.bb",
+            "x_1.0.bb",
+            &[]
+        ),
+        []
+    );
 }
 
 // ---------------------------------------------------------------------------------------
