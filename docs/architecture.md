@@ -161,6 +161,7 @@ pub enum StatementKind {
     AddHandler { name: String },
     ExportFunctions { names: Vec<String> },
     AddFragments { rest: String },                    // `addfragments` with 3+ arguments (M9)
+    AddPyLib { libdir: String, namespace: String },   // `addpylib` with 2+ arguments (w7)
     Unknown  { text: String },
 }
 
@@ -338,7 +339,9 @@ edges(id INTEGER PK, src_file INT, kind TEXT,        -- require | include | incl
                                                       -- bbappend | addfragments (never resolved)
       target_text TEXT,                               -- as written
       target_file INT NULL,                           -- resolved, NULL if unresolved or variable
-      line INT)
+      line INT,
+      context TEXT NULL)                              -- inherit in a classes/ class: recipe |
+                                                      -- global | both (w7, schema version 4)
   INDEX(src_file), INDEX(target_file)
 
 tasks(file_id INT, name TEXT, before TEXT, after TEXT, line INT)
@@ -993,8 +996,9 @@ one `realpath` of the whole path first): 104 ms to 19 ms on the live workspace.
 
 Parser (w5 fixes, `parse`): `StatementKind::AddFragments { rest }` for `addfragments` with
 three or more arguments (`Statement::add_fragments() -> Option<AddFragments>`,
-`AddFragments::groups(n)` applies the release's regular expression); `addpylib` is still an
-`Unknown` statement with a "not modelled" diagnostic. `parse::words`: `words`,
+`AddFragments::groups(n)` applies the release's regular expression); `addpylib` was still an
+`Unknown` statement with a "not modelled" diagnostic until w7 (`StatementKind::AddPyLib`,
+below). `parse::words`: `words`,
 `colon_parts`, `comma_fields`, `split_outside`, `split_keep_whitespace`, `known_words`,
 `is_unevaluated`, `abbreviate`: a `${...}` group is never split and a word holding one is
 unevaluated. **Every place that splits a list or colon-separated value must use
@@ -1031,6 +1035,44 @@ Lint (M9, w5 fixes): the 39th rule, `org/generated-conf-edit` (kas-generated `lo
 `org/layer-conf` reports a copied `LAYERSERIES_COMPAT` as an error (a warning on Kirkstone
 and Langdale workspaces). The fix rounds changed what several rules report (lint-rules.md,
 "On a real workspace").
+
+### After wave 6 (w7 fixes)
+
+Parser: `StatementKind::AddPyLib { libdir, namespace }` for `addpylib` with two or more
+arguments (the groups of `addpylib\s+(.+)\s+(.+)`, unexpanded; no diagnostic); with fewer it
+is `Unknown` with an "unparsed line" diagnostic. The index records it as statement kind
+`addpylib` (`name` = the directory, `value` = the namespace) and makes **no edge**: it adds a
+python library directory, not a metadata file. `hygiene/parse-error` judges where it is
+(base configuration only) and the release (`Feature::AddPyLib`, BitBake 2.4 on;
+`Feature::ALL` has ten). The `.inc` split treats it as opaque.
+
+Index (schema version 4): an `inherit` in a class under `classes/` (context-neutral, on a
+release with `Feature::SplitClassDirs`) is resolved in recipe and in global context; it is
+resolved when either finds the class, `edges.context` (and `EdgeRow::context`) records
+`recipe`, `global` or `both`, and when the two find different files there is an edge for
+each. An `inherit` in `classes-recipe/` stays recipe-only, in `classes-global/` or a `.conf`
+global-only; every other edge has no context. The replay is unchanged (it follows
+`__bbclasstype` as BitBake does).
+
+`gitcmd` (new module): `gitcmd::git(dir, args) -> Option<Vec<u8>>`,
+`gitcmd::git_text(dir, args) -> Option<String>`, `gitcmd::TIMEOUT` (5 s). The one way
+sous-chef runs git: argv only, stdin closed, no prompts, `--no-optional-locks`,
+`-c core.fsmonitor=false`, the `GIT_DIR` family and `GIT_CONFIG*` removed, killed after the
+timeout. `org/upstream-edit` and the audit both use it (`audit::git` is gone;
+`org_upstream_edit::TIMEOUT` and `audit::GIT_TIMEOUT` are `gitcmd::TIMEOUT`).
+
+`mcp::tools::layers::order_problems(index, ws) -> Result<Vec<OrderProblem>>` (`OrderProblem
+{ layer, severity: Severity, message, loc }`, all public): the `BBLAYERS` order checks, the
+`order` rows of `layers show=compat`. The audit calls it instead of reading those rows
+back from the view's JSON (it still reads `layers show=appends` that way).
+
+`BBFILES_DYNAMIC` (w7): `workspace::layers::read_bbfiles_dynamic(build_dir, roots) ->
+Result<Vec<DynamicWord>>` (`DynamicWord { word, layer: Option<usize> }`) reads the value with
+discovery's datastore (includes, overrides, every operator); `resolve::bbfiles_dynamic` uses
+it. A word without `:` (or with an empty collection) is BitBake's fatal error and an
+`Error::Config` from discovery (`read_layer_confs*`), with BitBake's message. Words that
+cannot be decided statically are `Collection::unusable`, said by `layers show=appends` and
+the audit's structure notes.
 
 ## Errors
 

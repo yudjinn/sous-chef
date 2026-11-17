@@ -12,7 +12,7 @@ use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 use crate::error::Result;
 
 /// Stored in `PRAGMA user_version`. Bump on every change to [`DDL`].
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// `PRAGMA busy_timeout`.
 pub const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -41,6 +41,11 @@ pub const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 ///   metadata (a data file); `meta.edges` ([`META_EDGES`]) records the version of the edge
 ///   step, so an index built before data files were marked gets its marks without a schema
 ///   change.
+/// - `edges.context` (schema version 4): for an `inherit` in a context-neutral class
+///   (`classes/`, on a release with `classes-recipe/` and `classes-global/`), which class
+///   search found the target: [`CONTEXT_RECIPE`], [`CONTEXT_GLOBAL`] or [`CONTEXT_BOTH`]
+///   (both found the same file). NULL for every other edge, and for one neither search
+///   resolved.
 pub const DDL: &str = r#"
 CREATE TABLE IF NOT EXISTS layers(
     id          INTEGER PRIMARY KEY,
@@ -94,7 +99,8 @@ CREATE TABLE IF NOT EXISTS edges(
     kind        TEXT,
     target_text TEXT,
     target_file INT NULL REFERENCES files(id) ON DELETE SET NULL,
-    line        INT
+    line        INT,
+    context     TEXT NULL
 );
 CREATE INDEX IF NOT EXISTS edges_src_file ON edges(src_file);
 CREATE INDEX IF NOT EXISTS edges_target_file ON edges(target_file);
@@ -189,7 +195,18 @@ pub const META_EDGES: &str = "edges";
 /// `dynamic-1`: `BBFILES_DYNAMIC` folded into the collection, `not_collected = 'dynamic'`
 /// (w6). `conf-data-1`: an unreferenced `.conf` under `conf/` that does not parse is data.
 /// `bbmask-1`: a static `BBMASK` is applied (`not_collected = 'bbmask'`).
-pub const EDGES_VERSION: &str = "bbmask-1";
+/// `inherit-context-1`: an `inherit` in a `classes/` class is resolved in both contexts
+/// (`edges.context`).
+pub const EDGES_VERSION: &str = "inherit-context-1";
+
+/// `edges.context`: found by the recipe-context class search (`classes-recipe/`, then
+/// `classes/`).
+pub const CONTEXT_RECIPE: &str = "recipe";
+/// `edges.context`: found by the global-context class search (`classes-global/`, then
+/// `classes/`).
+pub const CONTEXT_GLOBAL: &str = "global";
+/// `edges.context`: both searches found the same file.
+pub const CONTEXT_BOTH: &str = "both";
 
 /// The `meta` key holding the codename of the release the edges were resolved for.
 pub const META_RELEASE: &str = "release";

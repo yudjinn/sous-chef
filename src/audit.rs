@@ -7,12 +7,13 @@
 //!   directory under the root for `conf/layer.conf` ([`find_layers`]), following
 //!   `.gitmodules` and the kas repositories, so layers on disk that the build does not
 //!   enable are listed too (from their `conf/layer.conf` alone: they are not in the index);
-//! - git facts per repository ([`git`]: read-only commands, argv only, a timeout, the
-//!   `GIT_DIR` family removed; any failure is "unknown");
+//! - git facts per repository ([`crate::gitcmd::git`]: read-only commands, argv only, a
+//!   timeout, the `GIT_DIR` family removed; any failure is "unknown");
 //! - release detection ([`crate::release`]) and each layer's `LAYERSERIES_COMPAT`;
-//! - `org/layer-conf`'s checks ([`org_layer_conf::layer_problems`]), the `layers` tool's
-//!   `compat` and `appends` views (`BBLAYERS` order rows, bbappends `BBFILES` does not
-//!   collect), [`query::shadowed`] and [`query::orphan_appends`];
+//! - `org/layer-conf`'s checks ([`org_layer_conf::layer_problems`]), the `BBLAYERS` order
+//!   checks ([`layers_tool::order_problems`], the rows `layers show=compat` shows), the
+//!   `layers` tool's `appends` view (bbappends `BBFILES` does not collect),
+//!   [`query::shadowed`] and [`query::orphan_appends`];
 //! - every enabled lint rule over every layer, as `sous-chef lint --all` ([`lint::run`]);
 //! - the index's parse and resolution results (unparsed statements, unresolved `include` /
 //!   `require` / `inherit`, files BitBake does not collect).
@@ -26,16 +27,15 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
 use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::gitcmd;
 use crate::index::Index;
 use crate::index::query::{self, FileSet};
 use crate::lint::rules::org_layer_conf::{self, LayerProblem};
@@ -64,8 +64,8 @@ pub const UPSTREAM_PARSE_EXAMPLES: usize = 5;
 /// Items in "Most worth attention".
 pub const MAX_ATTENTION: usize = 10;
 
-/// Per git invocation.
-pub const GIT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Per git invocation ([`gitcmd::TIMEOUT`]).
+pub const GIT_TIMEOUT: Duration = crate::gitcmd::TIMEOUT;
 
 /// Shown for a path outside the root, before its last component.
 pub const OUTSIDE_ROOT: &str = "(outside ROOT)";
@@ -327,7 +327,7 @@ pub struct Structure {
     pub summary: String,
     /// `org/layer-conf`'s checks per enabled layer, in `BBLAYERS` order then check order.
     pub problems: Vec<StructureProblem>,
-    /// `BBLAYERS` order rows of `layers show=compat`.
+    /// `BBLAYERS` order rows ([`layers_tool::order_problems`], as `layers show=compat`).
     pub order: Vec<StructureProblem>,
     pub shadowed: Vec<Shadowed>,
     /// bbappends `BBFILES` collects that match no recipe (pointers).
@@ -488,7 +488,7 @@ pub struct NotChecked {
 // Building
 
 /// Builds the report for the workspace of `ctx`. Refreshes the index, calls the `layers`
-/// tool's `compat` and `appends` views, then assembles the rest with the index locked.
+/// tool's `appends` view, then assembles the rest with the index locked.
 pub async fn build(ctx: &Ctx, opts: &Options) -> Result<Audit> {
     let root = canonical_dir(&opts.root)?;
     opts.say("refreshing the index");
@@ -496,17 +496,15 @@ pub async fn build(ctx: &Ctx, opts: &Options) -> Result<Audit> {
         let mut index = ctx.index.lock().await;
         index.refresh(&ctx.workspace)?;
     }
-    opts.say("reading the layers views (compat, appends)");
-    let compat = view(ctx, layers_tool::Show::Compat).await;
+    opts.say("reading the layers view (appends)");
     let appends = view(ctx, layers_tool::Show::Appends).await;
     let index = ctx.index.lock().await;
-    let views = Views { compat, appends };
+    let views = Views { appends };
     assemble(&ctx.workspace, &index, &ctx.config, &root, opts, &views)
 }
 
 /// What the `layers` tool's views returned (or why they failed).
 struct Views {
-    compat: std::result::Result<JsonTable, String>,
     appends: std::result::Result<JsonTable, String>,
 }
 
@@ -842,60 +840,10 @@ fn read_gitmodules(dir: &Path) -> Vec<Submodule> {
 
 // ---- git
 
-const GIT_ENV: &[&str] = &[
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_COMMON_DIR",
-    "GIT_NAMESPACE",
-    "GIT_CEILING_DIRECTORIES",
-    "GIT_CONFIG",
-    "GIT_CONFIG_PARAMETERS",
-];
-
-/// Runs a read-only git command in `dir`: argv only (never a shell), stdin closed, no
-/// prompts, no optional locks, no fsmonitor, the `GIT_DIR` family removed, killed after
-/// [`GIT_TIMEOUT`]. Its stdout when it exits 0; `None` on any failure (git missing, not a
-/// repository, a timeout), which the report shows as unknown.
-pub fn git(dir: &Path, args: &[&str]) -> Option<String> {
-    let mut cmd = Command::new("git");
-    cmd.args(["--no-optional-locks", "-c", "core.fsmonitor=false"])
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("LC_ALL", "C");
-    for v in GIT_ENV {
-        cmd.env_remove(v);
-    }
-    let mut child = cmd.spawn().ok()?;
-    let mut stdout = child.stdout.take()?;
-    let reader = thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
-        buf
-    });
-    let start = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if start.elapsed() < GIT_TIMEOUT => thread::sleep(Duration::from_millis(5)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
-        }
-    };
-    let out = reader.join().ok()?;
-    status
-        .filter(|s| s.success())
-        .map(|_| String::from_utf8_lossy(&out).into_owned())
+/// [`gitcmd::git_text`]: a read-only git command in `dir`, `None` on any failure (git
+/// missing, not a repository, a timeout), which the report shows as unknown.
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    gitcmd::git_text(dir, args)
 }
 
 /// A remote URL with any userinfo (`user:token@`) removed: `https://user:token@host/x`
@@ -1437,27 +1385,20 @@ fn structure(
         }
     }
     let mut order = Vec::new();
-    match &views.compat {
-        Ok(t) => {
-            for row in &t.rows {
-                let cell = |i: usize| row.get(i).map(|c| unescape_cell(c)).unwrap_or_default();
-                if cell(1) == "order" {
-                    order.push(StructureProblem {
-                        layer: cell(0),
-                        check: "order".into(),
-                        severity: cell(2),
-                        pointer: cell(4),
-                        message: cell(3),
-                    });
-                }
-            }
+    match layers_tool::order_problems(index, ws) {
+        Ok(rows) => {
+            order.extend(rows.into_iter().map(|o| StructureProblem {
+                layer: o.layer,
+                check: "order".into(),
+                severity: o.severity.as_str().into(),
+                pointer: o.loc,
+                message: o.message,
+            }));
             if ws.build_dir.is_none() {
                 notes.push("no build directory, so no BBLAYERS order to check".into());
             }
         }
-        Err(e) => notes.push(format!(
-            "BBLAYERS order not checked: `layers show=compat` failed: {e}"
-        )),
+        Err(e) => notes.push(format!("BBLAYERS order not checked: {e}")),
     }
     let mut shadowed = Vec::new();
     for s in query::shadowed(index, ws)? {
@@ -1478,6 +1419,13 @@ fn structure(
         .iter()
         .map(|f| format!("{}:{}", f.layer, f.path.display()))
         .collect();
+    let (_, unusable) = crate::workspace::resolve::bbfiles_dynamic(ws);
+    if !unusable.is_empty() {
+        notes.push(format!(
+            "BBFILES_DYNAMIC words sous-chef cannot decide statically (python, or a variable set later) are left out, so the bbappends they would collect are not listed: {}",
+            unusable.join(" ")
+        ));
+    }
     let mut appends_not_collected = Vec::new();
     match &views.appends {
         Ok(t) => {
@@ -1710,7 +1658,7 @@ fn listing(ws: &Workspace, own: &BTreeSet<String>, items: Vec<(String, Item)>) -
 
 /// Marks a problem BitBake stops on (listed first in a [`Listing`]).
 const BITBAKE_STOPS: &str = "BitBake stops";
-const BITBAKE_STOPS_NOT_FOUND: &str = "not found on the search path sous-chef used (a class in classes/ is resolved as a recipe inherit); BitBake stops if it cannot find it either";
+const BITBAKE_STOPS_NOT_FOUND: &str = "not found on the search path sous-chef used (for an inherit in a classes/ class, in recipe and global context); BitBake stops if it cannot find it either";
 
 /// Pointers sorted by layer, path, then line numerically.
 fn cmp_pointer(a: &str, b: &str) -> std::cmp::Ordering {
@@ -1737,19 +1685,11 @@ fn parse_section(ws: &Workspace, index: &Index, own: &BTreeSet<String>) -> Resul
         unparsed_rows
             .into_iter()
             .map(|s| {
-                let text = if s.snippet.split_whitespace().next() == Some("addpylib") {
-                    format!(
-                        "{} (not modelled by sous-chef; BitBake reads it)",
-                        s.snippet
-                    )
-                } else {
-                    s.snippet.clone()
-                };
                 (
                     s.loc.layer.clone(),
                     Item {
                         pointer: s.loc.to_string(),
-                        text,
+                        text: s.snippet.clone(),
                     },
                 )
             })

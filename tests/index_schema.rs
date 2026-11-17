@@ -161,6 +161,7 @@ fn fresh_index_has_every_table_and_column() {
                 "target_text",
                 "target_file",
                 "line",
+                "context",
             ],
         ),
         ("tasks", &["file_id", "name", "before", "after", "line"]),

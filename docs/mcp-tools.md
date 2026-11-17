@@ -521,7 +521,8 @@ note: global class: ranked as INHERIT finds it (classes-global/, then classes/)
   `not collected (dynamic layer `<name>` not present)` (or `(BBFILES_DYNAMIC `!<name>`:
   layer `<name>` is present)`); one `BBMASK` masks is `not collected (masked by BBMASK)`;
   one no glob matches, `not collected (no BBFILES glob)`. A note counts the bbappends
-  BitBake never reads.
+  BitBake never reads; another lists the `BBFILES_DYNAMIC` words sous-chef cannot decide
+  statically (python, or a variable set later), which are left out.
 - `"compat"`: rows `layer check result detail loc`, per layer in `BBLAYERS` order. First a
   `compat` row: what `LAYERSERIES_COMPAT_<c>` claims against the workspace release and the
   core layer's `LAYERSERIES_CORENAMES` (`result` `ok`, or the worst severity of the
@@ -1088,7 +1089,8 @@ JSON, a `kas` object with the same fields. The `bitbake` row's mode is `init-scr
 A findings report over a whole build repository (T8.6, `src/audit.rs`): every layer under
 the root, enabled or not, with its releases, structure, lint findings and parse problems,
 for a person to read. It adds no analysis of its own; it runs layer discovery, release
-detection, `org/layer-conf`'s checks, `layers show=compat` and `show=appends`,
+detection, `org/layer-conf`'s checks, the `BBLAYERS` order checks of `layers
+show=compat` (`layers::order_problems`), `layers show=appends`,
 `query::shadowed`, `query::orphan_appends`, every enabled lint rule as `sous-chef lint
 --all`, and the index's parse and resolution results, and assembles them. It is
 read-only: it writes nothing into the repository, runs no BitBake and no kas, fetches
@@ -1177,7 +1179,8 @@ that differs between two runs on the same repository state), then:
   some layer claims plus the workspace's; `**missing**` where a layer does not claim the
   workspace release; names older than the floor or unknown in the last column).
 - `## 3. Layer structure`: `org/layer-conf`'s problems (through `layer_problems`, so they
-  agree with the rule) and the `BBLAYERS` order rows of `layers show=compat` (their shared
+  agree with the rule) and the `BBLAYERS` order rows of `layers show=compat` (through
+  `layers::order_problems`, the function the view calls; their shared
   explanation said once); shadowed recipes and classes; bbappends that match no recipe and
   those BitBake does not collect (`layers show=appends`); `org/append-wildcard-broad` and
   `org/duplicate-versions` findings from the lint run.
@@ -1186,9 +1189,9 @@ that differs between two runs on the same repository state), then:
   frequent rules, and per rule its count by severity and the first 3 findings (worst
   severity first) followed by the command that lists all of them (`sous-chef lint --all
   --rule <id>`). Release-dependent findings name the release in their message.
-- `## 5. Parse and resolution problems`: unparsed statements (`addpylib`, which the
-  parser does not model, is marked), unresolved `include` / `require` and `inherit`
-  (whether the argument needs evaluation, or what BitBake does with a missing file), files
+- `## 5. Parse and resolution problems`: unparsed statements, unresolved `include` /
+  `require` and `inherit` (whether the argument needs evaluation, or what BitBake does with
+  a missing file), files
   BitBake does not collect and why. Own layers in full, at most 5 per upstream layer, what
   BitBake stops on first.
 - `## 6. What was not checked`: whether a build environment was found, files with
@@ -1249,9 +1252,11 @@ kas project, release wrynose: 5 layers enabled (2 own), 6 present but not enable
 Read as its reader would, the report is right about the repository but carries the lint
 rules' known errors: item 1 is `meta:conf/ccache.conf`, ccache's own configuration file,
 which lint takes for metadata (lint-rules.md, "On a real workspace"), and section 5
-lists `inherit sanity` in `meta:classes/sign_*.bbclass` as not found because the index
-resolves an inherit in a `classes/` class as a recipe inherit, while those classes are
-used through `INHERIT`, where `classes-global/sanity.bbclass` is found. The `dirty (1)` of
+listed `inherit sanity` in `meta:classes/sign_*.bbclass` as not found because the index
+resolved an inherit in a `classes/` class as a recipe inherit, while those classes are
+used through `INHERIT`, where `classes-global/sanity.bbclass` is found (fixed in w7: such
+an inherit is resolved in both contexts; the live count of unresolved inherits went from
+24 to 21). The `dirty (1)` of
 yocto-kiss is the lock file `live-env.sh` wrote. With `scratch/sous-chef.toml` unchanged
 (no `kas` key) kas detection finds five candidate kas files, so the report shows no pins
 and says why.

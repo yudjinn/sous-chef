@@ -176,7 +176,6 @@ fn statement(text: &str, span: LineSpan, diags: &mut Vec<ParseDiagnostic>) -> St
             };
         }
     }
-    let word = text.split(py_space).next().unwrap_or("");
     if let Some(af) = crate::parse::ast::add_fragments_line(text) {
         // Fewer than three arguments match no release's regular expression: BitBake
         // reports "unparsed line". Whether three or four groups match is the release's
@@ -191,14 +190,18 @@ fn statement(text: &str, span: LineSpan, diags: &mut Vec<ParseDiagnostic>) -> St
             "unparsed line: `addfragments` needs at least three arguments",
         );
     }
-    if word == "addpylib" {
-        // Valid BitBake (configuration only) that the AST does not model.
-        return unknown(
-            text,
-            span,
-            diags,
-            &format!("`{word}` is not modelled by sous-chef"),
-        );
+    if let Some(groups) = crate::parse::ast::add_pylib_line(text) {
+        // Where BitBake accepts it (the base configuration, BitBake 2.4 on) is a question
+        // of the file and the release: `hygiene/parse-error` answers it.
+        return match groups {
+            Some((libdir, namespace)) => StatementKind::AddPyLib { libdir, namespace },
+            None => unknown(
+                text,
+                span,
+                diags,
+                "unparsed line: `addpylib` needs two arguments, a directory and a namespace",
+            ),
+        };
     }
     let why = if text.starts_with(py_space) {
         "unparsed line: BitBake does not allow leading whitespace here"

@@ -304,12 +304,20 @@ fn compat_summary(
     ))
 }
 
-/// A `BBLAYERS` order row.
-struct OrderProblem {
-    layer: String,
-    severity: Severity,
-    message: String,
-    loc: String,
+/// A `BBLAYERS` order row of [`order_problems`]: `layer` is listed before a layer it names
+/// in `LAYERDEPENDS`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderProblem {
+    /// The layer listed too early.
+    pub layer: String,
+    /// Warning when a `BBPATH` lookup finds a different file because of the order, info
+    /// otherwise.
+    pub severity: Severity,
+    /// What the order changes, in one paragraph.
+    pub message: String,
+    /// Pointer to the `BBLAYERS` assignment in `bblayers.conf` (`build:conf/bblayers.conf`
+    /// when it is not found).
+    pub loc: String,
 }
 
 /// Files whose relative path BitBake looks up along `BBPATH`: classes, `.inc` files and
@@ -327,8 +335,10 @@ fn bbpath_files(index: &Index, layer: &str) -> Result<BTreeSet<PathBuf>> {
 }
 
 /// Layers listed in `BBLAYERS` before a layer whose collection they name in `LAYERDEPENDS`,
-/// with what that order changes in `BBPATH` lookups.
-fn order_problems(index: &Index, ws: &Workspace) -> Result<Vec<OrderProblem>> {
+/// with what that order changes in `BBPATH` lookups (module docs, `compat`), in
+/// `BBLAYERS` order. Empty without a build directory (no `BBLAYERS` to check). The rows of
+/// `layers show=compat` with check `order`, and of the audit report's section 3.
+pub fn order_problems(index: &Index, ws: &Workspace) -> Result<Vec<OrderProblem>> {
     let mut out = Vec::new();
     if ws.build_dir.is_none() {
         return Ok(out);
@@ -492,6 +502,13 @@ fn appends(index: &Index, ws: &Workspace) -> Result<Table> {
             } else {
                 "bbappends match"
             }
+        ));
+    }
+    if !collection.unusable.is_empty() {
+        t.note(&format!(
+            "note: BBFILES_DYNAMIC words sous-chef cannot decide statically (python, or a \
+             variable set later), left out: {}",
+            collection.unusable.join(" ")
         ));
     }
     if uncollected > 0 {

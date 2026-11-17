@@ -76,6 +76,7 @@ use sha2::{Digest, Sha256};
 use super::{FileRefresh, Index, RefreshReport};
 use crate::error::Result;
 use crate::parse::{IncludeMode, Lang, StatementKind, lexer};
+use crate::release::Feature;
 use crate::render;
 use crate::types::{FileKind, LineSpan, Loc, VarRef};
 use crate::workspace::resolve::{self, RefKind, Resolver};
@@ -907,6 +908,13 @@ fn file_rows(text: &str, kind: FileKind, file_name: &str) -> FileRows {
                 row.name = Some(rest.trim_start_matches(lexer::py_space).to_string());
                 row.value = Some(format!("addfragments{rest}"));
             }
+            StatementKind::AddPyLib { libdir, namespace } => {
+                // No edge: it adds a python library directory to `sys.path`, not a
+                // metadata file to the parse.
+                row.kind = "addpylib";
+                row.name = Some(libdir.clone());
+                row.value = Some(namespace.clone());
+            }
             StatementKind::Unknown { text } => {
                 row.kind = "unknown";
                 row.value = Some(text.clone());
@@ -1363,6 +1371,10 @@ fn insert_ref_edges(
     let mut ins = tx.prepare_cached(
         "INSERT INTO edges(src_file, kind, target_text, target_file, line) VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
+    let mut ins_ctx = tx.prepare_cached(
+        "INSERT INTO edges(src_file, kind, target_text, target_file, line, context) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
     for (file_id, kind, text, op, line) in refs {
         let Some(info) = files.get(&file_id) else {
             continue;
@@ -1380,12 +1392,35 @@ fn insert_ref_edges(
             ])?;
             continue;
         }
+        let class_dir = (info.kind == Some(FileKind::Class))
+            .then(|| resolve::class_dir(ws, Path::new(&info.rel)));
+        if kind == "inherit"
+            && class_dir == Some(resolve::ClassDir::Shared)
+            && ws.release.release.has(Feature::SplitClassDirs)
+        {
+            // A class in `classes/` can be inherited from a recipe or through `INHERIT`, and
+            // BitBake searches its own `inherit`s in the context it is parsed in
+            // (`__bbclasstype`, bitbake-semantics.md "Finding files"): resolved in both.
+            let vars = |name: &str| static_var(name, info, corebase.as_deref());
+            for (target_text, target, context) in
+                neutral_inherit_edges(ws, resolver, by_path, &text, &info.abs, &vars)
+            {
+                ins_ctx.execute(params![
+                    file_id,
+                    "inherit",
+                    target_text,
+                    target,
+                    line,
+                    context
+                ])?;
+            }
+            continue;
+        }
         let (edge_kind, ref_kind) = if kind == "inherit" {
             // A class in `classes-global/` inherits in global context, but only on a release
             // that has that directory (`resolve::class_dir`, as the resolver searches).
-            let global = info.kind == Some(FileKind::Conf)
-                || (info.kind == Some(FileKind::Class)
-                    && resolve::class_dir(ws, Path::new(&info.rel)) == resolve::ClassDir::Global);
+            let global =
+                info.kind == Some(FileKind::Conf) || class_dir == Some(resolve::ClassDir::Global);
             ("inherit", RefKind::Inherit { global })
         } else {
             let mode = match op.as_str() {
@@ -1412,6 +1447,46 @@ fn insert_ref_edges(
         }
     }
     Ok(())
+}
+
+/// The edges of an `inherit` in a context-neutral class (`classes/`, on a release that has
+/// `classes-recipe/` and `classes-global/`): `(target_text, target_file, context)`. Each
+/// class name is searched in recipe context and in global context; it is resolved when
+/// either finds an indexed file, and `context` says which ([`schema::CONTEXT_RECIPE`],
+/// [`schema::CONTEXT_GLOBAL`], [`schema::CONTEXT_BOTH`] when both found the same file). When
+/// the two find different files there is one edge for each. An argument that needs
+/// evaluation is one unresolved edge with no context, as elsewhere.
+fn neutral_inherit_edges(
+    ws: &Workspace,
+    resolver: &Resolver,
+    by_path: &HashMap<PathBuf, i64>,
+    text: &str,
+    from: &Path,
+    vars: &dyn Fn(&str) -> Option<String>,
+) -> Vec<(String, Option<i64>, Option<&'static str>)> {
+    use super::schema::{CONTEXT_BOTH, CONTEXT_GLOBAL, CONTEXT_RECIPE};
+    let recipe = resolver.resolve_with(ws, RefKind::Inherit { global: false }, text, from, vars);
+    let global = resolver.resolve_with(ws, RefKind::Inherit { global: true }, text, from, vars);
+    let (Some(recipe), Some(global)) = (recipe, global) else {
+        return vec![(text.to_string(), None, None)];
+    };
+    let single = recipe.len() == 1;
+    let mut out = Vec::new();
+    for (r, g) in recipe.into_iter().zip(global) {
+        let target_text = if single { text.to_string() } else { r.text };
+        let indexed = |f: Option<PathBuf>| f.and_then(|p| by_path.get(&p).copied());
+        match (indexed(r.file), indexed(g.file)) {
+            (Some(a), Some(b)) if a == b => out.push((target_text, Some(a), Some(CONTEXT_BOTH))),
+            (Some(a), Some(b)) => {
+                out.push((target_text.clone(), Some(a), Some(CONTEXT_RECIPE)));
+                out.push((target_text, Some(b), Some(CONTEXT_GLOBAL)));
+            }
+            (Some(a), None) => out.push((target_text, Some(a), Some(CONTEXT_RECIPE))),
+            (None, Some(b)) => out.push((target_text, Some(b), Some(CONTEXT_GLOBAL))),
+            (None, None) => out.push((target_text, None, None)),
+        }
+    }
+    out
 }
 
 /// The indexed files among `files` (from `resolve::collect`: the `BBFILES` globs and the
@@ -1548,11 +1623,14 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
     }
     // Files with a line BitBake's configuration parser rejects ("unparsed line": anything
     // but assignments, `include` / `require` / `include_all`, `export`, `unset`,
-    // `addfragments`, `addpylib`, comments; so also functions, `inherit`, `addtask`).
+    // `addfragments`, comments; so also functions, `inherit`, `addtask`). `addpylib` is
+    // accepted only in the base configuration, whose files are all conventional (below):
+    // in any other `.conf` it is an unparsed line too.
     let unparsable: HashSet<i64> = {
         let mut st = tx.prepare_cached(
             "SELECT DISTINCT file_id FROM statements WHERE kind IN ('unknown', 'function', \
-             'pydef', 'inherit', 'addtask', 'deltask', 'addhandler', 'export_functions')",
+             'pydef', 'inherit', 'addtask', 'deltask', 'addhandler', 'export_functions', \
+             'addpylib')",
         )?;
         let rows = st.query_map([], |r| r.get(0))?;
         rows.collect::<rusqlite::Result<_>>()?

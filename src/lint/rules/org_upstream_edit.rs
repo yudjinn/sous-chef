@@ -4,9 +4,9 @@
 //! `git rev-parse --show-prefix`, `git ls-files -- conf/layer.conf` (a layer whose
 //! `layer.conf` is not tracked is not an upstream checkout, just a directory inside some
 //! other repository) and `git status --porcelain=v1 -z --untracked-files=all -- .` in the
-//! layer root (argv, never a shell; `GIT_DIR`, `GIT_WORK_TREE` and friends
-//! removed from the environment; no optional locks, no prompts), each with a timeout of
-//! [`TIMEOUT`]. Anything going wrong (git missing, not a git checkout, a timeout, a non-zero
+//! layer root with [`gitcmd::git`] (argv, never a shell; `GIT_DIR`, `GIT_WORK_TREE` and
+//! friends removed from the environment; no optional locks, no fsmonitor, no prompts), each
+//! with a timeout of [`TIMEOUT`]. Anything going wrong (git missing, not a git checkout, a timeout, a non-zero
 //! exit) skips the layer silently: git never makes lint fail.
 //!
 //! Reported (one finding per path, line 1, at most [`MAX_FINDINGS`], then one finding on
@@ -19,70 +19,19 @@
 //! Since lint skips layers that are not writable unless asked (`--all`, or naming the
 //! layer), this rule runs only then.
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use crate::gitcmd::{self, git};
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::types::{FileKind, LineSpan, Loc};
 
 pub struct OrgUpstreamEdit;
 
-/// Per git invocation.
-pub const TIMEOUT: Duration = Duration::from_secs(5);
+/// Per git invocation ([`gitcmd::TIMEOUT`]).
+pub const TIMEOUT: Duration = gitcmd::TIMEOUT;
 /// Findings listed one by one before the rest are counted.
 pub const MAX_FINDINGS: usize = 20;
-
-const GIT_ENV: &[&str] = &[
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_COMMON_DIR",
-    "GIT_NAMESPACE",
-];
-
-/// Runs git with `args` in `dir`; its stdout when it exits 0 within [`TIMEOUT`].
-fn git(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let mut cmd = Command::new("git");
-    cmd.arg("--no-optional-locks")
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("LC_ALL", "C");
-    for v in GIT_ENV {
-        cmd.env_remove(v);
-    }
-    let mut child = cmd.spawn().ok()?;
-    let mut stdout = child.stdout.take()?;
-    // Read on a thread so a large output cannot block the child while we wait.
-    let reader = thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
-        buf
-    });
-    let start = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if start.elapsed() < TIMEOUT => thread::sleep(Duration::from_millis(5)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
-        }
-    };
-    let out = reader.join().ok()?;
-    status.filter(|s| s.success()).map(|_| out)
-}
 
 /// What one porcelain entry says, for the paths worth reporting.
 fn describe(code: &[u8]) -> Option<&'static str> {

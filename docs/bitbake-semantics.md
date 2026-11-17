@@ -383,6 +383,27 @@ Checked against BitBake master (2026-11) and the release branches on GitHub
   space-separated names; the AST `name` field holds them joined with single spaces.
   `deltask` expands its argument; `addhandler` does not.
 - `EXPORT_FUNCTIONS` takes space-separated names.
+- `addpylib` (`__addpylib_regexp__ = addpylib\s+(.+)\s+(.+)`, `re.match`, greedy: with
+  more than two words the first group takes all but the last). Checked in BitBake
+  `lib/bb/parse/parse_py/ConfHandler.py` `feeder` and `lib/bb/cookerdata.py` on branch
+  `2.18` (`6e260eb6a`), branches `2.0`, `2.2` and `2.4`, and `git describe --contains
+  afb8478d3` = `2.3.1~96` (the commit that added it). **First release: BitBake 2.4
+  (Mickledore)**: on `2.0` (Kirkstone) and `2.2` (Langdale) `feeder` has no such pattern
+  and the line ends in `raise ParseError("unparsed line: ...")`, so the file fails to parse.
+  From 2.4 on, `feeder` accepts it only `if baseconfig and conffile and m`: `conffile` is
+  false when `BBHandler.feeder` (recipes, classes, `.inc`) falls through to
+  `ConfHandler.feeder`, and `baseconfig` is true only for the files `cookerdata` passes to
+  `parse_config_file` (`bb.parse.handle(fn, data, include, baseconfig=True)`): the
+  `-r` prerun files, `conf/bblayers.conf`, each layer's `conf/layer.conf`,
+  `conf/bitbake.conf` and the `-R` postrun files. A file any of those *includes* is parsed by
+  `ConfHandler.include_single_file` with `bb.parse.handle(fn, data, True)`, `baseconfig`
+  false, so `addpylib` in `local.conf`, a machine or distro conf, or a file `layer.conf`
+  includes is an "unparsed line" too. `ast.PyLibNode.eval` expands the directory, appends it
+  to `sys.path` and imports the namespace (and the modules its `BBIMPORTS` lists); it sets no
+  variable. sous-chef: `StatementKind::AddPyLib`, no edge, no effect on the replay;
+  `hygiene/parse-error` reports it outside `conf/layer.conf` / `conf/bitbake.conf` /
+  `conf/bblayers.conf` on every release, and there on a release without
+  `Feature::AddPyLib`. (The prerun and postrun files are not known to sous-chef.)
 
 ### Configuration fragments
 
@@ -492,6 +513,29 @@ Checked against BitBake master (commit `5495a547`, 2026-11-16), and reproduced b
   is looked up on `BBPATH` as given; an absolute name is used as is. The including file's
   directory is not searched. Not found is a parse error. A class already inherited
   (`__inherit_cache`) is not parsed again.
+- **`inherit` inside a class** (checked 2026-11-17 on BitBake 2.18, `6e260eb6a`:
+  `BBHandler.py` `inherit`, `cookerdata.py` `CookerDataBuilder.__init__` and
+  `parseConfigurationFiles`; and on branch `2.0`): the context is not a property of the class
+  but of the datastore when the `inherit` runs. `inherit` reads
+  `d.getVar("__bbclasstype", False)` for every name; `cookerdata` sets it to `global` on
+  `basedata` (before any configuration file) and to `recipe` on every multiconfig's data
+  after `parseConfigurationFiles` (`mcdata[mc].setVar("__bbclasstype", "recipe")`). So an
+  `inherit` in a class that `INHERIT` (or `base`) pulls in is searched
+  `classes-global/`, `classes/`; the same class inherited from a recipe searches
+  `classes-recipe/`, `classes/`. A class is parsed once per datastore (`__inherit_cache`):
+  one reached through `INHERIT` is already in the recipe datastore's cache and is not parsed
+  again in recipe context. A class in `classes-recipe/` can only be reached in recipe context
+  and one in `classes-global/` only in global context (neither search looks in the other's
+  directory), so their `inherit`s are recipe-only and global-only. A class in `classes/` is
+  reachable from both: OE-core's `meta/classes/sign_rpm.bbclass` (also `sign_ipk`,
+  `sign_package_feed`) says `inherit sanity`, and `sanity` is in `classes-global/`, found
+  because those classes are used through `INHERIT`. BitBake 2.0 has no `__bbclasstype`
+  (`inherit` looks for `classes/<name>.bbclass` only). sous-chef: the scanner resolves an
+  `inherit` in a `classes/` class in both contexts (on a release with
+  `Feature::SplitClassDirs`); it is resolved when either search finds the class, and
+  `edges.context` records `recipe`, `global` or `both`; when the two find different files
+  there is an edge for each. An `inherit` in an `.inc` is resolved in recipe context
+  whatever includes it. The replay follows the context it is actually in.
 - **Global classes** (`cookerdata.py`): the configuration inherits `["base"] + INHERIT`, in that
   order, after the configuration files, each with `__bbclasstype = "global"`.
 - **bbappend matching** (`cooker.py` `get_file_appends`): with `b` the append's file name with
@@ -585,12 +629,21 @@ any other `BBFILES` glob. The first release with `BBFILES_DYNAMIC` is BitBake 1.
 (Kirkstone), so every supported release has them and no `Feature` gates them. A word with
 an empty collection (`:glob`) makes `l[0]` raise in BitBake. sous-chef (w6,
 `resolve::collect` / `resolve::bbfiles_dynamic`, used by `resolve::recipe_files` and so by
-the index): each layer's `conf/layer.conf` is parsed and its `BBFILES_DYNAMIC` assignments
-applied in order (`${LAYERDIR}` replaced by that layer's root, as `expandVarref` does after
-each file; `=` replaces, `+=` adds, `:append` / `:prepend` / `:remove` after all; no
-`include` in a layer.conf, no conditional assignment followed); an active entry's glob is
-added to the globs, sorted by its layer's priority like the static ones; a malformed word or
-one with another `${...}` is left out. The index marks a file only an inactive entry matches
+the index): the value is read from the datastore discovery builds when it reads the layer
+confs (`workspace::layers::read_bbfiles_dynamic`, w7: `bblayers.conf`, then each
+`layer.conf` in `BBLAYERS` order with the files it includes, `${LAYERDIR}` replaced after
+each file as `expandVarref` does, every operator, override-qualified names and
+`:append` / `:prepend` / `:remove` with their conditions, as the `OVERRIDES` known at that
+point select them), so it is the value BitBake sees after all layer confs; each word is
+attributed to the layer after whose `layer.conf` it first appeared. An active entry's glob
+is added to the globs, sorted by that layer's priority like the static ones. A word without
+`:` is BitBake's fatal error and makes discovery fail with BitBake's message ("BBFILES_DYNAMIC
+entries must be of the form {!}<collection name>:<filename pattern>, not:" and the words,
+one per line, plus the files that set them), so `status` shows it as the startup error and
+`audit` stops on it; a word with an empty collection name fails discovery too. A word holding
+python (`${@...}`), or whose collection or glob still holds a `${...}` (BitBake expands
+`BBFILES` again later with the whole configuration), is left out and listed: `layers
+show=appends` and the audit report's layer-structure notes name it. The index marks a file only an inactive entry matches
 `files.not_collected = 'dynamic'`; an active entry's files get `bbappend` edges, are
 evaluated with their recipe, linted, and `org/append-no-match` sees a dangling one.
 `layers show=appends` reads the index.
@@ -1512,6 +1565,7 @@ and must not be used to report an error. No row is marked *verify* at present.
 | `AddFragments` | the `addfragments` directive (three-argument form) | 5.2 walnascar (BitBake 2.12) | (current) | BitBake `ConfHandler.py` `__addfragments_regexp__` and `ast.py` `AddFragmentsNode`: absent on branch `2.10` and tag `yocto-5.1.4`, present on branch `2.12` (`ac0973009`) and tag `yocto-5.2.4`; added by `f68774670` (see "Configuration fragments") |
 | `BuiltinFragments` | `addfragments` takes a fourth argument, the built-in fragments variable (`machine/x` sets `MACHINE`); the three-argument form is an unparsed line | 5.3 whinlatter (BitBake 2.16) | (current) | `3b9d7bea9` "parse/ast: add support for 'built-in' fragments", first in tag `yocto-5.3`; the four-group regex on branches `2.16` (`713fbbdb9`) and `2.18`, the three-group one on `2.12` and `yocto-5.2.4` |
 | `RecipeVirtualProviders` | `DEPENDS` words in `BB_RECIPE_VIRTUAL_PROVIDERS` are replaced with `PREFERRED_PROVIDER_<word>` at finalisation | 5.2 walnascar (BitBake 2.12) | (current) | `ast.py` `handleVirtRecipeProviders`: absent on branch `2.10`, present on `2.12`, `2.16`, `2.18`; added by `fb119c788` "parse/ast: Add support for BB_RECIPE_VIRTUAL_PROVIDERS" (2025-01-21, in tag `2.12.0`) (see "Replay") |
+| `AddPyLib` | the `addpylib` directive (base configuration only) | 4.2 mickledore (BitBake 2.4) | (current) | BitBake `ConfHandler.py` `feeder`: absent on branches `2.0` and `2.2`, present on `2.4` and `2.18`; added by `afb8478d3` (`2.3.1~96`) (see "Directives") |
 | `PrInWorkdir` | `WORKDIR` ends in `${EXTENDPE}${PV}-${PR}` (later: `${PV}`) | 4.0 kirkstone (floor) | 4.2 mickledore | OE-core `meta/conf/bitbake.conf` on branches `kirkstone`, `langdale`, `mickledore` (`.../${PN}/${EXTENDPE}${PV}-${PR}`) and `nanbield`, `scarthgap` (`.../${PN}/${PV}`); Yocto migration guide 4.3, "Versioning changes" ("PE and PR are no longer included in the work directory path") |
 
 Details:

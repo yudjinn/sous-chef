@@ -146,7 +146,101 @@ pub fn read_bbpath(build_dir: Option<&Path>, roots: &[PathBuf]) -> Result<Vec<St
         .collect())
 }
 
+/// One word of `BBFILES_DYNAMIC` as BitBake reads it once every `layer.conf` has been
+/// parsed (`cookerdata.py` `parseConfigurationFiles`: `data.getVar('BBFILES_DYNAMIC')`,
+/// expanded, split on whitespace), with the layer whose `layer.conf` (or a file it
+/// includes) added it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DynamicWord {
+    pub word: String,
+    /// Index into the `roots` read; `None` when the word was there before the first
+    /// `layer.conf` (set in `bblayers.conf`).
+    pub layer: Option<usize>,
+}
+
+/// The `BBFILES_DYNAMIC` words once `bblayers.conf` (if `build_dir` is given) and every
+/// `layer.conf` of `roots` (in order) have been read with the datastore discovery uses, so
+/// assignments in included files and under overrides, `:append` / `:prepend` / `:remove`
+/// and every operator count as they do for BitBake. A word BitBake stops on is an error,
+/// as in discovery (see [`read_layer_confs`]). Like [`read_bbpath`], this re-reads the
+/// configuration files.
+pub fn read_bbfiles_dynamic(
+    build_dir: Option<&Path>,
+    roots: &[PathBuf],
+) -> Result<Vec<DynamicWord>> {
+    let seed = match build_dir {
+        Some(b) => Some(read_bblayers(b)?),
+        None => None,
+    };
+    Ok(read_layer_confs_all(roots, seed.as_ref())?.2)
+}
+
+/// `BBFILES_DYNAMIC` words BitBake stops on (`cookerdata.py` `parseConfigurationFiles`,
+/// BitBake 2.18.0 and branch 2.0): a word without `:` is collected and reported with
+/// `bb.fatal("BBFILES_DYNAMIC entries must be of the form {!}<collection name>:<filename
+/// pattern>, not:\n    %s" % "\n    ".join(invalid))`; a word with an empty collection
+/// name (`:glob`, `!:glob`) makes `l[0]` raise an `IndexError` (for `:glob`) or names no
+/// collection. A word holding python (`${@...}`) is not judged: BitBake evaluates it.
+fn check_bbfiles_dynamic(words: &[DynamicWord], roots: &[PathBuf]) -> Result<()> {
+    let python = |w: &str| w.contains("${@");
+    let invalid: Vec<&DynamicWord> = words
+        .iter()
+        .filter(|w| !python(&w.word) && !w.word.contains(':'))
+        .collect();
+    let empty: Vec<&DynamicWord> = words
+        .iter()
+        .filter(|w| {
+            !python(&w.word)
+                && w.word
+                    .split_once(':')
+                    .is_some_and(|(c, _)| c.is_empty() || c == "!")
+        })
+        .collect();
+    let set_by = |ws: &[&DynamicWord]| -> String {
+        let mut files: Vec<String> = Vec::new();
+        for w in ws {
+            let f = match w.layer.and_then(|i| roots.get(i)) {
+                Some(r) => r.join("conf/layer.conf").display().to_string(),
+                None => "conf/bblayers.conf".to_string(),
+            };
+            if !files.contains(&f) {
+                files.push(f);
+            }
+        }
+        files.join(", ")
+    };
+    if !invalid.is_empty() {
+        let list: Vec<&str> = invalid.iter().map(|w| w.word.as_str()).collect();
+        return Err(Error::Config {
+            msg: format!(
+                "BBFILES_DYNAMIC entries must be of the form {{!}}<collection name>:<filename pattern>, not:\n    {}\n(BitBake stops with this error once the layer confs are read; set by {})",
+                list.join("\n    "),
+                set_by(&invalid)
+            ),
+        });
+    }
+    if !empty.is_empty() {
+        let list: Vec<&str> = empty.iter().map(|w| w.word.as_str()).collect();
+        return Err(Error::Config {
+            msg: format!(
+                "BBFILES_DYNAMIC entries with an empty collection name: {} (BitBake fails on them once the layer confs are read; set by {})",
+                list.join(" "),
+                set_by(&empty)
+            ),
+        });
+    }
+    Ok(())
+}
+
 fn read_layer_confs_vars(roots: &[PathBuf], seed: Option<&BbLayers>) -> Result<(Vec<Layer>, Vars)> {
+    let (layers, vars, _) = read_layer_confs_all(roots, seed)?;
+    Ok((layers, vars))
+}
+
+fn read_layer_confs_all(
+    roots: &[PathBuf],
+    seed: Option<&BbLayers>,
+) -> Result<(Vec<Layer>, Vars, Vec<DynamicWord>)> {
     let mut vars = seed.map(|s| s.vars.clone()).unwrap_or_default();
     // Files the layer confs may include: anything in the build directory or a layer.
     let mut allowed: Vec<PathBuf> = roots.iter().map(|r| canonical_or_self(r)).collect();
@@ -154,7 +248,12 @@ fn read_layer_confs_vars(roots: &[PathBuf], seed: Option<&BbLayers>) -> Result<(
         allowed.push(canonical_or_self(&s.topdir));
     }
     let mut layers = Vec::with_capacity(roots.len());
-    for root in roots {
+    // Which layer first left each `BBFILES_DYNAMIC` word in the datastore.
+    let mut dynamic_by: HashMap<String, Option<usize>> = words_of(&vars, "BBFILES_DYNAMIC")
+        .into_iter()
+        .map(|w| (w, None))
+        .collect();
+    for (i, root) in roots.iter().enumerate() {
         let conf = root.join("conf").join("layer.conf");
         let layerdir = root.to_string_lossy().into_owned();
         let layerdir_re = python_re_escape(&layerdir);
@@ -165,6 +264,9 @@ fn read_layer_confs_vars(roots: &[PathBuf], seed: Option<&BbLayers>) -> Result<(
         read_conf(&conf, &mut vars, &allowed, 0)?;
         vars.replace_ref("LAYERDIR", &layerdir);
         vars.replace_ref("LAYERDIR_RE", &layerdir_re);
+        for w in words_of(&vars, "BBFILES_DYNAMIC") {
+            dynamic_by.entry(w).or_insert(Some(i));
+        }
         let collections = added_words(&before_coll, &words_of(&vars, "BBFILE_COLLECTIONS"));
         let bbfiles = added_words(&before_files, &words_of(&vars, "BBFILES"));
         layers.push(Layer {
@@ -184,6 +286,15 @@ fn read_layer_confs_vars(roots: &[PathBuf], seed: Option<&BbLayers>) -> Result<(
     // cookerdata deletes both once every layer.conf has been read.
     vars.del("LAYERDIR_RE");
     vars.del("LAYERDIR");
+    // Then reads BBFILES_DYNAMIC, and stops on a malformed word.
+    let dynamic: Vec<DynamicWord> = words_of(&vars, "BBFILES_DYNAMIC")
+        .into_iter()
+        .map(|w| DynamicWord {
+            layer: dynamic_by.get(&w).copied().flatten(),
+            word: w,
+        })
+        .collect();
+    check_bbfiles_dynamic(&dynamic, roots)?;
 
     // Per-collection values, read once every layer.conf has been parsed (as BitBake does
     // in handleCollections).
@@ -231,7 +342,7 @@ fn read_layer_confs_vars(roots: &[PathBuf], seed: Option<&BbLayers>) -> Result<(
             layer.priority = collection_priority(c, &explicit, &deps, min_prio, &mut memo, 0);
         }
     }
-    Ok((layers, vars))
+    Ok((layers, vars, dynamic))
 }
 
 /// BitBake `calc_layer_priority`: an explicit non-zero priority is used as is; otherwise

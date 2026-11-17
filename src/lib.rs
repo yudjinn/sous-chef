@@ -7,6 +7,7 @@ pub mod config;
 pub mod diff;
 pub mod error;
 pub mod eval;
+pub mod gitcmd;
 pub mod handles;
 pub mod hook;
 pub mod index;

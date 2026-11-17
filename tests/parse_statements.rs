@@ -892,11 +892,52 @@ fn addfragments_is_a_statement_kind() {
         StatementKind::Unknown { .. }
     ));
     assert!(pf.diagnostics[0].message.starts_with("unparsed line"));
-    // `addpylib` is still kept as an unknown statement with a note.
+    // `addpylib` is a statement of its own, with no diagnostic.
     let pf = parse("addpylib ${LAYERDIR}/lib oe\n");
-    assert!(matches!(
+    assert_eq!(
         pf.statements[0].kind,
+        StatementKind::AddPyLib {
+            libdir: "${LAYERDIR}/lib".into(),
+            namespace: "oe".into(),
+        }
+    );
+    assert!(pf.diagnostics.is_empty(), "{:?}", pf.diagnostics);
+}
+
+#[test]
+fn addpylib_groups_as_python_greedy_match_splits_them() {
+    // `addpylib\s+(.+)\s+(.+)`: the first group is greedy, so it takes every word but the
+    // last, and the whitespace before the last but one character of the gap.
+    let kind = |s: &str| parse(s).statements[0].kind.clone();
+    assert_eq!(
+        kind("addpylib a b c\n"),
+        StatementKind::AddPyLib {
+            libdir: "a b".into(),
+            namespace: "c".into(),
+        }
+    );
+    assert_eq!(
+        kind("addpylib a  b\n"),
+        StatementKind::AddPyLib {
+            libdir: "a ".into(),
+            namespace: "b".into(),
+        }
+    );
+    // One argument, or none: "unparsed line" on every release.
+    for s in ["addpylib a\n", "addpylib \n"] {
+        let pf = parse(s);
+        assert!(
+            matches!(pf.statements[0].kind, StatementKind::Unknown { .. }),
+            "{s:?}"
+        );
+        assert!(
+            pf.diagnostics[0].message.starts_with("unparsed line"),
+            "{s:?}"
+        );
+    }
+    // Not the keyword: `addpylibx a b` is an unparsed line.
+    assert!(matches!(
+        kind("addpylibx a b\n"),
         StatementKind::Unknown { .. }
     ));
-    assert!(pf.diagnostics[0].message.contains("not modelled"));
 }

@@ -110,7 +110,14 @@ fn run_shell(command: &str, path: &OsString, stdin: &[u8], cache: &Path) -> Outp
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(stdin).unwrap();
+    // The fail-open path (`command -v sous-chef || exit 0`) exits without reading its
+    // input. When the shell is gone before the write, the write gets EPIPE; that is the
+    // command's right, not a failure (it failed one full `cargo test` run in three).
+    match child.stdin.take().unwrap().write_all(stdin) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+        Err(e) => panic!("writing the event to the hook command: {e}"),
+    }
     child.wait_with_output().unwrap()
 }
 

@@ -159,36 +159,74 @@ fn a_kas_file_path_with_a_colon_is_refused() {
     assert!(env.command("bitbake", &["-p"]).is_err());
 }
 
+/// True once `pid` no longer runs (gone, or a zombie waiting to be reaped), polling up to a
+/// deadline. The runner signals the whole group and reaps only its own child; the fake
+/// BitBake and its `sleep` are not its children, so they may still be exiting (a signal is
+/// delivered, the process not yet scheduled to die) when it returns. Checking once, at
+/// that instant, failed 2 runs in 30 under a parallel `cargo test`.
+fn dead(pid: &str) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Err(_) => return true,
+            Ok(stat) => {
+                let state = stat.rsplit(')').next().unwrap_or("").trim_start();
+                if state.starts_with('Z') || state.starts_with('X') {
+                    return true;
+                }
+            }
+        }
+        if Instant::now() > deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 #[tokio::test]
 async fn a_timeout_kills_the_whole_kas_process_group() {
     let p = Project::after();
     let env = kas_env(&p);
     let pidfile = p.path("pids");
+    // Far longer than any run below may take: a run that ends sooner was killed.
+    const SLEEP: Duration = Duration::from_secs(120);
     fs::write(
         p.path("fakekas.env"),
         format!(
-            "export FAKEBB_SLEEP=30\nexport FAKEBB_PIDFILE={}\n",
+            "export FAKEBB_SLEEP={}\nexport FAKEBB_PIDFILE={}\n",
+            SLEEP.as_secs(),
             pidfile.display()
         ),
     )
     .unwrap();
-    let start = Instant::now();
-    let out = env
-        .output("bitbake", &["-p"], Some(Duration::from_millis(1500)))
-        .await
-        .unwrap();
-    assert_eq!(out.finish, Finish::TimedOut);
-    assert!(start.elapsed() < Duration::from_secs(10));
-    let pids = fs::read_to_string(&pidfile).unwrap();
-    for pid in pids.split_whitespace() {
-        // The fake bitbake and its sleep child are gone.
+    // The timeout must fire after the fake BitBake has written its pids (kas, sh, the fake
+    // and its sleep child start first). If a loaded machine took longer than the timeout,
+    // the run is repeated with the timeout doubled, until the pids were written before the
+    // kill, within an overall deadline.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut timeout = Duration::from_millis(1500);
+    let pids = loop {
+        let _ = fs::remove_file(&pidfile);
+        let start = Instant::now();
+        let out = env.output("bitbake", &["-p"], Some(timeout)).await.unwrap();
+        assert_eq!(out.finish, Finish::TimedOut);
+        // The timeout plus the SIGTERM grace and the output drain, not the fake's sleep.
+        let took = start.elapsed();
+        assert!(took < timeout + Duration::from_secs(20), "{took:?}");
+        if let Ok(pids) = fs::read_to_string(&pidfile) {
+            break pids;
+        }
         assert!(
-            !Path::new(&format!("/proc/{pid}")).exists()
-                || fs::read_to_string(format!("/proc/{pid}/stat"))
-                    .map(|s| s.contains(") Z "))
-                    .unwrap_or(true),
-            "process {pid} survived"
+            Instant::now() < deadline,
+            "the fake BitBake never wrote its pids before the timeout"
         );
+        timeout *= 2;
+    };
+    let pids: Vec<&str> = pids.split_whitespace().collect();
+    assert_eq!(pids.len(), 2, "{pids:?}");
+    for pid in pids {
+        // The fake bitbake and its sleep child are gone.
+        assert!(dead(pid), "process {pid} survived");
     }
 }
 

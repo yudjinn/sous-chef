@@ -307,6 +307,82 @@ fn parse_error_bad_conf() {
 fn parse_error_good_files_have_no_findings() {
     assert_eq!(fixture_findings("good.bb"), []);
     assert_eq!(fixture_findings("good.conf"), []);
+    // `addpylib` in a layer's conf/layer.conf: base configuration, on a release with it.
+    assert_eq!(fixture_findings("conf/layer.conf"), []);
+}
+
+/// `hygiene/parse-error` on `text` as the file `path` of a layer, checked against
+/// `releases`.
+fn parse_error_at(path: &str, text: &str, releases: &[Release]) -> Vec<(u32, Severity, String)> {
+    let env = Env::new();
+    let loc = Loc {
+        layer: "fixture".into(),
+        path: PathBuf::from(path),
+        lines: LineSpan::line(1),
+    };
+    lint::check_text(
+        &HygieneParseError,
+        &env.ws,
+        &env.index,
+        loc,
+        text,
+        FileKind::from_path(Path::new(path)),
+        releases,
+        None,
+    )
+    .into_iter()
+    .map(|f| (f.loc.lines.start, f.severity, f.message))
+    .collect()
+}
+
+#[test]
+fn parse_error_judges_addpylib_by_place_and_release() {
+    let line = "A = \"1\"\naddpylib ${LAYERDIR}/lib oe\n";
+    // Base configuration (cookerdata `parse_config_file`): accepted from BitBake 2.4 on.
+    for base in ["conf/layer.conf", "conf/bitbake.conf", "conf/bblayers.conf"] {
+        assert_eq!(
+            parse_error_at(base, line, &[Release::Wrynose]),
+            [],
+            "{base}"
+        );
+        assert_eq!(
+            parse_error_at(base, line, &[Release::Mickledore]),
+            [],
+            "{base}"
+        );
+    }
+    // Kirkstone and Langdale (BitBake 2.0, 2.2) have no such pattern: "unparsed line".
+    let old = parse_error_at(
+        "conf/layer.conf",
+        line,
+        &[Release::Kirkstone, Release::Scarthgap],
+    );
+    assert_eq!(old.len(), 1, "{old:#?}");
+    assert_eq!((old[0].0, old[0].1), (2, Severity::Error));
+    assert!(old[0].2.contains("not available in kirkstone,"), "{old:#?}");
+    // Anywhere else BitBake rejects it on every release: a file the base configuration
+    // includes, a machine conf, a recipe, a class, an `.inc`.
+    for other in [
+        "conf/distro/mine.conf",
+        "conf/machine/m.conf",
+        "conf/local.conf",
+        "conf/layer-extra.conf",
+        "recipes-a/a/a_1.0.bb",
+        "classes/c.bbclass",
+        "recipes-a/a/a.inc",
+    ] {
+        let got = parse_error_at(other, line, &[Release::Wrynose]);
+        assert_eq!(got.len(), 1, "{other}: {got:#?}");
+        assert_eq!((got[0].0, got[0].1), (2, Severity::Error), "{other}");
+        assert!(
+            got[0].2.contains("only in the base configuration"),
+            "{other}: {got:#?}"
+        );
+    }
+    // One argument matches no release's pattern.
+    let got = parse_error_at("conf/layer.conf", "addpylib ${LAYERDIR}/lib\n", &[]);
+    assert_eq!(got.len(), 1, "{got:#?}");
+    assert!(got[0].2.starts_with("unparsed line"), "{got:#?}");
 }
 
 #[test]
@@ -329,10 +405,6 @@ fn parse_error_skips_whitespace_after_backslash_but_the_parser_still_reports_it(
         .iter()
         .map(|d| d.message.as_str())
         .collect();
-    assert!(
-        msgs.iter().any(|m| m.starts_with("`addpylib` ")),
-        "{msgs:?}"
-    );
     // `addfragments` is a statement kind of its own: no diagnostic, nothing to skip.
     assert!(!msgs.iter().any(|m| m.contains("addfragments")), "{msgs:?}");
     assert!(
