@@ -10,9 +10,13 @@
 //!   each bbappend and what it pulls in, then deferred inherits. One row per file with the
 //!   statement that pulled it in. Unresolved targets are rows too.
 //! - `outline`: every function and task statement across that tree.
+//! - `sources`, `tasks`, `packages` (T8.3, module `views`): evaluated views of `SRC_URI`
+//!   (with `FILESPATH` lookup and patch status), the task graph and the packages. See
+//!   docs/mcp-tools.md.
 //!
-//! This file also holds the recipe helpers the other lookup tools share: [`resolve_recipe`]
-//! (the `recipe` argument of `item` and `search`), [`walk_recipe`] (the recipe tree with its
+//! This file also holds the recipe helpers the other lookup tools share: [`resolve_selected`]
+//! (a recipe argument resolved the way BitBake picks the file: `recipe`, `item`, `search` and
+//! the `bbappend` generator), [`resolve_recipe`] (static), [`walk_recipe`] (the recipe tree with its
 //! statements in parse order) and [`file_ref`].
 //!
 //! The walk is static, like `query::tree`: an `include` or `inherit` whose argument needs
