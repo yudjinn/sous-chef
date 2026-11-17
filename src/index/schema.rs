@@ -12,7 +12,7 @@ use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 use crate::error::Result;
 
 /// Stored in `PRAGMA user_version`. Bump on every change to [`DDL`].
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// `PRAGMA busy_timeout`.
 pub const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -27,6 +27,9 @@ pub const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 /// - triggers that keep the external-content FTS5 table `statements_fts` in sync with
 ///   `statements`, so writers never touch `statements_fts` themselves.
 /// - the `handles` table used by the handle store (`src/handles.rs`, T5.1).
+/// - `meta(key, value)`: facts about the whole index. `release` is the codename of the
+///   release the edges were resolved for ([`META_RELEASE`]); `Index::refresh` recomputes the
+///   edges when it differs from the workspace's (schema version 2).
 pub const DDL: &str = r#"
 CREATE TABLE IF NOT EXISTS layers(
     id          INTEGER PRIMARY KEY,
@@ -134,7 +137,15 @@ CREATE TABLE IF NOT EXISTS handles(
     created INT                 -- seconds since the Unix epoch
 );
 CREATE INDEX IF NOT EXISTS handles_created ON handles(created);
+
+CREATE TABLE IF NOT EXISTS meta(
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 "#;
+
+/// The `meta` key holding the codename of the release the edges were resolved for.
+pub const META_RELEASE: &str = "release";
 
 /// Every table [`DDL`] creates (the FTS table included).
 pub const TABLES: &[&str] = &[
@@ -147,6 +158,7 @@ pub const TABLES: &[&str] = &[
     "depends",
     "statements_fts",
     "handles",
+    "meta",
 ];
 
 /// Opens a connection with the pragmas every index connection uses: WAL journal,

@@ -18,6 +18,11 @@
 //!    `workspace::resolve` where no evaluation is needed (otherwise `target_file` is NULL),
 //!    and `bbappend` edges from the `BBFILES` collection. This is a superset of "re-resolve
 //!    edges whose target was unresolved or changed" and keeps edge order meaningful.
+//! 7. The edges depend on the workspace's release (class directories, `SplitClassDirs`), so
+//!    the release they were resolved for is stored in `meta` (`release`). When it differs
+//!    from `ws.release.release` (or is absent), every edge is recomputed even if no file
+//!    changed. Nothing else in the index depends on the release: statements, tasks,
+//!    provides and depends come from the file text alone.
 //!
 //! All database writes run in one `Index::write` transaction.
 //!
@@ -147,6 +152,7 @@ pub fn refresh(index: &mut Index, ws: &Workspace) -> Result<RefreshReport> {
     let (layers, layers_changed, layer_removed) = sync_layers(index, ws)?;
     removed += layer_removed;
     changed_any |= layers_changed;
+    let release_changed = release_changed(index, ws)?;
 
     let found = walk(ws, &layers);
     let existing = load_existing(index.conn())?;
@@ -189,8 +195,9 @@ pub fn refresh(index: &mut Index, ws: &Workspace) -> Result<RefreshReport> {
         .count() as u32;
     removed += gone.len() as u32 + unreadable;
     changed_any |= !reindexed.is_empty() || removed > 0;
+    let rebuild = changed_any || release_changed;
 
-    let needs_write = changed_any || analysed.iter().any(|a| matches!(a, Analysed::Same));
+    let needs_write = rebuild || analysed.iter().any(|a| matches!(a, Analysed::Same));
     if needs_write {
         index.write(|tx| {
             for id in &gone {
@@ -217,7 +224,7 @@ pub fn refresh(index: &mut Index, ws: &Workspace) -> Result<RefreshReport> {
                     }
                 }
             }
-            if changed_any {
+            if rebuild {
                 rebuild_edges(tx, ws)?;
             }
             Ok(())
@@ -297,6 +304,13 @@ pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<Fil
         .optional()?;
     let found = found_file(ws, 0, &root, &root.join(&rel));
     let layer_conf = rel == "conf/layer.conf";
+    let stale_release = release_changed(index, ws)?;
+    let rebuild_all = |index: &mut Index| -> Result<()> {
+        if stale_release {
+            index.write(|tx| rebuild_edges(tx, ws))?;
+        }
+        Ok(())
+    };
 
     let remove = |index: &mut Index, id: i64| -> Result<FileRefresh> {
         index.write(|tx| {
@@ -309,13 +323,17 @@ pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<Fil
     let Some(f) = found else {
         return match existing {
             Some(e) => remove(index, e.id),
-            None => Ok(FileRefresh::NotIndexed),
+            None => {
+                rebuild_all(index)?;
+                Ok(FileRefresh::NotIndexed)
+            }
         };
     };
     if let Some(e) = &existing
         && e.mtime == f.mtime
         && e.size == f.size
     {
+        rebuild_all(index)?;
         return Ok(FileRefresh::Unchanged);
     }
     match analyse(&f, existing.as_ref()) {
@@ -329,17 +347,21 @@ pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<Fil
                     Ok(())
                 })?;
             }
+            rebuild_all(index)?;
             Ok(FileRefresh::Unchanged)
         }
         Analysed::Unreadable => match existing {
             Some(e) => remove(index, e.id),
-            None => Ok(FileRefresh::NotIndexed),
+            None => {
+                rebuild_all(index)?;
+                Ok(FileRefresh::NotIndexed)
+            }
         },
         Analysed::Changed { sha, rows } => {
             let lines = rows.lines.max(1);
             index.write(|tx| {
                 write_file(tx, layer_id, &f, &sha, &rows)?;
-                match (&existing, layer_conf) {
+                match (&existing, layer_conf || stale_release) {
                     (Some(e), false) => rebuild_file_edges(tx, ws, e.id),
                     _ => rebuild_edges(tx, ws),
                 }
@@ -1077,11 +1099,23 @@ struct EdgeCtx {
 }
 
 /// Recomputes every edge from the indexed statements and files.
+/// Records the workspace's release as the one the edges were resolved for.
 fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
     tx.execute("DELETE FROM edges", [])?;
     let ecx = edge_ctx(tx, ws)?;
     insert_ref_edges(tx, ws, &ecx, None)?;
-    insert_append_edges(tx, ws, &ecx)
+    insert_append_edges(tx, ws, &ecx)?;
+    tx.execute(
+        "INSERT INTO meta(key, value) VALUES (?1, ?2) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![super::schema::META_RELEASE, ws.release.release.codename()],
+    )?;
+    Ok(())
+}
+
+/// Whether the edges were resolved for another release than the workspace's (or never).
+fn release_changed(index: &Index, ws: &Workspace) -> Result<bool> {
+    Ok(super::query::indexed_release(index)? != Some(ws.release.release))
 }
 
 /// Recomputes the `require` / `include` / `include_all` / `inherit` edges of one file; its

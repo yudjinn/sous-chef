@@ -23,6 +23,20 @@ use crate::types::{FileKind, LineSpan, Loc};
 use crate::workspace::Workspace;
 use crate::workspace::resolve;
 
+/// The release the index's edges were resolved for (`meta.release`), `None` for an index
+/// that has never been refreshed. A codename this build does not know reads as `None` too.
+pub fn indexed_release(index: &Index) -> Result<Option<crate::release::Release>> {
+    let name: Option<String> = index
+        .conn()
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            [super::schema::META_RELEASE],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(name.and_then(|n| crate::release::Release::from_codename(&n)))
+}
+
 /// One indexed file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FileRow {
