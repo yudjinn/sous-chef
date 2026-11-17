@@ -16,8 +16,12 @@
 //! 6. After any change every edge is recomputed: `require` / `include` / `include_all` /
 //!    `inherit` from the statements, resolved against the indexed files with
 //!    `workspace::resolve` where no evaluation is needed (otherwise `target_file` is NULL),
-//!    and `bbappend` edges from the `BBFILES` collection. This is a superset of "re-resolve
-//!    edges whose target was unresolved or changed" and keeps edge order meaningful.
+//!    and `bbappend` edges from the `BBFILES` collection. An `inherit` in a class under
+//!    `classes/` is searched in both class contexts, one in an `.inc` in the contexts of the
+//!    files that reach it through include edges (`insert_inc_inherit_edges`); an `inherit`
+//!    in a `.conf` gets no edge (BitBake's configuration parser rejects the line). This is
+//!    a superset of "re-resolve edges whose target was unresolved or changed" and keeps edge
+//!    order meaningful.
 //! 7. The edges depend on the workspace's release (class directories, `SplitClassDirs`), so
 //!    the release they were resolved for is stored in `meta` (`release`). When it differs
 //!    from `ws.release.release` (or is absent), every edge is recomputed even if no file
@@ -33,13 +37,15 @@
 //! - `statements.name` is the full name as written for assignments, functions (anonymous
 //!   python: `__anonymous`), `def`, `export`, `unset`; the argument text for `inherit` and
 //!   `include`; the task names for `addtask` / `deltask`; the handler names for
-//!   `addhandler`; the space-joined names for `export_functions`; NULL for `unknown`.
+//!   `addhandler`; the space-joined names for `export_functions`; the library directory
+//!   for `addpylib`; NULL for `unknown`.
 //! - `statements.op` is the operator for assignments; `include` / `require` / `include_all`
 //!   for includes; `inherit` / `inherit_defer` for inherits; `shell` / `python`, prefixed
 //!   with `fakeroot ` when so declared, for functions; `python` for `def`.
-//! - `statements.value` is the raw value for assignments and the text of `unknown` lines.
-//! - `statements.kind` `addfragments`: an `addfragments` line (the parser's unknown statement
-//!   that `Statement::add_fragments` reads); `name` is its argument text, `value` the line.
+//! - `statements.value` is the raw value for assignments, the text of `unknown` lines and
+//!   the namespace for `addpylib` (which makes no edge).
+//! - `statements.kind` `addfragments`: an `addfragments` line (`StatementKind::AddFragments`);
+//!   `name` is its argument text, `value` the line.
 //!   Its edge (kind `addfragments`, `target_text` the argument text) is never resolved: the
 //!   files it includes follow from the evaluated fragments variable.
 //! - `edges.target_text` is the argument as written when it resolves to one target, else the
@@ -51,9 +57,11 @@
 //!   skipped and version constraints dropped.
 //! - `provides`: a recipe's `PN`, plus the words of unconditional `PROVIDES` assignments that
 //!   need no expansion, in any file kind except `.conf`.
-//! - `files.not_collected`: set with the edges (step 6) from the same `BBFILES` collection:
-//!   `bbfiles` for a `.bb` / `.bbappend` no glob matches, NULL otherwise. Only collected files
-//!   take part in `bbappend` edges.
+//! - `files.not_collected`: set with the edges (step 6) from the same `BBFILES` collection
+//!   (`BBFILES_DYNAMIC` folded in): for a `.bb` / `.bbappend`, `bbfiles` when no glob
+//!   matches, `dynamic` when only an inactive `BBFILES_DYNAMIC` glob does, `bbmask` when a
+//!   static `BBMASK` masks it; `data` for a data file (below); NULL otherwise. Only collected
+//!   files take part in `bbappend` edges.
 //!
 //! **Data files.** Then [`mark_data`] sets `not_collected` = `data` on every `.conf`, `.inc`
 //! and `.bbclass` that is not BitBake metadata: not in the layer's `conf/` tree, not a class
@@ -73,6 +81,7 @@ use std::time::{Instant, UNIX_EPOCH};
 use rusqlite::{OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
+use super::query::StatementRow;
 use super::{FileRefresh, Index, RefreshReport};
 use crate::error::Result;
 use crate::parse::{IncludeMode, Lang, StatementKind, lexer};
@@ -928,6 +937,45 @@ fn file_rows(text: &str, kind: FileKind, file_name: &str) -> FileRows {
     out
 }
 
+/// The statement rows the index stores for a file of `kind` holding `text`, as
+/// [`super::query`] reads them back (`id` and `file_id` 0, `loc` in `at`'s layer and path).
+/// The evaluator's overlay (`eval::overlay`) builds its in-memory files with it, so an
+/// overlaid file replays exactly as the indexed one would.
+pub fn statement_rows(text: &str, kind: FileKind, at: &Loc) -> Vec<StatementRow> {
+    let file_name = at
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    file_rows(text, kind, &file_name)
+        .statements
+        .into_iter()
+        .enumerate()
+        .map(|(ord, s)| StatementRow {
+            id: 0,
+            file_id: 0,
+            loc: Loc {
+                layer: at.layer.clone(),
+                path: at.path.clone(),
+                lines: LineSpan::new(s.start, s.end),
+            },
+            ord: ord as u32,
+            kind: s.kind.to_string(),
+            name: s.name,
+            base: s.base,
+            overrides: s
+                .overrides
+                .map(|o| o.split(':').map(str::to_string).collect())
+                .unwrap_or_default(),
+            flag: s.flag,
+            op: s.op,
+            legacy: s.legacy,
+            value: s.value,
+            snippet: s.snippet,
+        })
+        .collect()
+}
+
 fn include_op(mode: IncludeMode) -> &'static str {
     match mode {
         IncludeMode::Include => "include",
@@ -1379,6 +1427,16 @@ fn insert_ref_edges(
         let Some(info) = files.get(&file_id) else {
             continue;
         };
+        if kind == "inherit" && info.kind == Some(FileKind::Conf) {
+            // `ConfHandler` has no `inherit`: BitBake stops on the line as unparsed (BitBake
+            // 2.18 `ConfHandler.feeder`). No edge; `hygiene/parse-error` reports it.
+            continue;
+        }
+        if kind == "inherit" && info.kind == Some(FileKind::Include) {
+            // Its class context follows whoever reaches the `.inc`: resolved after every
+            // include edge is in (`insert_inc_inherit_edges`).
+            continue;
+        }
         if kind == "addfragments" {
             // Which files it includes follows from the evaluated fragments variable
             // (`OE_FRAGMENTS`), never from the file alone: always unresolved here, the replay
@@ -1419,8 +1477,7 @@ fn insert_ref_edges(
         let (edge_kind, ref_kind) = if kind == "inherit" {
             // A class in `classes-global/` inherits in global context, but only on a release
             // that has that directory (`resolve::class_dir`, as the resolver searches).
-            let global =
-                info.kind == Some(FileKind::Conf) || class_dir == Some(resolve::ClassDir::Global);
+            let global = class_dir == Some(resolve::ClassDir::Global);
             ("inherit", RefKind::Inherit { global })
         } else {
             let mode = match op.as_str() {
@@ -1443,6 +1500,200 @@ fn insert_ref_edges(
             Some(_) => {}
             None => {
                 ins.execute(params![file_id, edge_kind, text, Option::<i64>::None, line])?;
+            }
+        }
+    }
+    drop(ins);
+    drop(ins_ctx);
+    insert_inc_inherit_edges(tx, ws, ecx, only.is_some())
+}
+
+/// The class contexts that reach a file through `require` / `include` / `include_all`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Reach {
+    recipe: bool,
+    global: bool,
+}
+
+/// The class context a file parses its own statements in, when it is not an `.inc`: a
+/// `.conf` and a class in `classes-global/` are global, a recipe, a bbappend and a class in
+/// `classes-recipe/` recipe; a class in `classes/` either (both, on a release that has the
+/// context directories; recipe before, where the two searches are the same).
+fn own_reach(ws: &Workspace, info: &FileInfo) -> Option<Reach> {
+    let recipe = Reach {
+        recipe: true,
+        global: false,
+    };
+    match info.kind? {
+        FileKind::Conf => Some(Reach {
+            recipe: false,
+            global: true,
+        }),
+        FileKind::Recipe | FileKind::Append => Some(recipe),
+        FileKind::Class => Some(match resolve::class_dir(ws, Path::new(&info.rel)) {
+            resolve::ClassDir::Global => Reach {
+                recipe: false,
+                global: true,
+            },
+            resolve::ClassDir::Shared if ws.release.release.has(Feature::SplitClassDirs) => Reach {
+                recipe: true,
+                global: true,
+            },
+            _ => recipe,
+        }),
+        FileKind::Include => None,
+    }
+}
+
+/// For every `.inc` some other file reaches through any chain of include edges, which class
+/// contexts reach it, from the include edges in the table.
+fn inc_reach(tx: &Transaction<'_>, ws: &Workspace, ecx: &EdgeCtx) -> Result<HashMap<i64, Reach>> {
+    let edges: Vec<(i64, i64)> = {
+        let mut st = tx.prepare_cached(
+            "SELECT src_file, target_file FROM edges \
+             WHERE kind IN ('require', 'include', 'include_all') AND target_file IS NOT NULL",
+        )?;
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    let is_inc = |id: i64| {
+        ecx.files
+            .get(&id)
+            .is_some_and(|f| f.kind == Some(FileKind::Include))
+    };
+    let mut reach: HashMap<i64, Reach> = HashMap::new();
+    // Seeds: an edge from a file that has a context of its own into an `.inc`.
+    for &(src, dst) in &edges {
+        if !is_inc(dst) {
+            continue;
+        }
+        if let Some(r) = ecx.files.get(&src).and_then(|f| own_reach(ws, f)) {
+            let e = reach.entry(dst).or_default();
+            e.recipe |= r.recipe;
+            e.global |= r.global;
+        }
+    }
+    // Then along `.inc` to `.inc` edges until nothing changes (each pass can only add).
+    loop {
+        let mut changed = false;
+        for &(src, dst) in &edges {
+            if !is_inc(dst) || !is_inc(src) {
+                continue;
+            }
+            let Some(r) = reach.get(&src).copied() else {
+                continue;
+            };
+            let e = reach.entry(dst).or_default();
+            let next = Reach {
+                recipe: e.recipe | r.recipe,
+                global: e.global | r.global,
+            };
+            if next != *e {
+                *e = next;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    Ok(reach)
+}
+
+/// The `inherit` edges of every `.inc`. BitBake parses an `.inc` with whatever reaches it
+/// and searches its `inherit`s in that parse's class context (`__bbclasstype`: global for
+/// the whole configuration parse, recipe for a recipe; bitbake-semantics.md "Finding
+/// files"), so the index resolves them statically by what reaches the file through include
+/// edges ([`inc_reach`]): global from a `.conf` or a global class, recipe from a recipe, a
+/// bbappend or a recipe class, both (as for a class in `classes/`, with `edges.context`) when
+/// both reach it or through a class in `classes/`; recipe when nothing reaches it.
+///
+/// A change to one file can change what reaches any `.inc`, so with `replace` (one file's
+/// edges were rebuilt) every `.inc` `inherit` edge is recomputed.
+fn insert_inc_inherit_edges(
+    tx: &Transaction<'_>,
+    ws: &Workspace,
+    ecx: &EdgeCtx,
+    replace: bool,
+) -> Result<()> {
+    if replace {
+        tx.execute(
+            "DELETE FROM edges WHERE kind = 'inherit' \
+             AND src_file IN (SELECT id FROM files WHERE kind = 'inc')",
+            [],
+        )?;
+    }
+    let refs: Vec<(i64, String, u32)> = {
+        let mut st = tx.prepare_cached(
+            "SELECT s.file_id, s.name, s.start_line FROM statements s \
+             JOIN files f ON f.id = s.file_id \
+             WHERE s.kind = 'inherit' AND s.name IS NOT NULL AND f.kind = 'inc' \
+             ORDER BY s.file_id, s.ord",
+        )?;
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?
+    };
+    if refs.is_empty() {
+        return Ok(());
+    }
+    let reach = inc_reach(tx, ws, ecx)?;
+    let mut ins = tx.prepare_cached(
+        "INSERT INTO edges(src_file, kind, target_text, target_file, line, context) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
+    for (file_id, text, line) in refs {
+        let Some(info) = ecx.files.get(&file_id) else {
+            continue;
+        };
+        let r = reach.get(&file_id).copied().unwrap_or_default();
+        let vars = |name: &str| static_var(name, info, ecx.corebase.as_deref());
+        if r.recipe && r.global {
+            for (target_text, target, context) in
+                neutral_inherit_edges(ws, &ecx.resolver, &ecx.by_path, &text, &info.abs, &vars)
+            {
+                ins.execute(params![
+                    file_id,
+                    "inherit",
+                    target_text,
+                    target,
+                    line,
+                    context
+                ])?;
+            }
+            continue;
+        }
+        let ref_kind = RefKind::Inherit {
+            global: r.global && !r.recipe,
+        };
+        match ecx
+            .resolver
+            .resolve_with(ws, ref_kind, &text, &info.abs, &vars)
+        {
+            Some(targets) if !targets.is_empty() => {
+                let single = targets.len() == 1;
+                for t in targets {
+                    let target_text = if single { text.clone() } else { t.text };
+                    let target = t.file.and_then(|p| ecx.by_path.get(&p).copied());
+                    ins.execute(params![
+                        file_id,
+                        "inherit",
+                        target_text,
+                        target,
+                        line,
+                        Option::<&str>::None
+                    ])?;
+                }
+            }
+            Some(_) => {}
+            None => {
+                ins.execute(params![
+                    file_id,
+                    "inherit",
+                    text,
+                    Option::<i64>::None,
+                    line,
+                    Option::<&str>::None
+                ])?;
             }
         }
     }

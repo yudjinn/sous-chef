@@ -562,7 +562,7 @@ mod tests {
         let mut r = base(&Config::default());
         r.state = "ready".into();
         fill_workspace(&mut r, &fixture_ws());
-        // Table internals are private to render.rs (a stub until T2.4); check via Debug.
+        // Table internals are private to render.rs; check via Debug.
         let text = format!("{:?}", table(&r));
         for field in [
             "version",

@@ -877,11 +877,9 @@ fn kas_defaults(ws: &Workspace) -> Vec<(String, String, String)> {
 }
 
 /// Where kas's machine (`machine`) or distro value comes from, for the target note
-/// ("`MACHINE = "x"` from <this>"). The one place that describes the origin: once
-/// `KasProject::setting_source` (which also knows the `KAS_MACHINE` / `KAS_DISTRO`
-/// environment overrides) is available, it should decide the text here.
+/// ("`MACHINE = "x"` from <this>"): `KasProject::setting_source`, which names a
+/// `KAS_MACHINE` / `KAS_DISTRO` environment override as such.
 fn kas_origin(k: &crate::workspace::kas::KasProject, machine: bool) -> String {
-    // A `KAS_MACHINE` / `KAS_DISTRO` override is named as such (`setting_source`).
     k.setting_source(machine)
 }
 

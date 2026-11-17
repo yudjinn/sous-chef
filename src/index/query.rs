@@ -95,7 +95,8 @@ pub struct StatementRow {
     /// 0-based position in the file.
     pub ord: u32,
     /// `assign`, `function`, `pydef`, `inherit`, `include`, `addtask`, `deltask`,
-    /// `addhandler`, `export_functions`, `export`, `unset`, `addfragments`, `unknown`.
+    /// `addhandler`, `export_functions`, `export`, `unset`, `addfragments`, `addpylib`,
+    /// `unknown` (`mcp::tools::search::KINDS`).
     pub kind: String,
     pub name: Option<String>,
     pub base: Option<String>,

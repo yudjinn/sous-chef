@@ -8,6 +8,11 @@ in `sous-chef.toml`.
 Scope tells the engine what to hand the rule: `file` (one parsed file), `recipe` (the
 evaluated recipe tree), `layer` (index queries over a layer).
 
+Every rule that splits a list value (`SRC_URI`, `DEPENDS`, `OVERRIDES`, `BBCLASSEXTEND`,
+...) does it with `parse::words` (since w6), so a `${@...}` expression or another `${...}`
+group is one word and never read as a name (bitbake-semantics.md, "Splitting list
+values").
+
 Severity: **E** error (will break or is no longer accepted), **W** warning (likely bug or
 convention breach), **I** info (style). Two letters mean the severity depends on the case;
 the row says which.
@@ -87,7 +92,7 @@ workspace). Findings hidden by `--severity` never fail the run.
 | `override/plus-equals-with-override` | W | file | `VAR:foo += "x"` (and `=+`, `.=`, `=.`): this builds the variable `VAR:foo`, which replaces `VAR` when `foo` is active, rather than appending to `VAR`. Suggests `VAR:append:foo`. Not flagged: the package override of a package-scoped variable (`FILES:${PN} +=`, `RDEPENDS:libfoo +=`), overrides containing `${` or not starting with `[a-z0-9]`, names with `:append` / `:prepend` / `:remove`. A condition after the package is flagged (`RDEPENDS:${PN}:qemux86 +=`). |
 | `override/remove-in-recipe` | W/I | file | `:remove` (not on a flag). Warning in a `.bb`, `.inc` or `.bbclass`: it is applied last, so no bbappend or conf can add the item back. Info in a `.bbappend`, a `.conf`, or an `.inc` under a `conf/` directory (configuration), where it is the usual tool. |
 | `override/dead` | W/I | recipe | An override element of an inactive operation in the recipe's own files (the `.bb`, its `.inc` files, its bbappends) that is no entry of the recipe's `OVERRIDES` (an entry that holds python is never a name), no machine, distro, class or declared override of the workspace, and no word of any `*OVERRIDES` assignment. Suggests the closest known name. Info instead of warning when the override list is only partly known. Never checks package names, `${...}` elements or legacy names. |
-| `override/shadowed` | I | recipe | A `NAME =` / `NAME :=` in the recipe's own files that the evaluation marks shadowed, when a later `=` / `:=` of exactly the same name follows. Not flagged: functions; a later assignment in a bbappend other than the earlier one's; any `NAME` that something in the tree could read first (a `:=` mentioning it, an `inherit` / `include` / `require` with `${NAME}`); an earlier assignment in a file that more than one recipe (or a class, `.conf` or bbappend) reaches through `require` / `include`, unless the later one is in that same file. |
+| `override/shadowed` | I | recipe | A `NAME =` / `NAME :=` in the recipe's own files that the evaluation marks shadowed, when a later `=` / `:=` of exactly the same name follows. BitBake's rewrite of virtual providers in `DEPENDS` (a `rewrite` row of the history) is no assignment and replaces nothing. Not flagged: functions; a later assignment in a bbappend other than the earlier one's; any `NAME` that something in the tree could read first (a `:=` mentioning it, an `inherit` / `include` / `require` with `${NAME}`); an earlier assignment in a file that more than one recipe (or a class, `.conf` or bbappend) reaches through `require` / `include`, unless the later one is in that same file. |
 | `override/weak-after-default` | I | file | `??=` after a `=`, `:=` or `?=` of exactly the same name (overrides and flag included) earlier in the same file; an `unset` in between starts over. |
 | `override/missing-package` | E | file | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `ALLOW_EMPTY` and the `pkg_*` functions set to a value without a package override (`:${PN}`), in recipes that produce packages. Also `VAR:append`, `VAR:append:<cond>` and a function `pkg_postinst()`. Not flagged: an empty value (`FILES = ""`; but `+=` / `=+` store a space and are flagged), flags, `:remove` alone, legacy names (`override/legacy-syntax`), the classes `image` and `core-image`, a class that inherits one of them or itself empties `PACKAGES`. |
 | `override/append-vs-plus-equals` | I | file | An unconditional `VAR:append =` in a `.bb` after a plain `VAR =` / `VAR :=` in the same file, where `+=` (or `.=`) would do. Not flagged when a later statement of the file assigns `VAR` again or is an `inherit`, `require` or `include`, after an `unset VAR`, or outside `.bb` files (in bbappends and classes `:append` is usually right). |
@@ -403,6 +408,15 @@ After branch `w6-fix` (measured 2026-11-17 with the same command, kas build, no 
 | hygiene/parse-error | 3 | 0 | `conf/ccache.conf` is a data file |
 
 Every other rule's count is unchanged, and so is every other finding.
+
+Re-measured for branch `w9-final` (2026-11-18, the kas build, the release binary with
+`scratch/sous-chef.toml`, `sous-chef lint --severity info`, no BitBake run): default 1
+finding in 13 files (info, `hygiene/missing-metadata` on `linux-kiss_7.0.bb`); `--all` 625
+findings in 1718 files (0 E, 166 W, 459 I). Every rule's count is the one in the "After"
+column of the w6-fix table above: neither the w7 / w8 rounds (addpylib, the `.inc` split
+overlay, the task `depends` rewrite, `BBMASK` per machine) nor this branch's `.inc` inherit
+contexts changed a finding there (no `inherit` in an `.inc` of that workspace is reached
+from a `.conf` or a global class).
 
 What the rules still get wrong there, as far as it was checked:
 

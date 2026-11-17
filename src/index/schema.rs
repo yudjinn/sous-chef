@@ -41,11 +41,12 @@ pub const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 ///   metadata (a data file); `meta.edges` ([`META_EDGES`]) records the version of the edge
 ///   step, so an index built before data files were marked gets its marks without a schema
 ///   change.
-/// - `edges.context` (schema version 4): for an `inherit` in a context-neutral class
-///   (`classes/`, on a release with `classes-recipe/` and `classes-global/`), which class
-///   search found the target: [`CONTEXT_RECIPE`], [`CONTEXT_GLOBAL`] or [`CONTEXT_BOTH`]
-///   (both found the same file). NULL for every other edge, and for one neither search
-///   resolved.
+/// - `edges.context` (schema version 4): for an `inherit` searched in both class contexts
+///   (in a context-neutral class, `classes/`, on a release with `classes-recipe/` and
+///   `classes-global/`; or in an `.inc` that both a recipe-context and a global-context file
+///   reach, `scan.rs` `insert_inc_inherit_edges`), which class search found the target:
+///   [`CONTEXT_RECIPE`], [`CONTEXT_GLOBAL`] or [`CONTEXT_BOTH`] (both found the same file).
+///   NULL for every other edge, and for one neither search resolved.
 pub const DDL: &str = r#"
 CREATE TABLE IF NOT EXISTS layers(
     id          INTEGER PRIMARY KEY,
@@ -196,8 +197,9 @@ pub const META_EDGES: &str = "edges";
 /// (w6). `conf-data-1`: an unreferenced `.conf` under `conf/` that does not parse is data.
 /// `bbmask-1`: a static `BBMASK` is applied (`not_collected = 'bbmask'`).
 /// `inherit-context-1`: an `inherit` in a `classes/` class is resolved in both contexts
-/// (`edges.context`).
-pub const EDGES_VERSION: &str = "inherit-context-1";
+/// (`edges.context`). `inc-context-1`: an `inherit` in an `.inc` is resolved in the
+/// contexts of the files that reach it; an `inherit` in a `.conf` gets no edge.
+pub const EDGES_VERSION: &str = "inc-context-1";
 
 /// `edges.context`: found by the recipe-context class search (`classes-recipe/`, then
 /// `classes/`).

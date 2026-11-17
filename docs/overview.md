@@ -26,6 +26,10 @@ and `bitbake -e` dumps into context. That has two costs:
 5. **Runs BitBake** when a build environment exists, keeps the large output on disk under a
    handle, and returns a digest.
 6. **Scaffolds** recipes, bbappends, layers, classes and `.inc` splits in the right place.
+7. **Reports** on a whole repository (`audit`: every layer, its releases, structure, lint
+   findings and parse problems, for a person to read) and on an upstream update (`diff`:
+   which recipes changed between two git revisions of a layer and which of your bbappends
+   that affects), both read-only.
 
 ## Decisions (settled, do not reopen)
 

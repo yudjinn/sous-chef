@@ -33,7 +33,7 @@ include/inherit chain, bbappends and the override chain correctly.
 | M5 | [BitBake backend and handles](milestones/M5-bitbake-handles.md) | Handles, `slice`, running bitbake, `log`, authoritative `var` |
 | M6 | [Scaffold](milestones/M6-scaffold.md) | `scaffold` tool |
 | M7 | [Hooks and plugin](milestones/M7-hooks-plugin.md) | Claude Code hooks and packaging |
-| M8 | [Verification and extras](milestones/M8-verification-extras.md) | Differential test, scale check, extra views |
+| M8 | [Verification and extras](milestones/M8-verification-extras.md) | Differential test, scale check, extra views, release diff (`diff`), workspace audit (`audit`) |
 | M9 | [kas and live verification](milestones/M9-kas-live.md) | kas project support; checks against a real build environment |
 
 ## Parallel work plan
@@ -55,6 +55,9 @@ Wave 5   T5.5 envdump + authoritative var | T7.5 plugin | M8
            |
 M9       T9.1 live environment | T9.2 live verification | T9.3 kas; then fix rounds on the
          bugs found (eval, lint, hooks)
+           |
+w6-w9    T8.6 audit | T8.4 release diff | fix rounds on the open items; w9 final
+         documentation pass
 ```
 
 Each task's own *Depends on* line is the authority; the waves are a suggested grouping.

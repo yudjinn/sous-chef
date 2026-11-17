@@ -534,8 +534,9 @@ Checked against BitBake master (commit `5495a547`, 2026-11-16), and reproduced b
   `inherit` in a `classes/` class in both contexts (on a release with
   `Feature::SplitClassDirs`); it is resolved when either search finds the class, and
   `edges.context` records `recipe`, `global` or `both`; when the two find different files
-  there is an edge for each. An `inherit` in an `.inc` is resolved in recipe context
-  whatever includes it. The replay follows the context it is actually in.
+  there is an edge for each. An `inherit` in an `.inc` follows what reaches the `.inc` (w9,
+  below: "Which handler parses an included file"). The replay follows the context it is
+  actually in.
 - **Global classes** (`cookerdata.py`): the configuration inherits `["base"] + INHERIT`, in that
   order, after the configuration files, each with `__bbclasstype = "global"`.
 - **bbappend matching** (`cooker.py` `get_file_appends`): with `b` the append's file name with
@@ -942,9 +943,15 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
   is parsed by ConfHandler, whose `feeder` has no `inherit` / `inherit_defer` (an
   "unparsed line" `ParseError`). sous-chef: the replay's class type is per pass (`global`
   in the configuration pass, recipe in the recipe pass), which is exactly this; (w8) an
-  `inherit` in a `.conf` is a `RefProblem::Fatal` issue and is not followed. The index's
-  static edge for an `inherit` in an `.inc` is still resolved in recipe context only
-  (`index/scan.rs` `insert_ref_edges`), also for an `.inc` only `.conf` files include.
+  `inherit` in a `.conf` is a `RefProblem::Fatal` issue and is not followed. (w9) The
+  index, which resolves without evaluating, gets the same rule from the include edges
+  (`index/scan.rs` `insert_inc_inherit_edges`): an `inherit` in an `.inc` is searched in
+  global context when a `.conf` or a `classes-global/` class reaches the `.inc` through any
+  chain of `require` / `include` / `include_all`, in recipe context when a recipe, a
+  bbappend or a `classes-recipe/` class does, in both (`edges.context` saying which search
+  found the class, as for a class in `classes/`) when both do or a `classes/` class does, and
+  in recipe context when nothing does. An `inherit` in a `.conf` gets no index edge;
+  `hygiene/parse-error` reports the line.
 - **When a deferred inherit's argument is expanded** (BitBake
   2.18.0 `lib/bb/parse/parse_py/BBHandler.py` `inherit_defer` and `inherit`, `lib/bb/parse/ast.py`
   `InheritDeferredNode.eval` and `finalize`): `inherit_defer` stores the argument **as
@@ -1815,8 +1822,9 @@ What `src/scaffold/inc_split.rs` relies on, all from rules already recorded abov
   by `setVarFlag` (line 762). So `SRC_URI = ...` and `SRC_URI[sha256sum] = ...` may change
   order. The before/after evaluation test (`tests/scaffold_inc_split.rs`) checks this case
   against the sous-chef evaluator, which models flags the same way.
-- `addtask` / `deltask` are not replayed; their relative order is kept by the generator (all
-  of them count as touching the task list).
+- `addtask` / `deltask` change only the task list (`__BBTASKS`, kept by the replay since
+  w8); their relative order is kept by the generator (all of them count as touching the
+  task list).
 - (w8) The plan evaluates every version before and after the split, the planned files held
   in memory (`eval::evaluate_with_overlay`; the configuration cache and the index are not
   changed), and is refused when any final value, flag, function piece text, anonymous python
@@ -1827,6 +1835,12 @@ What `src/scaffold/inc_split.rs` relies on, all from rules already recorded abov
   are only explanations, and a split they would have refused is made when the evaluation
   shows no change (`:append` reordered past a version's own `=`: `:append` is applied at
   the end of parsing, "Overrides").
+- (w9) The split never changes which recipes and bbappends BitBake collects: it modifies
+  existing `.bb` files under their own names and creates one `.inc`, and `collect_bbfiles`
+  keeps only names ending in `.bb` / `.bbappend` (BitBake 2.18.0 `lib/bb/cooker.py` lines
+  1936-1946), bbappends being matched to recipes by file name ("Finding files"). So the
+  evaluation with an overlay, which replaces file contents but takes bbappends and the
+  collection from the index, sees the bbappends BitBake would apply.
 
 ## OE-core checks and defaults used by lint
 
@@ -1971,8 +1985,16 @@ against BitBake's behaviour or output:
 
 - kas: `layers` null and `{}`, the `KAS_*` overrides, what `kas shell -k` does (before the
   first checkout and with `{repo, file}` includes), the YAML 1.1 rules and `kas-container`
-  were settled from the kas 5.5 and PyYAML 6.0.3 source (see "kas"), not by running kas;
-  the kas keys sous-chef does not read (`env`, `patches`, ...) were not looked at.
+  were settled from the kas 5.5 and PyYAML 6.0.3 source (see "kas"), not by running kas
+  (the live environment ran only `kas checkout`, `kas dump` and `kas shell -c`); the kas
+  keys sous-chef does not read (`env`, `patches`, ...) were not looked at.
+- The skip and license notes ("Skipped recipes", `INCOMPATIBLE_LICENSE`, the `BBMASK`
+  difference note): from the BitBake and OE-core source and fixture tests; none fires on
+  yocto-kiss (its `MACHINEOVERRIDES` holds python, `INCOMPATIBLE_LICENSE` is unset), so no
+  note was compared with a real BitBake skip.
+- The class type of an `inherit` in an `.inc` that a `.conf` or a global class reaches
+  ("Which handler parses an included file"): from the source and tests; no such `inherit`
+  exists on yocto-kiss (every `inherit` in an `.inc` there is reached from recipes only).
 - `bitbake -e`: the `# expansion of NAME threw ...` line is from `emit_var`, not seen in
   real output.
 - Task logs: the compiler, configure, make, wget and quilt messages are those tools' own

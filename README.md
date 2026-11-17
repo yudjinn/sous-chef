@@ -94,9 +94,18 @@ bash = false                          # see Hooks
 Other keys: `layers` (extra layer roots, for a workspace without a build directory),
 `init_script` (sourced before any bitbake command), `[bitbake] enabled` and
 `allow_destructive`, `[lint] disable`, `[output] budget_tokens`, `[hooks] grep_read` and
-`edit`. In a kas project the kas files are found without `kas` when exactly one sits next
-to the kas build directory, and with `writable_layers` empty the project's own layers are
-writable. See "Configuration" in [docs/architecture.md](docs/architecture.md).
+`edit`. See "Configuration" in [docs/architecture.md](docs/architecture.md).
+
+**kas projects.** The kas files are found without `kas` when exactly one sits next to the
+kas build directory, and with `writable_layers` empty the project's own layers are
+writable. sous-chef reads the kas files as kas merges them (includes, lock files) and runs
+no kas command to do so. `KAS_MACHINE`, `KAS_DISTRO`, `KAS_TARGET` and `KAS_TASK` in the
+environment sous-chef was started in override the files as in kas (`status` shows each).
+Before the first `kas checkout` (no build directory) the kas machine and distro stand in
+for the `local.conf` kas would write. BitBake commands run through `kas shell
+--keep-config-unchanged`, except when a kas file includes a file from another repository
+(`{repo, file}`): kas fetches and checks out such repositories on every `kas shell`, even
+with that option, so sous-chef then uses another way into the build environment, or none.
 
 ## A short tour
 
@@ -234,16 +243,20 @@ edit = false       # the reindex and lint after an edit
 - **Needs BitBake.** `bitbake`, `log`, and `var` with `authoritative: true` (which runs
   `bitbake -e` as a background job and caches the dump until the metadata changes) need a
   build environment: an OE `oe-init-build-env`, a bitbake-setup `init-build-env`, an
-  environment the server was started in, or a kas project with `kas` on `PATH`
-  (`status` shows which).
+  environment the server was started in, or a kas project with `kas` on `PATH` and an
+  existing build directory (not when a kas file includes another repository's file, see
+  "kas projects") (`status` shows which).
 - **Not modelled.** `BBCLASSEXTEND` variants such as `-native` (named as class-extended
-  variants, no provider, not evaluated); `PREFERRED_PROVIDERS`; `INCOMPATIBLE_LICENSE`.
-  Partly: a static `BBMASK` marks the files it masks (with the default machine and
-  distro), and `SKIP_RECIPE` / `COMPATIBLE_MACHINE` / `COMPATIBLE_HOST` give a "BitBake
-  would skip this recipe" note when every value involved is static. `PACKAGECONFIG` dependencies are listed from the flags, since OE-core adds them with
-  anonymous python. Reverse dependencies see unconditional statements as written. Tasks
-  added by anonymous python are not seen. The `.inc` split checks statement order
-  statically; it does not evaluate the result.
+  variants, no provider, not evaluated); `PREFERRED_PROVIDERS`. Partly: a static `BBMASK`
+  marks the files it masks (with the default machine and distro; an evaluation for another
+  machine or distro says which files its own mask would treat differently), and
+  `SKIP_RECIPE`, `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST` and `INCOMPATIBLE_LICENSE` give a
+  "BitBake would skip this recipe" note when the values involved are static, or "may skip"
+  naming the unknown ones; nothing is hidden. `PACKAGECONFIG` dependencies are listed from
+  the flags, since OE-core adds them with anonymous python. Reverse dependencies see
+  unconditional statements as written. Tasks added by anonymous python are not seen. The
+  `.inc` split evaluates every version before and after (the planned files held in memory)
+  and refuses any change.
 - **Writes** go only to layers listed in `writable_layers` (and, in a kas project, the kas
   file a new layer is added to); upstream layers are never edited. No arbitrary shell
   execution through MCP; no network.
@@ -272,7 +285,8 @@ The decisions and non-goals are in [docs/overview.md](docs/overview.md).
   `sous-chef index` to build it from scratch. Set `XDG_CACHE_HOME` to keep an experiment's
   index out of `~/.cache`.
 - **A recipe or file sous-chef calls "not collected".** A `.bb` / `.bbappend` that no
-  layer's `BBFILES` glob matches is indexed but is no recipe; a `.conf` / `.inc` a recipe
+  layer's `BBFILES` glob matches, that only an inactive `BBFILES_DYNAMIC` entry matches, or
+  that a static `BBMASK` masks is indexed but is no recipe; a `.conf` / `.inc` a recipe
   installs (a data file) is not searched or linted. `item` says which applies.
 - **`authoritative: true` says it cannot run.** BitBake allows one client per build
   directory: while a `bitbake` job runs, authoritative `var` answers only from a cached dump.

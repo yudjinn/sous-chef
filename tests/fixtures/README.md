@@ -225,7 +225,17 @@ Names with `_` that must **not** be flagged: `SRCREV_machine`, `do_install()`,
 `org/recipe-change-in-local-conf` (local.conf:9), `override/plus-equals-on-default`
 (local.conf:13), `org/class-location` (meta-core/classes/base.bbclass), `override/dead`
 (vendor append line 9), `org/append-no-match` (orphan append), everything in meta-legacy.
-`hygiene/missing-metadata` info for `app` (no `HOMEPAGE`).
+`hygiene/missing-metadata` info for `app` (no `HOMEPAGE`). The exact list `sous-chef lint`
+gives on `ws/` (default and `--all`) is in docs/lint-rules.md, "Findings on the fixture
+workspace"; `tests/audit.rs` audits `ws/` itself (`meta-legacy` is its layer present but not
+enabled).
+
+Not under `fixtures/`: the release diff tests (`tests/release_diff.rs`) build their git
+repository (an upstream layer with two commits and a tag `v1`, and a writable layer with
+bbappends) in a temporary directory from text in the test, with fixed dates so the commit
+hashes in the snapshots are stable; tests that need a changed workspace (`temp_ws`,
+`temp_ws_release`) copy `ws/` to a temporary directory first, so `ws/` itself never
+changes.
 
 ---
 

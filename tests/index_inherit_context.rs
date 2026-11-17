@@ -176,3 +176,175 @@ fn before_split_class_directories_only_classes_is_searched() {
         [(s("base"), Some(s("classes/base.bbclass")), None)]
     );
 }
+
+/// `.inc` files reached from global-context files, recipe-context files, both and neither.
+fn add_incs(root: &Path) {
+    let core = root.join("meta-core");
+    let w = |rel: &str, text: &str| {
+        let p = core.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, text).unwrap();
+    };
+    // Global: a `.conf`, through a chain of two `.inc` files.
+    w(
+        "conf/gl.conf",
+        "require conf/gl.inc\nrequire conf/both.inc\n",
+    );
+    w("conf/gl.inc", "require conf/gl2.inc\n");
+    w("conf/gl2.inc", "inherit sanityish autotoolsish\n");
+    // Global: a class in `classes-global/`.
+    w("classes-global/gclass.bbclass", "require conf/gc.inc\n");
+    w("conf/gc.inc", "inherit sanityish\n");
+    // Recipe: a recipe.
+    w(
+        "recipes-core/incy/incy_1.0.bb",
+        "require incy.inc\nrequire conf/both.inc\n",
+    );
+    w(
+        "recipes-core/incy/incy.inc",
+        "inherit sanityish autotoolsish\n",
+    );
+    // Both: the `.conf` and the recipe above.
+    w("conf/both.inc", "inherit sanityish autotoolsish\n");
+    // Through a class in `classes/`: both.
+    w("classes/sharedinc.bbclass", "require conf/sh.inc\n");
+    w("conf/sh.inc", "inherit base\n");
+    // Nothing reaches it: recipe.
+    w(
+        "recipes-core/incy/lonely.inc",
+        "inherit autotoolsish sanityish\n",
+    );
+    // `inherit` in a `.conf`: BitBake's configuration parser rejects the line.
+    w("conf/bad.conf", "inherit sanityish\n");
+}
+
+#[test]
+fn an_inherit_in_an_inc_follows_what_reaches_it() {
+    let (_tmp, root, _cfg, ws) = temp_ws_release("wrynose", add_incs);
+    let cache = tempfile::tempdir().unwrap();
+    let mut index = Index::open_in(cache.path(), &ws).unwrap();
+    index.refresh(&ws).unwrap();
+
+    let global = [
+        (
+            s("sanityish"),
+            Some(s("classes-global/sanityish.bbclass")),
+            None,
+        ),
+        (s("autotoolsish"), None, None),
+    ];
+    assert_eq!(inherit_edges(&index, "conf/gl2.inc"), global);
+    assert_eq!(
+        inherit_edges(&index, "conf/gc.inc"),
+        [(
+            s("sanityish"),
+            Some(s("classes-global/sanityish.bbclass")),
+            None
+        )]
+    );
+    assert_eq!(
+        inherit_edges(&index, "recipes-core/incy/incy.inc"),
+        [
+            (s("sanityish"), None, None),
+            (
+                s("autotoolsish"),
+                Some(s("classes-recipe/autotoolsish.bbclass")),
+                None
+            ),
+        ]
+    );
+    assert_eq!(
+        inherit_edges(&index, "conf/both.inc"),
+        [
+            (
+                s("sanityish"),
+                Some(s("classes-global/sanityish.bbclass")),
+                Some(s("global"))
+            ),
+            (
+                s("autotoolsish"),
+                Some(s("classes-recipe/autotoolsish.bbclass")),
+                Some(s("recipe"))
+            ),
+        ]
+    );
+    assert_eq!(
+        inherit_edges(&index, "conf/sh.inc"),
+        [(s("base"), Some(s("classes/base.bbclass")), Some(s("both")))]
+    );
+    assert_eq!(
+        inherit_edges(&index, "recipes-core/incy/lonely.inc"),
+        [
+            (
+                s("autotoolsish"),
+                Some(s("classes-recipe/autotoolsish.bbclass")),
+                None
+            ),
+            (s("sanityish"), None, None),
+        ]
+    );
+    // No edge for an `inherit` in a `.conf`, resolved or not.
+    assert_eq!(inherit_edges(&index, "conf/bad.conf"), []);
+
+    // Reaching an `.inc` from a `.conf` later changes its edges with one file's refresh.
+    let gl = root.join("meta-core/conf/gl.conf");
+    fs::write(
+        &gl,
+        "require conf/gl.inc\nrequire conf/both.inc\nrequire recipes-core/incy/lonely.inc\n",
+    )
+    .unwrap();
+    index.refresh_file(&ws, &gl).unwrap();
+    assert_eq!(
+        inherit_edges(&index, "recipes-core/incy/lonely.inc"),
+        [
+            (s("autotoolsish"), None, None),
+            (
+                s("sanityish"),
+                Some(s("classes-global/sanityish.bbclass")),
+                None
+            ),
+        ]
+    );
+    // Dropping the recipe's reach makes `both.inc` global only.
+    let incy = root.join("meta-core/recipes-core/incy/incy_1.0.bb");
+    fs::write(&incy, "require incy.inc\n").unwrap();
+    index.refresh_file(&ws, &incy).unwrap();
+    assert_eq!(inherit_edges(&index, "conf/both.inc"), global);
+}
+
+#[test]
+fn an_inherit_in_a_conf_is_one_parse_error_and_no_unresolved_edge() {
+    let (_tmp, root, cfg, ws) = temp_ws_release("wrynose", add_incs);
+    let cache = tempfile::tempdir().unwrap();
+    let mut index = Index::open_in(cache.path(), &ws).unwrap();
+    index.refresh(&ws).unwrap();
+    let report = sous_chef::lint::run(
+        &ws,
+        &index,
+        &cfg,
+        &sous_chef::lint::Target::Files {
+            files: vec![root.join("meta-core/conf/bad.conf")],
+            lines: None,
+        },
+        &sous_chef::lint::Options::default(),
+    )
+    .unwrap();
+    let parse: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| f.rule == "hygiene/parse-error")
+        .collect();
+    assert_eq!(parse.len(), 1, "{:?}", report.findings);
+    assert!(
+        parse[0].message.starts_with("`inherit` in a .conf file"),
+        "{}",
+        parse[0].message
+    );
+    // The audit's unresolved-inherit listing reads the edges: nothing for this line.
+    assert!(
+        !query::unresolved_inherit_edges(&index)
+            .unwrap()
+            .iter()
+            .any(|e| e.src.path == Path::new("conf/bad.conf")),
+    );
+}

@@ -80,13 +80,22 @@ impl Ctx {
         // the index database, which a schema rebuild replaces.
         let handles = HandleStore::open(&index.cache_dir().join("handles"))
             .map_err(|e| ("opening the handle store", e))?;
-        Ok(Ctx {
+        let ctx = Ctx {
             config,
             workspace,
             index: tokio::sync::Mutex::new(index),
             handles,
             jobs: JobTable::new(),
-        })
+        };
+        // Output files a crashed server left behind (`bitbake::jobs`, module docs).
+        ctx.jobs.sweep_in_background(&ctx.jobs_dir());
+        Ok(ctx)
+    }
+
+    /// Where job output is written while a job runs: `<cache dir>/jobs`, next to `handles/`.
+    pub fn jobs_dir(&self) -> PathBuf {
+        let h = self.handles.dir();
+        h.parent().unwrap_or(h).join("jobs")
     }
 }
 

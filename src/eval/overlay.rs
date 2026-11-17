@@ -16,19 +16,27 @@
 //! cached pass probed for an `include` / `require` / `include_all` and did not find (a new
 //! file there would have been read). See `replay::evaluate_with_overlay`.
 //!
-//! The statement rows are built the way `index::scan` builds them for the index (same
-//! `kind`, `name`, `base`, `overrides`, `flag`, `op`, `value` columns); `scan.rs` keeps that
-//! conversion private, so it is repeated here (`rows`), and the two must change together.
+//! **Limit: the overlay replaces contents, not the collection.** Which recipes and bbappends
+//! exist, which bbappends apply to a recipe and which version a recipe name chooses come
+//! from the index (its `bbappend` edges, `files.not_collected`, `providers.rs`), never from
+//! the overlay: an overlaid `.bbappend` that is not indexed is not applied, a new `.bb` is
+//! no recipe, and an overlaid recipe's text does not change the provider choice. The one
+//! user, the `.inc` split (`scaffold::inc_split`), never needs more: its plan modifies
+//! existing `.bb` files (same names, so the same bbappends match them; BitBake 2.18
+//! `cooker.py` `collect_bbfiles` collects only `.bb` and `.bbappend` names and matches a
+//! bbappend by basename) and creates one `.inc` (never collected), it evaluates each version
+//! by its path (no provider choice), and version data (`PV`, `PE`, `PR`, ...) never moves.
+//!
+//! The statement rows are built by the scanner's own conversion
+//! (`index::scan::statement_rows`), so an overlaid file has exactly the rows the index would
+//! store for it.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::index::query::StatementRow;
-use crate::index::scan::written_name;
-use crate::parse::{IncludeMode, Lang, StatementKind, lexer};
-use crate::render;
-use crate::types::{FileKind, LineSpan, Loc, VarRef};
+use crate::types::{FileKind, LineSpan, Loc};
 use crate::workspace::Workspace;
 
 /// Files replaced in memory for one evaluation.
@@ -73,7 +81,7 @@ impl Overlay {
             .ok_or_else(|| Error::Confined {
                 path: abs.to_path_buf(),
             })?;
-        let rows = rows(text, &loc);
+        let rows = crate::index::scan::statement_rows(text, kind, &loc);
         self.files.insert(
             key,
             OverlayFile {
@@ -118,135 +126,4 @@ impl Overlay {
     pub(crate) fn contains(&self, abs: &Path) -> bool {
         self.files.contains_key(abs)
     }
-}
-
-/// The statement rows `index::scan` (`file_rows`) would store for `text`.
-fn rows(text: &str, at: &Loc) -> Vec<StatementRow> {
-    let parsed = crate::parse::parse(text);
-    let mut out = Vec::with_capacity(parsed.statements.len());
-    for (ord, st) in parsed.statements.iter().enumerate() {
-        let src = text.get(st.bytes.clone()).unwrap_or("");
-        let mut row = StatementRow {
-            id: 0,
-            file_id: 0,
-            loc: Loc {
-                layer: at.layer.clone(),
-                path: at.path.clone(),
-                lines: LineSpan::new(st.span.start, st.span.end),
-            },
-            ord: ord as u32,
-            kind: String::new(),
-            name: None,
-            base: None,
-            overrides: Vec::new(),
-            flag: None,
-            op: None,
-            legacy: false,
-            value: None,
-            snippet: render::snippet(src),
-        };
-        let set_var = |row: &mut StatementRow, var: &VarRef| {
-            row.name = Some(written_name(var, src));
-            row.base = Some(var.base.clone());
-            row.overrides = var.overrides.clone();
-            row.flag = var.flag.clone();
-            row.legacy = var.legacy_syntax;
-        };
-        let named = |row: &mut StatementRow, kind: &str, name: &str| {
-            row.kind = kind.to_string();
-            row.name = Some(name.to_string());
-        };
-        match &st.kind {
-            StatementKind::Assign { var, op, value, .. } => {
-                row.kind = "assign".into();
-                set_var(&mut row, var);
-                row.op = Some(op.as_str().to_string());
-                row.value = Some(value.clone());
-            }
-            StatementKind::Export { name } => {
-                named(&mut row, "export", name);
-                row.base = Some(name.clone());
-            }
-            StatementKind::Unset { name, flag } => {
-                named(&mut row, "unset", name);
-                row.base = Some(name.clone());
-                row.flag = flag.clone();
-            }
-            StatementKind::Function {
-                name,
-                lang,
-                fakeroot,
-                ..
-            } => {
-                row.kind = "function".into();
-                match name {
-                    Some(v) => set_var(&mut row, v),
-                    None => {
-                        row.name = Some("__anonymous".into());
-                        row.base = Some("__anonymous".into());
-                    }
-                }
-                let l = match lang {
-                    Lang::Shell => "shell",
-                    Lang::Python => "python",
-                };
-                row.op = Some(if *fakeroot {
-                    format!("fakeroot {l}")
-                } else {
-                    l.to_string()
-                });
-            }
-            StatementKind::PyDef { name, .. } => {
-                named(&mut row, "pydef", name);
-                row.base = Some(name.clone());
-                row.op = Some("python".into());
-            }
-            StatementKind::Inherit { classes, deferred } => {
-                named(&mut row, "inherit", classes);
-                row.op = Some(
-                    if *deferred {
-                        "inherit_defer"
-                    } else {
-                        "inherit"
-                    }
-                    .into(),
-                );
-            }
-            StatementKind::Include { path, mode } => {
-                named(&mut row, "include", path);
-                row.op = Some(
-                    match mode {
-                        IncludeMode::Include => "include",
-                        IncludeMode::Require => "require",
-                        IncludeMode::IncludeAll => "include_all",
-                    }
-                    .into(),
-                );
-            }
-            StatementKind::AddTask { name, .. } => named(&mut row, "addtask", name),
-            StatementKind::DelTask { name } => named(&mut row, "deltask", name),
-            StatementKind::AddHandler { name } => named(&mut row, "addhandler", name),
-            StatementKind::ExportFunctions { names } => {
-                named(&mut row, "export_functions", &names.join(" "))
-            }
-            StatementKind::AddFragments { rest } => {
-                named(
-                    &mut row,
-                    "addfragments",
-                    rest.trim_start_matches(lexer::py_space),
-                );
-                row.value = Some(format!("addfragments{rest}"));
-            }
-            StatementKind::AddPyLib { libdir, namespace } => {
-                named(&mut row, "addpylib", libdir);
-                row.value = Some(namespace.clone());
-            }
-            StatementKind::Unknown { text } => {
-                row.kind = "unknown".into();
-                row.value = Some(text.clone());
-            }
-        }
-        out.push(row);
-    }
-    out
 }
