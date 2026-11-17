@@ -689,6 +689,34 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 (immediate expansion and the trailing colon both matter).
 
+**Which `FILESEXTRAPATHS` forms keep the list** (checked for B9 against BitBake 2.18
+`6e260eb6` `lib/bb/parse/ast.py` `DataNode.eval` and OE-core Wrynose `33a6bd6c`
+`bitbake.conf:387` `FILESEXTRAPATHS ?= "__default:"`, `utils.bbclass` `base_set_filespath`,
+`insane.bbclass` "FILESEXTRAPATHS-variable, must always use :prepend"):
+`base_set_filespath` removes the text `__default:`, splits the rest on `:` and skips empty
+entries; insane.bbclass warns when `__default` is no longer one of the `:`-split entries.
+`predot` (`=.`) stores `value + old` and `postdot` (`.=`) `old + value`, unexpanded, at parse
+time. So, in a recipe, `.inc`, bbappend or class (all parsed after `bitbake.conf`):
+
+| Form | Result | Right? |
+|---|---|---|
+| `:prepend = / := "<p>:"` | `<p>:` before the final value | yes |
+| `:append = / := ":<p>"` | `:<p>` after it | yes |
+| `=. "<p>:"` | `<p>:__default:` | yes |
+| `.= ":<p>"` | `__default::<p>` (the empty entry is skipped) | yes |
+| `=. "<p>"` / `:prepend = "<p>"` | `<p>__default:`: the marker and the path are glued | no |
+| `.= "<p>"` / `:append = "<p>"` | right after the default by luck, glued to any earlier append | no |
+| `=`, `:=` | the default is gone | no |
+| `+=`, `=+` | a space joins `<p>` to the neighbouring entry | no |
+| `FILESEXTRAPATHS:<cond> =. "<p>:"` | builds `FILESEXTRAPATHS:<cond>` = `<p>:`, which replaces the list when `<cond>` is active | no |
+
+In a `layer.conf` (parsed before `bitbake.conf`) `=.` / `.=` set the variable before the
+`?=`, which then does nothing, so the default is lost; `:prepend` / `:append` are applied
+at read time and are fine anywhere. `=.` / `.=` cannot be combined with `:=`, so the value
+stays unexpanded: `${THISDIR}` (`base.bbclass`: `os.path.dirname(d.getVar('FILE'))`) and
+`${FILE_DIRNAME}` expand late, to the directory of the `.bb`; that is right in the `.bb` and
+in an `.inc` of the same directory, wrong in a bbappend or an `.inc` elsewhere.
+
 Verified (T8.3) against OE-Core `9518ce9` and BitBake `5495a54`; this is what `recipe
 show=sources` reproduces:
 

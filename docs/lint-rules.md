@@ -83,7 +83,7 @@ workspace). Findings hidden by `--severity` never fail the run.
 | `override/missing-package` | E | file | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `ALLOW_EMPTY` and the `pkg_*` functions set without a package override (`:${PN}`), in recipes that produce packages. Also `VAR:append`, `VAR:append:<cond>` and a function `pkg_postinst()`. Not flagged: flags, `:remove` alone, legacy names (`override/legacy-syntax`). |
 | `override/append-vs-plus-equals` | I | file | An unconditional `VAR:append =` in a `.bb` after a plain `VAR =` / `VAR :=` in the same file, where `+=` (or `.=`) would do. Not flagged when a later statement of the file assigns `VAR` again or is an `inherit`, `require` or `include`, after an `unset VAR`, or outside `.bb` files (in bbappends and classes `:append` is usually right). |
 | `override/plus-equals-on-default` | W | file | `VAR +=` (and `=+`, `.=`, `=.`) on a plain name in a conf file, when a `?=` of the same name is parsed later and nothing gave `VAR` a value before: the default is lost. Suggest `:append`. Parse order comes from the evaluated configuration; nothing is reported when the order cannot be told. |
-| `override/filesextrapaths` | E | file | `FILESEXTRAPATHS` modified without `:prepend` / `:append`, without the trailing (`:prepend`) or leading (`:append`) colon, or without `:=` when the value uses `${THISDIR}`, `${FILE_DIRNAME}` or `${FILE}` outside the `.bb` itself. Not flagged: `:remove`, and a `?=` / `??=` in a `.conf` (the default's definition). |
+| `override/filesextrapaths` | E | file | `FILESEXTRAPATHS` replaced instead of extended (any operator but `=.` / `.=` without `:prepend` / `:append`; `=.` / `.=` on a conditional name or in a `.conf`), a prepend (`:prepend`, `=.`) without the trailing colon or an append (`:append`, `.=`) without the leading one, or no `:=` when the value uses `${THISDIR}`, `${FILE_DIRNAME}` or `${FILE}` outside the `.bb` itself and outside an `.inc` that only `.bb` files of its own directory include. Not flagged: `:remove`, a `?=` / `??=` in a `.conf` (the default's definition), and a value whose end in question is a `${NAME}` the file does not set to a literal value (python never). |
 
 Notes:
 
@@ -127,8 +127,14 @@ Notes:
   configuration (no recipe). A `.conf` the configuration does not reach, compared with
   another such file, gives no finding.
 - **`filesextrapaths`.** In the `.bb` itself `${THISDIR}` still expands to the recipe's
-  directory at the end of parsing, so `=` is harmless there. Legacy names
-  (`FILESEXTRAPATHS_prepend`) are left to `override/legacy-syntax`.
+  directory at the end of parsing, so `=` is harmless there; the same holds in an `.inc`
+  that only recipes of its own directory reach through `require` / `include` (OE-core's
+  `clang/common.inc`, `gcc-15.3.inc`). `FILESEXTRAPATHS =. "${FILE_DIRNAME}/x:"` in a
+  recipe is correct (see "Files and patches" in bitbake-semantics.md for which forms keep
+  the list). A value ending (prepend) or starting (append) with `${NAME}` is reported only
+  when the file assigns `NAME` a literal value without the colon (`${THISDIR}`,
+  `${FILE_DIRNAME}`, `${FILE}` and `${LAYERDIR}` are paths and count as missing it). Legacy
+  names (`FILESEXTRAPATHS_prepend`) are left to `override/legacy-syntax`.
 
 ## Group `org` (task T4.3)
 

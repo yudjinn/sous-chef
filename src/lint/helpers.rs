@@ -163,6 +163,49 @@ pub fn read_indexed(cx: &LintContext<'_>, f: &query::FileRow) -> Option<(String,
     Some((text, parsed))
 }
 
+/// Who includes a file, followed up through `require` / `include` / `include_all` edges
+/// ([`including_recipes`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Includers {
+    /// The `.bb` files that reach the file, directly or through other `.inc` files, by id.
+    pub recipes: Vec<query::FileRow>,
+    /// Whether a class, a `.conf`, a bbappend or another non-`.inc` file also reaches it.
+    pub other: bool,
+}
+
+/// The recipes that reach `file` through include edges (the file itself when it is a
+/// `.bb`, and every `.bb` that requires it), and whether anything else does. `None` when
+/// the index cannot answer. Only resolved edges count: an include whose argument needs
+/// evaluation is not seen.
+pub fn including_recipes(index: &Index, file: &query::FileRow) -> Option<Includers> {
+    let mut out = Includers::default();
+    let mut seen: HashSet<i64> = HashSet::new();
+    let mut todo = vec![file.clone()];
+    while let Some(f) = todo.pop() {
+        if !seen.insert(f.id) {
+            continue;
+        }
+        let id = f.id;
+        match f.kind {
+            // A `.bb` may itself be required by another `.bb`
+            // (`buildtools-docs-tarball.bb` requires `buildtools-tarball.bb`).
+            FileKind::Recipe => out.recipes.push(f),
+            FileKind::Include => {}
+            _ => {
+                out.other = true;
+                continue;
+            }
+        }
+        for e in query::edges_to(index, id).ok()? {
+            if matches!(e.kind.as_str(), "require" | "include" | "include_all") {
+                todo.push(e.src);
+            }
+        }
+    }
+    out.recipes.sort_by_key(|r| r.id);
+    Some(out)
+}
+
 /// Text normalised for comparison, one entry per line: lines trimmed, blank and comment
 /// lines dropped, whitespace runs collapsed.
 pub fn normalise_lines(text: &str) -> Vec<String> {
@@ -193,6 +236,83 @@ pub fn heredoc_delimiter(line: &str) -> Option<String> {
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
         .collect();
     (!word.is_empty()).then_some(word)
+}
+
+// ---------------------------------------------------------------------------------------
+// Values that begin or end with a reference
+
+/// Whether `name` is the name of a plain `${NAME}` reference (BitBake's
+/// `[a-zA-Z0-9\-_+./~:]+`).
+fn is_ref_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_+./~:".contains(c))
+}
+
+/// How a value's first (or last) character is known statically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValueEdge<'a> {
+    /// Literal text: the character is known.
+    Literal,
+    /// A `${NAME}` reference: the character comes from `NAME`'s value.
+    Ref(&'a str),
+    /// Python (`${@...}`), a nested reference, or anything else that cannot be told.
+    Unknown,
+}
+
+/// What `value` starts with: literal text, a `${NAME}` reference, or something unknown.
+pub fn leading_edge(value: &str) -> ValueEdge<'_> {
+    let Some(rest) = value.strip_prefix("${") else {
+        return ValueEdge::Literal;
+    };
+    match rest.find('}') {
+        Some(end) if is_ref_name(&rest[..end]) => ValueEdge::Ref(&rest[..end]),
+        _ => ValueEdge::Unknown,
+    }
+}
+
+/// What `value` ends with: literal text, a `${NAME}` reference, or something unknown (a
+/// `}` that closes python or a nested reference).
+pub fn trailing_edge(value: &str) -> ValueEdge<'_> {
+    let Some(head) = value.strip_suffix('}') else {
+        return ValueEdge::Literal;
+    };
+    match head.rfind("${") {
+        Some(at) if is_ref_name(&head[at + 2..]) => ValueEdge::Ref(&head[at + 2..]),
+        _ => ValueEdge::Unknown,
+    }
+}
+
+/// The values `file` gives `base` by a plain assignment (`=`, `:=`, `?=`, `??=`; any
+/// conditional override, but no `:append` / `:prepend` / `:remove` and no flag), with the
+/// line of each. These decide how the variable's value starts and ends.
+pub fn plain_values<'a>(file: &'a ParsedFile, base: &str) -> Vec<(u32, &'a str)> {
+    use crate::types::AssignOp;
+    file.statements
+        .iter()
+        .filter_map(|s| match &s.kind {
+            crate::parse::StatementKind::Assign { var, op, value, .. }
+                if var.base == base
+                    && var.flag.is_none()
+                    && !var.legacy_syntax
+                    && !var
+                        .overrides
+                        .iter()
+                        .any(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
+                    && matches!(
+                        op,
+                        AssignOp::Set
+                            | AssignOp::Immediate
+                            | AssignOp::Default
+                            | AssignOp::WeakDefault
+                    ) =>
+            {
+                Some((s.span.start, value.as_str()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------------------
@@ -662,6 +782,22 @@ mod tests {
         assert_eq!(list_kind(&var("FOO_DIR", None)), ListKind::Scalar);
         assert_eq!(list_kind(&var("SOMETHING", None)), ListKind::Unknown);
         assert!(is_space_list(&var("IMAGE_INSTALL", None)));
+    }
+
+    #[test]
+    fn value_edges() {
+        assert_eq!(leading_edge(" x"), ValueEdge::Literal);
+        assert_eq!(leading_edge("${A}"), ValueEdge::Ref("A"));
+        assert_eq!(leading_edge("${A} b"), ValueEdge::Ref("A"));
+        assert_eq!(leading_edge("${@d.getVar('A')}"), ValueEdge::Unknown);
+        assert_eq!(leading_edge("${${A}}"), ValueEdge::Unknown);
+        assert_eq!(trailing_edge("a:${B_C}"), ValueEdge::Ref("B_C"));
+        assert_eq!(trailing_edge("a:"), ValueEdge::Literal);
+        assert_eq!(trailing_edge("${@'x' if y else ''}"), ValueEdge::Unknown);
+        let f = crate::parse::parse(
+            "A = \"x\"\nA:append = \"y\"\nA[doc] = \"z\"\nA:qemux86 ?= \" w\"\nB = \"v\"\n",
+        );
+        assert_eq!(plain_values(&f, "A"), [(1, "x"), (4, " w")]);
     }
 
     #[test]

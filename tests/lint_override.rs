@@ -522,6 +522,78 @@ fn filesextrapaths() {
     assert_eq!(lines(&env, r, "good.bb"), []);
 }
 
+#[test]
+fn filesextrapaths_dot_operators_and_references() {
+    // B9: `=.` with the trailing colon and `.=` with the leading one extend the list (in
+    // good.bb); without the colon, on a conditional name or in a .conf they do not.
+    let env = Env::new();
+    let r = &OverrideFilesextrapaths;
+    assert_eq!(
+        lines(&env, r, "bad-dot.bb"),
+        [(2, E), (3, E), (4, E), (6, E)]
+    );
+    let m = messages(&env, r, "bad-dot.bb");
+    assert!(m[0].contains("without the trailing `:`"), "{}", m[0]);
+    assert!(!m[0].contains("without `:prepend`"), "{}", m[0]);
+    assert!(m[1].contains("without the leading `:`"), "{}", m[1]);
+    assert!(m[2].contains("without `:prepend`"), "{}", m[2]);
+    assert!(m[3].contains("without the trailing `:`"), "{}", m[3]);
+    assert_eq!(lines(&env, r, "bad-dot.conf"), [(2, E)]);
+}
+
+/// `(path, line)` of the rule's findings on `files` (under the workspace) after adding them.
+fn file_findings(env: &Env, rule: &dyn Rule, files: &[&str]) -> Vec<String> {
+    let files: Vec<PathBuf> = files.iter().map(|f| env.root.join(f)).collect();
+    env.run(&Target::Files { files, lines: None }, false, &[rule])
+        .findings
+        .iter()
+        .map(|f| format!("{}", f.loc))
+        .collect()
+}
+
+#[test]
+fn filesextrapaths_in_an_inc_beside_its_recipes() {
+    // clang/common.inc: included only by recipes of its own directory, a late
+    // ${FILE_DIRNAME} is that directory, so `=` / `=.` without `:=` is right.
+    let inc = fixture("filesextrapaths", "beside.inc");
+    let dir = "meta-mine/recipes-app/clangish";
+    let env = Env::with(&[
+        (&format!("{dir}/common.inc"), inc.clone()),
+        (
+            &format!("{dir}/clangish_1.0.bb"),
+            "SUMMARY = \"x\"\nrequire common.inc\n".into(),
+        ),
+        (
+            &format!("{dir}/clangish-native_1.0.bb"),
+            "SUMMARY = \"x\"\nrequire common.inc\n".into(),
+        ),
+    ]);
+    let r = &OverrideFilesextrapaths;
+    assert_eq!(
+        file_findings(&env, r, &[&format!("{dir}/common.inc")]),
+        [] as [&str; 0]
+    );
+    // Included from another directory too: the late value is that recipe's directory.
+    let env = Env::with(&[
+        (&format!("{dir}/common.inc"), inc),
+        (
+            &format!("{dir}/clangish_1.0.bb"),
+            "SUMMARY = \"x\"\nrequire common.inc\n".into(),
+        ),
+        (
+            "meta-mine/recipes-app/other/other_1.0.bb",
+            "SUMMARY = \"x\"\nrequire recipes-app/clangish/common.inc\n".into(),
+        ),
+    ]);
+    assert_eq!(
+        file_findings(&env, r, &[&format!("{dir}/common.inc")]),
+        [
+            "meta-mine:recipes-app/clangish/common.inc:3",
+            "meta-mine:recipes-app/clangish/common.inc:4"
+        ]
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Recipe-scope rules, on the real datastore
 
