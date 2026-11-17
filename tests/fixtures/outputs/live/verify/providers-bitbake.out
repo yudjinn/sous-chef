@@ -1,0 +1,26 @@
+2026-11-17 16:43:40 - INFO     - kas 5.5 started on EndeavourOS rolling
+2026-11-17 16:43:40 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss
+2026-11-17 16:43:40 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss-ti
+2026-11-17 16:43:40 - INFO     - Repository openembedded-core already contains 33a6bd6cc8a9a976902081642414bd67adc74879 as commit
+2026-11-17 16:43:40 - INFO     - Repository meta-arm already contains 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735 as commit
+2026-11-17 16:43:40 - INFO     - Repository bitbake already contains 6e260eb6ab1631607ea414d9ff8ede1155faa5d9 as commit
+2026-11-17 16:43:40 - INFO     - Repository bitbake checked out to 6e260eb6ab1631607ea414d9ff8ede1155faa5d9
+2026-11-17 16:43:40 - INFO     - Repository openembedded-core checked out to 33a6bd6cc8a9a976902081642414bd67adc74879
+2026-11-17 16:43:40 - INFO     - Repository meta-arm checked out to 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735
+2026-11-17 16:43:40 - INFO     - To start the default build, run: bitbake -c build kiss-image
+{{LIVE}}/yocto-kiss/build/tmp
+FILE="{{LIVE}}/yocto-kiss/build/../meta-kiss/recipes-kernel/linux/linux-kiss_7.0.bb"
+PN="linux-kiss"
+PREFERRED_PROVIDER_virtual/kernel="linux-kiss"
+PV="7.0"
+FILE="{{LIVE}}/yocto-kiss/build/../meta-kiss/recipes-bsp/u-boot/u-boot-kiss_git.bb"
+PN="u-boot-kiss"
+PV="git"
+CLASSOVERRIDE="class-native"
+FILE="{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb"
+OVERRIDES="linux:x86-64:pn-curl-native:layer-\${FILE_LAYERNAME}::kiss:class-native:toolchain-gcc:forcevariable"
+PN="curl-native"
+PV="8.19.0"
+FILE="{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-core/glibc/glibc_2.43.bb"
+PREFERRED_VERSION_glibc="2.43%"
+PV="2.43+git"

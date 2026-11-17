@@ -299,8 +299,12 @@ Verified (T1.2) against BitBake `master` 2026-11 and the release branches on Git
   rest of the file. Lint reports the directive to the user: `hygiene/release-syntax`, for
   a layer checked against a release without it.
 - `BB_DEFER_BBCLASSES` is newer still: absent from `BBHandler.py` on branches `2.8`, `2.10`
-  and `2.12`, present on `master` (2026-11). The first release that has it is not yet
-  recorded (*verify* 2.14 / 2.16); the replay currently honours it on every release.
+  and `2.12`, present on `master` (2026-11). Settled by T9.2 (2026-11-17) in the bitbake
+  clone of the live environment: added by commit `8e741b2e8` ("ast/BBHandler: Add support
+  for BB_DEFER_BBCLASSES", 2025-06-12, `git describe --contains`: `2.15.0~2`); `git show
+  origin/<branch>:lib/bb/parse/parse_py/BBHandler.py` has it on `2.16` and `2.18`, not on
+  `2.12` (there is no `2.14` branch). **First release: BitBake 2.16 (Whinlatter).** The
+  replay still honours it on every release.
 - `include_all` (`include_all\s+(.+)`, ConfHandler): present in bitbake 2.12 (Yocto 5.2
   walnascar), absent in 2.10. It includes `<entry>/<path>` for every distinct `BBPATH` entry,
   left to right; the including file's directory is **not** searched; missing files are not an
@@ -364,7 +368,11 @@ Verified (T1.4) against BitBake `master` (commit `5495a547`, 2026-11-16), and re
   is walked for `.bb` / `.bbappend`; duplicates are dropped (first kept); `BBMASK` regexes
   are applied afterwards. The `.bbappend` files are kept in this order, which is the order
   `get_file_appends` returns them in, so appends apply **lowest layer priority first** (the
-  highest priority layer has the last word), ties in `BBFILES` order.
+  highest priority layer has the last word), ties in `BBFILES` order. The matches of one
+  glob are sorted **as strings** (`sorted(globbed)`, `cooker.py:1894` in 2.18), so
+  `optee-ftpm/optee-os_%.bbappend` comes before `optee/optee-os_%.bbappend` (`-` < `/`);
+  a path-component sort gives the opposite. Confirmed against `bitbake-layers
+  show-appends` by T9.2 (BitBake 2.18.0, meta-arm `673e8d7c`; `tests/fixtures/outputs/live/kas-shell-show-appends.out`).
 - **`BBPATH`** is whatever the configuration leaves in the variable: OE layers usually do
   `BBPATH .= ":${LAYERDIR}"` but some prepend (`BBPATH =. "${LAYERDIR}:"`), so sous-chef reads
   the value from `bblayers.conf` and the layer confs instead of assuming the layer order
@@ -376,9 +384,14 @@ are ever found; `BBMASK` is not applied by `recipe_files`.
 **A bbappend that matches no recipe** (checked by T4.3 in `cooker.py`
 `show_appends_with_no_recipes`, master and branches `2.0` and `2.8`): BitBake stops with a
 fatal error ("No recipes available for"). On BitBake 2.0 (Kirkstone) and 2.8 (Scarthgap)
-`BB_DANGLINGAPPENDS_WARNONLY` set makes it a warning; master has no such variable. The
-release that dropped it was not checked (*verify*). The `layers` tool (`show: appends`)
-and `org/append-no-match` report these appends.
+`BB_DANGLINGAPPENDS_WARNONLY` set makes it a warning; master has no such variable. Settled
+by T9.2 in the bitbake clone: commit `fca9c9e3c` ("cooker: Drop support for
+BB_DANGLINGAPPENDS_WARNONLY", 2024-11-21); `lib/bb/cooker.py` has it on branch `2.10`, not on
+`2.12`. **Last release with it: BitBake 2.10 (Styhead); fatal from 2.12 (Walnascar).** The
+`layers` tool (`show: appends`) and `org/append-no-match` report these appends. A bbappend
+under a `BBFILES_DYNAMIC` entry whose collection is absent is not collected at all, so
+BitBake neither applies nor reports it (live: meta-arm's
+`dynamic-layers/meta-tpm2/.../tpm2-tools_5.7.bbappend` is not in `show-appends`).
 
 Static expansion of reference arguments (`resolve::expand_with`): the scanner resolves
 `${VAR}` in `require` / `include` / `inherit` arguments only for values that follow from the
@@ -412,8 +425,11 @@ legitimately use `_<collection>` suffixes):
 Layer priority decides which recipe wins when two layers provide the same `PN` and version,
 and the order in which bbappends are applied (lower priority first, so the highest priority
 layer has the last word). Verified in the BitBake source (T1.4, see "Finding files"; again
-by T3.4, `multi_finalize` parses `__BBAPPEND` in `get_file_appends` order); not checked
-against `bitbake-layers show-appends` output.
+by T3.4, `multi_finalize` parses `__BBAPPEND` in `get_file_appends` order); checked
+against `bitbake-layers show-appends` by T9.2 (BitBake 2.18.0, yocto-kiss kas build): the
+same recipes get the same bbappends in the same order, ties sorted as strings (see
+"Finding files"). Priorities match `bitbake-layers show-layers`, which in 2.18 names each
+layer by its **collection** (`core`, `arm-toolchain`), not its directory.
 
 Checked by T1.3 against BitBake master (`lib/bb/cookerdata.py`, `cooker.py`,
 `parse/ast.py`):
@@ -512,11 +528,16 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
 - **`FILE_LAYERNAME`** is set with `setVar` before the recipe is parsed (so it beats
   OE-Core's `FILE_LAYERNAME ??= "config"`). Its value is the **collection name** (not the
   layer directory name) of the first `BBFILE_PATTERN_<c>` regex that matches the recipe path
-  (`re.match`), patterns tried in reverse lexical order of their text.
+  (`re.match`), patterns tried in reverse lexical order of their text. Live (T9.2, BitBake
+  2.18.0): `bitbake -e curl` shows `set cookerdata.py:513 [_parse_recipe] "core"` after
+  the `??= "config"` default. For a `BBCLASSEXTEND` variant (`bitbake -e curl-native`) the
+  same line sets `"None"`: no pattern matches the `virtual:native:` file name, the variable
+  is printed without a `FILE_LAYERNAME=` line, and that variant's `OVERRIDES` contains a
+  literal `layer-${FILE_LAYERNAME}`.
 - **bbappends** are parsed after the whole `.bb` (`multi_finalize`, in `__BBAPPEND` order
   = `get_file_appends` = `BBFILES` collection order: lowest layer priority first), each with
-  BBHandler as an include. Confirmed in the source; not checked against
-  `bitbake-layers show-appends` output.
+  BBHandler as an include. Confirmed in the source, and against `bitbake-layers
+  show-appends` by T9.2 (see "Finding files" for the string sort of ties).
 - **Finalisation** (`ast.finalize`): deferred inherits (`__BBDEFINHERITS`, first in first
   out, including ones added meanwhile), event handler registration, `expandKeys`, then
   anonymous python (`runAnonFuncs`), then task processing.
@@ -590,9 +611,15 @@ Verified (T3.7) against BitBake `master` 2026-11, `lib/bb/providers.py`
   a second; the eligible list is the first list then the second; a `PN` equal to the name
   is moved to the front. `filterProviders` then reads `PREFERRED_PROVIDER_<name>` (e.g.
   `PREFERRED_PROVIDER_virtual/foo`) and, if an eligible file has that `PN`, moves it to the
-  front and marks the choice unique. There is no `PREFERRED_PROVIDERS` variable. Without a
-  unique choice and with several eligible files BitBake fires `MultipleProviders` and uses
-  the first one (`taskdata.py`: *verify*, not read for this task).
+  front and marks the choice unique. **Corrected by T9.2** (BitBake 2.18.0 source): there
+  *is* a `PREFERRED_PROVIDERS` variable. `cooker.handlePrefProviders` reads its words
+  (`providee:provider`, an error for conflicting pairs) from the configuration into
+  `recipecaches.preferred`; `filterProviders` overwrites that entry with
+  `PREFERRED_PROVIDER_<name>` when it is set, then uses it as above. Without a unique
+  choice and with several eligible files BitBake fires `MultipleProviders`
+  (`taskdata.add_provider_internal`), adds every eligible file as a build target, and the
+  runqueue uses `build_targets[name][0]`: **the first one** (settled by T9.2 in
+  `taskdata.py` and `runqueue.py`, BitBake 2.18.0).
 
 sous-chef differences: the candidates are the recipes whose `PN` or static `PROVIDES` (also
 in an include, class or bbappend of the recipe) names the item in the index, confirmed by
@@ -602,11 +629,14 @@ found. The file order inside a bucket is layer then path, not BitBake's collecti
 non-`.conf` file (or a `.conf` statement with an override) sets one of them; values set by
 anonymous python are not seen. `BBMASK`, `SKIP_RECIPE` and `COMPATIBLE_*` are not applied,
 and `BBCLASSEXTEND` variants (`-native`, `nativesdk-`) are not providers.
+`PREFERRED_PROVIDERS` is not read.
 
-*Verify* (used by `org/policy-in-recipe`, not checked against the source by any task):
-`PREFERRED_PROVIDER_*` is read only from the configuration datastore (`cooker.py`
-`handlePrefProviders`, `providers.findBestProvider`), so a recipe's own value never takes
-part in the choice.
+Confirmed by T9.2 (used by `org/policy-in-recipe`; BitBake 2.18.0 `providers.filterProviders(...,
+cfgData, ...)` and `cooker.handlePrefProviders`, and observed: `bitbake -e virtual/kernel`
+gives `FILE=.../meta-kiss/recipes-kernel/linux/linux-kiss_7.0.bb` from
+`PREFERRED_PROVIDER_virtual/kernel ?= "linux-kiss"` in the machine conf):
+`PREFERRED_PROVIDER_*` is read only from the configuration datastore, so a recipe's own
+value never takes part in the choice.
 
 ### `PACKAGECONFIG` (verified, T3.7)
 
@@ -645,7 +675,15 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
   `tmp-glibc` (`TCLIBCAPPEND`, now removed). All of these can be overridden, so ask
   `bitbake-getvar -r <pn> --value T` when the environment is available. (Checked:
   openembedded-core 9518ce9 of 2026-11-16, and the `kirkstone` and `scarthgap` branches'
-  `bitbake.conf`.)
+  `bitbake.conf`.) **Confirmed live by T9.2** (BitBake 2.18.0, OE-core `33a6bd6c`, kas
+  build of yocto-kiss): `bitbake-getvar --value TMPDIR` is `<build>/tmp` (the yocto-kiss
+  README's `tmp-glibc` is out of date); `bitbake-getvar -r curl --value T` prints only
+  `<build>/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp`. After `-c fetch`,
+  `T` holds `log.do_<task>.<pid>` and `run.do_<task>.<pid>` each with its symlink,
+  `run.<function>.<pid>` without a symlink for every helper function run
+  (`base_do_fetch`, `extend_recipe_sysroot`, `sstate_*`, ...), `depsig.do_<task>.<pid>`
+  with a symlink, and `log.task_order` with one line per task:
+  `<YYYYMMDD-HHMMSS.ffffff> do_<task> (<pid>): log.do_<task>.<pid>`.
 - Cooker logs: `BB_CONSOLELOG ?= "${LOG_DIR}/cooker/${MACHINE}/${DATETIME}.log"`, i.e.
   `tmp/log/cooker/<machine>/<datetime>.log` (OE-core `bitbake.conf`).
 - Failure text, as printed by bitbake 5495a54 (2026-11-16) and OE-core 9518ce9:
@@ -679,7 +717,19 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
   - Fetch: `bb.fatal("Bitbake Fetcher Error: " + repr(e))` in `base_do_fetch`, e.g.
     `ERROR: Bitbake Fetcher Error: FetchError('Unable to fetch URL from any source.', '<url>')`;
     `FetchError` text is `Fetcher failure for URL: '<url>'. <msg>` or
-    `Fetcher failure: <msg>`.
+    `Fetcher failure: <msg>`. Seen in a real log by T9.2 (BitBake 2.18.0, wget, an
+    unresolvable `https://` URL; `tests/fixtures/outputs/live/broken-fetch/`): that line is
+    preceded by `ERROR: Fetcher failure: Fetch command <export ...; /usr/bin/env wget
+    --tries=2 --timeout=100 --output-document=... --continue --directory-prefix=... '<url>'
+    --progress=dot --verbose> failed with exit code 4, see logfile for output` (the
+    upstream attempt; exit 4 is wget's network failure); wget's own lines (`Resolving
+    <host> ... failed: Name or service not known.`, `ERROR 404: Not Found.`) appear
+    unprefixed after each `DEBUG: Running export ...` line; OE-core's `MIRRORS` are tried
+    after upstream (`downloads.yoctoproject.org/mirror/sources/`,
+    `mirrors.edge.kernel.org/yocto-sources/`), each with `DEBUG: Mirror fetch failure for
+    url <mirror url> (original url: <url>)`. On the console the two ERROR lines carry the
+    `<PF> do_fetch: ` prefix, then `Logfile of failure stored in:`, the runqueue line and
+    the summary, as described above; no `Log data follows:`.
   - Patch: `NOTE: Applying patch '<name>' (<path>)`, then on failure
     `ERROR: Applying patch '<file>' on target directory '<dir>'` followed by the repr of
     the patch tool's `CmdError` (quilt's output with `\n` turned into newlines).
@@ -729,11 +779,20 @@ Checked 2026-11-17 against bitbake `master` (`lib/bb/main.py`, `lib/bb/cooker.py
   (both required; destination is "Layer/path to put recipe into", which may be a layer
   name from `bblayers.conf`; the tool accepts only the name of a writable workspace
   layer), `build <recipename>` (`build.py`; required; options `-s`, `-c` not offered).
-- *Verify* (not checked): whether the BitBake server process started by a job leaves the
-  job's process group (it daemonises) and so survives a cancel, which terminates only the
-  group; and whether a second `bitbake` client (`-e`, `bitbake-layers`) waits for or
-  fails on the lock while a build runs. The tool avoids the second question by running
-  one job at a time.
+- **Server and cancel** (settled by T9.2, BitBake 2.18.0, kas build of yocto-kiss): the
+  server started by a job (`bitbake-server decafbad ...`, two processes) is re-parented
+  away from the job and runs in its own session and process group, so a cancel, which
+  terminates the job's group, does not reach it. It was still running (and parsing) right
+  after the cancel and exited by itself about 3 s later ("No timeout, exiting.",
+  "Exiting as we could obtain the lock"), because with `BB_SERVER_TIMEOUT` unset the server
+  leaves once its client is gone. With `BB_SERVER_TIMEOUT` set it would stay (not tried).
+- **A second client** (settled by T9.2): while `bitbake -e curl` ran, `bitbake-layers
+  show-layers` started in a second shell printed `NOTE: Reconnecting to bitbake server...`,
+  **waited**, and completed normally (exit 0) half a second after the first client
+  finished. `lib/bb/main.py`: a client that finds `bitbake.lock` taken connects to the
+  running server's socket, retrying up to 8 times (5 s apart after the fourth try), then
+  fails with "Unable to connect to bitbake server, or start one" (that failure was not
+  observed). The tool still runs one job at a time.
 
 ## Releases
 
@@ -854,16 +913,22 @@ Checked 2026-11-17 against OE-core `wrynose` (`meta/lib/bblayers/create.py`,
   shell function is fatal ("contains a dash character and is calling an sh function"), so
   the generator refuses `-` in the name of a class with tasks.
 
-*Verify* (open, not used by any code): whether Wrynose changes how the build environment is
-initialised, which matters to `src/bitbake/env.rs` (it sources `oe-init-build-env` or uses an
-environment that is already set up). Checked 2026-11-17: the 6.0 migration guide only says
+**Settled by T9.1 / T9.2** (2026-11-17, live environment, bitbake-setup 2.19.0, kas 5.5,
+BitBake 2.18.0, bash 5.3): a `bitbake-setup` build has `<setup dir>/build/init-build-env`,
+a script to source that takes no arguments: `cd <openembedded-core>; set <build dir>; .
+./oe-init-build-env; set --` (`tests/fixtures/outputs/live/bitbake-setup-build/init-build-env`).
+So `oe-init-build-env <build dir>` still works for such a build, and it also works for a kas
+build directory (T9.2 ran `bitbake-getvar` and `bitbake-layers` through it there, without
+touching `conf/`). The final `set --` empties the caller's positional parameters when the
+script is sourced from a function or `bash -c` that relies on `$@`. kas builds are entered
+with `kas shell` (see live-environment.md); inside it `BUILDDIR` and `BBPATH` are set and
+`bitbake` is on `PATH`. Earlier notes: the 6.0 migration guide only says
 VSCode setup was dropped from `oe-init-build-env` ("Users are advised to use bitbake-setup
 instead") and that the `meta-poky/conf/templates/default` templates moved to OE-core's
 `meta` layer. The 6.0 release notes mention `bitbake-setup init` (it writes
 `build/conf/auto.conf`) and that devtool ide-sdk looks for "bitbake-setup's init-build-env
 first, and oe-init-build-env if not found". So a `bitbake-setup` build directory appears to
-have its own `init-build-env` script; its location and whether `oe-init-build-env` still
-works for such builds were not checked.
+have its own `init-build-env` script (confirmed above).
 
 ## OE-core checks and defaults used by lint
 
@@ -882,15 +947,28 @@ Checked by the wave 4 lint tasks against OE-core master (2026-11) unless marked:
   `SRCREV ??= "INVALID"`. The `UNPACKDIR` defaults per release are in the table under
   "Scaffold: sources, `S` and build-system classes" (none on kirkstone and scarthgap).
 
-*Verify* (relied on by lint, not checked by any task):
+Relied on by lint; settled by T9.2 against BitBake 2.18.0 and OE-core Wrynose (`33a6bd6c`)
+in the live environment:
 
-- that OE-core has an `uppercase-pn` QA check reporting upper-case letters in `PN`
-  (`org/recipe-path`);
-- that `IMAGE_INSTALL` is read only by image recipes (`org/policy-in-recipe`);
-- the fetcher's checksum lookup, as `hygiene/src-uri-checksum` assumes it: an entry with
-  `name=<n>` uses `SRC_URI[<n>.sha256sum]`, one without uses `SRC_URI[sha256sum]`, and a
-  `sha256sum=` parameter also counts; and the `SRCREV` lookup order for a git entry with
-  `name=<n>` (`SRCREV_<n>`, else `SRCREV`).
+- OE-core has an `uppercase-pn` QA check reporting upper-case letters in `PN`
+  (`org/recipe-path`): confirmed, `insane.bbclass:1557` ("PN: %s is upper case, this can
+  result in unexpected behavior."), listed in `CHECKLAYER_REQUIRED_TESTS`.
+- `IMAGE_INSTALL` is read only by image recipes (`org/policy-in-recipe`): confirmed by
+  grep: as that exact name it is read only by `classes-recipe/image.bbclass` and
+  `core-image.bbclass` (and recorded by `classes/buildhistory.bbclass`). A machine conf may
+  still add to it (`meta-kiss-ti`'s `dogbonedark.conf` has `IMAGE_INSTALL:append`).
+- The fetcher's checksum lookup (`fetch2/__init__.py` `FetchData.configure_checksum`):
+  confirmed with refinements. For an entry with `name=<n>` the expected value is the URL
+  parameter `<n>.sha256sum=`, else the URL parameter `sha256sum=`, else the flag
+  `SRC_URI[<n>.sha256sum]`; without `name`, the parameter `sha256sum=`, else
+  `SRC_URI[sha256sum]`. So with `name=<n>` the flag `SRC_URI[sha256sum]` is **not** used.
+  Checksums are looked up only for `http`, `https`, `ftp`, `ftps`, `sftp`, `s3`, `az`,
+  `crate`, `gs`, `gomod` and `npm` URLs (other types get none).
+- The `SRCREV` lookup (`srcrev_internal_helper`): confirmed and extended. For `name=<n>`
+  the variables tried are `SRCREV_<n>:pn-<pn>`, `SRCREV_<n>`, `SRCREV:pn-<pn>`, `SRCREV`
+  (without a name only the last two), first value set and not `INVALID`; a `rev=` URL
+  parameter is used when none is set, and must equal the variable's value otherwise
+  ("Conflicting revisions").
 
 ## What the static evaluator cannot do
 

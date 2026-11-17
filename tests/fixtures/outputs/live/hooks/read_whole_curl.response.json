@@ -1,0 +1,1 @@
+{"hookSpecificOutput":{"additionalContext":"sous-chef index context for this read of meta:recipes-support/curl/curl_8.19.0.bb:1-209:\ncurl_8.19.0.bb is not the whole recipe; these files also contribute: meta:conf/distro/include/ptest-packagelists.inc (require).","hookEventName":"PostToolUse"}}
