@@ -390,8 +390,9 @@ legitimately use `_<collection>` suffixes):
 
 Layer priority decides which recipe wins when two layers provide the same `PN` and version,
 and the order in which bbappends are applied (lower priority first, so the highest priority
-layer has the last word). Verified in the BitBake source (T1.4, see "Finding files"); not
-checked against `bitbake-layers show-appends` output.
+layer has the last word). Verified in the BitBake source (T1.4, see "Finding files"; again
+by T3.4, `multi_finalize` parses `__BBAPPEND` in `get_file_appends` order); not checked
+against `bitbake-layers show-appends` output.
 
 Checked by T1.3 against BitBake master (`lib/bb/cookerdata.py`, `cooker.py`,
 `parse/ast.py`):
@@ -442,6 +443,82 @@ Then for each recipe, on top of a copy of the configuration:
    point where they appear
 6. each matching `.bbappend`, in layer priority order
 7. deferred inherits, anonymous python (not evaluated by us), then finalisation
+
+### Replay (verified, T3.4)
+
+Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigurationFiles`,
+`_parse_recipe`; `lib/bb/cooker.py` `collect_bbfiles`, `get_file_appends`,
+`CookerCollectFiles.get_layername`; `parse/parse_py/ConfHandler.py` `handle`,
+`include_single_file`; `parse/parse_py/BBHandler.py` `handle`, `inherit`; `parse/ast.py`
+`MethodNode`, `PythonMethodNode`, `ExportFuncsNode`, `multi_finalize`, `finalize`;
+`data_smart.py` `expandVarref`) and OE-Core `master` (`meta/conf/bitbake.conf`,
+`meta/classes-global/base.bbclass`). This is what `src/eval/replay.rs` reproduces:
+
+- **Configuration order.** `TOPDIR` = the directory above `conf/bblayers.conf`; parse
+  `bblayers.conf`; for each `BBLAYERS` entry (trailing `/` stripped, *not* normalised): set
+  `LAYERDIR` and `LAYERDIR_RE` (`re.escape`), parse `<layer>/conf/layer.conf`, then
+  `expandVarref('LAYERDIR')` and `expandVarref('LAYERDIR_RE')` (every variable whose
+  unexpanded finalised value contains `${LAYERDIR}` gets it replaced and is stored again with a
+  plain `setVar`); after the last layer both are deleted. Then `conf/bitbake.conf`, found
+  along `BBPATH` only, its includes followed as written. Then the classes
+  `["base"] + INHERIT.split()`, **`base` first**, each through `BBHandler.inherit` with
+  `__bbclasstype = "global"`. (Also done by BitBake and not reproduced: `LAYERSERIES_COMPAT_*`
+  and `LAYERSERIES_CORENAMES` are deleted and set again in sorted form; `BBFILES_DYNAMIC`;
+  the duplicate-`BBPATH` check.)
+- **`FILE`.** ConfHandler sets `FILE` to every `.conf` it parses and restores the previous
+  value afterwards if there was one. BBHandler sets it to every `.bb`, `.inc` and `.bbappend`
+  (not `.bbclass`) and restores it afterwards when parsed as an include; the top-level
+  recipe is parsed with `include == 0` and leaves `FILE` set to the recipe.
+- **`PN`, `PV`, `BPN`, `THISDIR`, `FILE_DIRNAME`** are python in OE-Core:
+  `PN` / `PV` = `bb.parse.vars_from_file(FILE)` parts 0 / 1, else `defaultpkgname` / `1.0`
+  (`vars_from_file` only splits names ending in `.bb` / `.bbappend`, so inside a `.inc` `PN`
+  is `defaultpkgname`, and inside `hello_%.bbappend` `PV` is `%`); `BPN` =
+  `oe.utils.prune_suffix(PN, SPECIAL_PKGSUFFIX)` (then `MLPREFIX` stripped);
+  `FILE_DIRNAME` (bitbake.conf) and `THISDIR` (base.bbclass, "only works properly with
+  immediate expansion") = `dirname(FILE)`. `BP = "${BPN}-${PV}"` is plain text.
+- **`FILE_LAYERNAME`** is set with `setVar` before the recipe is parsed (so it beats
+  OE-Core's `FILE_LAYERNAME ??= "config"`). Its value is the **collection name** (not the
+  layer directory name) of the first `BBFILE_PATTERN_<c>` regex that matches the recipe path
+  (`re.match`), patterns tried in reverse lexical order of their text.
+- **bbappends** are parsed after the whole `.bb` (`multi_finalize`, in `__BBAPPEND` order
+  = `get_file_appends` = `BBFILES` collection order: lowest layer priority first), each with
+  BBHandler as an include. Confirmed in the source; not checked against
+  `bitbake-layers show-appends` output.
+- **Finalisation** (`ast.finalize`): deferred inherits (`__BBDEFINHERITS`, first in first
+  out, including ones added meanwhile), event handler registration, `expandKeys`, then
+  anonymous python (`runAnonFuncs`), then task processing.
+- **Inherit** (`BBHandler.inherit`): the argument is expanded and split; a word listed in
+  `BB_DEFER_BBCLASSES` is deferred (unless already deferred); a class file in
+  `__inherit_cache` is not parsed again. Not found is a parse error.
+- **Include** (`include_single_file`): skipped only when the written name equals the
+  including file's path text, so `require self.inc` inside `self.inc` recurses (BitBake
+  fails eventually).
+- **Functions** (`MethodNode.eval`): stored with `setVar(name, body, parsing=True)`, so
+  override syntax in the name applies; if the name already has a value its `python` and
+  `fakeroot` flags are cleared first; then flags `python`, `fakeroot`, `func`, `filename`,
+  `lineno`. Anonymous python becomes `__anon_<line>_<file with /.+-@%&~ replaced by _>`
+  and is appended to `__BBANONFUNCS`. A top-level `def` (`PythonMethodNode`) only sets the
+  `func` and `python` flags; its body goes to the method pool, not the datastore.
+- **`EXPORT_FUNCTIONS`** (`ExportFuncsNode`) in class `c`: for each `f`, skipped if `f`
+  already has a value that is not an earlier stub; otherwise `f` gets the `func` / `python`
+  flags of `c_f`, `c_f` gets `f`'s `dirs` / `cleandirs` / `fakeroot`, and `f` becomes a stub
+  calling `c_f`. A later class's stub replaces an earlier one.
+
+sous-chef differences (in `replay.rs`): `LAYERDIR` is the canonical layer root, not the
+`BBLAYERS` text. `expandVarref` is done by replacing the reference inside each stored piece
+(value, `??=` default, `:append` / `:prepend` / `:remove` texts) rather than folding the
+appends into the value; final values are the same except where an override variant would
+have been detached. `PN`, `PV`, `BPN`, `FILE_DIRNAME` and `THISDIR` are computed as above
+only in the recipe pass and only while their stored value is python or absent (the python
+is assumed to be OE-Core's); `BP` is set to `${BPN}-${PV}` when absent. Target `MACHINE` /
+`DISTRO` are set before `bblayers.conf` and again after every configuration assignment to
+them. A function's stored value is a pointer per piece instead of the body. A reference
+that needs python or an undefined variable is not followed (BitBake would expand the
+python, or look for a file with `${X}` in its name) and is recorded; `include` of a missing
+file is silent, as in BitBake; a missing `require` / class and an include cycle are recorded
+instead of failing the parse. `addtask`, `deltask` and `addhandler` do not change values and
+are not replayed. Anonymous python and event handlers are never run; the variables an
+anonymous function changes by a literal name are flagged `unevaluated_python`.
 
 ## Providers and versions
 

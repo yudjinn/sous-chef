@@ -94,7 +94,8 @@ discovery through `build/conf/bblayers.conf` finds **three**.
     (neither exists: silently ignored), `include conf/local.conf` (resolves through
     `BBPATH` to `build/conf/local.conf`), `include conf/machine/${MACHINE}.conf`,
     `include conf/distro/${DISTRO}.conf`.
-- Expected `OVERRIDES` (with `FILE_LAYERNAME` = the recipe layer's collection, *verify*):
+- Expected `OVERRIDES` (`FILE_LAYERNAME` is the collection whose `BBFILE_PATTERN` matches the
+  recipe, verified by T3.4 in `cooker.py` `get_layername`; `core` for hello, `mine` for app):
   - MACHINE=qemux86: `linux:i686:pn-<pn>:layer-<c>:qemux86:testdistro:class-target:libc-glibc:forcevariable`
   - MACHINE=boardx: `linux:arm:pn-<pn>:layer-<c>:socx:boardx:testdistro:class-target:libc-glibc:forcevariable`
 - `conf/machine/qemux86.conf`: `TARGET_ARCH = "i686"`, `MACHINE_FEATURES`, no
@@ -123,11 +124,11 @@ discovery through `build/conf/bblayers.conf` finds **three**.
 - Classes therefore exist in all three directories: `classes/` (base), `classes-recipe/`
   (autotoolsish), `classes-global/` (sanityish). `meta-legacy/classes/oldclass.bbclass` is
   a fourth, outside `BBLAYERS`. No class is shadowed across layers.
-- Configuration parse order (*verify* where base/INHERIT go): `bblayers.conf`; `layer.conf`
-  of meta-core, meta-vendor, meta-mine; `meta-core/conf/bitbake.conf`; `build/conf/local.conf`;
+- Configuration parse order (verified by T3.4 in `cookerdata.py` `parseConfigurationFiles`,
+  asserted in `tests/eval_replay.rs`): `bblayers.conf`; `layer.conf` of meta-core,
+  meta-vendor, meta-mine; `meta-core/conf/bitbake.conf`; `build/conf/local.conf`;
   `conf/machine/<MACHINE>.conf`; `conf/distro/testdistro.conf`; then `base.bbclass` and
-  `sanityish.bbclass` (BitBake's cookerdata inherits `base` before the `INHERIT` list —
-  *verify*).
+  `sanityish.bbclass` (BitBake inherits `["base"] + INHERIT`, base first).
 
 ### Recipes
 
@@ -160,7 +161,9 @@ discovery through `build/conf/bblayers.conf` finds **three**.
 | `meta-legacy/recipes-legacy/oldapp/oldapp_%.bbappend` | legacy (7) | `oldapp_1.0.bb` (only when meta-legacy is a layer) |
 
 Application order for hello 1.1: the vendor append, then the mine append (lower priority
-first; *verify* against `bitbake-layers show-appends`).
+first; verified in the BitBake source, `collect_bbfiles` / `get_file_appends` /
+`multi_finalize`, by T1.4 and T3.4; not checked against real `bitbake-layers show-appends`
+output).
 
 `hello_%.bbappend` (vendor):
 - line 2 `FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"` (files in

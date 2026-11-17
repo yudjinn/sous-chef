@@ -31,7 +31,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::datastore::{Keyword, Piece, split_keyword};
+use super::datastore::{Keyword, Piece, base_of, split_keyword};
 use super::expand::{Expander, Source};
 use super::{DataStore, OpStatus, Value, VarOp};
 
@@ -149,6 +149,10 @@ impl Eval<'_> {
     fn finalise(&self, name: &str, exp: &mut Expander, trace: &mut Trace) -> Option<Value> {
         let c = self.compose(name, true, exp, trace, 0);
         let mut v = c.parsed?;
+        // Anonymous python may change this variable (recorded by the replay, T3.4).
+        if self.ds.notes.python_vars.contains(base_of(name)) {
+            v.unevaluated_python = true;
+        }
         let unknown_entries = (trace.inactive_seen || trace.multi_active) && self.ovr.uncertain();
         if trace.consulted && (self.ovr.unstable || unknown_entries) {
             if self.ovr.python {

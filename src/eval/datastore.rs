@@ -43,6 +43,7 @@ use crate::types::{AssignOp, Loc, VarRef};
 
 use super::FileVisit;
 use super::overrides::OverrideState;
+use super::replay::ReplayNotes;
 
 /// One recorded operation on a variable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -141,6 +142,9 @@ pub struct DataStore {
     pub(crate) next_seq: u64,
     /// `OVERRIDES` as computed from the current contents; reset on every write.
     pub(crate) ovr_cache: OnceLock<Arc<OverrideState>>,
+    /// What the replay recorded beside the variables (T3.4, `replay.rs`): references it
+    /// could not follow, anonymous python, names python may change.
+    pub(crate) notes: Arc<ReplayNotes>,
 }
 
 impl DataStore {
