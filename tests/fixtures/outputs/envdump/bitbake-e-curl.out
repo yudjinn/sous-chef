@@ -1,0 +1,1043 @@
+2026-11-17 16:28:01 - INFO     - kas 5.5 started on EndeavourOS rolling
+2026-11-17 16:28:01 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss
+2026-11-17 16:28:01 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss-ti
+2026-11-17 16:28:01 - INFO     - Repository bitbake already contains 6e260eb6ab1631607ea414d9ff8ede1155faa5d9 as commit
+2026-11-17 16:28:01 - INFO     - Repository openembedded-core already contains 33a6bd6cc8a9a976902081642414bd67adc74879 as commit
+2026-11-17 16:28:01 - INFO     - Repository meta-arm already contains 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735 as commit
+2026-11-17 16:28:01 - INFO     - Repository bitbake checked out to 6e260eb6ab1631607ea414d9ff8ede1155faa5d9
+2026-11-17 16:28:01 - INFO     - Repository openembedded-core checked out to 33a6bd6cc8a9a976902081642414bd67adc74879
+2026-11-17 16:28:01 - INFO     - Repository meta-arm checked out to 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735
+2026-11-17 16:28:01 - INFO     - To start the default build, run: bitbake -c build kiss-image
+NOTE: Reconnecting to bitbake server...
+NOTE: Retrying server connection (#1)... (16:28:01.995954)
+Loading cache...done.
+Loaded 0 entries from dependency cache.
+Parsing recipes...done.
+Parsing of 1033 .bb files complete (0 cached, 1033 parsed). 2085 targets, 435 skipped, 0 masked, 0 errors.
+NOTE: Resolving any missing task queue dependencies
+#
+# INCLUDE HISTORY:
+#
+# {{LIVE}}/yocto-kiss/build/conf/bblayers.conf
+# {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/conf/layer.conf
+# {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm-toolchain/conf/layer.conf
+# {{LIVE}}/yocto-kiss/build/../meta-kiss/conf/layer.conf
+# {{LIVE}}/yocto-kiss/build/../meta-kiss-ti/conf/layer.conf
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/layer.conf
+# conf/bitbake.conf includes:
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/abi_version.conf
+#   conf/site.conf
+#   conf/auto.conf
+#   conf/toolcfg.conf
+#   {{LIVE}}/yocto-kiss/build/conf/local.conf
+#   {{LIVE}}/yocto-kiss/build/../meta-kiss-ti/conf/machine/dogbonedark.conf includes:
+#     {{LIVE}}/yocto-kiss/build/../meta-kiss/conf/machine/include/common.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/soc-family.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/armv7a/tune-cortexa8.inc includes:
+#       {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc includes:
+#         {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc includes:
+#           {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc includes:
+#             {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc includes:
+#               {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv4.inc includes:
+#                 {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-arm.inc
+#                 {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/feature-arm-thumb.inc
+#               {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/feature-arm-vfp.inc
+#         {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/feature-arm-neon.inc
+#         {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/feature-arm-simd.inc
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine-sdk/x86_64.conf
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/cve-check-map.conf
+#   {{LIVE}}/yocto-kiss/build/../meta-kiss/conf/distro/kiss.conf
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/defaultsetup.conf includes:
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/default-providers.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/default-distrovars.inc
+#     {{LIVE}}/yocto-kiss/build/conf/distro/include/maintainers.inc
+#     {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/conf/distro/include/maintainers.inc
+#     {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm-toolchain/conf/distro/include/maintainers.inc
+#     {{LIVE}}/yocto-kiss/build/../meta-kiss/conf/distro/include/maintainers.inc
+#     {{LIVE}}/yocto-kiss/build/../meta-kiss-ti/conf/distro/include/maintainers.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/maintainers.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/time64.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/tcmode-default.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/tclibc-glibc.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/no-static-libs.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/security_flags.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/yocto-space-optimize.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/uninative-flags.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/yocto-uninative.inc
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/init-manager-sysvinit.inc
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/licenses.conf
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/sanity.conf
+#   conf/bblock.conf
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/base.bbclass includes:
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/patch.bbclass includes:
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes/terminal.bbclass
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/staging.bbclass
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/mirrors.bbclass
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/utils.bbclass
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/utility-tasks.bbclass
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/logging.bbclass
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes/metadata_scm.bbclass
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/package_ipk.bbclass includes:
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/package.bbclass includes:
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/packagedata.bbclass
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes/chrpath.bbclass
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/package_pkgdata.bbclass
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/insane.bbclass
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/debian.bbclass
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/devshell.bbclass
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/sstate.bbclass
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/license.bbclass
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes/remove-libtool.bbclass
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes/create-spdx.bbclass includes:
+#   {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes/create-spdx-3.0.bbclass includes:
+#     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes/spdx-common.bbclass
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/buildstats.bbclass
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/uninative.bbclass
+# {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/sanity.bbclass
+#
+# $ABIEXTENSION [4 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:164
+#     [_defaultval] ""
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-arm.inc:14
+#     "eabi"
+#   override[class-crosssdk]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine-sdk/x86_64.conf:3
+#     ""
+#   override[class-nativesdk]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine-sdk/x86_64.conf:4
+#     ""
+# pre-expansion value:
+#   "eabi"
+ABIEXTENSION="eabi"
+#
+# $ABIEXTENSION:class-crosssdk
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine-sdk/x86_64.conf:3
+#     ""
+ABIEXTENSION:class-crosssdk=""
+# [fixture] 5 lines cut
+#
+# $ALLOW_EMPTY [7 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:62
+#     [doc] "Specifies if an output package should still be produced if it is empty."
+#   override[curl-dbg]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:372
+#     "1"
+#   override[curl-dbg]:rename from ALLOW_EMPTY:${PN}-dbg data.py:97 [expandKeys]
+#     "1"
+#   override[curl-dev]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:362
+#     "1"
+#   override[curl-dev]:rename from ALLOW_EMPTY:${PN}-dev data.py:97 [expandKeys]
+#     "1"
+#   override[curl-ptest]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/ptest.bbclass:21
+#     "1"
+#   override[curl-ptest]:rename from ALLOW_EMPTY:${PN}-ptest data.py:97 [expandKeys]
+#     "1"
+# pre-expansion value:
+#   "None"
+#
+# $ALLOW_EMPTY:curl-dbg [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:372
+#     "1"
+#   rename from ALLOW_EMPTY:${PN}-dbg data.py:97 [expandKeys]
+#     "1"
+# pre-expansion value:
+#   "1"
+ALLOW_EMPTY:curl-dbg="1"
+# [fixture] 23 lines cut
+#
+# $ALTERNATIVE
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:63
+#     [doc] "Lists commands in a package that need an alternative binary naming scheme."
+# [fixture] 34 lines cut
+#
+# $AR [2 operations]
+#   exported ast.py:67 [eval]
+#     [export] "1"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes/toolchain/gcc.bbclass:7
+#     "${HOST_PREFIX}gcc-ar"
+# pre-expansion value:
+#   "${HOST_PREFIX}gcc-ar"
+export AR="arm-oe-linux-gnueabi-gcc-ar"
+# [fixture] 21 lines cut
+#
+# $ARMPKGARCH [97 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-arm.inc:4
+#     "${ARMPKGARCH:tune-${DEFAULTTUNE}}"
+#   override[tune-armv4]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv4.inc:20
+#     "armv4"
+#   override[tune-armv4t]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv4.inc:21
+#     "armv4"
+#   override[tune-armv4b]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv4.inc:29
+#     "armv4"
+#   override[tune-armv4tb]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv4.inc:30
+#     "armv4"
+#   override[tune-armv5]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:13
+#     "armv5"
+#   override[tune-armv5t]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:14
+#     "armv5"
+#   override[tune-armv5-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:22
+#     "armv5"
+#   override[tune-armv5t-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:23
+#     "armv5"
+#   override[tune-armv5hf-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:24
+#     "armv5"
+#   override[tune-armv5thf-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:25
+#     "armv5"
+#   override[tune-armv5b]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:37
+#     "armv5"
+#   override[tune-armv5tb]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:38
+#     "armv5"
+#   override[tune-armv5b-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:46
+#     "armv5"
+#   override[tune-armv5tb-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:47
+#     "armv5"
+#   override[tune-armv5hfb-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:48
+#     "armv5"
+#   override[tune-armv5thfb-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:49
+#     "armv5"
+#   override[tune-armv5e]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:9
+#     "armv5"
+#   override[tune-armv5te]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:10
+#     "armv5"
+#   override[tune-armv5e-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:18
+#     "armv5"
+#   override[tune-armv5te-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:19
+#     "armv5"
+#   override[tune-armv5ehf-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:20
+#     "armv5"
+#   override[tune-armv5tehf-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:21
+#     "armv5"
+#   override[tune-armv5eb]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:33
+#     "armv5"
+#   override[tune-armv5teb]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:34
+#     "armv5"
+#   override[tune-armv5eb-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:42
+#     "armv5"
+#   override[tune-armv5teb-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:43
+#     "armv5"
+#   override[tune-armv5ehfb-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:44
+#     "armv5"
+#   override[tune-armv5tehfb-vfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5-dsp.inc:45
+#     "armv5"
+#   override[tune-armv6-novfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:12
+#     "armv6"
+#   override[tune-armv6t-novfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:13
+#     "armv6"
+#   override[tune-armv6]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:14
+#     "armv6"
+#   override[tune-armv6t]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:15
+#     "armv6"
+#   override[tune-armv6hf]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:16
+#     "armv6"
+#   override[tune-armv6thf]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:17
+#     "armv6"
+#   override[tune-armv6b-novfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:33
+#     "armv6"
+#   override[tune-armv6tb-novfp]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:34
+#     "armv6"
+#   override[tune-armv6b]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:35
+#     "armv6"
+#   override[tune-armv6tb]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:36
+#     "armv6"
+#   override[tune-armv6hfb]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:37
+#     "armv6"
+#   override[tune-armv6thfb]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:38
+#     "armv6"
+#   override[tune-armv7a]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:15
+#     "armv7a"
+#   override[tune-armv7at]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:16
+#     "armv7a"
+#   override[tune-armv7a-vfpv3d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:17
+#     "armv7a"
+#   override[tune-armv7at-vfpv3d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:18
+#     "armv7a"
+#   override[tune-armv7a-vfpv3]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:19
+#     "armv7a"
+#   override[tune-armv7at-vfpv3]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:20
+#     "armv7a"
+#   override[tune-armv7a-vfpv4d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:21
+#     "armv7a"
+#   override[tune-armv7at-vfpv4d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:22
+#     "armv7a"
+#   override[tune-armv7a-neon]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:23
+#     "armv7a"
+#   override[tune-armv7at-neon]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:24
+#     "armv7a"
+#   override[tune-armv7a-neon-vfpv4]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:25
+#     "armv7a"
+#   override[tune-armv7at-neon-vfpv4]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:26
+#     "armv7a"
+#   override[tune-armv7ahf]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:54
+#     "armv7a"
+#   override[tune-armv7athf]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:55
+#     "armv7a"
+#   override[tune-armv7ahf-vfpv3d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:56
+#     "armv7a"
+#   override[tune-armv7athf-vfpv3d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:57
+#     "armv7a"
+#   override[tune-armv7ahf-vfpv3]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:58
+#     "armv7a"
+#   override[tune-armv7athf-vfpv3]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:59
+#     "armv7a"
+#   override[tune-armv7ahf-vfpv4d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:60
+#     "armv7a"
+#   override[tune-armv7athf-vfpv4d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:61
+#     "armv7a"
+#   override[tune-armv7ahf-neon]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:62
+#     "armv7a"
+#   override[tune-armv7athf-neon]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:63
+#     "armv7a"
+#   override[tune-armv7ahf-neon-vfpv4]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:64
+#     "armv7a"
+#   override[tune-armv7athf-neon-vfpv4]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:65
+#     "armv7a"
+#   override[tune-armv7ab]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:93
+#     "armv7a"
+#   override[tune-armv7atb]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:94
+#     "armv7a"
+#   override[tune-armv7ab-vfpv3d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:95
+#     "armv7a"
+#   override[tune-armv7atb-vfpv3d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:96
+#     "armv7a"
+#   override[tune-armv7ab-vfpv3]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:97
+#     "armv7a"
+#   override[tune-armv7atb-vfpv3]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:98
+#     "armv7a"
+#   override[tune-armv7ab-vfpv4d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:99
+#     "armv7a"
+#   override[tune-armv7atb-vfpv4d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:100
+#     "armv7a"
+#   override[tune-armv7ab-neon]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:101
+#     "armv7a"
+#   override[tune-armv7atb-neon]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:102
+#     "armv7a"
+#   override[tune-armv7ab-neon-vfpv4]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:103
+#     "armv7a"
+#   override[tune-armv7atb-neon-vfpv4]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:104
+#     "armv7a"
+#   override[tune-armv7ahfb]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:132
+#     "armv7a"
+#   override[tune-armv7athfb]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:133
+#     "armv7a"
+#   override[tune-armv7ahfb-vfpv3d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:134
+#     "armv7a"
+#   override[tune-armv7athfb-vfpv3d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:135
+#     "armv7a"
+#   override[tune-armv7ahfb-vfpv3]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:136
+#     "armv7a"
+#   override[tune-armv7athfb-vfpv3]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:137
+#     "armv7a"
+#   override[tune-armv7ahfb-vfpv4d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:138
+#     "armv7a"
+#   override[tune-armv7athfb-vfpv4d16]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:139
+#     "armv7a"
+#   override[tune-armv7ahfb-neon]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:140
+#     "armv7a"
+#   override[tune-armv7athfb-neon]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:141
+#     "armv7a"
+#   override[tune-armv7ahfb-neon-vfpv4]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:142
+#     "armv7a"
+#   override[tune-armv7athfb-neon-vfpv4]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:143
+#     "armv7a"
+#   override[tune-cortexa8]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/armv7a/tune-cortexa8.inc:11
+#     "cortexa8"
+#   override[tune-cortexa8t]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/armv7a/tune-cortexa8.inc:12
+#     "cortexa8"
+#   override[tune-cortexa8-neon]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/armv7a/tune-cortexa8.inc:13
+#     "cortexa8"
+#   override[tune-cortexa8t-neon]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/armv7a/tune-cortexa8.inc:14
+#     "cortexa8"
+#   override[tune-cortexa8hf]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/armv7a/tune-cortexa8.inc:27
+#     "cortexa8"
+#   override[tune-cortexa8thf]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/armv7a/tune-cortexa8.inc:28
+#     "cortexa8"
+#   override[tune-cortexa8hf-neon]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/armv7a/tune-cortexa8.inc:29
+#     "cortexa8"
+#   override[tune-cortexa8thf-neon]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/armv7a/tune-cortexa8.inc:30
+#     "cortexa8"
+# pre-expansion value:
+#   "${ARMPKGARCH:tune-${DEFAULTTUNE}}"
+ARMPKGARCH="armv7a"
+# [fixture] 660 lines cut
+#
+# $B [3 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:422
+#     "${S}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:77
+#     [doc] "The Build Directory. The OpenEmbedded build system places generated objects into the Build Directory during a recipe's build process."
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/autotools.bbclass:241
+#     "${WORKDIR}/build"
+# pre-expansion value:
+#   "${WORKDIR}/build"
+B="{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/build"
+# [fixture] 223 lines cut
+#
+# $BBLAYERS [2 operations]
+#   set? {{LIVE}}/yocto-kiss/build/conf/bblayers.conf:6
+#     "     ${TOPDIR}/../meta-arm/meta-arm     ${TOPDIR}/../meta-arm/meta-arm-toolchain     ${TOPDIR}/../meta-kiss     ${TOPDIR}/../meta-kiss-ti     ${TOPDIR}/../openembedded-core/meta"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:90
+#     [doc] "Lists the layers to enable during the build. This variable is defined in the bblayers.conf configuration file."
+# pre-expansion value:
+#   "     ${TOPDIR}/../meta-arm/meta-arm     ${TOPDIR}/../meta-arm/meta-arm-toolchain     ${TOPDIR}/../meta-kiss     ${TOPDIR}/../meta-kiss-ti     ${TOPDIR}/../openembedded-core/meta"
+BBLAYERS="     {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm     {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm-toolchain     {{LIVE}}/yocto-kiss/build/../meta-kiss     {{LIVE}}/yocto-kiss/build/../meta-kiss-ti     {{LIVE}}/yocto-kiss/build/../openembedded-core/meta"
+# [fixture] 420 lines cut
+#
+# $BPN [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:266
+#     "${@oe.utils.prune_suffix(d.getVar('PN'), d.getVar('SPECIAL_PKGSUFFIX').split(), d)}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:96
+#     [doc] "The bare name of the recipe. This variable is a version of the PN variable but removes common suffixes and prefixes."
+# pre-expansion value:
+#   "${@oe.utils.prune_suffix(d.getVar('PN'), d.getVar('SPECIAL_PKGSUFFIX').split(), d)}"
+BPN="curl"
+# [fixture] 308 lines cut
+#
+# $CC [2 operations]
+#   exported ast.py:67 [eval]
+#     [export] "1"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes/toolchain/gcc.bbclass:1
+#     "${CCACHE}${HOST_PREFIX}gcc ${HOST_CC_ARCH}${TOOLCHAIN_OPTIONS}"
+# pre-expansion value:
+#   "${CCACHE}${HOST_PREFIX}gcc ${HOST_CC_ARCH}${TOOLCHAIN_OPTIONS}"
+export CC="arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot"
+# [fixture] 27 lines cut
+#
+# $CFLAGS [3 operations]
+#   exported {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:618
+#     [export] "1"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:618
+#     "${TARGET_CFLAGS}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:108
+#     [doc] "Flags passed to the C compiler for the target system. This variable evaluates to the same as TARGET_CFLAGS."
+# pre-expansion value:
+#   "${TARGET_CFLAGS}"
+export CFLAGS=" -O2 -g -fcanon-prefix-map  -ffile-prefix-map={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/sources/curl-8.19.0=/usr/src/debug/curl/8.19.0  -ffile-prefix-map={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/build=/usr/src/debug/curl/8.19.0  -ffile-prefix-map={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot=  -ffile-prefix-map={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot-native=  -pipe"
+# [fixture] 78 lines cut
+#
+# $COMMON_PACKAGECONFIG
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:62
+#     "basic-auth bearer-auth digest-auth ipfs negotiate-auth openssl proxy threaded-resolver verbose zlib"
+COMMON_PACKAGECONFIG="basic-auth bearer-auth digest-auth ipfs negotiate-auth openssl proxy threaded-resolver verbose zlib"
+# [fixture] 268 lines cut
+#
+# $D [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:420
+#     "${WORKDIR}/image"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:127
+#     [doc] "The destination directory."
+# pre-expansion value:
+#   "${WORKDIR}/image"
+D="{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/image"
+# [fixture] 145 lines cut
+#
+# $DEPENDS [9 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:314
+#     ""
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:133
+#     [doc] "Lists a recipe's build-time dependencies (i.e. other recipe files)."
+#   :prepend {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/base.bbclass:73
+#     "${BASEDEPENDS} "
+#   :prepend {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/autotools.bbclass:29
+#     "${@get_autotools_dep(d)} "
+#   :prepend {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/pkgconfig.bbclass:7
+#     "pkgconf-native "
+#   :append[class-target] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:175
+#     "${@bb.utils.contains('PTEST_ENABLED', '1', ' openssl-native', '', d)}"
+#   append base.bbclass:508 [appendVar]
+#     " libidn2 openssl zlib"
+#   append update-alternatives.bbclass:78 [ua_extend_depends]
+#     " virtual/${MLPREFIX}update-alternatives"
+#   set ast.py:506 [handleVirtRecipeProviders]
+#     "pkgconf-native autoconf-native automake-native libtool-native libtool-cross gcc-cross-arm virtual/compilerlibs virtual/libc libidn2 openssl zlib virtual/update-alternatives"
+# pre-expansion value:
+#   "pkgconf-native autoconf-native automake-native libtool-native libtool-cross gcc-cross-arm virtual/compilerlibs virtual/libc libidn2 openssl zlib virtual/update-alternatives"
+DEPENDS="pkgconf-native autoconf-native automake-native libtool-native libtool-cross gcc-cross-arm virtual/compilerlibs virtual/libc libidn2 openssl zlib virtual/update-alternatives"
+# [fixture] 249 lines cut
+#
+# $DISTRO [3 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:788
+#     [_defaultval] "nodistro"
+#   set {{LIVE}}/yocto-kiss/build/conf/local.conf:7
+#     [_defaultval] "kiss"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:138
+#     [doc] "The short name of the distribution. If the variable is blank, meta/conf/distro/defaultsetup.conf will be used."
+# pre-expansion value:
+#   "kiss"
+DISTRO="kiss"
+#
+# $DISTROOVERRIDES [2 operations]
+#   set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:804
+#     "${@d.getVar('DISTRO') or ''}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:147
+#     [doc] "Lists overrides specific to the current distribution. By default, the variable list includes the value of the DISTRO variable."
+# pre-expansion value:
+#   "${@d.getVar('DISTRO') or ''}"
+DISTROOVERRIDES="kiss"
+# [fixture] 241 lines cut
+#
+# $EXTRA_OECONF [5 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:597
+#     ""
+#   :append {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/no-static-libs.inc:24
+#     "${DISABLE_STATIC}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:162
+#     [doc] "Additional configure script options."
+#   :append {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/autotools.bbclass:134
+#     " ${PACKAGECONFIG_CONFARGS}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:124
+#     "     --disable-libcurl-option     --without-libpsl     --enable-optimize     --with-ca-bundle=${CURL_CA_BUNDLE_BASE_DIR}/ssl/certs/ca-certificates.crt     ${@'--without-ssl' if (bb.utils.filter('PACKAGECONFIG', 'gnutls mbedtls openssl schannel', d) == '') else ''}     WATT_ROOT=${STAGING_DIR_TARGET}${prefix} "
+# pre-expansion value:
+#   "     --disable-libcurl-option     --without-libpsl     --enable-optimize     --with-ca-bundle=${CURL_CA_BUNDLE_BASE_DIR}/ssl/certs/ca-certificates.crt     ${@'--without-ssl' if (bb.utils.filter('PACKAGECONFIG', 'gnutls mbedtls openssl schannel', d) == '') else ''}     WATT_ROOT=${STAGING_DIR_TARGET}${prefix} ${DISABLE_STATIC} ${PACKAGECONFIG_CONFARGS}"
+EXTRA_OECONF="     --disable-libcurl-option     --without-libpsl     --enable-optimize     --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt          WATT_ROOT={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot/usr  --disable-static  --disable-ares --enable-aws --enable-basic-auth --enable-bearer-auth --without-brotli --disable-manual --disable-debug --disable-dict --enable-digest-auth --without-gnutls --disable-gopher --disable-imap --enable-ipfs --enable-ipv6 --disable-kerberos-auth --without-gssapi --disable-ldap --disable-ldaps --without-libgsasl --with-libidn2 --without-libssh2 --without-mbedtls --disable-mqtt --enable-negotiate-auth --without-nghttp2 --with-openssl --disable-pop3 --enable-proxy --without-librtmp --disable-rtsp --without-schannel --disable-smb --disable-smtp --disable-telnet --disable-tftp --enable-threaded-resolver --enable-verbose --disable-websockets --with-zlib --without-zstd"
+#
+# $EXTRA_OEMAKE [6 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:596
+#     ""
+#   :prepend[task-compile] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:649
+#     "${PARALLEL_MAKE} "
+#   :prepend[task-install] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:653
+#     "${PARALLEL_MAKEINST} "
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:163
+#     [doc] "Additional GNU make options."
+#   :prepend[task-compile-ptest-base] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/ptest.bbclass:16
+#     "${PTEST_PARALLEL_MAKE} "
+#   :prepend[task-install-ptest-base] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/ptest.bbclass:17
+#     "${PTEST_PARALLEL_MAKEINST} "
+# pre-expansion value:
+#   ""
+EXTRA_OEMAKE=""
+# [fixture] 297 lines cut
+#
+# $FILES:curl [4 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:347
+#     "${bindir}/* ${sbindir}/* ${libexecdir}/* ${libdir}/lib*${SOLIBS}             ${sysconfdir} ${sharedstatedir} ${localstatedir}             ${base_bindir}/* ${base_sbindir}/*             ${base_libdir}/*${SOLIBS}             ${base_prefix}/lib/udev ${prefix}/lib/udev             ${base_libdir}/udev ${libdir}/udev             ${datadir}/${BPN} ${libdir}/${BPN}/*             ${datadir}/pixmaps ${datadir}/applications             ${datadir}/idl ${datadir}/omf ${datadir}/sounds             ${libdir}/bonobo/servers"
+#   append {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:202
+#     "${datadir}/zsh"
+#   :append[class-nativesdk] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:203
+#     " ${SDKPATHNATIVE}/environment-setup.d/curl.sh"
+#   rename from FILES:${PN} data.py:97 [expandKeys]
+#     "${bindir}/* ${sbindir}/* ${libexecdir}/* ${libdir}/lib*${SOLIBS}             ${sysconfdir} ${sharedstatedir} ${localstatedir}             ${base_bindir}/* ${base_sbindir}/*             ${base_libdir}/*${SOLIBS}             ${base_prefix}/lib/udev ${prefix}/lib/udev             ${base_libdir}/udev ${libdir}/udev             ${datadir}/${BPN} ${libdir}/${BPN}/*             ${datadir}/pixmaps ${datadir}/applications             ${datadir}/idl ${datadir}/omf ${datadir}/sounds             ${libdir}/bonobo/servers ${datadir}/zsh"
+# pre-expansion value:
+#   "${bindir}/* ${sbindir}/* ${libexecdir}/* ${libdir}/lib*${SOLIBS}             ${sysconfdir} ${sharedstatedir} ${localstatedir}             ${base_bindir}/* ${base_sbindir}/*             ${base_libdir}/*${SOLIBS}             ${base_prefix}/lib/udev ${prefix}/lib/udev             ${base_libdir}/udev ${libdir}/udev             ${datadir}/${BPN} ${libdir}/${BPN}/*             ${datadir}/pixmaps ${datadir}/applications             ${datadir}/idl ${datadir}/omf ${datadir}/sounds             ${libdir}/bonobo/servers ${datadir}/zsh"
+FILES:curl="/usr/bin/* /usr/sbin/* /usr/libexec/* /usr/lib/lib*.so.*             /etc /com /var             /bin/* /sbin/*             /lib/*.so.*             /lib/udev /usr/lib/udev             /lib/udev /usr/lib/udev             /usr/share/curl /usr/lib/curl/*             /usr/share/pixmaps /usr/share/applications             /usr/share/idl /usr/share/omf /usr/share/sounds             /usr/lib/bonobo/servers /usr/share/zsh"
+# [fixture] 129 lines cut
+#
+# $FILE_LAYERNAME [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:801
+#     [_defaultval] "config"
+#   set cookerdata.py:513 [_parse_recipe]
+#     "core"
+# pre-expansion value:
+#   "core"
+FILE_LAYERNAME="core"
+# [fixture] 454 lines cut
+#
+# $INHERIT [3 operations]
+#   append {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/defaultsetup.conf:18
+#     "${PACKAGE_CLASSES} ${USER_CLASSES} ${INHERIT_DISTRO}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:221
+#     [doc] "Causes the named class to be inherited at this point during parsing. The variable is only valid in configuration files."
+#   append {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/sanity.conf:15
+#     "sanity"
+# pre-expansion value:
+#   " ${PACKAGE_CLASSES} ${USER_CLASSES} ${INHERIT_DISTRO} sanity"
+INHERIT=" package_ipk  debian devshell sstate license remove-libtool create-spdx buildstats uninative sanity"
+# [fixture] 404 lines cut
+#
+# $LICENSE [3 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:303
+#     [_defaultval] "INVALID"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:258
+#     [doc] "The list of source licenses for the recipe. Logical operators '&' or '|' and parentheses can be used."
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:9
+#     "curl"
+# pre-expansion value:
+#   "curl"
+LICENSE="curl"
+# [fixture] 50 lines cut
+#
+# $LIC_FILES_CHKSUM [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:257
+#     [doc] "Checksums of the license text in the recipe source code."
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:10
+#     "file://COPYING;md5=0515352b285b9c3f66464b135c9c0fdc"
+# pre-expansion value:
+#   "file://COPYING;md5=0515352b285b9c3f66464b135c9c0fdc"
+LIC_FILES_CHKSUM="file://COPYING;md5=0515352b285b9c3f66464b135c9c0fdc"
+# [fixture] 89 lines cut
+#
+# $MACHINE [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/conf/local.conf:6
+#     [_defaultval] "dogbonedark"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:272
+#     [doc] "Specifies the target device for which the image is built. You define MACHINE in the conf/local.conf file in the Build Directory."
+# pre-expansion value:
+#   "dogbonedark"
+MACHINE="dogbonedark"
+#
+# $MACHINEOVERRIDES [8 operations]
+#   set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:805
+#     "${MACHINE}"
+#   predot {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/soc-family.inc:3
+#     "${@['', '${SOC_FAMILY}:']['${SOC_FAMILY}' != '']}"
+#   predot {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv7a.inc:7
+#     "${@bb.utils.contains('TUNE_FEATURES', 'armv7a', 'armv7a:', '', d)}"
+#   predot {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv6.inc:6
+#     "${@bb.utils.contains('TUNE_FEATURES', 'armv6', 'armv6:', '', d)}"
+#   predot {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv5.inc:6
+#     "${@bb.utils.contains('TUNE_FEATURES', 'armv5', 'armv5:', '', d)}"
+#   predot {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/arch-armv4.inc:13
+#     "${@bb.utils.contains('TUNE_FEATURES', 'armv4', 'armv4:', '', d)}"
+#   predot {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/machine/include/arm/armv7a/tune-cortexa8.inc:7
+#     "${@bb.utils.contains('TUNE_FEATURES', 'cortexa8', 'armv7a:', '', d)}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:280
+#     [doc] "Lists overrides specific to the current machine. By default, this list includes the value of MACHINE."
+# pre-expansion value:
+#   "${@bb.utils.contains('TUNE_FEATURES', 'cortexa8', 'armv7a:', '', d)}${@bb.utils.contains('TUNE_FEATURES', 'armv4', 'armv4:', '', d)}${@bb.utils.contains('TUNE_FEATURES', 'armv5', 'armv5:', '', d)}${@bb.utils.contains('TUNE_FEATURES', 'armv6', 'armv6:', '', d)}${@bb.utils.contains('TUNE_FEATURES', 'armv7a', 'armv7a:', '', d)}${@['', '${SOC_FAMILY}:']['${SOC_FAMILY}' != '']}${MACHINE}"
+MACHINEOVERRIDES="armv7a:ti-soc:ti33x:dogbonedark"
+# [fixture] 327 lines cut
+#
+# $OVERRIDES [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:800
+#     "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}:${TCOVERRIDE}${LIBCOVERRIDE}:forcevariable"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:298
+#     [doc] "BitBake uses OVERRIDES to control what variables are overridden after BitBake parses recipes and configuration files."
+# pre-expansion value:
+#   "${TARGET_OS}:${TRANSLATED_TARGET_ARCH}:pn-${PN}:layer-${FILE_LAYERNAME}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}:${CLASSOVERRIDE}:${TCOVERRIDE}${LIBCOVERRIDE}:forcevariable"
+OVERRIDES="linux-gnueabi:arm:pn-curl:layer-core:armv7a:ti-soc:ti33x:dogbonedark:kiss:class-target:toolchain-gcc:libc-glibc:forcevariable"
+# [fixture] 9 lines cut
+#
+# $PACKAGECONFIG [45 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:311
+#     [doc] "This variable provides a means of enabling or disabling features of a recipe on a per-recipe basis."
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:942
+#     [vardepvalue] "${PACKAGECONFIG}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:63
+#     [_defaultval] "${COMMON_PACKAGECONFIG} ${@bb.utils.filter('DISTRO_FEATURES', 'ipv6', d)} aws libidn"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:68
+#     [ares] "--enable-ares,--disable-ares,c-ares,,,threaded-resolver"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:69
+#     [aws] "--enable-aws,--disable-aws"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:70
+#     [basic-auth] "--enable-basic-auth,--disable-basic-auth"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:71
+#     [bearer-auth] "--enable-bearer-auth,--disable-bearer-auth"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:72
+#     [brotli] "--with-brotli,--without-brotli,brotli"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:73
+#     [builtinmanual] "--enable-manual,--disable-manual"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:75
+#     [debug] "--enable-debug,--disable-debug"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:76
+#     [dict] "--enable-dict,--disable-dict,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:77
+#     [digest-auth] "--enable-digest-auth,--disable-digest-auth"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:78
+#     [gnutls] "--with-gnutls,--without-gnutls,gnutls"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:79
+#     [gopher] "--enable-gopher,--disable-gopher,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:80
+#     [imap] "--enable-imap,--disable-imap,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:81
+#     [ipv6] "--enable-ipv6,--disable-ipv6,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:82
+#     [ipfs] "--enable-ipfs,--disable-ipfs,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:83
+#     [kerberos-auth] "--enable-kerberos-auth,--disable-kerberos-auth"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:84
+#     [krb5] "--with-gssapi,--without-gssapi,krb5"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:85
+#     [ldap] "--enable-ldap,--disable-ldap,openldap"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:86
+#     [ldaps] "--enable-ldaps,--disable-ldaps,openldap"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:87
+#     [libgsasl] "--with-libgsasl,--without-libgsasl,libgsasl"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:88
+#     [libidn] "--with-libidn2,--without-libidn2,libidn2"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:89
+#     [libssh2] "--with-libssh2,--without-libssh2,libssh2"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:90
+#     [mbedtls] "--with-mbedtls,--without-mbedtls,mbedtls"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:91
+#     [mqtt] "--enable-mqtt,--disable-mqtt,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:92
+#     [negotiate-auth] "--enable-negotiate-auth,--disable-negotiate-auth"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:93
+#     [nghttp2] "--with-nghttp2,--without-nghttp2,nghttp2"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:94
+#     [openssl] "--with-openssl,--without-openssl,openssl"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:95
+#     [pop3] "--enable-pop3,--disable-pop3,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:96
+#     [proxy] "--enable-proxy,--disable-proxy,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:97
+#     [rtmpdump] "--with-librtmp,--without-librtmp,rtmpdump"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:98
+#     [rtsp] "--enable-rtsp,--disable-rtsp,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:99
+#     [schannel] "--with-schannel,--without-schannel,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:100
+#     [smb] "--enable-smb,--disable-smb,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:101
+#     [smtp] "--enable-smtp,--disable-smtp,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:102
+#     [telnet] "--enable-telnet,--disable-telnet,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:103
+#     [tftp] "--enable-tftp,--disable-tftp,"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:104
+#     [threaded-resolver] "--enable-threaded-resolver,--disable-threaded-resolver,,,,ares"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:105
+#     [verbose] "--enable-verbose,--disable-verbose"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:106
+#     [websockets] "--enable-websockets,--disable-websockets"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:107
+#     [zlib] "--with-zlib,--without-zlib,zlib"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:108
+#     [zstd] "--with-zstd,--without-zstd,zstd"
+#   override[class-native]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:64
+#     "${COMMON_PACKAGECONFIG} ipv6"
+#   override[class-nativesdk]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:65
+#     "${COMMON_PACKAGECONFIG} ipv6"
+# pre-expansion value:
+#   "${COMMON_PACKAGECONFIG} ${@bb.utils.filter('DISTRO_FEATURES', 'ipv6', d)} aws libidn"
+PACKAGECONFIG="basic-auth bearer-auth digest-auth ipfs negotiate-auth openssl proxy threaded-resolver verbose zlib ipv6 aws libidn"
+# [fixture] 10 lines cut
+#
+# $PACKAGECONFIG_CONFARGS [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/base.bbclass:18
+#     [_defaultval] ""
+#   append base.bbclass:508 [appendVar]
+#     " --disable-ares --enable-aws --enable-basic-auth --enable-bearer-auth --without-brotli --disable-manual --disable-debug --disable-dict --enable-digest-auth --without-gnutls --disable-gopher --disable-imap --enable-ipfs --enable-ipv6 --disable-kerberos-auth --without-gssapi --disable-ldap --disable-ldaps --without-libgsasl --with-libidn2 --without-libssh2 --without-mbedtls --disable-mqtt --enable-negotiate-auth --without-nghttp2 --with-openssl --disable-pop3 --enable-proxy --without-librtmp --disable-rtsp --without-schannel --disable-smb --disable-smtp --disable-telnet --disable-tftp --enable-threaded-resolver --enable-verbose --disable-websockets --with-zlib --without-zstd"
+# pre-expansion value:
+#   " --disable-ares --enable-aws --enable-basic-auth --enable-bearer-auth --without-brotli --disable-manual --disable-debug --disable-dict --enable-digest-auth --without-gnutls --disable-gopher --disable-imap --enable-ipfs --enable-ipv6 --disable-kerberos-auth --without-gssapi --disable-ldap --disable-ldaps --without-libgsasl --with-libidn2 --without-libssh2 --without-mbedtls --disable-mqtt --enable-negotiate-auth --without-nghttp2 --with-openssl --disable-pop3 --enable-proxy --without-librtmp --disable-rtsp --without-schannel --disable-smb --disable-smtp --disable-telnet --disable-tftp --enable-threaded-resolver --enable-verbose --disable-websockets --with-zlib --without-zstd"
+PACKAGECONFIG_CONFARGS=" --disable-ares --enable-aws --enable-basic-auth --enable-bearer-auth --without-brotli --disable-manual --disable-debug --disable-dict --enable-digest-auth --without-gnutls --disable-gopher --disable-imap --enable-ipfs --enable-ipv6 --disable-kerberos-auth --without-gssapi --disable-ldap --disable-ldaps --without-libgsasl --with-libidn2 --without-libssh2 --without-mbedtls --disable-mqtt --enable-negotiate-auth --without-nghttp2 --with-openssl --disable-pop3 --enable-proxy --without-librtmp --disable-rtsp --without-schannel --disable-smb --disable-smtp --disable-telnet --disable-tftp --enable-threaded-resolver --enable-verbose --disable-websockets --with-zlib --without-zstd"
+# [fixture] 14 lines cut
+#
+# $PACKAGES [4 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:334
+#     "${PN}-src ${PN}-dbg ${PN}-staticdev ${PN}-dev ${PN}-doc ${PN}-locale ${PACKAGE_BEFORE_PN} ${PN}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:312
+#     [doc] "The list of packages to be created from the recipe."
+#   prepend {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/ptest.bbclass:31
+#     "${@bb.utils.contains('PTEST_ENABLED', '1', '${PN}-ptest', '', d)}"
+#   prepend {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:197
+#     "lib${BPN}"
+# pre-expansion value:
+#   "lib${BPN} ${@bb.utils.contains('PTEST_ENABLED', '1', '${PN}-ptest', '', d)} ${PN}-src ${PN}-dbg ${PN}-staticdev ${PN}-dev ${PN}-doc ${PN}-locale ${PACKAGE_BEFORE_PN} ${PN}"
+PACKAGES="libcurl  curl-src curl-dbg curl-staticdev curl-dev curl-doc curl-locale  curl"
+# [fixture] 889 lines cut
+#
+# $PF [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:247
+#     "${PN}-${EXTENDPE}${PV}-${PR}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:319
+#     [doc] "Specifies the recipe or package name and includes all version and revision numbers. This variable is comprised of ${PN}-${EXTENDPE}${PV}-${PR}."
+# pre-expansion value:
+#   "${PN}-${EXTENDPE}${PV}-${PR}"
+PF="curl-8.19.0-r0"
+# [fixture] 134 lines cut
+#
+# $PN [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:243
+#     "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[0] or 'defaultpkgname'}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:325
+#     [doc] "PN refers to a recipe name in the context of a file used by the OpenEmbedded build system as input to create a package. It refers to a package name in the context of a file created or produced by the OpenEmbedded build system."
+# pre-expansion value:
+#   "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[0] or 'defaultpkgname'}"
+PN="curl"
+# [fixture] 21 lines cut
+#
+# $PR [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:245
+#     "r0"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:326
+#     [doc] "The revision of the recipe. The default value for this variable is 'r0'."
+# pre-expansion value:
+#   "r0"
+PR="r0"
+# [fixture] 234 lines cut
+#
+# $PREFERRED_PROVIDER_virtual/kernel
+#   set? {{LIVE}}/yocto-kiss/build/../meta-kiss-ti/conf/machine/dogbonedark.conf:22
+#     "linux-kiss"
+PREFERRED_PROVIDER_virtual/kernel="linux-kiss"
+# [fixture] 461 lines cut
+#
+# $PTESTS_FAST [6 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/ptest-packagelists.inc:103
+#     "    acl     apr-util     attr     babeltrace2     bc     bluez5     busybox     cpio     diffstat     diffutils     ethtool     expat     expect     findutils     flex     fmt     gawk     gdbm     gdk-pixbuf     glib-networking     gzip     icu     json-c     json-glib     libarchive     libassuan     libcheck     libconfig     libconvert-asn1-perl     libexif     libgpg-error    libksba     libmd     libnl     libpcre     libpcre2     librsvg     libsolv     libssh2     libtest-fatal-perl     libtest-needs-perl     libtest-warnings-perl     libtimedate-perl     libtry-tiny-perl     libusb1     libxml-namespacesupport-perl     libxml-parser-perl     libxml-perl     libxml-sax-base-perl     libxml-sax-perl     libxml-simple-perl     libxml2     libxmlb     libyaml     logrotate     lua     lzo     m4     nettle     opkg     popt     procps     python3-atomicwrites     python3-attrs     python3-bcrypt     python3-calver     python3-hypothesis     python3-idna     python3-jinja2     python3-jsonpointer     python3-libarchive-c     python3-license-expression     python3-mako     python3-markupsafe     python3-more-itertools     python3-packaging     python3-pluggy     python3-pefile     python3-pyasn1     python3-pytz     python3-pyyaml     python3-rpds-py     python3-trove-classifiers     python3-uritools     python3-wcwidth     python3-webcolors     python3-wheel     qemu     quilt     rpm-sequoia     sed     slang     utfcpp     wayland     xz     zlib "
+#   :remove[mips64] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/ptest-packagelists.inc:104
+#     "qemu"
+#   :remove[riscv32] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/ptest-packagelists.inc:106
+#     "qemu"
+#   :remove[libc-musl] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/ptest-packagelists.inc:108
+#     "procps"
+#   :remove[libc-musl:qemuarm64] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/ptest-packagelists.inc:162
+#     "libarchive"
+#   :remove[libc-musl:qemux86-64] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/distro/include/ptest-packagelists.inc:166
+#     "libarchive"
+# pre-expansion value:
+#   "    acl     apr-util     attr     babeltrace2     bc     bluez5     busybox     cpio     diffstat     diffutils     ethtool     expat     expect     findutils     flex     fmt     gawk     gdbm     gdk-pixbuf     glib-networking     gzip     icu     json-c     json-glib     libarchive     libassuan     libcheck     libconfig     libconvert-asn1-perl     libexif     libgpg-error    libksba     libmd     libnl     libpcre     libpcre2     librsvg     libsolv     libssh2     libtest-fatal-perl     libtest-needs-perl     libtest-warnings-perl     libtimedate-perl     libtry-tiny-perl     libusb1     libxml-namespacesupport-perl     libxml-parser-perl     libxml-perl     libxml-sax-base-perl     libxml-sax-perl     libxml-simple-perl     libxml2     libxmlb     libyaml     logrotate     lua     lzo     m4     nettle     opkg     popt     procps     python3-atomicwrites     python3-attrs     python3-bcrypt     python3-calver     python3-hypothesis     python3-idna     python3-jinja2     python3-jsonpointer     python3-libarchive-c     python3-license-expression     python3-mako     python3-markupsafe     python3-more-itertools     python3-packaging     python3-pluggy     python3-pefile     python3-pyasn1     python3-pytz     python3-pyyaml     python3-rpds-py     python3-trove-classifiers     python3-uritools     python3-wcwidth     python3-webcolors     python3-wheel     qemu     quilt     rpm-sequoia     sed     slang     utfcpp     wayland     xz     zlib "
+PTESTS_FAST="    acl     apr-util     attr     babeltrace2     bc     bluez5     busybox     cpio     diffstat     diffutils     ethtool     expat     expect     findutils     flex     fmt     gawk     gdbm     gdk-pixbuf     glib-networking     gzip     icu     json-c     json-glib     libarchive     libassuan     libcheck     libconfig     libconvert-asn1-perl     libexif     libgpg-error    libksba     libmd     libnl     libpcre     libpcre2     librsvg     libsolv     libssh2     libtest-fatal-perl     libtest-needs-perl     libtest-warnings-perl     libtimedate-perl     libtry-tiny-perl     libusb1     libxml-namespacesupport-perl     libxml-parser-perl     libxml-perl     libxml-sax-base-perl     libxml-sax-perl     libxml-simple-perl     libxml2     libxmlb     libyaml     logrotate     lua     lzo     m4     nettle     opkg     popt     procps     python3-atomicwrites     python3-attrs     python3-bcrypt     python3-calver     python3-hypothesis     python3-idna     python3-jinja2     python3-jsonpointer     python3-libarchive-c     python3-license-expression     python3-mako     python3-markupsafe     python3-more-itertools     python3-packaging     python3-pluggy     python3-pefile     python3-pyasn1     python3-pytz     python3-pyyaml     python3-rpds-py     python3-trove-classifiers     python3-uritools     python3-wcwidth     python3-webcolors     python3-wheel     qemu     quilt     rpm-sequoia     sed     slang     utfcpp     wayland     xz     zlib "
+# [fixture] 98 lines cut
+#
+# $PV [3 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:244
+#     "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[1] or '1.0'}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:333
+#     [doc] "The version of the recipe. The version is normally extracted from the recipe filename."
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/sstate.bbclass:51
+#     [vardepvalue] "${PV}"
+# pre-expansion value:
+#   "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[1] or '1.0'}"
+PV="8.19.0"
+#
+# $PWD [2 operations]
+#   from env data.py:105 [inheritFromOS]
+#     "{{LIVE}}/yocto-kiss/build"
+#   auto env export data.py:107 [inheritFromOS]
+#     [export] "True"
+# pre-expansion value:
+#   "{{LIVE}}/yocto-kiss/build"
+export PWD="{{LIVE}}/yocto-kiss/build"
+# [fixture] 154 lines cut
+#
+# $RDEPENDS:curl-ptest [7 operations]
+#   append {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/ptest.bbclass:26
+#     "${PN}"
+#   append {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:195
+#     " 	locale-base-en-us 	perl-module-b 	perl-module-base 	perl-module-cwd 	perl-module-digest 	perl-module-digest-md5 	perl-module-digest-sha 	perl-module-file-basename 	perl-module-file-spec 	perl-module-file-temp 	perl-module-i18n-langinfo 	perl-module-io-socket 	perl-module-ipc-open2 	perl-module-list-util 	perl-module-memoize 	perl-module-storable 	perl-module-time-hires "
+#   rename from RDEPENDS:${PN}-ptest data.py:97 [expandKeys]
+#     " ${PN}  	locale-base-en-us 	perl-module-b 	perl-module-base 	perl-module-cwd 	perl-module-digest 	perl-module-digest-md5 	perl-module-digest-sha 	perl-module-file-basename 	perl-module-file-spec 	perl-module-file-temp 	perl-module-i18n-langinfo 	perl-module-io-socket 	perl-module-ipc-open2 	perl-module-list-util 	perl-module-memoize 	perl-module-storable 	perl-module-time-hires "
+#   override[class-native]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/ptest.bbclass:27
+#     ""
+#   override[class-native]:rename from RDEPENDS:${PN}-ptest:class-native data.py:97 [expandKeys]
+#     ""
+#   override[class-nativesdk]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/ptest.bbclass:28
+#     ""
+#   override[class-nativesdk]:rename from RDEPENDS:${PN}-ptest:class-nativesdk data.py:97 [expandKeys]
+#     ""
+# pre-expansion value:
+#   " ${PN}  	locale-base-en-us 	perl-module-b 	perl-module-base 	perl-module-cwd 	perl-module-digest 	perl-module-digest-md5 	perl-module-digest-sha 	perl-module-file-basename 	perl-module-file-spec 	perl-module-file-temp 	perl-module-i18n-langinfo 	perl-module-io-socket 	perl-module-ipc-open2 	perl-module-list-util 	perl-module-memoize 	perl-module-storable 	perl-module-time-hires "
+RDEPENDS:curl-ptest=" curl  	locale-base-en-us 	perl-module-b 	perl-module-base 	perl-module-cwd 	perl-module-digest 	perl-module-digest-md5 	perl-module-digest-sha 	perl-module-file-basename 	perl-module-file-spec 	perl-module-file-temp 	perl-module-i18n-langinfo 	perl-module-io-socket 	perl-module-ipc-open2 	perl-module-list-util 	perl-module-memoize 	perl-module-storable 	perl-module-time-hires "
+# [fixture] 6706 lines cut
+#
+# $S [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:421
+#     "${UNPACKDIR}/${BP}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:360
+#     [doc] "The location in the Build Directory where unpacked package source code resides."
+# pre-expansion value:
+#   "${UNPACKDIR}/${BP}"
+S="{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/sources/curl-8.19.0"
+# [fixture] 504 lines cut
+#
+# $SHELL [4 operations]
+#   from env data.py:105 [inheritFromOS]
+#     "/usr/bin/zsh"
+#   auto env export data.py:107 [inheritFromOS]
+#     [export] "True"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:935
+#     [unexport] "1"
+#   set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes/terminal.bbclass:16
+#     "bash"
+# pre-expansion value:
+#   "/usr/bin/zsh"
+unset SHELL
+# [fixture] 700 lines cut
+#
+# $SRCREV [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:741
+#     [_defaultval] "INVALID"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:386
+#     [doc] "The revision of the source code used to build the package. This variable applies to Subversion, Git, Mercurial and Bazaar only."
+# pre-expansion value:
+#   "INVALID"
+SRCREV="INVALID"
+#
+# $SRC_URI [6 operations]
+#   append {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:734
+#     [vardepsexclude] "    APACHE_MIRROR     CPAN_MIRROR     DEBIAN_MIRROR     GENTOO_MIRROR     GNOME_GIT     GNOME_MIRROR     GNU_MIRROR     GNUPG_MIRROR     KERNELORG_MIRROR     SAMBA_MIRROR     SAVANNAH_GNU_MIRROR     SAVANNAH_NONGNU_MIRROR     SOURCEFORGE_MIRROR     XLIBS_MIRROR     XORG_MIRROR "
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:745
+#     ""
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:383
+#     [doc] "The list of source files - local or remote. This variable tells the OpenEmbedded build system what bits to pull in for the build and how to pull them in."
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:42
+#     "https://curl.se/download/${BP}.tar.xz            file://run-ptest            file://disable-tests            file://no-test-timeout.patch            file://CVE-2026-6276.patch            file://CVE-2026-5773.patch            file://mbedtls.patch            file://CVE-2026-5545.patch            file://CVE-2026-6253.patch            file://CVE-2026-6429-dependent.patch            file://CVE-2026-6429.patch            file://CVE-2026-7168.patch            file://CVE-2026-4873.patch            file://CVE-2026-8286.patch            file://CVE-2026-8927.patch            file://CVE-2026-8932-dependent.patch            file://CVE-2026-8932.patch            file://CVE-2026-11352.patch            file://CVE-2026-11586.patch            file://CVE-2026-7009.patch            file://CVE-2026-8925.patch            file://CVE-2026-9080.patch            file://CVE-2026-9545-01.patch            file://CVE-2026-9545-02.patch            file://CVE-2026-9079.patch            file://CVE-2026-13608.patch            file://CVE-2026-80229.patch            file://CVE-2026-9546-01.patch            file://CVE-2026-9546-02.patch            file://CVE-2026-80230.patch            "
+#   :append[class-nativesdk] {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:46
+#     "     file://environment.d-curl.sh "
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:48
+#     [sha256sum] "4eb41489790d19e190d7ac7e18e82857cdd68af8f4e66b292ced562d333f11df"
+# pre-expansion value:
+#   "https://curl.se/download/${BP}.tar.xz            file://run-ptest            file://disable-tests            file://no-test-timeout.patch            file://CVE-2026-6276.patch            file://CVE-2026-5773.patch            file://mbedtls.patch            file://CVE-2026-5545.patch            file://CVE-2026-6253.patch            file://CVE-2026-6429-dependent.patch            file://CVE-2026-6429.patch            file://CVE-2026-7168.patch            file://CVE-2026-4873.patch            file://CVE-2026-8286.patch            file://CVE-2026-8927.patch            file://CVE-2026-8932-dependent.patch            file://CVE-2026-8932.patch            file://CVE-2026-11352.patch            file://CVE-2026-11586.patch            file://CVE-2026-7009.patch            file://CVE-2026-8925.patch            file://CVE-2026-9080.patch            file://CVE-2026-9545-01.patch            file://CVE-2026-9545-02.patch            file://CVE-2026-9079.patch            file://CVE-2026-13608.patch            file://CVE-2026-80229.patch            file://CVE-2026-9546-01.patch            file://CVE-2026-9546-02.patch            file://CVE-2026-80230.patch            "
+SRC_URI="https://curl.se/download/curl-8.19.0.tar.xz            file://run-ptest            file://disable-tests            file://no-test-timeout.patch            file://CVE-2026-6276.patch            file://CVE-2026-5773.patch            file://mbedtls.patch            file://CVE-2026-5545.patch            file://CVE-2026-6253.patch            file://CVE-2026-6429-dependent.patch            file://CVE-2026-6429.patch            file://CVE-2026-7168.patch            file://CVE-2026-4873.patch            file://CVE-2026-8286.patch            file://CVE-2026-8927.patch            file://CVE-2026-8932-dependent.patch            file://CVE-2026-8932.patch            file://CVE-2026-11352.patch            file://CVE-2026-11586.patch            file://CVE-2026-7009.patch            file://CVE-2026-8925.patch            file://CVE-2026-9080.patch            file://CVE-2026-9545-01.patch            file://CVE-2026-9545-02.patch            file://CVE-2026-9079.patch            file://CVE-2026-13608.patch            file://CVE-2026-80229.patch            file://CVE-2026-9546-01.patch            file://CVE-2026-9546-02.patch            file://CVE-2026-80230.patch            "
+# [fixture] 430 lines cut
+#
+# $SUMMARY [15 operations]
+#   set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:273
+#     "${PN} version ${PV}-${PR}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:392
+#     [doc] "The short (80 characters or less) summary of the binary package for packaging systems such as opkg, rpm or dpkg. By default, SUMMARY is used to define the DESCRIPTION variable if DESCRIPTION is not set in the recipe."
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:1
+#     "Command line tool and library for client-side URL transfers"
+#   override[curl-dbg]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:286
+#     "${SUMMARY} - Debugging files"
+#   override[curl-dbg]:rename from SUMMARY:${PN}-dbg data.py:97 [expandKeys]
+#     "${SUMMARY} - Debugging files"
+#   override[curl-dev]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:290
+#     "${SUMMARY} - Development files"
+#   override[curl-dev]:rename from SUMMARY:${PN}-dev data.py:97 [expandKeys]
+#     "${SUMMARY} - Development files"
+#   override[curl-doc]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:299
+#     "${SUMMARY} - Documentation files"
+#   override[curl-doc]:rename from SUMMARY:${PN}-doc data.py:97 [expandKeys]
+#     "${SUMMARY} - Documentation files"
+#   override[curl-ptest]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/ptest.bbclass:7
+#     "${SUMMARY} - Package test files"
+#   override[curl-ptest]:rename from SUMMARY:${PN}-ptest data.py:97 [expandKeys]
+#     "${SUMMARY} - Package test files"
+#   override[curl-src]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:282
+#     "${SUMMARY} - Source files"
+#   override[curl-src]:rename from SUMMARY:${PN}-src data.py:97 [expandKeys]
+#     "${SUMMARY} - Source files"
+#   override[curl-staticdev]:set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:295
+#     "${SUMMARY} - Development files (Static Libraries)"
+#   override[curl-staticdev]:rename from SUMMARY:${PN}-staticdev data.py:97 [expandKeys]
+#     "${SUMMARY} - Development files (Static Libraries)"
+# pre-expansion value:
+#   "Command line tool and library for client-side URL transfers"
+SUMMARY="Command line tool and library for client-side URL transfers"
+# [fixture] 129 lines cut
+#
+# $T [3 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:419
+#     "${WORKDIR}/temp"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:406
+#     [doc] "This variable points to a directory were BitBake places temporary files, which consist mostly of task logs and scripts, when building a particular recipe."
+#   override[task-clean]:set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/utility-tasks.bbclass:27
+#     "${LOG_DIR}/cleanlogs/${PN}"
+# pre-expansion value:
+#   "${WORKDIR}/temp"
+T="{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp"
+#
+# $T:task-clean
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/utility-tasks.bbclass:27
+#     "${LOG_DIR}/cleanlogs/${PN}"
+T:task-clean="{{LIVE}}/yocto-kiss/build/tmp/log/cleanlogs/curl"
+# [fixture] 205 lines cut
+#
+# $THISDIR [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:425
+#     [doc] "The directory in which the file BitBake is currently parsing is located."
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-global/base.bbclass:78
+#     "${@os.path.dirname(d.getVar('FILE'))}"
+# pre-expansion value:
+#   "${@os.path.dirname(d.getVar('FILE'))}"
+THISDIR="{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl"
+# [fixture] 9 lines cut
+#
+# $TMPDIR [2 operations]
+#   set? {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:405
+#     "${TOPDIR}/tmp"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:427
+#     [doc] "The temporary directory the OpenEmbedded build system uses when it does its work building images. By default, the TMPDIR variable is named tmp within the Build Directory."
+# pre-expansion value:
+#   "${TOPDIR}/tmp"
+TMPDIR="{{LIVE}}/yocto-kiss/build/tmp"
+# [fixture] 23 lines cut
+#
+# $TOPDIR [2 operations]
+#   set cookerdata.py:370 [parseConfigurationFiles]
+#     "{{LIVE}}/yocto-kiss/build"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:430
+#     [doc] "The Build Directory. BitBake automatically sets this variable. The OpenEmbedded build system uses the Build Directory when building images."
+# pre-expansion value:
+#   "{{LIVE}}/yocto-kiss/build"
+TOPDIR="{{LIVE}}/yocto-kiss/build"
+# [fixture] 1132 lines cut
+#
+# $WORKDIR [2 operations]
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:416
+#     "${BASE_WORKDIR}/${MULTIMACH_TARGET_SYS}/${PN}/${PV}"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/documentation.conf:458
+#     [doc] "The pathname of the working directory in which the OpenEmbedded build system builds a recipe. This directory is located within the TMPDIR directory structure and changes as different packages are built."
+# pre-expansion value:
+#   "${BASE_WORKDIR}/${MULTIMACH_TARGET_SYS}/${PN}/${PV}"
+WORKDIR="{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0"
+# [fixture] 576 lines cut
+#
+# $systemd_unitdir [2 operations]
+#   exported {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:39
+#     [export] "1"
+#   set {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/conf/bitbake.conf:39
+#     "${nonarch_base_libdir}/systemd"
+# pre-expansion value:
+#   "${nonarch_base_libdir}/systemd"
+export systemd_unitdir="/lib/systemd"
+# [fixture] 14 lines cut
+# line: 227, file: {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/classes-recipe/autotools.bbclass
+autotools_do_compile() {
+	oe_runmake
+}
+
+# [fixture] 381 lines cut
+# line: 1, file: autogenerated
+do_compile() {
+    # Export function set
+    autotools_do_compile
+}
+
+# line: 147, file: {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb
+do_compile_ptest() {
+	oe_runmake -C {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/build/tests
+}
+
+# [fixture] 1174 lines cut
+
+
+python autotools_sitefiles () {
+    sitefiles, searched = siteinfo_get_files(d, sysrootcache=True)
+    d.setVar("CONFIG_SITE", " ".join(sitefiles))
+}
+
+
+python base_do_fetch () {
+
+    src_uri = (d.getVar('SRC_URI') or "").split()
+    if not src_uri:
+        return
+
+    try:
+        fetcher = bb.fetch2.Fetch(src_uri, d)
+        fetcher.download()
+    except bb.fetch2.BBFetchException as e:
+        bb.fatal("Bitbake Fetcher Error: " + repr(e))
+}
+# [fixture] 7789 lines cut
+
+
+python write_task_data () {
+def write_task_data(status, logfile, e, d):
+    with open(os.path.join(logfile), "a") as f:
+        elapsedtime = get_timedata("__timedata_task", d, e.time)
+        if elapsedtime:
+            f.write(d.expand("${PF}: %s\n" % e.task))
+            f.write(d.expand("Elapsed time: %0.2f seconds\n" % elapsedtime))
+            cpu, iostats, resources, childres = get_process_cputime(os.getpid())
+            if cpu:
+                f.write("utime: %s\n" % cpu['utime'])
+                f.write("stime: %s\n" % cpu['stime'])
+                f.write("cutime: %s\n" % cpu['cutime'])
+                f.write("cstime: %s\n" % cpu['cstime'])
+            for i in iostats:
+                f.write("IO %s: %s\n" % (i, iostats[i]))
+            rusages = ["ru_utime", "ru_stime", "ru_maxrss", "ru_minflt", "ru_majflt", "ru_inblock", "ru_oublock", "ru_nvcsw", "ru_nivcsw"]
+            for i in rusages:
+                f.write("rusage %s: %s\n" % (i, getattr(resources, i)))
+            for i in rusages:
+                f.write("Child rusage %s: %s\n" % (i, getattr(childres, i)))
+        if status == "passed":
+            f.write("Status: PASSED \n")
+        else:
+            f.write("Status: FAILED \n")
+        f.write("Ended: %0.2f \n" % e.time)
+}
+
