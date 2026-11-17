@@ -453,7 +453,7 @@ impl Files {
     fn load(index: &Index, ws: &Workspace) -> Result<Files> {
         // By layer name then path, compared as bytes (SQLite's text order): the order the
         // cache fingerprint is computed in.
-        let mut rows: Vec<FileInfo> = query::all_files(index)?
+        let mut rows: Vec<FileInfo> = query::all_files_in(index, query::FileSet::ALL)?
             .into_iter()
             .map(|f| FileInfo {
                 id: f.id,

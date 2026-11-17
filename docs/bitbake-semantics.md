@@ -532,7 +532,39 @@ file in the index (`item`, `search`, `layers` show it) and marks it
 `providers::recipes_using` leave it out, it takes part in no `bbappend` edge, and an
 evaluation addressed to it by path (`layer:path`) adds the note "not matched by any layer's
 BBFILES" (`ReplayNotes::target_notes`). A file `BBMASK` masks would be another value of the
-same column (not implemented: `BBMASK` is evaluated configuration).
+same column (not implemented: `BBMASK` is evaluated configuration). Since w5-fix-eval2 the
+`item` and `search` tools add the same note for a hit in such a file, and
+`query::files_in_layer_in(.., FileSet::COLLECTED)` lists a layer's files without them (lint's
+engine uses `files_in_layer`, which still includes them).
+
+**Data files** (w5-fix-eval2, live verification B1; BitBake 2.18.0
+`lib/bb/cookerdata.py` `parseConfigurationFiles`, `parse/parse_py/ConfHandler.py`
+`include_single_file`, `parse/parse_py/BBHandler.py` `inherit`, `lib/bb/cooker.py`
+`collect_bbfiles`): BitBake parses a `.conf` only when the configuration reaches it
+(`bblayers.conf`, each layer's `conf/layer.conf`, `conf/bitbake.conf` on `BBPATH`, and what
+those include), an `.inc` only when a `require` / `include` names it, a `.bbclass` only from
+`classes-<type>/` or `classes/` along `BBPATH` (or by absolute path), and a `.bb` /
+`.bbappend` only when `BBFILES` collects it. Nothing else in a layer is metadata: OE-core
+ships about 35 `.conf` files that recipes install (`wpa-supplicant/wpa-supplicant/wpa_supplicant.conf`,
+`busybox/files/mdev.conf`, the systemd drop-ins), `files/wic/common.wks.inc` (a wic
+kickstart include) and `conf/ccache.conf` (ccache's own configuration, used as
+`CCACHE_CONFIGPATH`). sous-chef cannot know without evaluating which files a dynamic
+reference reaches, so it decides by place and by the index's edges, keeping a file when in
+doubt (`index/scan.rs` `mark_data`): a `.conf` / `.inc` / `.bbclass` is metadata when it is
+in the layer's `conf/` tree, is a class under a `classes*/` directory, is the target of a
+resolved `include` / `require` / `include_all` / `inherit` edge, or could be the target of
+an unresolved one (the reference's path, `${...}` standing for any text within a component,
+ends the file's path; a bare name only next to the including file or at a layer root; a
+reference that is all `${...}` matches nothing); otherwise it is **data** when it is under a
+directory a recipe takes files from (`files/`, `<pn>/` or `<pn>-<pv>/` next to a `.bb` /
+`.bbappend` of that name, `FILESPATH`'s defaults) or under `files/`, `lib/`, `scripts/` or
+`wic/`; anything else stays metadata. A data file is indexed and marked
+(`files.not_collected = 'data'`): `item` shows it with a note, `search` (every mode) and the
+file listings (`all_files`, `files_by_kind`, `files_in_layer`; lint's file list) leave it out
+unless `FileSet::ALL` is asked for, and the replay still reads it if an evaluation reaches it.
+The marks are recomputed with the edges, and with one file's edges on `refresh_file`. Known
+residual: `conf/ccache.conf` is in `conf/` and stays metadata (3 `hygiene/parse-error`
+findings on OE-core, from 422).
 
 **A bbappend that matches no recipe** (checked by T4.3 in `cooker.py`
 `show_appends_with_no_recipes`, master and branches `2.0` and `2.8`): BitBake stops with a

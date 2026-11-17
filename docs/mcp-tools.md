@@ -388,7 +388,9 @@ Otherwise it returns a header line `layer:path:A-B sha256=<12 hex>` then the exa
 unmodified (line endings included), so they can be used as Edit strings. The header range
 is the range actually returned, context included; the hash is of the file as read. Capped
 at 8 KB (or `budget_tokens * 4` when that is smaller) with a `+N more lines (lines=A-B)`
-marker. JSON: `{loc, sha256, text, more_lines, rest, notes}`.
+marker. JSON: `{loc, sha256, text, more_lines, rest, notes}`. A note follows the text when
+BitBake does not parse the file as indexed: a `.bb` / `.bbappend` no `BBFILES` glob matches
+(as in `recipe`), or a data file (`is not BitBake metadata: a data file ...`).
 
 ```
 meta-mine:recipes-app/app/app_0.1.bb:25-29 sha256=8c263137e2cb
@@ -414,7 +416,11 @@ its range. `regex` mode reads file content line by line, through the confinement
 applies to the enclosing statement, so lines outside any statement are dropped. Files that
 cannot be read are skipped and counted in a note. The other modes use the index. `limit`
 cuts with a `+N more (limit=L)` marker; in `name` and `fts` mode it counts up to 5000 index
-hits, beyond which `N` is a lower bound.
+hits, beyond which `N` is a lower bound. Data files (a `.conf` / `.inc` that is not BitBake
+metadata, bitbake-semantics.md "Data files") are not searched in any mode. A hit in a `.bb`
+/ `.bbappend` that no `BBFILES` glob collects is followed by a note per file: `note:
+<layer>:<path> is not matched by any layer's BBFILES: BitBake does not collect it, so it is
+no recipe and no bbappend applies`.
 
 ```
 loc	kind	item	snippet

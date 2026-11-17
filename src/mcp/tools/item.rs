@@ -27,6 +27,23 @@ use crate::render::{self, Format, Table};
 use crate::types::{LineSpan, Loc};
 use crate::workspace::Workspace;
 
+/// The note for an indexed file BitBake does not parse as it is indexed
+/// (`query::not_collected`): a `.bb` / `.bbappend` no `BBFILES` glob matches, or a data
+/// file. `None` for a file BitBake reads.
+pub fn collection_note(index: &Index, f: &FileRow) -> Result<Option<String>> {
+    Ok(query::not_collected(index, f.id)?.map(|why| {
+        let what = if matches!(
+            f.kind,
+            crate::types::FileKind::Recipe | crate::types::FileKind::Append
+        ) {
+            ": BitBake does not collect it, so it is no recipe and no bbappend applies"
+        } else {
+            ""
+        };
+        format!("note: {}:{} is {why}{what}", f.layer, f.path.display())
+    }))
+}
+
 /// The cap on the returned text, in bytes, header and marker included.
 pub const CAP_BYTES: usize = 8 * 1024;
 
@@ -113,6 +130,11 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         }
     };
 
+    if let Some(f) = query::file_by_path(&index, &loc.layer, &loc.path)?
+        && let Some(n) = collection_note(&index, &f)?
+    {
+        notes.push(n);
+    }
     let bytes = read_confined(&ctx.workspace, &loc)?;
     let sha = hex12(&bytes);
     let lines = split_lines(&bytes);

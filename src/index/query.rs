@@ -37,6 +37,19 @@ pub fn indexed_release(index: &Index) -> Result<Option<crate::release::Release>>
     Ok(name.and_then(|n| crate::release::Release::from_codename(&n)))
 }
 
+/// The version of the edge computation the index was built with (`meta` key
+/// [`super::schema::META_EDGES`]), if recorded.
+pub fn indexed_edges_version(index: &Index) -> Result<Option<String>> {
+    Ok(index
+        .conn()
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            [super::schema::META_EDGES],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
 /// One indexed file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FileRow {
@@ -296,32 +309,108 @@ pub fn file_by_abs(index: &Index, ws: &Workspace, abs: &Path) -> Result<Option<F
     }
 }
 
-/// Every indexed file (the build pseudo-layer included), by layer row id then path.
+/// Which indexed files a file listing returns besides the metadata BitBake collects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileSet {
+    /// Data files (`files.not_collected` = `data`: a `.conf` / `.inc` / `.bbclass` that is
+    /// not BitBake metadata, see `scan.rs`, "Data files").
+    pub data: bool,
+    /// `.bb` / `.bbappend` files no layer's `BBFILES` collects (`not_collected` =
+    /// `bbfiles`).
+    pub uncollected_recipes: bool,
+}
+
+impl FileSet {
+    /// What [`all_files`], [`files_by_kind`] and [`files_in_layer`] return: everything but
+    /// data files.
+    pub const DEFAULT: FileSet = FileSet {
+        data: false,
+        uncollected_recipes: true,
+    };
+    /// Every indexed file.
+    pub const ALL: FileSet = FileSet {
+        data: true,
+        uncollected_recipes: true,
+    };
+    /// Only what BitBake parses: no data files, no uncollected recipe files.
+    pub const COLLECTED: FileSet = FileSet {
+        data: false,
+        uncollected_recipes: false,
+    };
+
+    /// The SQL condition on `f` (the files table) for this set.
+    fn sql(self) -> String {
+        let mut keep = vec!["f.not_collected IS NULL".to_string()];
+        if self.data {
+            keep.push(format!(
+                "f.not_collected = '{}'",
+                super::schema::NOT_COLLECTED_DATA
+            ));
+        }
+        if self.uncollected_recipes {
+            keep.push(format!(
+                "f.not_collected = '{}'",
+                super::schema::NOT_COLLECTED_BBFILES
+            ));
+        }
+        if self.data && self.uncollected_recipes {
+            return "1".into();
+        }
+        format!("({})", keep.join(" OR "))
+    }
+}
+
+/// Every indexed file (the build pseudo-layer included), by layer row id then path; data
+/// files left out ([`FileSet::DEFAULT`]; see [`all_files_in`]).
 pub fn all_files(index: &Index) -> Result<Vec<FileRow>> {
-    let sql = format!("SELECT {FILE_COLS} FROM {FILE_FROM} ORDER BY l.id, f.path");
+    all_files_in(index, FileSet::DEFAULT)
+}
+
+/// [`all_files`] for an explicit [`FileSet`].
+pub fn all_files_in(index: &Index, set: FileSet) -> Result<Vec<FileRow>> {
+    let sql = format!(
+        "SELECT {FILE_COLS} FROM {FILE_FROM} WHERE {} ORDER BY l.id, f.path",
+        set.sql()
+    );
     collect(index, &sql, &[], |r| file_row(r, 0))
 }
 
-/// Every indexed file of one of `kinds`, by layer row id then path. An empty `kinds`
-/// returns nothing.
+/// Every indexed file of one of `kinds`, by layer row id then path; data files left out
+/// ([`FileSet::DEFAULT`]). An empty `kinds` returns nothing.
 pub fn files_by_kind(index: &Index, kinds: &[FileKind]) -> Result<Vec<FileRow>> {
+    files_by_kind_in(index, kinds, FileSet::DEFAULT)
+}
+
+/// [`files_by_kind`] for an explicit [`FileSet`].
+pub fn files_by_kind_in(index: &Index, kinds: &[FileKind], set: FileSet) -> Result<Vec<FileRow>> {
     if kinds.is_empty() {
         return Ok(Vec::new());
     }
     let names: Vec<&'static str> = kinds.iter().map(|k| k.as_str()).collect();
     let marks: Vec<String> = (1..=names.len()).map(|i| format!("?{i}")).collect();
     let sql = format!(
-        "SELECT {FILE_COLS} FROM {FILE_FROM} WHERE f.kind IN ({}) ORDER BY l.id, f.path",
-        marks.join(", ")
+        "SELECT {FILE_COLS} FROM {FILE_FROM} WHERE f.kind IN ({}) AND {} ORDER BY l.id, f.path",
+        marks.join(", "),
+        set.sql()
     );
     let refs: Vec<&dyn ToSql> = names.iter().map(|n| n as &dyn ToSql).collect();
     collect(index, &sql, &refs, |r| file_row(r, 0))
 }
 
 /// The indexed files of the layer named `layer` (`build` for the build pseudo-layer), by
-/// path. An unknown layer has none.
+/// path; data files left out ([`FileSet::DEFAULT`]). An unknown layer has none. Lint's
+/// file list: pass [`FileSet::COLLECTED`] to [`files_in_layer_in`] to leave out the recipe
+/// files BitBake does not collect as well.
 pub fn files_in_layer(index: &Index, layer: &str) -> Result<Vec<FileRow>> {
-    let sql = format!("SELECT {FILE_COLS} FROM {FILE_FROM} WHERE l.name = ?1 ORDER BY f.path");
+    files_in_layer_in(index, layer, FileSet::DEFAULT)
+}
+
+/// [`files_in_layer`] for an explicit [`FileSet`].
+pub fn files_in_layer_in(index: &Index, layer: &str, set: FileSet) -> Result<Vec<FileRow>> {
+    let sql = format!(
+        "SELECT {FILE_COLS} FROM {FILE_FROM} WHERE l.name = ?1 AND {} ORDER BY f.path",
+        set.sql()
+    );
     collect(index, &sql, &[&layer], |r| file_row(r, 0))
 }
 
@@ -337,6 +426,11 @@ pub fn not_collected(index: &Index, id: i64) -> Result<Option<String>> {
         .optional()?;
     Ok(reason.flatten().map(|r| match r.as_str() {
         super::schema::NOT_COLLECTED_BBFILES => "not matched by any layer's BBFILES".to_string(),
+        super::schema::NOT_COLLECTED_DATA => {
+            "not BitBake metadata: a data file (in a directory a recipe takes files from, or \
+             under lib/, scripts/ or wic/, and nothing includes it); BitBake never parses it"
+                .to_string()
+        }
         other => format!("not collected by BitBake ({other})"),
     }))
 }
@@ -704,11 +798,13 @@ pub fn statements_by_base(
     )
 }
 
-/// The distinct statement values (as written) that contain `needle`, a literal substring.
+/// The distinct statement values (as written) that contain `needle`, a literal substring;
+/// data files left out.
 pub fn values_containing(index: &Index, needle: &str) -> Result<Vec<String>> {
     collect(
         index,
-        "SELECT DISTINCT value FROM statements WHERE value IS NOT NULL AND instr(value, ?1) > 0",
+        "SELECT DISTINCT s.value FROM statements s JOIN files f ON f.id = s.file_id \
+         WHERE s.value IS NOT NULL AND instr(s.value, ?1) > 0 AND f.not_collected IS NOT 'data'",
         &[&needle],
         |r| r.get(0),
     )
@@ -737,7 +833,7 @@ pub fn search_names(
     let pattern = format!("%{}%", like_escape(query));
     statements_where(
         index,
-        "s.name LIKE ?1 ESCAPE '\\'",
+        "s.name LIKE ?1 ESCAPE '\\' AND f.not_collected IS NOT 'data'",
         vec![Box::new(pattern), Box::new(query.to_string())],
         filter,
         "(lower(s.name) = lower(?2)) DESC, l.id, f.path, s.ord",
@@ -758,7 +854,7 @@ pub fn search_fts(
         "SELECT {STMT_COLS} FROM statements_fts \
          JOIN statements s ON s.id = statements_fts.rowid \
          JOIN files f ON f.id = s.file_id JOIN layers l ON l.id = f.layer_id \
-         WHERE statements_fts MATCH ?1"
+         WHERE statements_fts MATCH ?1 AND f.not_collected IS NOT 'data'"
     );
     filter_sql(filter, &mut sql, &mut params);
     if let Some(fs) = &filter.files {
