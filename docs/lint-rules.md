@@ -12,12 +12,50 @@ Severity: **E** error (will break or is no longer accepted), **W** warning (like
 convention breach), **I** info (style).
 
 Releases: there is one rule set for all supported Yocto releases (Kirkstone to Wrynose). A
-rule whose subject exists only in some releases declares that range, and the engine runs it
-for a layer only when the range includes one of the releases the layer is checked against:
-every supported release in its `LAYERSERIES_COMPAT`, down to the oldest, plus the
-workspace's release. A finding that holds for only some of them names them. See "Release
-contract" in architecture.md. A user changes behaviour with `release`, `[lint] disable` and
-`[lint.severity]` in `sous-chef.toml`; there are no user-defined rules.
+rule whose subject exists only in some releases declares that range (`Rule::releases`,
+default: all), and the engine runs it for a file or layer only when the range includes one
+of the releases it is checked against (`LintContext::releases`, oldest first): for a
+writable layer, every supported release in its `LAYERSERIES_COMPAT` plus the workspace's
+release; for a layer that is not writable, and for a file outside every layer (the build
+directory's `conf/*.conf`), the workspace's release alone. A finding that holds for only
+some of them names them. See "Release contract" in architecture.md. A user changes
+behaviour with `release`, `[lint] disable` and `[lint.severity]` in `sous-chef.toml`; there
+are no user-defined rules.
+
+## Running lint
+
+`sous-chef lint [target] [--rule ID]... [--severity S] [--fail-on S] [--format F] [--all]`
+and the `lint` tool take the same target: a layer name (`build` for the build directory),
+a pointer `layer:path` or `layer:path:A-B` (the range keeps only findings in it), a path to
+a file or directory relative to the working directory, or a recipe `pn` or `pn_pv` (its
+`.bb` as BitBake picks it, the files it requires or includes, its bbappends; not classes).
+With no target, the whole workspace: the writable layers and the build directory's
+configuration files. Layers that are not writable are skipped, with a note, unless
+`--all`; if no layer is writable, every layer is linted. A named layer, recipe or file is
+linted whatever its layer. For a recipe or file target, layer-scope rules run on the layers
+the files are in and only findings in those files are kept.
+
+Which rules run:
+
+- With no selection, every rule except those in `[lint] disable` and those off by default
+  (`Rule::default_enabled` false).
+- `--rule` / `rules` names ids or groups; an unknown one is an error. A rule named by its
+  exact id runs even when disabled or off by default; a group selects only rules that are
+  enabled.
+- `style/variable-order` is an alias of `hygiene/variable-order`, and the group `style`
+  names it too, wherever an id or group is accepted.
+- Unknown ids or groups in `[lint] disable` or `[lint.severity]` do not stop lint; each
+  becomes a note in the report.
+- `[lint.severity]` replaces a rule's severity; an entry for the id wins over one for its
+  group.
+
+Inline suppression: a comment `# sous-chef: allow <id-or-group>[, <id-or-group>...]` on the
+line directly above the finding's line, or directly above the statement that contains it.
+Several such comment lines may be stacked.
+
+Exit status of `sous-chef lint`: 0 clean, 1 a reported finding at or above `--fail-on`
+(default `error`), 2 lint could not run (bad target, unknown rule id, unreadable
+workspace). Findings hidden by `--severity` never fail the run.
 
 ## Group `override` (task T4.2)
 
@@ -66,12 +104,24 @@ contract" in architecture.md. A user changes behaviour with `release`, `[lint] d
 | `hygiene/src-uri-checksum` | W | recipe | Remote tarball in `SRC_URI` without a `sha256sum`; git URL without `SRCREV` or with `branch` missing. |
 | `hygiene/host-path` | W | file | Absolute host paths (`/usr/lib`, `/home/...`) in task bodies instead of `${D}`, `${S}`, `${B}`, `${STAGING_*}`, `${bindir}` and friends; `do_install` that never references `${D}`. |
 | `hygiene/workdir-s` | I | file | `S = "${WORKDIR}"` (not allowed in recent releases; verify the release that changed it). |
-| `hygiene/variable-order` | I | file | Order differs from the OE style guide (description block, license, dependencies, `SRC_URI`, `S`, inherit, `PACKAGECONFIG`, tasks, packaging). Ships disabled-by-default as `style/variable-order` alias. |
+| `hygiene/variable-order` | I | file | Order differs from the OE style guide (description block, license, dependencies, `SRC_URI`, `S`, inherit, `PACKAGECONFIG`, tasks, packaging). Off by default: the rule returns false from `default_enabled` (T4.4 adds this; the M0 stub does not have it yet), so it runs only when selected by its id or the alias `style/variable-order`. |
 | `hygiene/tabs` | I | file | Tabs in shell task bodies mixed with spaces; python bodies not indented with 4 spaces. |
 | `hygiene/continuation` | W | file | A comment line or a blank line inside a continued assignment; trailing whitespace after `\`. |
-| `hygiene/parse-error` | E | file | Any `Unknown` statement or parser diagnostic. |
+| `hygiene/parse-error` | E/W | file | Any `Unknown` statement no parser diagnostic covers, and parser diagnostics. Not reported: whitespace after a trailing `\` (left to `hygiene/continuation`), `addfragments`, and `addpylib` in a `.conf`. Warning: the `addtask` quirk that joins two `before`/`after` groups into one task name. Error: everything else. In a `.conf` file, a function, `def`, `inherit`, `inherit_defer`, `addtask`, `deltask`, `addhandler` or `EXPORT_FUNCTIONS` is an error (BitBake's configuration parser rejects them). |
 
 ## Output
 
-One row per finding: `severity  rule-id  pointer  message`. The message says what is wrong
-and what to write instead, in one line. Findings are sorted by file, then line.
+A summary line first (counts by severity and by rule), then one row per finding:
+`severity rule pointer message`, then the notes (skipped layers or rules, configuration
+problems, evaluation failures). The message says what is wrong and what to write instead,
+in one line. Findings are sorted by file (layer, path), then line, rule and message; exact
+duplicates are removed.
+
+```
+4 findings in 6 files: 3 error, 1 warning, 0 info; by rule: hygiene/parse-error 4
+severity	rule	pointer	message
+error	hygiene/parse-error	meta-mine:conf/distro/mine.conf:1	`inherit` in a .conf file: BitBake's configuration parser rejects it as an unparsed line; move it to a class or recipe (use INHERIT += for a global class)
+error	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:3	unparsed line; fix the line so BitBake can parse it, or remove it
+warning	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:4	addtask: `before`/`after` groups split by the other keyword are concatenated by BitBake without a space, joining two task names; write all `after` tasks in one group and all `before` tasks in another
+error	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:5-6	function do_broken is never closed: no `}` in column 0 before end of file; close the function with `}` in column 0
+```
