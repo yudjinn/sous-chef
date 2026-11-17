@@ -121,6 +121,10 @@ pub struct EdgeRow {
     pub src: FileRow,
     /// `None` when unresolved (not found, or needs evaluation).
     pub target: Option<FileRow>,
+    /// For an `inherit` in a context-neutral class (`classes/`, on a release with
+    /// `classes-recipe/` and `classes-global/`): which class search found the target,
+    /// `recipe`, `global` or `both` (`schema::CONTEXT_*`). `None` for every other edge.
+    pub context: Option<String>,
 }
 
 impl EdgeRow {
@@ -907,8 +911,8 @@ pub fn search_fts(
 
 const EDGE_SELECT: &str = "SELECT e.id, e.kind, e.target_text, e.line, \
      fs.id, ls.name, fs.layer_id, fs.path, fs.kind, fs.sha256, fs.pn, fs.pv, ls.priority, \
-     ft.id, lt.name, ft.layer_id, ft.path, ft.kind, ft.sha256, ft.pn, ft.pv, lt.priority \
-     FROM edges e JOIN files fs ON fs.id = e.src_file JOIN layers ls ON ls.id = fs.layer_id \
+     ft.id, lt.name, ft.layer_id, ft.path, ft.kind, ft.sha256, ft.pn, ft.pv, lt.priority, \
+     e.context FROM edges e JOIN files fs ON fs.id = e.src_file JOIN layers ls ON ls.id = fs.layer_id \
      LEFT JOIN files ft ON ft.id = e.target_file LEFT JOIN layers lt ON lt.id = ft.layer_id";
 
 fn edge_row(r: &Row<'_>) -> rusqlite::Result<EdgeRow> {
@@ -923,6 +927,7 @@ fn edge_row(r: &Row<'_>) -> rusqlite::Result<EdgeRow> {
         line: r.get(3)?,
         src: file_row(r, 4)?,
         target,
+        context: r.get(22)?,
     })
 }
 

@@ -1249,9 +1249,11 @@ kas project, release wrynose: 5 layers enabled (2 own), 6 present but not enable
 Read as its reader would, the report is right about the repository but carries the lint
 rules' known errors: item 1 is `meta:conf/ccache.conf`, ccache's own configuration file,
 which lint takes for metadata (lint-rules.md, "On a real workspace"), and section 5
-lists `inherit sanity` in `meta:classes/sign_*.bbclass` as not found because the index
-resolves an inherit in a `classes/` class as a recipe inherit, while those classes are
-used through `INHERIT`, where `classes-global/sanity.bbclass` is found. The `dirty (1)` of
+listed `inherit sanity` in `meta:classes/sign_*.bbclass` as not found because the index
+resolved an inherit in a `classes/` class as a recipe inherit, while those classes are
+used through `INHERIT`, where `classes-global/sanity.bbclass` is found (fixed in w7: such
+an inherit is resolved in both contexts; the live count of unresolved inherits went from
+24 to 21). The `dirty (1)` of
 yocto-kiss is the lock file `live-env.sh` wrote. With `scratch/sous-chef.toml` unchanged
 (no `kas` key) kas detection finds five candidate kas files, so the report shows no pins
 and says why.

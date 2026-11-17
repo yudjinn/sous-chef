@@ -339,7 +339,9 @@ edges(id INTEGER PK, src_file INT, kind TEXT,        -- require | include | incl
                                                       -- bbappend | addfragments (never resolved)
       target_text TEXT,                               -- as written
       target_file INT NULL,                           -- resolved, NULL if unresolved or variable
-      line INT)
+      line INT,
+      context TEXT NULL)                              -- inherit in a classes/ class: recipe |
+                                                      -- global | both (w7, schema version 4)
   INDEX(src_file), INDEX(target_file)
 
 tasks(file_id INT, name TEXT, before TEXT, after TEXT, line INT)
@@ -1043,6 +1045,14 @@ is `Unknown` with an "unparsed line" diagnostic. The index records it as stateme
 python library directory, not a metadata file. `hygiene/parse-error` judges where it is
 (base configuration only) and the release (`Feature::AddPyLib`, BitBake 2.4 on;
 `Feature::ALL` has ten). The `.inc` split treats it as opaque.
+
+Index (schema version 4): an `inherit` in a class under `classes/` (context-neutral, on a
+release with `Feature::SplitClassDirs`) is resolved in recipe and in global context; it is
+resolved when either finds the class, `edges.context` (and `EdgeRow::context`) records
+`recipe`, `global` or `both`, and when the two find different files there is an edge for
+each. An `inherit` in `classes-recipe/` stays recipe-only, in `classes-global/` or a `.conf`
+global-only; every other edge has no context. The replay is unchanged (it follows
+`__bbclasstype` as BitBake does).
 
 ## Errors
 

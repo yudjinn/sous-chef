@@ -513,6 +513,29 @@ Checked against BitBake master (commit `5495a547`, 2026-11-16), and reproduced b
   is looked up on `BBPATH` as given; an absolute name is used as is. The including file's
   directory is not searched. Not found is a parse error. A class already inherited
   (`__inherit_cache`) is not parsed again.
+- **`inherit` inside a class** (checked 2026-11-17 on BitBake 2.18, `6e260eb6a`:
+  `BBHandler.py` `inherit`, `cookerdata.py` `CookerDataBuilder.__init__` and
+  `parseConfigurationFiles`; and on branch `2.0`): the context is not a property of the class
+  but of the datastore when the `inherit` runs. `inherit` reads
+  `d.getVar("__bbclasstype", False)` for every name; `cookerdata` sets it to `global` on
+  `basedata` (before any configuration file) and to `recipe` on every multiconfig's data
+  after `parseConfigurationFiles` (`mcdata[mc].setVar("__bbclasstype", "recipe")`). So an
+  `inherit` in a class that `INHERIT` (or `base`) pulls in is searched
+  `classes-global/`, `classes/`; the same class inherited from a recipe searches
+  `classes-recipe/`, `classes/`. A class is parsed once per datastore (`__inherit_cache`):
+  one reached through `INHERIT` is already in the recipe datastore's cache and is not parsed
+  again in recipe context. A class in `classes-recipe/` can only be reached in recipe context
+  and one in `classes-global/` only in global context (neither search looks in the other's
+  directory), so their `inherit`s are recipe-only and global-only. A class in `classes/` is
+  reachable from both: OE-core's `meta/classes/sign_rpm.bbclass` (also `sign_ipk`,
+  `sign_package_feed`) says `inherit sanity`, and `sanity` is in `classes-global/`, found
+  because those classes are used through `INHERIT`. BitBake 2.0 has no `__bbclasstype`
+  (`inherit` looks for `classes/<name>.bbclass` only). sous-chef: the scanner resolves an
+  `inherit` in a `classes/` class in both contexts (on a release with
+  `Feature::SplitClassDirs`); it is resolved when either search finds the class, and
+  `edges.context` records `recipe`, `global` or `both`; when the two find different files
+  there is an edge for each. An `inherit` in an `.inc` is resolved in recipe context
+  whatever includes it. The replay follows the context it is actually in.
 - **Global classes** (`cookerdata.py`): the configuration inherits `["base"] + INHERIT`, in that
   order, after the configuration files, each with `__bbclasstype = "global"`.
 - **bbappend matching** (`cooker.py` `get_file_appends`): with `b` the append's file name with

@@ -1710,7 +1710,7 @@ fn listing(ws: &Workspace, own: &BTreeSet<String>, items: Vec<(String, Item)>) -
 
 /// Marks a problem BitBake stops on (listed first in a [`Listing`]).
 const BITBAKE_STOPS: &str = "BitBake stops";
-const BITBAKE_STOPS_NOT_FOUND: &str = "not found on the search path sous-chef used (a class in classes/ is resolved as a recipe inherit); BitBake stops if it cannot find it either";
+const BITBAKE_STOPS_NOT_FOUND: &str = "not found on the search path sous-chef used (for an inherit in a classes/ class, in recipe and global context); BitBake stops if it cannot find it either";
 
 /// Pointers sorted by layer, path, then line numerically.
 fn cmp_pointer(a: &str, b: &str) -> std::cmp::Ordering {
