@@ -388,7 +388,7 @@ pub fn looks_generated_bblayers(text: &str) -> bool {
     lines.len() >= 3
         && lines[lines.len() - 2] == BBLAYERS_TRAILER[0]
         && lines[lines.len() - 1] == BBLAYERS_TRAILER[1]
-        && lines.iter().any(|l| *l == "BBLAYERS ?= \" \\")
+        && lines.contains(&"BBLAYERS ?= \" \\")
 }
 
 /// The last line of the `CACHEDIR.TAG` kas writes into its build directory (observed with
@@ -598,6 +598,7 @@ pub fn load(files: &[PathBuf], source: KasSource, work_dir: &Path, build_dir: &P
         locks: Vec::new(),
         problems: Vec::new(),
         missing_repos: BTreeSet::new(),
+        order: Vec::new(),
     };
     // kas iterates: repositories found in one pass make their includes readable in the
     // next. sous-chef never checks out, so repository paths only grow from what is on disk.
@@ -608,6 +609,7 @@ pub fn load(files: &[PathBuf], source: KasSource, work_dir: &Path, build_dir: &P
         loader.locks.clear();
         loader.problems.clear();
         loader.missing_repos.clear();
+        loader.order.clear();
         let mut configs = Vec::new();
         for f in &files {
             loader.file(f, &root, &repo_paths, &mut configs, 0);
@@ -633,7 +635,13 @@ pub fn load(files: &[PathBuf], source: KasSource, work_dir: &Path, build_dir: &P
         ));
     }
 
+    // `read` (read order) is what node positions index; the project lists merge order.
     let read = loader.read;
+    let merge_order: Vec<PathBuf> = loader
+        .order
+        .iter()
+        .filter_map(|i| read.get(*i).cloned())
+        .collect();
     let repos = build_repos(&merged, &root, &work_dir, &read, &mut problems);
     let mut layers = build_layers(&merged, &repos, &mut problems);
     layers.sort_by(|a, b| {
@@ -718,7 +726,7 @@ pub fn load(files: &[PathBuf], source: KasSource, work_dir: &Path, build_dir: &P
         work_dir,
         build_dir: canonical_or(build_dir),
         lock_files: loader.locks,
-        read,
+        read: merge_order,
         repos,
         layers,
         local_conf_header,
@@ -736,6 +744,8 @@ struct Loader {
     locks: Vec<PathBuf>,
     problems: Vec<String>,
     missing_repos: BTreeSet<String>,
+    /// Indexes into `read`, in merge order.
+    order: Vec<usize>,
 }
 
 impl Loader {
@@ -864,6 +874,7 @@ impl Loader {
                 )),
             }
         }
+        self.order.push(idx);
         configs.push(doc);
     }
 

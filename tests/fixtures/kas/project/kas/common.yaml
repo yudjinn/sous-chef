@@ -1,0 +1,12 @@
+# Included by base.yaml (a repository-relative include).
+header:
+  version: 11
+
+local_conf_header:
+  common: |
+    PATCHRESOLVE = "noop"
+    CONF_VERSION = "2"
+
+bblayers_conf_header:
+  common: |
+    POKY_BBLAYERS_CONF_VERSION = "2"

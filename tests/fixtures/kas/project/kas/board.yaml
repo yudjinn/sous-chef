@@ -1,0 +1,10 @@
+# The machine file, modelled on yocto-kiss kas/dogbonedark.yaml.
+header:
+  version: 11
+
+machine: board1
+
+repos:
+  proj-bsp:
+    layers:
+      meta-proj-bsp:
