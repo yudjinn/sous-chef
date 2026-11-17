@@ -1,0 +1,11 @@
+---
+source: tests/recipe_item.rs
+expression: out
+---
+name	kind	file_kind	loc
+__anonymous	python	bb	meta-mine:recipes-app/app/app_0.1.bb:13-16
+app_helper_name	def	bb	meta-mine:recipes-app/app/app_0.1.bb:18-19
+do_compile	shell	bb	meta-mine:recipes-app/app/app_0.1.bb:21-23
+do_install	fakeroot shell	bb	meta-mine:recipes-app/app/app_0.1.bb:25-29
+do_report	python	bb	meta-mine:recipes-app/app/app_0.1.bb:31-33
+report	addtask	bb	meta-mine:recipes-app/app/app_0.1.bb:34

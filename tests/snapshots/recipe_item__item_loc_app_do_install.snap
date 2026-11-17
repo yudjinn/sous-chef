@@ -1,0 +1,10 @@
+---
+source: tests/recipe_item.rs
+expression: out
+---
+meta-mine:recipes-app/app/app_0.1.bb:25-29 sha256=8c263137e2cb
+fakeroot do_install() {
+	install -d ${D}${bindir}
+	install -m 0755 app ${D}${bindir}/app
+	chown root:root ${D}${bindir}/app
+}

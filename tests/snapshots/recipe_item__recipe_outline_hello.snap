@@ -1,0 +1,12 @@
+---
+source: tests/recipe_item.rs
+expression: out
+---
+name	kind	file_kind	loc
+autotoolsish_do_autoreconf	shell	bbclass	meta-core:classes-recipe/autotoolsish.bbclass:13-15
+autoreconf	addtask	bbclass	meta-core:classes-recipe/autotoolsish.bbclass:16
+autotoolsish_do_configure	shell	bbclass	meta-core:classes-recipe/autotoolsish.bbclass:18-20
+autotoolsish_do_compile	shell	bbclass	meta-core:classes-recipe/autotoolsish.bbclass:22-24
+autotoolsish_do_install	shell	bbclass	meta-core:classes-recipe/autotoolsish.bbclass:26-28
+do_install:append	shell	inc	meta-core:recipes-core/hello/hello.inc:15-18
+do_install:append	shell	bbappend	meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10
