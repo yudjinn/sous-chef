@@ -1,0 +1,11 @@
+# Fake oe-init-build-env for tests (never a real BitBake). Sourced as
+# `source oe-init-build-env <build dir>`, like poky's: it sets BUILDDIR and BBPATH, puts the
+# fake tools in bin/ on PATH and changes into the build directory. The banner goes to
+# stdout, which the runner discards.
+FAKEBB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+echo "### Shell environment set up for builds. ###"
+BUILDDIR="${1:?build directory}"
+export BUILDDIR
+export BBPATH="$BUILDDIR"
+export PATH="$FAKEBB_ROOT/bin:$PATH"
+cd "$BUILDDIR" || return 1
