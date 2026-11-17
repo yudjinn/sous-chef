@@ -69,8 +69,13 @@ pub const SETUP_SCRIPT_NAME: &str = "init-build-env";
 pub const SETUP_WRAPPER: &str = r#"__sous_chef_argv=("$@"); set --; source "${__sous_chef_argv[0]}" >/dev/null && exec "${__sous_chef_argv[@]:1}""#;
 
 /// The kas subcommand and option every kas-mode command uses: `kas shell
-/// --keep-config-unchanged`, which skips kas's checkout and configuration steps, so running
-/// BitBake through sous-chef never updates repositories or rewrites `local.conf`.
+/// --keep-config-unchanged`, which skips kas's checkout and configuration steps
+/// (`setup_dir`, `finish_setup_repos`, `repos_checkout`, `repos_apply_patches`,
+/// `write_bbconfig`), so running BitBake through sous-chef does not rewrite `local.conf`.
+/// It does not skip `repo_setup_loop`, which fetches and checks out the repositories that
+/// `{repo, file}` includes name (kas 5.5 `libcmds.py`, `libkas.py`
+/// `setup_parser_keep_config_unchanged_arg`), so kas mode is not used for a project with
+/// such an include ([`BbEnv::probe`]).
 pub const KAS_SHELL_ARGS: [&str; 2] = ["shell", "--keep-config-unchanged"];
 
 /// How a kas-mode command is started: `<program> shell --keep-config-unchanged
@@ -168,8 +173,10 @@ impl BbEnv {
     /// 3. Already initialised: `BUILDDIR` or `BBPATH` set and an executable `bitbake` on
     ///    `PATH`. The build directory is `BUILDDIR` if it is a directory, else the
     ///    workspace's.
-    /// 4. A kas project with kas files (`ws.kas`), an executable `kas` on `PATH` and an
-    ///    existing kas build directory: kas mode.
+    /// 4. A kas project with kas files (`ws.kas`), an executable `kas` on `PATH`, an
+    ///    existing kas build directory and no `{repo, file}` include
+    ///    (`KasProject::repo_includes`, see [`KAS_SHELL_ARGS`]): kas mode. With such an
+    ///    include, the modes below are tried and the reason is kept for the error.
     /// 5. A build directory holding a `bitbake-setup` `init-build-env`: bitbake-setup mode.
     /// 6. A build directory and an `oe-init-build-env` in a layer root, a layer root's
     ///    parent (poky's layout: `poky/meta` next to `poky/oe-init-build-env`) or the build
@@ -229,6 +236,12 @@ impl BbEnv {
         let mut kas_problem = None;
         if let Some(k) = ws.kas.as_ref().filter(|k| !k.files.is_empty()) {
             match find_on_path("kas", host.path.as_deref()) {
+                Some(_) if !k.repo_includes.is_empty() => {
+                    kas_problem = Some(format!(
+                        "kas mode is not used: the kas files include files from repo {}, and kas shell --keep-config-unchanged still fetches and checks out such repositories",
+                        k.repo_includes.join(", ")
+                    ));
+                }
                 Some(program) if k.build_dir.is_dir() => {
                     return Ok(BbEnv {
                         build_dir: k.build_dir.clone(),

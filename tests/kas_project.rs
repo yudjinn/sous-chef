@@ -451,6 +451,27 @@ fn kas_environment_variables_override_the_files() {
 }
 
 #[test]
+fn a_bblayers_conf_written_by_kas_container_gets_a_hint() {
+    // kas-container computes `${TOPDIR}/...` inside the container, where the project
+    // repository is /repo and the work directory /work.
+    let p = Project::after();
+    let conf = p.path("build/conf/bblayers.conf");
+    let text = fs::read_to_string(&conf).unwrap().replace(
+        "${TOPDIR}/../meta-proj \\",
+        "${TOPDIR}/../../repo/meta-proj \\",
+    );
+    fs::write(&conf, text).unwrap();
+    let e = Workspace::discover_in(&p.config(), &KasEnv::default())
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("which is not a directory"), "{e}");
+    assert!(
+        e.contains("if kas-container wrote this bblayers.conf"),
+        "{e}"
+    );
+}
+
+#[test]
 fn a_workspace_without_kas_is_unchanged() {
     let ws = common::fixture_ws();
     assert_eq!(ws.kas, None);

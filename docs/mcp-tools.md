@@ -1009,7 +1009,9 @@ mode, or `bitbake-setup` when the file is named `init-build-env`); an environmen
 was started in (`BUILDDIR` or `BBPATH` set and `bitbake` on `PATH`: `initialised`, the
 program is run directly); a kas project with `kas` on `PATH` and an existing kas build
 directory (`kas`: every command is `kas shell --keep-config-unchanged <files> -c '<command>'`
-in kas's work directory, so kas does not rewrite `conf/` first); a build directory holding
+in kas's work directory, so kas does not rewrite `conf/` first; not used when a kas file
+has a `{repo, file}` include, because `-k` still fetches and checks out those repositories:
+the modes below are tried instead); a build directory holding
 bitbake-setup's `init-build-env` (`bitbake-setup`); an `oe-init-build-env` in a layer root,
 a layer root's parent or the build directory's parent (`init-script`). The init script is
 sourced and the program run by a wrapper that takes every name as argv; in `kas` mode the

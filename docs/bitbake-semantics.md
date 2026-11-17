@@ -1477,10 +1477,17 @@ file name, the layer order. `src/workspace/kas.rs` implements what follows.
   version control operation). `url` without `path`: `<kas work dir>/<name>`. A relative
   `path` is under the kas work dir. kas therefore clones next to the kas files'
   repository root when kas is started there (observed: `yocto-kiss/openembedded-core`).
-- `layers`: missing (or empty / null, per the schema; *verify* null, which the code would
-  not accept) means the repository itself; `.` is the repository itself; a value null or
-  `{prio: n}` adds the layer, `disabled` (and the deprecated `excluded`, `n`, `no`, `0`,
-  `false`) removes it.
+- `layers` (kas 5.5 `repos.py` `Repo.factory`: `repo_config.get('layers', {'': None})`,
+  then `_create_layers_from_dict`, read 2026-11-18): missing means the repository itself;
+  an empty mapping `{}` adds **no** layer (the schema's description says "missing or
+  `None` or an empty dictionary" is the repository itself; the code adds one layer per
+  entry, so none); null fails kas's schema check (`layers` has `"type": "object"`; every
+  file is validated on load, `includehandler.py` `ConfigFile.load`), so kas stops, and
+  sous-chef lists it as a problem and adds no layer. `.` is the repository itself; a value
+  null or `{prio: n}` adds the layer (`prio` default 0), `disabled` removes it, and so do
+  the deprecated values kas compares by Python equality with `['excluded', 'n', 'no',
+  '0', 'false', 0]`: those strings, and any plain scalar YAML 1.1 reads as false or as an
+  integer 0 (below).
 - `BBLAYERS` order: `prio` descending, then repository name, then layer name (`RepoLayer.
   __lt__`); observed on yocto-kiss (`meta-arm/meta-arm` before
   `meta-arm/meta-arm-toolchain`, though `kiss.yaml` lists them the other way round).
@@ -1543,9 +1550,24 @@ caller's (observed: `/usr/bin/zsh -c 'bitbake -p'`), so the command string is sh
 for whatever shell the user has. `-k` / `--keep-config-unchanged` skips the steps
 `setup_dir`, `finish_setup_repos`, `repos_checkout`, `repos_apply_patches` and
 `write_bbconfig`, so nothing is checked out and the configuration files are not rewritten;
-the environment is still set up. sous-chef's kas mode always passes it. *Verify:* what `-k`
-does before the first checkout (expected: it fails, since the repositories are missing;
-sous-chef does not offer kas mode until the build directory exists).
+the environment is still set up. sous-chef's kas mode always passes it. What `-k` does
+**not** skip (kas 5.5 `libkas.py` `setup_parser_keep_config_unchanged_arg`, `libcmds.py`
+`Macro`, read 2026-11-18): `setup_home`, `init_setup_repos` and `repo_setup_loop`, then
+`setup_environ`. `init_setup_repos` asks the include handler for the repositories that
+`{repo, file}` includes name and that it was not given a path for, which on this first
+call (`find_missing_repos()` with no paths) is every one of them; `repo_setup_loop` then
+fetches them (`repos_fetch`: clone when the directory is missing, `git remote set-url
+origin <url>`, a fetch when the wanted commit, tag or branch is not there) and checks
+them out (`repo.checkout()`, unless the checkout is dirty), until the includes resolve.
+So even `kas shell -k` changes repositories that `{repo, file}` includes name; sous-chef
+does not use kas mode for such a project (`KasProject::repo_includes`, `BbEnv::probe`).
+`setup_environ` looks for `oe-init-build-env` in every repository's path and stops with
+"Did not find any init-build-env script" when none is there; otherwise it sources it with
+the build directory, which creates the directory and, when missing, OE-core's template
+`conf/local.conf` and `conf/bblayers.conf` (not kas's). So before the first checkout
+(OE-core not cloned) `kas shell -k` fails; with the repositories present but no build
+directory it runs with OE-core's templates. sous-chef offers kas mode only once the kas
+build directory exists.
 
 **Subcommands** (`kas --help`, `kas-container` usage). `build` checks out and runs BitBake
 (`-c` there is the task, `--target` the target); `checkout` only checks out and writes the
@@ -1556,11 +1578,44 @@ files; `shell` runs a shell or `-c` command; `for-all-repos`, `clean`, `cleansst
 value: `--runtime-args`, `--docker-args`, `--ssh-dir`, `--aws-dir`, `--git-credential-store`,
 `--git-credential-socket`, `-l` / `--log-level`) and takes the same subcommands.
 
-Not reproduced, *verify* if ever needed: YAML 1.1 specifics (sous-chef parses with a YAML
-1.2 parser, `yaml-rust2`; `yes` / `no` / `on` / `off` are strings there, which only matters
-for the legacy layer values, all of which are handled as strings; `<<` merge keys are not
-supported); `kas-container` path rewriting; `env`, `patches`, `signers`, `buildtools`,
-`artifacts`, `menu_configuration`; JSON comments.
+**YAML 1.1** (kas loads with `yaml.safe_load`, PyYAML 6.0.3 as installed with kas 5.5;
+`resolver.py`, `constructor.py`, read 2026-11-18). sous-chef parses with a YAML 1.2
+parser (`yaml-rust2`) and reproduces what matters for kas files:
+
+- A plain scalar is a boolean for `yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|
+  on|On|ON|off|Off|OFF` and an integer for `0b...`, `0...` (octal), decimal, `0x...` and
+  base-60 `1:20` forms (`_` allowed). sous-chef keeps scalars as text and records whether
+  one was plain; the one place the type changes kas's result is a layer's value, where a
+  plain false or 0 disables the layer (`False == 0` in Python, `0` is a disabled token)
+  and a quoted `'No'` is a string kas's schema refuses (`yaml11_false_or_zero`). `y` and
+  `n` are strings in PyYAML (its resolver leaves them out).
+- Merge keys `<<: *anchor` and `<<: [*a, *b]` (`flatten_mapping`): the merged entries
+  come before the mapping's own, its own keys win, and of a list the first mapping wins.
+  sous-chef flattens them the same way (`flatten_merge_keys`).
+- Nulls (`~`, `null`, `Null`, `NULL`, empty) are the same in both.
+
+**`kas-container`** (the 5.5 script, read 2026-11-18). It runs kas in a container with
+the repository of the first kas file (`git rev-parse --show-toplevel`, else `hg root`,
+else its directory; `_source_dir_host` from `.config.yaml` when set) mounted at `/repo`
+(read-only for rootless docker), `KAS_WORK_DIR` at `/work` (`KAS_WORK_DIR=/work`), and
+`KAS_BUILD_DIR`, `DL_DIR`, `SSTATE_DIR`, `KAS_REPO_REF_DIR`, `BB_HASHSERVE_DB_DIR` and
+`KAS_BUILDTOOLS_DIR` as `/work/<relative>` when under the work directory, else mounted at
+`/build`, `/downloads`, `/sstate`, `/repo-ref`, `/bb-hashserve-db`, `/buildtools`. The kas
+file arguments under the repository are rewritten to `/repo/...` (`sed`); for `diff` with
+two files the second repository goes to `/repo2`. A shared git worktree gets its common
+directory at `/repo-common` and a rewritten `.git` file. `KAS_DISTRO`, `KAS_MACHINE`,
+`KAS_TARGET`, `KAS_TASK` (and a few others) are passed in when set and not empty. kas then
+writes `bblayers.conf` with `${TOPDIR}/<path relative to the build directory>` computed
+inside the container, so a layer of the project repository (`/repo/...`) appears as
+`${TOPDIR}/../../repo/...` from `/work/build`; on the host that names a directory that does
+not exist unless the work directory's parent happens to hold the repository as `repo/`.
+sous-chef reads `bblayers.conf` as it is, so discovery stops on such an entry (`BBLAYERS
+in ... lists ..., which is not a directory`), with a hint that kas-container may have
+written the file when the kas project generates that build directory. Not reproduced:
+mapping container paths back to the host.
+
+Not reproduced: `env`, `patches`, `signers`, `buildtools`, `artifacts`,
+`menu_configuration`; JSON comments.
 
 ## Releases
 
