@@ -45,7 +45,8 @@ pub fn fixture_config() -> Config {
     ws_config(&fixture_ws_root())
 }
 
-/// The discovered fixture workspace. Panics if discovery fails (it does until T1.3 lands).
+/// The discovered fixture workspace (three layers, through `build/conf/bblayers.conf`).
+/// Panics if discovery fails.
 pub fn fixture_ws() -> Workspace {
     Workspace::discover(&fixture_config()).expect("discovering the fixture workspace")
 }

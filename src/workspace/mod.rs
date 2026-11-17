@@ -1,17 +1,19 @@
 //! Workspace and layers. Contract: `docs/architecture.md` ("Workspace contract").
-//!
-//! Stub (M0): T1.3 implements discovery, `loc_for`, `abs_path` and `confine`.
 
 pub mod layers;
 pub mod resolve;
 
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::types::{LineSpan, Loc};
+
+/// The pseudo-layer name `loc_for` uses for files in the build directory.
+pub const BUILD_LAYER: &str = "build";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Workspace {
@@ -42,31 +44,327 @@ pub struct Layer {
 
 impl Workspace {
     /// Finds the build directory and layers (see "Configuration" in architecture.md).
-    pub fn discover(_cfg: &Config) -> Result<Workspace> {
-        Err(Error::not_implemented())
+    ///
+    /// 1. `cfg.build_dir`, else the nearest ancestor of `cfg.work_dir` with
+    ///    `conf/bblayers.conf`: layers are `BBLAYERS`, in order.
+    /// 2. No build directory: `cfg.layers`, else every directory up to
+    ///    [`layers::SCAN_DEPTH`] levels below `cfg.work_dir` with `conf/layer.conf`.
+    ///
+    /// Layer roots and the build directory are stored canonicalised (symlinks resolved).
+    /// `BBLAYERS` entries that cannot be expanded statically are skipped with a warning on
+    /// stderr; use [`layers::read_bblayers`] to inspect them.
+    pub fn discover(cfg: &Config) -> Result<Workspace> {
+        let work_dir = absolute(&cfg.work_dir)?;
+        let build_dir = match &cfg.build_dir {
+            Some(b) => {
+                let b = work_dir.join(b);
+                if !b.join("conf").join("bblayers.conf").is_file() {
+                    return Err(Error::Config {
+                        msg: format!(
+                            "build directory {} has no conf/bblayers.conf; fix build_dir or --build-dir",
+                            b.display()
+                        ),
+                    });
+                }
+                Some(b)
+            }
+            None => layers::find_build_dir(&work_dir),
+        };
+
+        let (build_dir, mut found) = match build_dir {
+            Some(b) => {
+                let b = canonical(&b, "build directory")?;
+                let bb = layers::read_bblayers(&b)?;
+                for u in &bb.unresolved {
+                    eprintln!(
+                        "sous-chef: warning: BBLAYERS entry {u:?} in {} cannot be expanded statically; skipped",
+                        b.join("conf/bblayers.conf").display()
+                    );
+                }
+                if bb.layers.is_empty() {
+                    return Err(Error::Config {
+                        msg: format!(
+                            "BBLAYERS in {} lists no layer that can be resolved",
+                            b.join("conf/bblayers.conf").display()
+                        ),
+                    });
+                }
+                let mut roots = Vec::with_capacity(bb.layers.len());
+                for l in &bb.layers {
+                    // BitBake checks relative entries against its working directory.
+                    let abs = work_dir.join(l);
+                    if !abs.is_dir() {
+                        return Err(Error::Config {
+                            msg: format!(
+                                "BBLAYERS in {} lists {}, which is not a directory",
+                                b.join("conf/bblayers.conf").display(),
+                                abs.display()
+                            ),
+                        });
+                    }
+                    roots.push(canonical(&abs, "layer")?);
+                }
+                let found = layers::read_layer_confs(&roots, Some(&bb))?;
+                (Some(b), found)
+            }
+            None => {
+                let roots = if cfg.layers.is_empty() {
+                    layers::scan_for_layers(&work_dir, layers::SCAN_DEPTH)
+                } else {
+                    cfg.layers.iter().map(|l| work_dir.join(l)).collect()
+                };
+                let mut canon = Vec::with_capacity(roots.len());
+                for r in &roots {
+                    let c = canonical(r, "layer")?;
+                    if !c.join("conf").join("layer.conf").is_file() {
+                        return Err(Error::Config {
+                            msg: format!("layer {} has no conf/layer.conf", c.display()),
+                        });
+                    }
+                    canon.push(c);
+                }
+                (None, layers::read_layer_confs(&canon, None)?)
+            }
+        };
+
+        assign_names(&mut found);
+        for l in &mut found {
+            l.writable = cfg.writable_layers.contains(&l.name);
+        }
+        Ok(Workspace {
+            build_dir,
+            layers: found,
+        })
     }
 
     /// The pointer for an absolute path inside a layer (or the build directory, as the
-    /// pseudo-layer `build`).
-    pub fn loc_for(&self, _abs: &Path, _lines: LineSpan) -> Option<Loc> {
-        None
+    /// pseudo-layer `build`). The innermost containing layer wins.
+    pub fn loc_for(&self, abs: &Path, lines: LineSpan) -> Option<Loc> {
+        let lexical = normalize(abs);
+        self.loc_for_normalized(&lexical, lines).or_else(|| {
+            let canon = fs::canonicalize(abs).ok()?;
+            self.loc_for_normalized(&canon, lines)
+        })
     }
 
-    /// The absolute path a pointer refers to.
-    pub fn abs_path(&self, _loc: &Loc) -> Option<PathBuf> {
-        None
+    fn loc_for_normalized(&self, abs: &Path, lines: LineSpan) -> Option<Loc> {
+        let best = self
+            .layers
+            .iter()
+            .filter_map(|l| abs.strip_prefix(&l.root).ok().map(|rel| (l, rel)))
+            .max_by_key(|(l, _)| l.root.components().count());
+        if let Some((l, rel)) = best {
+            return Some(Loc {
+                layer: l.name.clone(),
+                path: rel.to_path_buf(),
+                lines,
+            });
+        }
+        let rel = abs.strip_prefix(self.build_dir.as_ref()?).ok()?;
+        Some(Loc {
+            layer: BUILD_LAYER.to_string(),
+            path: rel.to_path_buf(),
+            lines,
+        })
+    }
+
+    /// The absolute path a pointer refers to. `None` for an unknown layer or a path that is
+    /// absolute or contains `..`.
+    pub fn abs_path(&self, loc: &Loc) -> Option<PathBuf> {
+        let ok = loc
+            .path
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+        if !ok {
+            return None;
+        }
+        let root = match self.layer(&loc.layer) {
+            Some(l) => &l.root,
+            None if loc.layer == BUILD_LAYER => self.build_dir.as_ref()?,
+            None => return None,
+        };
+        Some(root.join(&loc.path))
     }
 
     /// Confinement check: resolves symlinks and requires the result to be inside a layer
     /// root or the build directory. Every file access goes through this.
+    ///
+    /// The path need not exist (scaffold checks files it is about to create): the longest
+    /// existing prefix is resolved through the filesystem and the rest lexically. A relative
+    /// path is taken relative to the process working directory. Returns the resolved path.
     pub fn confine(&self, path: &Path) -> Result<PathBuf> {
-        Err(Error::Confined {
+        let denied = || Error::Confined {
             path: path.to_path_buf(),
-        })
+        };
+        let resolved = resolve_existing(path).map_err(|_| denied())?;
+        let inside = self
+            .layers
+            .iter()
+            .map(|l| &l.root)
+            .chain(self.build_dir.as_ref())
+            .any(|root| resolved.starts_with(root));
+        if inside { Ok(resolved) } else { Err(denied()) }
     }
 
     /// Looks up a layer by name.
     pub fn layer(&self, name: &str) -> Option<&Layer> {
         self.layers.iter().find(|l| l.name == name)
+    }
+}
+
+/// Makes names unique: the directory name, extended with parent directories
+/// (`poky/meta`, `other/meta`) for as long as two layers share one.
+fn assign_names(layers: &mut [Layer]) {
+    let comps: Vec<Vec<String>> = layers
+        .iter()
+        .map(|l| {
+            l.root
+                .components()
+                .filter_map(|c| match c {
+                    Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .collect();
+    let mut depth = vec![1usize; layers.len()];
+    let name_of = |i: usize, d: usize| -> String {
+        let c = &comps[i];
+        let start = c.len().saturating_sub(d);
+        c[start..].join("/")
+    };
+    loop {
+        let names: Vec<String> = (0..layers.len()).map(|i| name_of(i, depth[i])).collect();
+        let mut changed = false;
+        for i in 0..layers.len() {
+            let clash = (0..layers.len()).any(|j| j != i && names[j] == names[i]);
+            if clash && depth[i] < comps[i].len() {
+                depth[i] += 1;
+                changed = true;
+            }
+        }
+        if !changed {
+            for (i, l) in layers.iter_mut().enumerate() {
+                l.name = names[i].clone();
+            }
+            return;
+        }
+    }
+}
+
+fn absolute(p: &Path) -> Result<PathBuf> {
+    if p.is_absolute() {
+        Ok(p.to_path_buf())
+    } else {
+        Ok(std::env::current_dir()?.join(p))
+    }
+}
+
+fn canonical(p: &Path, what: &str) -> Result<PathBuf> {
+    fs::canonicalize(p).map_err(|e| Error::Config {
+        msg: format!("{what} {}: {e}", p.display()),
+    })
+}
+
+/// Lexical normalisation: drops `.`, applies `..` to the preceding component.
+fn normalize(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Resolves `path` as the OS would: each existing prefix is canonicalised (so symlinks and
+/// `..` after a symlink behave as on disk); components past the first missing one are
+/// applied lexically.
+fn resolve_existing(path: &Path) -> std::io::Result<PathBuf> {
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut cur = PathBuf::new();
+    let mut exists = true;
+    for c in abs.components() {
+        match c {
+            Component::Prefix(_) | Component::RootDir => cur.push(c),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                cur.pop();
+            }
+            Component::Normal(name) => {
+                cur.push(name);
+                if exists {
+                    match fs::canonicalize(&cur) {
+                        Ok(real) => cur = real,
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                            // A dangling symlink is not "missing": refuse it.
+                            if fs::symlink_metadata(&cur).is_ok() {
+                                return Err(e);
+                            }
+                            exists = false;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+        }
+    }
+    Ok(cur)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn layer(root: &str) -> Layer {
+        Layer {
+            name: String::new(),
+            root: PathBuf::from(root),
+            collections: vec![],
+            priority: 0,
+            compat: vec![],
+            depends: vec![],
+            bbfiles: vec![],
+            writable: false,
+        }
+    }
+
+    #[test]
+    fn names_are_disambiguated_with_parents() {
+        let mut ls = vec![
+            layer("/src/poky/meta"),
+            layer("/src/other/meta"),
+            layer("/src/poky/meta-poky"),
+            layer("/a/x/meta-y"),
+            layer("/b/x/meta-y"),
+        ];
+        assign_names(&mut ls);
+        let names: Vec<_> = ls.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "poky/meta",
+                "other/meta",
+                "meta-poky",
+                "a/x/meta-y",
+                "b/x/meta-y"
+            ]
+        );
+    }
+
+    #[test]
+    fn normalize_is_lexical() {
+        assert_eq!(
+            normalize(Path::new("/a/b/../c/./d")),
+            PathBuf::from("/a/c/d")
+        );
     }
 }
