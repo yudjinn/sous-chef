@@ -1066,6 +1066,14 @@ timeout. `org/upstream-edit` and the audit both use it (`audit::git` is gone;
 `order` rows of `layers show=compat`. The audit calls it instead of reading those rows
 back from the view's JSON (it still reads `layers show=appends` that way).
 
+`BBFILES_DYNAMIC` (w7): `workspace::layers::read_bbfiles_dynamic(build_dir, roots) ->
+Result<Vec<DynamicWord>>` (`DynamicWord { word, layer: Option<usize> }`) reads the value with
+discovery's datastore (includes, overrides, every operator); `resolve::bbfiles_dynamic` uses
+it. A word without `:` (or with an empty collection) is BitBake's fatal error and an
+`Error::Config` from discovery (`read_layer_confs*`), with BitBake's message. Words that
+cannot be decided statically are `Collection::unusable`, said by `layers show=appends` and
+the audit's structure notes.
+
 ## Errors
 
 `error::Error` (thiserror) with variants `Io(io::Error)`, `Sqlite(rusqlite::Error)`,

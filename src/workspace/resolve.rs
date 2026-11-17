@@ -573,85 +573,28 @@ fn expand_bbfiles_word(ws: &Workspace, g: &str) -> Vec<PathBuf> {
     matched
 }
 
-/// The `BBFILES_DYNAMIC` entries of the layers' `conf/layer.conf` files, in `BBLAYERS`
-/// order, and the words that cannot be used.
+/// The `BBFILES_DYNAMIC` entries of the layers, in the order of the value, and the words
+/// that cannot be used.
 ///
 /// BitBake (2.18.0 `lib/bb/cookerdata.py` `CookerDataBuilder.parseConfigurationFiles`; the
 /// same code on branch `2.0`) reads `BBFILES_DYNAMIC` once every layer.conf has been parsed
 /// (each layer's `${LAYERDIR}` was replaced in every variable right after its file,
 /// `expandVarref('LAYERDIR')`), splits it on whitespace, splits each word on its first `:`
 /// (no `:` is fatal), and a leading `!` inverts the test; the glob is appended to `BBFILES`
-/// when the collection is in `BBFILE_COLLECTIONS` (absent, inverted). Here each layer.conf
-/// is parsed and its assignments to `BBFILES_DYNAMIC` applied in order (`=` / `:=` replace,
-/// `?=` / `??=` only while unset, `+=` / `.=` add at the end, `=+` / `=.` at the start;
-/// `:append` / `:prepend` after all of them, `:remove` drops words); `include` /
-/// `require` in a layer.conf and conditional (override) assignments are not followed. A
-/// word with `${...}` other than `${LAYERDIR}` cannot be expanded and is left out (listed
-/// as unusable).
+/// when the collection is in `BBFILE_COLLECTIONS` (absent, inverted). The value is the one
+/// [`layers::read_bbfiles_dynamic`] reads with discovery's datastore: assignments in files a
+/// layer.conf includes, under overrides, `:append` / `:prepend` / `:remove`, every operator.
+/// A word BitBake stops on makes discovery fail (`Error::Config`, BitBake's message); if the
+/// layer confs changed since and one appears here, the words are all listed as unusable.
+/// A word holding python (`${@...}`), or whose collection or glob still holds a `${...}`
+/// (expanded later by BitBake, with the whole configuration), cannot be decided statically
+/// and is listed as unusable.
 pub fn bbfiles_dynamic(ws: &Workspace) -> (Vec<DynamicEntry>, Vec<String>) {
-    use crate::parse::StatementKind;
-    use crate::types::AssignOp;
-    const LAYERDIR_REF: &str = "${LAYERDIR}";
-    // (word, layer that wrote it)
-    let mut words: Option<Vec<(String, String)>> = None;
-    let mut removes: Vec<String> = Vec::new();
-    let mut appends: Vec<(String, String)> = Vec::new();
-    let mut prepends: Vec<(String, String)> = Vec::new();
-    for l in &ws.layers {
-        let Ok(text) = fs::read(l.root.join("conf/layer.conf")) else {
-            continue;
-        };
-        let root = l.root.to_string_lossy();
-        let parsed = crate::parse::parse_bytes(&text);
-        for st in &parsed.statements {
-            let StatementKind::Assign { var, op, value, .. } = &st.kind else {
-                continue;
-            };
-            if var.base != "BBFILES_DYNAMIC" || var.flag.is_some() || var.legacy_syntax {
-                continue;
-            }
-            let new: Vec<(String, String)> = crate::parse::words::words(value)
-                .into_iter()
-                .map(|w| (w.replace(LAYERDIR_REF, &root), l.name.clone()))
-                .collect();
-            match var.overrides.as_slice() {
-                [] => {}
-                [k] if k == "append" => {
-                    appends.extend(new);
-                    continue;
-                }
-                [k] if k == "prepend" => {
-                    let mut n = new;
-                    n.append(&mut prepends);
-                    prepends = n;
-                    continue;
-                }
-                [k] if k == "remove" => {
-                    removes.extend(new.into_iter().map(|(w, _)| w));
-                    continue;
-                }
-                _ => continue,
-            }
-            let cur = words.get_or_insert_with(Vec::new);
-            match op {
-                AssignOp::Set | AssignOp::Immediate => *cur = new,
-                AssignOp::Default | AssignOp::WeakDefault => {
-                    if cur.is_empty() {
-                        *cur = new;
-                    }
-                }
-                AssignOp::Append | AssignOp::AppendDot => cur.extend(new),
-                AssignOp::Prepend | AssignOp::PrependDot => {
-                    let mut n = new;
-                    n.append(cur);
-                    *cur = n;
-                }
-            }
-        }
-    }
-    let mut all = prepends;
-    all.extend(words.unwrap_or_default());
-    all.extend(appends);
+    let roots: Vec<PathBuf> = ws.layers.iter().map(|l| l.root.clone()).collect();
+    let words = match layers::read_bbfiles_dynamic(ws.build_dir.as_deref(), &roots) {
+        Ok(w) => w,
+        Err(e) => return (Vec::new(), vec![e.to_string()]),
+    };
     let collections: HashSet<&str> = ws
         .layers
         .iter()
@@ -659,20 +602,25 @@ pub fn bbfiles_dynamic(ws: &Workspace) -> (Vec<DynamicEntry>, Vec<String>) {
         .collect();
     let mut out = Vec::new();
     let mut unusable = Vec::new();
-    for (word, layer) in all {
-        if removes.contains(&word) {
-            continue;
-        }
-        let Some((coll, pattern)) = word.split_once(':') else {
-            unusable.push(word);
+    for w in words {
+        let layer = w
+            .layer
+            .and_then(|i| ws.layers.get(i))
+            .map_or_else(|| super::BUILD_LAYER.to_string(), |l| l.name.clone());
+        let Some((coll, pattern)) = w.word.split_once(':') else {
+            unusable.push(w.word);
             continue;
         };
         let (collection, invert) = match coll.strip_prefix('!') {
             Some(c) => (c, true),
             None => (coll, false),
         };
-        if collection.is_empty() || pattern.contains("${") || collection.contains("${") {
-            unusable.push(word);
+        if w.word.contains("${@")
+            || collection.is_empty()
+            || pattern.contains("${")
+            || collection.contains("${")
+        {
+            unusable.push(w.word.clone());
             continue;
         }
         out.push(DynamicEntry {

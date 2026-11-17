@@ -1419,6 +1419,13 @@ fn structure(
         .iter()
         .map(|f| format!("{}:{}", f.layer, f.path.display()))
         .collect();
+    let (_, unusable) = crate::workspace::resolve::bbfiles_dynamic(ws);
+    if !unusable.is_empty() {
+        notes.push(format!(
+            "BBFILES_DYNAMIC words sous-chef cannot decide statically (python, or a variable set later) are left out, so the bbappends they would collect are not listed: {}",
+            unusable.join(" ")
+        ));
+    }
     let mut appends_not_collected = Vec::new();
     match &views.appends {
         Ok(t) => {

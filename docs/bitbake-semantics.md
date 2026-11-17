@@ -629,12 +629,21 @@ any other `BBFILES` glob. The first release with `BBFILES_DYNAMIC` is BitBake 1.
 (Kirkstone), so every supported release has them and no `Feature` gates them. A word with
 an empty collection (`:glob`) makes `l[0]` raise in BitBake. sous-chef (w6,
 `resolve::collect` / `resolve::bbfiles_dynamic`, used by `resolve::recipe_files` and so by
-the index): each layer's `conf/layer.conf` is parsed and its `BBFILES_DYNAMIC` assignments
-applied in order (`${LAYERDIR}` replaced by that layer's root, as `expandVarref` does after
-each file; `=` replaces, `+=` adds, `:append` / `:prepend` / `:remove` after all; no
-`include` in a layer.conf, no conditional assignment followed); an active entry's glob is
-added to the globs, sorted by its layer's priority like the static ones; a malformed word or
-one with another `${...}` is left out. The index marks a file only an inactive entry matches
+the index): the value is read from the datastore discovery builds when it reads the layer
+confs (`workspace::layers::read_bbfiles_dynamic`, w7: `bblayers.conf`, then each
+`layer.conf` in `BBLAYERS` order with the files it includes, `${LAYERDIR}` replaced after
+each file as `expandVarref` does, every operator, override-qualified names and
+`:append` / `:prepend` / `:remove` with their conditions, as the `OVERRIDES` known at that
+point select them), so it is the value BitBake sees after all layer confs; each word is
+attributed to the layer after whose `layer.conf` it first appeared. An active entry's glob
+is added to the globs, sorted by that layer's priority like the static ones. A word without
+`:` is BitBake's fatal error and makes discovery fail with BitBake's message ("BBFILES_DYNAMIC
+entries must be of the form {!}<collection name>:<filename pattern>, not:" and the words,
+one per line, plus the files that set them), so `status` shows it as the startup error and
+`audit` stops on it; a word with an empty collection name fails discovery too. A word holding
+python (`${@...}`), or whose collection or glob still holds a `${...}` (BitBake expands
+`BBFILES` again later with the whole configuration), is left out and listed: `layers
+show=appends` and the audit report's layer-structure notes name it. The index marks a file only an inactive entry matches
 `files.not_collected = 'dynamic'`; an active entry's files get `bbappend` edges, are
 evaluated with their recipe, linted, and `org/append-no-match` sees a dangling one.
 `layers show=appends` reads the index.

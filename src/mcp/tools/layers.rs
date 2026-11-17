@@ -504,6 +504,13 @@ fn appends(index: &Index, ws: &Workspace) -> Result<Table> {
             }
         ));
     }
+    if !collection.unusable.is_empty() {
+        t.note(&format!(
+            "note: BBFILES_DYNAMIC words sous-chef cannot decide statically (python, or a \
+             variable set later), left out: {}",
+            collection.unusable.join(" ")
+        ));
+    }
     if uncollected > 0 {
         t.note(&format!(
             "note: {uncollected} {} not collected by BBFILES or BBFILES_DYNAMIC: BitBake never \

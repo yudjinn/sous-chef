@@ -521,7 +521,8 @@ note: global class: ranked as INHERIT finds it (classes-global/, then classes/)
   `not collected (dynamic layer `<name>` not present)` (or `(BBFILES_DYNAMIC `!<name>`:
   layer `<name>` is present)`); one `BBMASK` masks is `not collected (masked by BBMASK)`;
   one no glob matches, `not collected (no BBFILES glob)`. A note counts the bbappends
-  BitBake never reads.
+  BitBake never reads; another lists the `BBFILES_DYNAMIC` words sous-chef cannot decide
+  statically (python, or a variable set later), which are left out.
 - `"compat"`: rows `layer check result detail loc`, per layer in `BBLAYERS` order. First a
   `compat` row: what `LAYERSERIES_COMPAT_<c>` claims against the workspace release and the
   core layer's `LAYERSERIES_CORENAMES` (`result` `ok`, or the worst severity of the
