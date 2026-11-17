@@ -176,6 +176,8 @@ struct Patterns {
     make: Regex,
     fetch_url: Regex,
     fetch_repr: Regex,
+    fetch_cmd: Regex,
+    download_cause: Regex,
     patch: Regex,
     qa: Regex,
     py_bb_start: Regex,
@@ -206,6 +208,18 @@ impl Patterns {
             fetch_url: Regex::new(r"Fetcher failure for URL: '([^']*)'\. (.*)$")?,
             fetch_repr: Regex::new(
                 r"Bitbake Fetcher Error: (\w+)\('((?:[^'\\]|\\.)*)', '([^']*)'\)",
+            )?,
+            // `FetchError` from `runfetchcmd` (`fetch2/__init__.py`), as `base_do_fetch`
+            // logs it: the full command, its environment exports included, then the code.
+            fetch_cmd: Regex::new(
+                r"^ERROR: Fetcher failure: Fetch command (.*) failed with exit code (\d+)",
+            )?,
+            // The downloader's own statement of the cause, logged as plain output after the
+            // `DEBUG: Running ...` (or `failed ..., output:`) line: wget's `wget: ...` and
+            // `<date> <time> ERROR <code>: <reason>.`, curl's `curl: (<n>) ...`, git's
+            // `fatal: ...`.
+            download_cause: Regex::new(
+                r"^(?:wget: .+|\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ERROR \d+: .+|curl: \(\d+\) .+|fatal: .+)$",
             )?,
             patch: Regex::new(r"^ERROR: (?:Applying|Importing) patch '([^']+)'")?,
             qa: Regex::new(r"^ERROR: QA Issue: (.*?)(?: \[([A-Za-z0-9_-]+)\])?$")?,
@@ -292,6 +306,38 @@ fn is_consequence(msg: &str) -> bool {
     PREFIXES.iter().any(|p| msg.starts_with(p))
 }
 
+/// The program a fetch command runs: the word after `/usr/bin/env ` (OE-core's
+/// `FETCHCMD_wget = "/usr/bin/env wget ..."`), else the first word after the last `;` (the
+/// `export ...;` prefixes `runfetchcmd` adds).
+fn downloader(command: &str) -> String {
+    let after_env = match command.split_once("/usr/bin/env ") {
+        Some((_, rest)) => rest,
+        None => command.rsplit(';').next().unwrap_or(command),
+    };
+    after_env
+        .split_whitespace()
+        .next()
+        .map(|w| w.rsplit('/').next().unwrap_or(w).to_string())
+        .unwrap_or_else(|| "the fetch command".to_string())
+}
+
+/// The downloader's own error lines in a log (wget, curl, git; see `download_cause`), in
+/// order, without repeats: `(1-based line, text)`.
+pub fn download_causes(text: &str) -> Vec<(u32, String)> {
+    let Some(p) = PATTERNS.as_ref() else {
+        return Vec::new();
+    };
+    let mut out: Vec<(u32, String)> = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let cleaned = clean_line(p, raw).0;
+        let line = cleaned.trim();
+        if p.download_cause.is_match(line) && !out.iter().any(|(_, l)| l == line) {
+            out.push((lno(i), line.to_string()));
+        }
+    }
+    out
+}
+
 /// Matches the line at `i`. Returns the failure, if any, and the index of the next line
 /// to look at (blocks such as a python traceback are consumed whole).
 fn match_line(p: &Patterns, lines: &[String], i: usize) -> (Option<Failure>, usize) {
@@ -366,6 +412,21 @@ fn match_line(p: &Patterns, lines: &[String], i: usize) -> (Option<Failure>, usi
             span(lines, i, i + 2),
             &c[2],
             Some(c[1].to_string()),
+        );
+        return (Some(f), next);
+    }
+
+    if let Some(c) = p.fetch_cmd.captures(line) {
+        // The command (with the environment it exported) is long and says nothing that the
+        // URL and the downloader's own error line do not: keep the program and the code.
+        let program = downloader(&c[1]);
+        let f = failure(
+            FailureKind::Fetch,
+            Rank::Consequence,
+            i,
+            span(lines, i, i),
+            &format!("Fetcher failure: {program} failed with exit code {}", &c[2]),
+            Some(program),
         );
         return (Some(f), next);
     }
@@ -929,6 +990,12 @@ pub struct Digest {
     pub meta: LogMeta,
     pub log: Option<String>,
     pub first: Option<DigestError>,
+    /// For a fetch failure: the downloader's first error line (`wget: unable to resolve host
+    /// address ...`, `... ERROR 404: Not Found.`), which states the cause, with its line.
+    pub cause: Option<(u32, String)>,
+    /// How many other distinct downloader error lines the log has (mirrors tried after the
+    /// upstream URL).
+    pub more_causes: usize,
     /// Other distinct errors that are not consequences of the first.
     pub more: usize,
     pub function: Option<FailingFunction>,
@@ -969,10 +1036,19 @@ pub fn digest(input: &DigestInput<'_>) -> Digest {
         .as_ref()
         .and_then(|f| f.source.as_ref())
         .map(|(file, line)| pointer_or_path(input.ws, file, *line));
+    let mut causes = if first.as_ref().is_some_and(|e| e.kind == FailureKind::Fetch) {
+        download_causes(input.text)
+    } else {
+        Vec::new()
+    };
+    let more_causes = causes.len().saturating_sub(1);
+    let cause = (!causes.is_empty()).then(|| causes.swap_remove(0));
     Digest {
         meta,
         log: input.log_path.map(|p| display_path(input.ws, p)),
         first,
+        cause,
+        more_causes,
         more,
         function,
         function_at,
@@ -1025,6 +1101,13 @@ fn context_lines(f: &Failure, lines: &[&str], ws: Option<&Workspace>) -> Vec<Str
             .filter(|&n| n != f.line)
             .filter_map(get)
             .filter(|l| !l.starts_with("configure: error: in `"))
+            .collect(),
+        // The fetch command line before `FetchError` is the whole command with its
+        // environment; the cause row says what matters.
+        FailureKind::Fetch => range
+            .filter(|&n| n != f.line)
+            .filter_map(get)
+            .filter(|l| !l.starts_with("ERROR: Fetcher failure: Fetch command "))
             .collect(),
         _ => range.filter(|&n| n != f.line).filter_map(get).collect(),
     };
@@ -1087,6 +1170,13 @@ impl Digest {
                     if !matches!(e.kind, FailureKind::Python | FailureKind::Patch) {
                         t.row(&[field, &render::snippet(d)]);
                     }
+                }
+                if let Some((line, c)) = &self.cause {
+                    let mut v = render::snippet(c);
+                    if self.more_causes > 0 {
+                        v.push_str(&format!(" (+{} more download errors)", self.more_causes));
+                    }
+                    t.row(&[&format!("cause (line {line})"), &v]);
                 }
                 for c in e.context.iter().take(context_rows) {
                     t.row(&["context", c]);
@@ -1236,6 +1326,30 @@ pub fn failed_tasks(output: &str) -> Vec<FailedTask> {
         }
     }
     out
+}
+
+/// The exit status BitBake reported on the console for the task whose log is `log`: the
+/// `ERROR: Task (<file>:<task>) failed with exit code 'N'` that follows `Logfile of failure
+/// stored in: <log>` ([`failed_tasks`]). A task log does not carry it (`bb.runqueue`
+/// prints it on the console only). Paths are compared by their last five components
+/// (`<arch>/<pn>/<version>/temp/log.do_<task>.<pid>`), since the console may print them
+/// through another route (`build/../`).
+pub fn exit_from_console(output: &str, log: &Path) -> Option<i32> {
+    let tail = |p: &Path| -> Vec<String> {
+        let mut v: Vec<String> = p
+            .components()
+            .rev()
+            .take(5)
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        v.reverse();
+        v
+    };
+    let want = tail(log);
+    failed_tasks(output)
+        .into_iter()
+        .find(|t| t.log.as_deref().is_some_and(|l| tail(l) == want))
+        .and_then(|t| t.exit_code)
 }
 
 /// `compile` or `do_compile` -> `do_compile`. Task and recipe names may hold only
@@ -1432,11 +1546,11 @@ pub async fn t_dir_from_bitbake(env: &BbEnv, recipe: &str) -> Result<PathBuf> {
 ///
 /// A definition in the recipe or one of its bbappends is preferred to one in an included
 /// file or a class (the class default is what the recipe overrides); within each group the
-/// last one in parse order wins. Static resolution only: `None` when the index has no such
+/// last one in parse order wins. The global classes (`base`, static `INHERIT` words) count
+/// as included first, so `do_fetch` of a recipe that keeps it finds `base_do_fetch`. Static resolution only: `None` when the index has no such
 /// recipe or no function of that name.
 pub fn task_definition(index: &Index, ws: &Workspace, recipe: &str, task: &str) -> Option<Loc> {
     use crate::index::query;
-    let _ = ws;
     let row = query::preferred_recipe(index, recipe, None).ok()??;
     let mut own: Vec<i64> = vec![row.file.id];
     own.extend(
@@ -1448,6 +1562,21 @@ pub fn task_definition(index: &Index, ws: &Workspace, recipe: &str, task: &str) 
     // Included and inherited files, with the name a class gives its default for the task
     // (`EXPORT_FUNCTIONS`: `<class>_<task>`).
     let mut pulled: Vec<(i64, Option<String>)> = Vec::new();
+    // The global classes come first: BitBake inherits `base` and every `INHERIT` class
+    // before it parses the recipe (`BBHandler`, "Configuration order" in
+    // bitbake-semantics.md), and `base.bbclass` is where `do_fetch`, `do_unpack`,
+    // `do_configure`, `do_compile`, `do_install` ... have their defaults (`base_do_<task>`,
+    // `EXPORT_FUNCTIONS`). Without them a recipe that keeps the default task had no pointer.
+    for class in global_classes(index) {
+        let Ok(files) = query::class_files(index, ws, &class, true) else {
+            continue;
+        };
+        if let Some(f) = files.into_iter().find(|c| c.rank.is_some()).map(|c| c.file)
+            && !pulled.iter().any(|(id, _)| *id == f.id)
+        {
+            pulled.push((f.id, Some(format!("{class}_{task}"))));
+        }
+    }
     for root in &own {
         for node in query::tree(index, *root).ok()? {
             if let Some(f) = node.file
@@ -1479,6 +1608,28 @@ pub fn task_definition(index: &Index, ws: &Workspace, recipe: &str, task: &str) 
                 .rev()
                 .find_map(|(id, class_default)| function(*id, class_default.as_deref()?))
         })
+}
+
+/// `base` and the words of every static `INHERIT` assignment in a `.conf` of the index
+/// (words with `${` left out), without repeats, `base` first.
+fn global_classes(index: &Index) -> Vec<String> {
+    use crate::index::query;
+    let mut out = vec!["base".to_string()];
+    let scope = query::StatementFilter {
+        kinds: vec!["assign".into()],
+        ..query::StatementFilter::default()
+    };
+    for s in query::statements_by_base(index, "INHERIT", &scope).unwrap_or_default() {
+        if s.flag.is_some() || s.loc.path.extension().is_none_or(|e| e != "conf") {
+            continue;
+        }
+        for w in s.value.as_deref().unwrap_or("").split_whitespace() {
+            if !w.contains("${") && !out.iter().any(|o| o == w) {
+                out.push(w.to_string());
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]

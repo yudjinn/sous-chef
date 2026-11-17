@@ -7,23 +7,26 @@
 //! - **Directory** (info): `<dir>` holds recipes of only this `PN` and is neither the `PN`
 //!   nor a prefix of it (`linux/linux-foo_6.6.bb` and `u-boot/u-boot-foo_*.bb` are the usual
 //!   BSP layout and are not reported). Directories that group several recipes (`images/`,
-//!   `packagegroups/`) hold several `PN`s and are not reported either.
+//!   `packagegroups/`) hold several `PN`s and are not reported either, and neither is an
+//!   image recipe in `images/` or a packagegroup in `packagegroups/` when it is the only
+//!   one there: that is OE-core's layout (`recipes-core/images/`,
+//!   `recipes-core/packagegroups/`), the directory names the kind, not the recipe.
 //! - **File name**: more than one `_` (warning: BitBake splits the name into `PN`, `PV` and
 //!   `PR`, `bb.parse.vars_from_file`); no `_<pv>` at all (info, `PV` then defaults to `1.0`),
-//!   except for `packagegroup-*` recipes and recipes that inherit `image`, `core-image` or
-//!   `packagegroup` directly, which are conventionally unversioned.
+//!   except for `packagegroup-*` recipes and recipes whose static tree inherits an image class
+//!   ([`helpers::image_class`]: `image`, `core-image`, `*-image`) or `packagegroup`, which
+//!   are conventionally unversioned.
 //! - **PN** (warning): upper-case letters (OE-core's `uppercase-pn` QA check).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path};
 
 use crate::index::query;
+use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::types::{FileKind, LineSpan};
 
 pub struct OrgRecipePath;
-
-const UNVERSIONED_CLASSES: &[&str] = &["image", "core-image", "packagegroup"];
 
 fn components(p: &Path) -> Vec<String> {
     p.components()
@@ -34,23 +37,42 @@ fn components(p: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Whether the recipe inherits a class that is conventionally unversioned.
-fn unversioned_kind(cx: &LintContext<'_>, file: &query::FileRow) -> bool {
-    let scope = query::StatementFilter {
-        kinds: vec!["inherit".into()],
-        ..query::StatementFilter::default()
-    };
-    query::statements_in(cx.index, file.id, &scope)
-        .map(|s| {
-            s.iter().any(|s| {
-                s.name
-                    .as_deref()
-                    .unwrap_or("")
-                    .split_whitespace()
-                    .any(|w| UNVERSIONED_CLASSES.contains(&w))
-            })
+/// A recipe kind that is conventionally unversioned and kept in a directory named after
+/// the kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Image,
+    Packagegroup,
+    Other,
+}
+
+/// The recipe's kind from the classes its static tree inherits ([`query::tree`]: its own
+/// `inherit` lines and those of the files it requires, so `core-image-minimal-dev.bb`,
+/// which only `require`s `core-image-minimal.bb`, is an image), and a `packagegroup-` name.
+fn recipe_kind(cx: &LintContext<'_>, file: &query::FileRow, pn: &str) -> Kind {
+    let inherits: Vec<String> = query::tree(cx.index, file.id)
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter(|n| n.kind == "inherit")
+                .map(|n| match &n.file {
+                    Some(f) => f
+                        .path
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    None => n.target_text.clone(),
+                })
+                .collect()
         })
-        .unwrap_or(false)
+        .unwrap_or_default();
+    if inherits.iter().any(|c| helpers::image_class(c)) {
+        Kind::Image
+    } else if pn.starts_with("packagegroup-") || inherits.iter().any(|c| c == "packagegroup") {
+        Kind::Packagegroup
+    } else {
+        Kind::Other
+    }
 }
 
 impl Rule for OrgRecipePath {
@@ -93,6 +115,7 @@ impl Rule for OrgRecipePath {
             let stem = file_name.strip_suffix(".bb").unwrap_or(file_name);
             let parts: Vec<&str> = stem.split('_').collect();
             let pn = parts.first().copied().unwrap_or(stem);
+            let kind = recipe_kind(cx, f, pn);
             let mut push = |severity: Severity, message: String| {
                 out.push(Finding {
                     rule: self.id(),
@@ -118,7 +141,11 @@ impl Rule for OrgRecipePath {
                     .parent()
                     .and_then(|d| by_dir.get(d))
                     .is_some_and(|pns| pns.len() == 1);
-                if only_this && dir != pn && !pn.starts_with(&format!("{dir}-")) {
+                let kind_dir = matches!(
+                    (kind, dir),
+                    (Kind::Image, "images") | (Kind::Packagegroup, "packagegroups")
+                );
+                if only_this && !kind_dir && dir != pn && !pn.starts_with(&format!("{dir}-")) {
                     push(
                         Severity::Info,
                         format!(
@@ -143,10 +170,7 @@ impl Rule for OrgRecipePath {
                         parts[0], parts[1]
                     ),
                 );
-            } else if parts.len() == 1
-                && !pn.starts_with("packagegroup-")
-                && !unversioned_kind(cx, f)
-            {
+            } else if parts.len() == 1 && kind == Kind::Other {
                 push(
                     Severity::Info,
                     format!(

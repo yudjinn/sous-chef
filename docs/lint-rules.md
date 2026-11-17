@@ -74,16 +74,16 @@ workspace). Findings hidden by `--severity` never fail the run.
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
 | `override/legacy-syntax` | E | file | Underscore override syntax: a name the parser marks legacy (`VAR_append`, `VAR_remove`, `RDEPENDS_${PN}`, a package variable followed by `_<lowercase package>`), or `VAR_<o>` whose trailing `_` elements are all machine or distro names of the workspace, known `class-*` overrides or `pn-<name>`. Never flags `do_install`, the per-collection `layer.conf` names, `PREFERRED_*`, `SRCREV_<name>` or a suffix that is a collection name. Misses `VAR_<machine>` when that machine has no `.conf` in the workspace. |
-| `override/append-no-space` | W | file | `:append` value without a leading space, or `:prepend` without a trailing space, on a variable known to be a space-separated list. Not flagged: colon lists (`FILESEXTRAPATHS`), scalars, flags and unknown variables; values starting with `${@`; `+=` / `=+` on an `:append` / `:prepend` name (they add the space); function bodies. |
+| `override/append-no-space` | W | file | `:append` value without a leading space, or `:prepend` without a trailing space, on a variable known to be a space-separated list. Not flagged: colon lists (`FILESEXTRAPATHS`), scalars, flags and unknown variables; values starting with `${@`, and a `:prepend` value ending in python; a value starting (`:append`) or ending (`:prepend`) with `${NAME}`, unless the file itself gives `NAME` a non-empty literal value without the space; `+=` / `=+` on an `:append` / `:prepend` name (they add the space); function bodies. |
 | `override/plus-equals-with-override` | W | file | `VAR:foo += "x"` (and `=+`, `.=`, `=.`): this builds the variable `VAR:foo`, which replaces `VAR` when `foo` is active, rather than appending to `VAR`. Suggests `VAR:append:foo`. Not flagged: the package override of a package-scoped variable (`FILES:${PN} +=`, `RDEPENDS:libfoo +=`), overrides containing `${` or not starting with `[a-z0-9]`, names with `:append` / `:prepend` / `:remove`. A condition after the package is flagged (`RDEPENDS:${PN}:qemux86 +=`). |
 | `override/remove-in-recipe` | W/I | file | `:remove` (not on a flag). Warning in a `.bb`, `.inc` or `.bbclass`: it is applied last, so no bbappend or conf can add the item back. Info in a `.bbappend`, a `.conf`, or an `.inc` under a `conf/` directory (configuration), where it is the usual tool. |
 | `override/dead` | W/I | recipe | An override element of an inactive operation in the recipe's own files (the `.bb`, its `.inc` files, its bbappends) that is no entry of the recipe's `OVERRIDES`, no machine, distro, class or declared override of the workspace, and no word of any `*OVERRIDES` assignment. Suggests the closest known name. Info instead of warning when the override list is only partly known. Never checks package names, `${...}` elements or legacy names. |
-| `override/shadowed` | I | recipe | A `NAME =` / `NAME :=` in the recipe's own files that the evaluation marks shadowed, when a later `=` / `:=` of exactly the same name follows. Not flagged: functions; a later assignment in a bbappend other than the earlier one's; any `NAME` that something in the tree could read first (a `:=` mentioning it, an `inherit` / `include` / `require` with `${NAME}`). |
+| `override/shadowed` | I | recipe | A `NAME =` / `NAME :=` in the recipe's own files that the evaluation marks shadowed, when a later `=` / `:=` of exactly the same name follows. Not flagged: functions; a later assignment in a bbappend other than the earlier one's; any `NAME` that something in the tree could read first (a `:=` mentioning it, an `inherit` / `include` / `require` with `${NAME}`); an earlier assignment in a file that more than one recipe (or a class, `.conf` or bbappend) reaches through `require` / `include`, unless the later one is in that same file. |
 | `override/weak-after-default` | I | file | `??=` after a `=`, `:=` or `?=` of exactly the same name (overrides and flag included) earlier in the same file; an `unset` in between starts over. |
-| `override/missing-package` | E | file | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `ALLOW_EMPTY` and the `pkg_*` functions set without a package override (`:${PN}`), in recipes that produce packages. Also `VAR:append`, `VAR:append:<cond>` and a function `pkg_postinst()`. Not flagged: flags, `:remove` alone, legacy names (`override/legacy-syntax`). |
+| `override/missing-package` | E | file | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `ALLOW_EMPTY` and the `pkg_*` functions set to a value without a package override (`:${PN}`), in recipes that produce packages. Also `VAR:append`, `VAR:append:<cond>` and a function `pkg_postinst()`. Not flagged: an empty value (`FILES = ""`; but `+=` / `=+` store a space and are flagged), flags, `:remove` alone, legacy names (`override/legacy-syntax`), the classes `image` and `core-image`, a class that inherits one of them or itself empties `PACKAGES`. |
 | `override/append-vs-plus-equals` | I | file | An unconditional `VAR:append =` in a `.bb` after a plain `VAR =` / `VAR :=` in the same file, where `+=` (or `.=`) would do. Not flagged when a later statement of the file assigns `VAR` again or is an `inherit`, `require` or `include`, after an `unset VAR`, or outside `.bb` files (in bbappends and classes `:append` is usually right). |
 | `override/plus-equals-on-default` | W | file | `VAR +=` (and `=+`, `.=`, `=.`) on a plain name in a conf file, when a `?=` of the same name is parsed later and nothing gave `VAR` a value before: the default is lost. Suggest `:append`. Parse order comes from the evaluated configuration; nothing is reported when the order cannot be told. |
-| `override/filesextrapaths` | E | file | `FILESEXTRAPATHS` modified without `:prepend` / `:append`, without the trailing (`:prepend`) or leading (`:append`) colon, or without `:=` when the value uses `${THISDIR}`, `${FILE_DIRNAME}` or `${FILE}` outside the `.bb` itself. Not flagged: `:remove`, and a `?=` / `??=` in a `.conf` (the default's definition). |
+| `override/filesextrapaths` | E | file | `FILESEXTRAPATHS` replaced instead of extended (any operator but `=.` / `.=` without `:prepend` / `:append`; `=.` / `.=` on a conditional name or in a `.conf`), a prepend (`:prepend`, `=.`) without the trailing colon or an append (`:append`, `.=`) without the leading one, or no `:=` when the value uses `${THISDIR}`, `${FILE_DIRNAME}` or `${FILE}` outside the `.bb` itself and outside an `.inc` that only `.bb` files of its own directory include. Not flagged: `:remove`, a `?=` / `??=` in a `.conf` (the default's definition), and a value whose end in question is a `${NAME}` the file does not set to a literal value (python never). |
 
 Notes:
 
@@ -113,28 +113,44 @@ Notes:
 - **`shadowed`.** Conservative on purpose: any `:=` whose value mentions `NAME` (`${NAME}`
   or python), and any `inherit` or `include` / `require` whose argument mentions `${NAME}`,
   anywhere in the tree (classes included), keeps the assignment from being reported; their
-  order relative to the two assignments is not checked.
+  order relative to the two assignments is not checked. The rule runs on one recipe's
+  evaluation, so a shared file (an `.inc` several `.bb` files require, such as OE-core's
+  `u-boot-common.inc`, or a `.bb` another `.bb` requires, such as `buildtools-tarball.bb`)
+  is not judged from it: an assignment there is reported only when the assignment that
+  replaces it is in the same file, where it is replaced for every includer. Who reaches a
+  file comes from the index's resolved include edges; an include that needs evaluation is
+  not seen, and when the index cannot answer the file counts as shared.
 - **`missing-package`.** The variables are those of OE-core's `pkgvarcheck` QA check, which
   rejects them set without a package. That check runs only when `PACKAGES` is not empty, so
   a file is not reported when every recipe it belongs to statically has an empty
   `PACKAGES`: an unconditional `PACKAGES = ""`, or `inherit image` / `core-image`, and
   nothing that could give `PACKAGES` a value. Packagegroups are checked
-  (`packagegroup.bbclass` sets `PACKAGES = "${PN}"`). A file reached from a class or a
-  `.conf`, or from no recipe, keeps its findings.
+  (`packagegroup.bbclass` sets `PACKAGES = "${PN}"`). The check tests `if d.getVar(var,
+  False)`, so an empty value is never a finding. A class is exempt when it is `image` or
+  `core-image`, inherits one of them directly, or sets an unconditional `PACKAGES = ""` and
+  gives `PACKAGES` no other value (OE-core's `image.bbclass`: `PACKAGES = ""` then
+  `RDEPENDS +=`); other classes (a `*-image` name alone does not count), a file reached from
+  a class or a `.conf`, or from no recipe, keep their findings.
 - **`plus-equals-on-default`.** A `?=` in a recipe, bbappend, recipe class or
   non-configuration `.inc` is always parsed after every `.conf`; a `?=` later in the same
   file is after by line; between `.conf` files the order is the history of the evaluated
   configuration (no recipe). A `.conf` the configuration does not reach, compared with
   another such file, gives no finding.
 - **`filesextrapaths`.** In the `.bb` itself `${THISDIR}` still expands to the recipe's
-  directory at the end of parsing, so `=` is harmless there. Legacy names
-  (`FILESEXTRAPATHS_prepend`) are left to `override/legacy-syntax`.
+  directory at the end of parsing, so `=` is harmless there; the same holds in an `.inc`
+  that only recipes of its own directory reach through `require` / `include` (OE-core's
+  `clang/common.inc`, `gcc-15.3.inc`). `FILESEXTRAPATHS =. "${FILE_DIRNAME}/x:"` in a
+  recipe is correct (see "Files and patches" in bitbake-semantics.md for which forms keep
+  the list). A value ending (prepend) or starting (append) with `${NAME}` is reported only
+  when the file assigns `NAME` a literal value without the colon (`${THISDIR}`,
+  `${FILE_DIRNAME}`, `${FILE}` and `${LAYERDIR}` are paths and count as missing it). Legacy
+  names (`FILESEXTRAPATHS_prepend`) are left to `override/legacy-syntax`.
 
 ## Group `org` (task T4.3)
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `org/recipe-path` | W/I | layer | Recipe not at `recipes-<category>/<dir>/<file>.bb` (W); `<dir>` holds only this recipe and is neither its `PN` nor a prefix of it (I); file name with more than one `_` (W) or no `_<pv>` (I); upper-case letters in `PN` (W). Recipes under `dynamic-layers/` are skipped; the no-version check skips `packagegroup-*` and recipes that inherit `image`, `core-image` or `packagegroup` directly. |
+| `org/recipe-path` | W/I | layer | Recipe not at `recipes-<category>/<dir>/<file>.bb` (W); `<dir>` holds only this recipe and is neither its `PN` nor a prefix of it (I); file name with more than one `_` (W) or no `_<pv>` (I); upper-case letters in `PN` (W). Recipes under `dynamic-layers/` are skipped; the no-version check skips `packagegroup-*` and recipes whose static tree (their own lines and the files they require) inherits an image class (`image`, `core-image`, `*-image`) or `packagegroup`; the directory check skips such an image in `images/` and such a packagegroup in `packagegroups/`. |
 | `org/duplicate-versions` | I | layer | Two or more versions of a recipe whose statements are mostly identical (at least 60 percent of the longer one, and at least 3): suggest a shared `<pn>.inc`. Version data and `require` / `include` lines are left out of the comparison. Reported on the newest version. |
 | `org/inc-has-version-data` | W/I | file | An `.inc` that `.bb` files of two or more versions require or include directly sets `PV`, `SRCREV` / `SRCREV_<name>` (not with `AUTOREV`) or a `SRC_URI` checksum flag (W), or `LIC_FILES_CHKSUM` (I: fine while the license text is the same). Appending to `PV` is not flagged. |
 | `org/inc-unused` | I | layer | A `.inc` that no `require`, `include` or `include_all` of the workspace resolves to. An unresolved argument with `${...}` that could match the file name keeps it from being reported. |
@@ -157,8 +173,13 @@ Notes:
 
 - **`recipe-path`.** The pointer is line 1 of the recipe. Directories that hold several
   `PN`s (`images/`, `packagegroups/`) are not reported, nor is a directory whose name is a
-  prefix of the `PN` (`linux/linux-foo_6.6.bb`). A file name with more than one `_` makes
-  BitBake read `PN`, `PV` and `PR` from it (`bb.parse.vars_from_file`).
+  prefix of the `PN` (`linux/linux-foo_6.6.bb`), nor an image recipe alone in `images/` or
+  a packagegroup alone in `packagegroups/` (OE-core's `recipes-core/images/` layout; the
+  directory names the kind). An image recipe is one whose static tree inherits a class
+  `helpers::image_class` accepts, as for `hygiene/missing-metadata`
+  (`core-image-minimal-dev.bb` only requires `core-image-minimal.bb`). A file name with
+  more than one `_` makes BitBake read `PN`, `PV` and `PR` from it
+  (`bb.parse.vars_from_file`).
 - **`duplicate-versions`.** Statements are normalised (lines trimmed, blank and comment
   lines dropped, whitespace collapsed) and compared as a multiset. Left out: `require` and
   `include` lines, `PV`, `PR`, `PE`, `SRCREV*`, `LIC_FILES_CHKSUM` and `SRC_URI` checksum
@@ -224,10 +245,10 @@ Notes:
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `hygiene/missing-metadata` | W/I | recipe | No `SUMMARY` or `LICENSE`, or no `LIC_FILES_CHKSUM` when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (W, one finding); no `HOMEPAGE` (I). Configuration defaults do not count as set. Values that depend on python are not reported. |
+| `hygiene/missing-metadata` | W/I | recipe | No `SUMMARY` or `LICENSE`, or no `LIC_FILES_CHKSUM` when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (W, one finding); no `HOMEPAGE` (I) when the recipe has an upstream: a `SRC_URI` entry that is not `file://`, and not an image or a packagegroup. Configuration defaults do not count as set. Values that depend on python are not reported. |
 | `hygiene/autorev` | W | file | `SRCREV` or `SRCREV_<name>` (any operator or override, not a flag) whose value contains `${AUTOREV}`, outside `local.conf` and `auto.conf`. `SRCREV_FORMAT` is not checked. |
 | `hygiene/src-uri-checksum` | W | recipe | Remote download (`http`, `https`, `ftp`) in the evaluated `SRC_URI` without a checksum; `git://` / `gitsm://` URL without a revision, or without `branch=` (or `nobranch=1`) unless a `tag=` is given. Not reported when `SRC_URI` depends on python, or for an entry still containing `${` after expansion. |
-| `hygiene/host-path` | W | file | Absolute host paths (`/usr/lib`, `/etc`, `/home/...`) at the start of a word in `do_<task>` shell bodies, instead of `${D}`, `${S}`, `${bindir}` and friends; a `do_install` that never references `${D}` while running a command that writes files itself. Not scanned: other functions, comments, here-documents, the first word of a line, values after `=`; `/dev`, `/proc`, `/sys`, `/tmp` are never reported. |
+| `hygiene/host-path` | W | file | Absolute host paths (`/usr/lib`, `/etc`, `/home/...`) at the start of a word in `do_<task>` shell bodies, instead of `${D}`, `${S}`, `${bindir}` and friends; a `do_install` that never references `${D}` while running a command that writes files itself. Not scanned: other functions, comments, here-documents, the command word, values after `=`; `/dev`, `/proc`, `/sys`, `/tmp` are never reported. Data is not host access: the arguments of `echo`, `printf` and `bb*` messages, quoted arguments of `sed`, `grep`, `awk`, `perl` (expressions, patterns, shebangs), the target of `ln -s`; a redirection target always is. |
 | `hygiene/workdir-s` | E | file | `S = "${WORKDIR}"` (or `${WORKDIR}/`), reported only when the file's releases include one that rejects it (Styhead and later), naming them. A layer checked only against releases that accept it gets nothing. |
 | `hygiene/variable-order` | I | file | In a `.bb`, the first statement out of the OE style guide order (description block, license, dependencies, `SRC_URI`, `S`, inherit, `PACKAGECONFIG` and build options, tasks, packaging), once per file. Off by default: runs only when selected by its id, the alias `style/variable-order` or the alias group `style`. |
 | `hygiene/tabs` | I | file | Tabs in shell task bodies mixed with spaces; python bodies not indented with 4 spaces. At most one finding per function. |
@@ -243,7 +264,15 @@ Notes:
   OE-core's `bitbake.conf` defaults (`SUMMARY ?=`, `LICENSE ??= "INVALID"`,
   `HOMEPAGE = ""`) do not count. The `LIC_FILES_CHKSUM` condition is OE-core's
   `populate_lic_qa_checksum`. A variable whose value is python, or that anonymous python
-  sets, is not reported. Both findings are on line 1 of the `.bb`.
+  sets, is not reported. Both findings are on line 1 of the `.bb`. `HOMEPAGE` is the
+  upstream project's page, so it is not asked of an image (a visited or directly inherited
+  class `image`, `core-image` or `*-image`), a packagegroup (`packagegroup`), or a recipe
+  whose `SRC_URI` is empty or only `file://` entries (OE-core's `connman-conf`,
+  `base-files`). A remote URL written out in `SRC_URI` counts even when other parts of the
+  value are python; a value with python and no such URL counts as no upstream. OE-core's
+  own images and packagegroups set `SUMMARY` and get `LICENSE` from their class (`LICENSE ?= "MIT"`, which counts: a class is not
+  configuration); only four of its 37 set `HOMEPAGE`. `SUMMARY` and `LICENSE` are asked of
+  every recipe.
 - **`src-uri-checksum`.** A checksum is a `sha256sum` flag on `SRC_URI` (`<name>.sha256sum`
   with a `name=` parameter), a `sha256sum=` parameter, or an `md5sum`, `sha1sum`,
   `sha384sum` or `sha512sum` flag or parameter. A git revision is a `rev=` or `tag=`
@@ -258,6 +287,14 @@ Notes:
   nor `$D` and runs `install`, `cp`, `mkdir`, `ln`, `mv`, `rsync`, `tar`, `touch`, `cat` or
   `echo` as the first word of a line; it is not reported when the body calls a
   `*_do_install` function, `oe_runmake`, or sets `DESTDIR`, or only calls other functions.
+  Each path is judged by the command it belongs to: the line is split into words at
+  unquoted spaces, a command starts after `|`, `||`, `&&`, `;` or `&` (keywords such as
+  `if`, `then`, `!` and `VAR=value` prefixes skipped), and a line ending in `\` carries its
+  command to the next. Still reported, and right: `cp "/etc/x" ...`, `sed -i '...' /etc/x`,
+  `grep x /etc/passwd`, `echo x > /etc/x`, the link name of `ln -s`. Not told apart (so not
+  reported): a quoted file name given to `sed` / `grep` (`sed -i '...' "/etc/x"`), and a
+  path that another command only prints or stores; a path glued to a redirection
+  (`>/etc/x`) is not at the start of a word and is missed.
 - **`workdir-s`.** Matched: an assignment to `S` (no flag; not `+=`-style, not `:append`,
   `:prepend` or `:remove`) whose value is `${WORKDIR}` or `${WORKDIR}/`. Since every layer
   is checked against the workspace's release, a Styhead or later workspace reports it
@@ -276,18 +313,17 @@ What the default rule set reports on `tests/fixtures/ws`, whose `sous-chef.toml`
 `meta-mine` writable. `sous-chef lint`, run in that directory:
 
 ```
-5 findings in 6 files: 0 error, 3 warning, 2 info; by rule: hygiene/missing-metadata 1, hygiene/release-syntax 1, org/append-no-match 1, org/recipe-change-in-local-conf 1, override/plus-equals-on-default 1
+4 findings in 6 files: 0 error, 3 warning, 1 info; by rule: hygiene/release-syntax 1, org/append-no-match 1, org/recipe-change-in-local-conf 1, override/plus-equals-on-default 1
 severity	rule	pointer	message
 info	org/recipe-change-in-local-conf	build:conf/local.conf:9	`EXTRA_OECONF:append:pn-hello` in local.conf changes only recipe hello, and only in this build directory; move it to a hello_%.bbappend in your layer as `EXTRA_OECONF:append`, or to your distro conf if it is policy
 warning	override/plus-equals-on-default	build:conf/local.conf:13	`DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = " wayland"`
-info	hygiene/missing-metadata	meta-mine:recipes-app/app/app_0.1.bb:1	recipe has no HOMEPAGE; set HOMEPAGE to the upstream project's web page
 warning	hygiene/release-syntax	meta-mine:recipes-app/app/app_0.1.bb:22	`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
 warning	org/append-no-match	meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1	orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer
 note: not checked: 2 layers that are not writable (meta-core, meta-vendor); name one as the target or pass --all
 ```
 
-`sous-chef lint --all` adds three findings in the other layers (`8 findings in 21 files: 0
-error, 4 warning, 4 info`):
+`sous-chef lint --all` adds three findings in the other layers (`7 findings in 21 files: 0
+error, 4 warning, 3 info`):
 
 ```
 info	org/class-location	meta-core:classes/base.bbclass:1	class base is in classes/, but every release this layer is checked against (wrynose) searches classes-recipe/ and classes-global/ first; move it to classes-global/ (it is used through INHERIT) and keep the name

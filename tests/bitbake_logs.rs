@@ -9,7 +9,14 @@
 //! openembedded-core 9518ce9 (2026-11-16). The compiler, configure, make, wget and quilt
 //! output inside them follows those tools' usual formats and was not checked against a
 //! source. They use the prefix `/home/builder/poky` for the workspace root; the tool test
-//! rewrites it to a temporary copy of the fixture workspace.
+//! rewrites it to a temporary copy of the fixture workspace. `log.do_fetch.60311` was
+//! rewritten after T9.2 to the format of the real failed fetch
+//! (`outputs/live/broken-fetch/log.do_fetch.1484343`, BitBake 2.18.0): long wget options,
+//! `fetcher_hashes_dummyfunc`, the `DEBUG: Running ...` line with wget's output after it,
+//! the `DEBUG: Fetcher failure: ... output:` line after that, `downloads.yoctoproject.org`
+//! as the mirror, the `ERROR: Fetcher failure: Fetch command ...` line before the
+//! `FetchError`, and the closing `finished` lines; it stays hand-written (a 404 instead of a
+//! DNS failure). The real log is digested by `fetch_failure_on_the_real_log`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;
@@ -194,8 +201,91 @@ fn fetch_failure() {
         Some("https://downloads.example.org/app/app-0.1.tar.gz")
     );
     assert!(out.contains("url\thttps://downloads.example.org/app/app-0.1.tar.gz"));
-    // The wget output inside the DEBUG message is not an error of its own.
+    // The wget output is not an error of its own, and the `ERROR: Fetcher failure: Fetch
+    // command ...` line restates the FetchError.
     assert_eq!(d.more, 0);
+    // B16: wget's own line states the cause.
+    assert_eq!(
+        d.cause,
+        Some((21, "2026-11-16 09:14:02 ERROR 404: Not Found.".to_string()))
+    );
+    assert_eq!(d.more_causes, 1);
+    assert!(
+        out.contains(
+            "cause (line 21)\t2026-11-16 09:14:02 ERROR 404: Not Found. (+1 more download errors)"
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("export PATH"), "{out}");
+}
+
+/// The real failed fetch of T9.2 (`tests/fixtures/outputs/live/broken-fetch/`), digested as
+/// the `log` tool does it, with the console output for the exit status.
+#[test]
+fn fetch_failure_on_the_real_log() {
+    let text = output("live/broken-fetch/log.do_fetch.1484343");
+    let path = PathBuf::from(
+        "{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/temp/log.do_fetch.1484343",
+    );
+    let h = handle();
+    let mut d = digest(&DigestInput {
+        text: &text,
+        log_path: Some(&path),
+        handle: Some(&h),
+        ..DigestInput::default()
+    });
+    assert_eq!(d.meta.recipe.as_deref(), Some("broken-fetch"));
+    assert_eq!(d.meta.version.as_deref(), Some("1.0"));
+    assert_eq!(d.meta.task.as_deref(), Some("do_fetch"));
+    let e = d.first.as_ref().unwrap();
+    assert_eq!(e.kind, FailureKind::Fetch);
+    assert_eq!(e.line, 165);
+    assert_eq!(
+        e.message,
+        "FetchError: Unable to fetch URL from any source."
+    );
+    // The `ERROR: Fetcher failure: Fetch command ... failed with exit code 4` line before it
+    // (the whole command and its environment) is a consequence, not context or "+1 more".
+    assert!(e.context.is_empty(), "{:?}", e.context);
+    assert_eq!(d.more, 0);
+    let failures = detect(&text);
+    let cmd = failures.iter().find(|f| f.line == 164).unwrap();
+    assert_eq!(cmd.rank, Rank::Consequence);
+    assert_eq!(cmd.message, "Fetcher failure: wget failed with exit code 4");
+    // The cause: wget's line for the upstream URL; the two mirrors' 404s are one more.
+    assert_eq!(
+        d.cause,
+        Some((
+            20,
+            "wget: unable to resolve host address ‘sous-chef-verify.invalid’".to_string()
+        ))
+    );
+    assert_eq!(d.more_causes, 1);
+    // The task log has no exit status; the console that ran it has.
+    assert_eq!(d.meta.exit_code, None);
+    let console = output("live/broken-fetch/console.out");
+    d.meta.exit_code = logs::exit_from_console(&console, &path);
+    assert_eq!(d.meta.exit_code, Some(1));
+    // Through another route to the same file, too.
+    let other = PathBuf::from(
+        "/elsewhere/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/temp/log.do_fetch.1484343",
+    );
+    assert_eq!(logs::exit_from_console(&console, &other), Some(1));
+    let out = d.render(Format::Text, 600);
+    assert!(
+        out.len() <= logs::DIGEST_MAX_BYTES,
+        "{} bytes:\n{out}",
+        out.len()
+    );
+    for want in [
+        "exit\t1",
+        "url\thttps://sous-chef-verify.invalid/broken-fetch-1.0.tar.gz",
+        "cause (line 20)\twget: unable to resolve host address",
+        "(+1 more download errors)",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+    assert!(!out.contains("SSH_AUTH_SOCK"), "{out}");
 }
 
 #[test]
@@ -646,6 +736,67 @@ async fn log_tool_defaults_to_the_most_recent_failure() {
             .iter()
             .any(|r| r[1] == "do_configure")
     );
+}
+
+/// The real failed fetch (T9.2) laid out in a copy of the fixture workspace: the task log
+/// under `build/tmp/work/` and the real console output as the newest cooker log, with the
+/// live paths rewritten to the copy. With `recipe`, the scratch recipe is added to meta-mine.
+fn real_fetch_tree(recipe: bool) -> (tempfile::TempDir, PathBuf) {
+    let (tmp, root) = build_tree();
+    let build = root.join("build").display().to_string();
+    let rewrite = |s: String| s.replace("{{LIVE}}/yocto-kiss/build", &build);
+    let t = root.join("build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/temp");
+    fs::create_dir_all(&t).unwrap();
+    let log = t.join("log.do_fetch.1484343");
+    fs::write(
+        &log,
+        rewrite(output("live/broken-fetch/log.do_fetch.1484343")),
+    )
+    .unwrap();
+    set_mtime(&log, 5_000);
+    let cooker = root.join("build/tmp/log/cooker/dogbonedark/20261117164631.log");
+    fs::create_dir_all(cooker.parent().unwrap()).unwrap();
+    fs::write(&cooker, rewrite(output("live/broken-fetch/console.out"))).unwrap();
+    set_mtime(&cooker, 5_000);
+    if recipe {
+        let dir = root.join("meta-mine/recipes-test/broken-fetch");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("broken-fetch_1.0.bb"),
+            output("live/broken-fetch/meta-scratch/recipes-test/broken-fetch/broken-fetch_1.0.bb"),
+        )
+        .unwrap();
+    }
+    (tmp, root)
+}
+
+#[tokio::test]
+async fn log_tool_digests_the_real_fetch_failure() {
+    // B16: exit status (from the console), the cause (wget's line) and the definition.
+    let (tmp, root) = real_fetch_tree(true);
+    let ctx = ctx_for(&root, &tmp.path().join("cache"));
+    let out = log::run(&ctx, args(None, None)).await.unwrap();
+    assert!(out.len() < 1024, "{} bytes:\n{out}", out.len());
+    for want in [
+        "recipe\tbroken-fetch",
+        "task\tdo_fetch",
+        "exit\t1",
+        "cause (line 20)\twget: unable to resolve host address",
+        "definition\tmeta-core:classes/base.bbclass:",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+    // As in T9.2, where the scratch layer was not in BBLAYERS: no pointer, and a note why.
+    let (tmp, root) = real_fetch_tree(false);
+    let ctx = ctx_for(&root, &tmp.path().join("cache"));
+    let out = log::run(&ctx, args(None, None)).await.unwrap();
+    assert!(out.contains("exit\t1"), "{out}");
+    assert!(!out.contains("definition\t"), "{out}");
+    assert!(
+        out.contains("recipe broken-fetch is in no layer of the workspace"),
+        "{out}"
+    );
+    assert!(out.len() < 1024, "{} bytes:\n{out}", out.len());
 }
 
 #[tokio::test]

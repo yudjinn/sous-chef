@@ -416,6 +416,9 @@ fn plan(cx: &GenContext<'_>) -> Result<Plan> {
                 .join(", ")
         ));
     }
+    if let Some(note) = shadow_note(layer, pn, pv, &others) {
+        notes.push(note);
+    }
     Ok(Plan {
         files: vec![PlannedFile {
             path,
@@ -425,6 +428,83 @@ fn plan(cx: &GenContext<'_>) -> Result<Plan> {
         notes,
         new_layer: None,
     })
+}
+
+/// A note when recipes of the same `PN` exist in other layers: the new file joins them as a
+/// provider of `PN`, and BitBake builds only one. Which one follows
+/// `bb.providers.findBestProvider` (BitBake 2.18 `6e260eb6`): without `PREFERRED_VERSION`,
+/// the files of the highest `BBFILE_PRIORITY` (`sortPriorities`), and among them the highest
+/// version (`findLatestProvider`, `vercmp`; `DEFAULT_PREFERENCE` first). Changing an
+/// existing recipe is what a bbappend is for, so the note suggests one. A note, never a
+/// refusal: a new version in a higher layer can be intended.
+fn shadow_note(layer: &Layer, pn: &str, pv: &str, others: &[RecipeRow]) -> Option<String> {
+    let elsewhere: Vec<&RecipeRow> = others
+        .iter()
+        .filter(|r| r.file.layer != layer.name)
+        .collect();
+    if elsewhere.is_empty() {
+        return None;
+    }
+    let existing: Vec<String> = elsewhere
+        .iter()
+        .map(|r| {
+            format!(
+                "{}:{} (priority {})",
+                r.file.layer,
+                r.file.path.display(),
+                r.file.priority
+            )
+        })
+        .collect();
+    // Every candidate after the write: (priority, version, label), the new file included.
+    let new_label = format!("the new {pn}_{pv}.bb");
+    let mut candidates: Vec<(i32, &str, String)> = others
+        .iter()
+        .map(|r| {
+            (
+                r.file.priority,
+                r.pv.as_str(),
+                format!("{}:{}", r.file.layer, r.file.path.display()),
+            )
+        })
+        .collect();
+    candidates.push((layer.priority, pv, new_label.clone()));
+    let top = candidates.iter().map(|c| c.0).max()?;
+    let best = candidates.iter().filter(|c| c.0 == top).reduce(|a, b| {
+        if query::vercmp(b.1, a.1) == std::cmp::Ordering::Greater {
+            b
+        } else {
+            a
+        }
+    })?;
+    let tie = candidates
+        .iter()
+        .filter(|c| c.0 == top && query::vercmp(c.1, best.1) == std::cmp::Ordering::Equal)
+        .count()
+        > 1;
+    let pick = if tie {
+        format!(
+            "one of the priority-{top} files of version {} (equal: the first in BBFILES order)",
+            best.1
+        )
+    } else {
+        best.2.clone()
+    };
+    let effect = if best.2 == new_label && !tie {
+        format!("so the new file shadows the existing {pn}")
+    } else {
+        "so the new file is not built".to_string()
+    };
+    Some(format!(
+        "{pn} already exists in another layer: {}; this layer ({}) has priority {}; BitBake \
+         would then build {pick} (highest layer priority, then highest version; \
+         PREFERRED_VERSION_{pn} or DEFAULT_PREFERENCE can change this), {effect}; to change \
+         the existing recipe write a bbappend instead (scaffold kind=bbappend, or kind=where \
+         to see where the change belongs)",
+        existing.join(", "),
+        layer.name,
+        layer.priority,
+    ))
 }
 
 /// The `recipes-<category>` directory name for an option value (`core` or `recipes-core`).

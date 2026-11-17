@@ -444,8 +444,15 @@ note: global class: ranked as INHERIT finds it (classes-global/, then classes/)
 - `"shadowed"`: one row per file of every recipe or class file name that more than one layer
   provides (`kind name status layer priority file`), the winner first.
 - `"appends"`: one row per bbappend and recipe it applies to (`bbappend priority matches
-  status`), status `applies`; a bbappend that matches nothing is one row with `matches` `-`
-  and status `no-match`, and a note.
+  status`), status `applies`; a bbappend that `BBFILES` collects and that matches nothing is
+  one row with `matches` `-` and status `no-match`, and a note (BitBake stops on these). A
+  bbappend no `BBFILES` glob collects is looked up in the layers' `BBFILES_DYNAMIC`
+  (`{!}<collection>:<glob>`, added to `BBFILES` when the collection is present, or absent
+  with `!`): when the entry is not active the status is `not collected (dynamic layer
+  `<name>` not present)` (or `(BBFILES_DYNAMIC `!<name>`: layer `<name>` is present)`);
+  when it is active, the append is matched by file name (`applies (BBFILES_DYNAMIC)` or
+  `no-match (BBFILES_DYNAMIC)`; sous-chef's evaluation does not apply it); with no entry,
+  `not collected (no BBFILES glob)`. A note counts the bbappends BitBake never reads.
 - `"compat"`: rows `layer check result detail loc`, per layer in `BBLAYERS` order. First a
   `compat` row: what `LAYERSERIES_COMPAT_<c>` claims against the workspace release and the
   core layer's `LAYERSERIES_CORENAMES` (`result` `ok`, or the worst severity of the
@@ -613,7 +620,11 @@ Generated files follow the releases the target layer is checked against (see "Re
 lint-rules.md) and are meant to lint clean for them.
 
 `recipe`: `name` is `PN`, `version` is `PV` (no `_`, `/`, quotes or spaces); both required.
-Writes `recipes-<category>/<pn>/<pn>_<pv>.bb`.
+Writes `recipes-<category>/<pn>/<pn>_<pv>.bb`. When recipes of that `PN` exist in other
+layers, a note (never a refusal) names their files and layer priorities and which file
+BitBake would then build (highest layer priority, then highest version, as
+`findBestProvider` without `PREFERRED_VERSION`; equal ones: the first in `BBFILES` order),
+and suggests `scaffold kind=bbappend` (or `kind=where`) to change the existing recipe.
 
 | Option | Notes |
 |---|---|
@@ -837,6 +848,17 @@ becomes a handle the next time the `bitbake` tool, or `log` with `job`, is calle
 Digest: failing recipe and task, exit status, the error lines with a few lines of context,
 the function in `run.do_<task>` that failed if identifiable, a pointer to the task's
 definition in the layers, and a handle to the full log.
+
+The exit status is BitBake's `Task (...) failed with exit code`, which only the console
+prints: it comes from the log itself when the shell exit trap gives it, else from the
+job's output or the newest console log (`tmp/log/cooker/<machine>/`) when that names the
+digested log; otherwise the row is missing. For a fetch failure a `cause` row gives the
+downloader's first error line (`wget: unable to resolve host address ...`, `ERROR 404: Not
+Found.`) and how many more there are (mirrors); the `Fetch command ... failed` line is
+treated as a consequence. The definition pointer is the recipe's own function, else one
+from its included files and classes, else the default of a global class (`base_do_fetch` in
+`base.bbclass`, or an `INHERIT` class); when the recipe is in no layer of the workspace, a
+note says so instead.
 
 With `job`: the log named in the job's output (the first failed task's
 `Logfile of failure stored in:`, then any other log it names), filtered by `recipe` and

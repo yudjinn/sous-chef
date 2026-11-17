@@ -260,6 +260,8 @@ fn append_no_space() {
         m[4]
     );
     assert_eq!(lines(&env, r, "good.bb"), []);
+    // B14: a reference is judged by the file's own value for it.
+    assert_eq!(lines(&env, r, "bad-ref.bb"), [(3, W), (5, W)]);
 }
 
 #[test]
@@ -362,6 +364,41 @@ fn missing_package() {
         m[5]
     );
     assert_eq!(lines(&env, r, "good.bb"), []);
+}
+
+#[test]
+fn missing_package_empty_values_and_classes_without_packages() {
+    // B10: `FILES = ""` (good.bb) and image.bbclass (good-nopackages.bbclass) are not
+    // findings; a class that keeps or refills PACKAGES is, and `+=` of nothing stores a
+    // space.
+    let env = Env::new();
+    let r = &OverrideMissingPackage;
+    let at = |name: &str, path: &str| -> Vec<u32> {
+        check_at(&env, r, &fixture("missing-package", name), path)
+            .iter()
+            .map(|f| f.loc.lines.start)
+            .collect()
+    };
+    assert_eq!(at("bad.bbclass", "classes-recipe/bad.bbclass"), [2, 6]);
+    assert_eq!(
+        at("good-nopackages.bbclass", "classes-recipe/image.bbclass"),
+        [] as [u32; 0]
+    );
+    assert_eq!(
+        at("good-nopackages.bbclass", "classes-recipe/nopkgs.bbclass"),
+        [] as [u32; 0]
+    );
+    let inherits = "inherit core-image\nRDEPENDS += \"x\"\n";
+    assert_eq!(
+        check_at(&env, r, inherits, "classes-recipe/my-rootfs.bbclass"),
+        []
+    );
+    // The name alone does not empty PACKAGES.
+    let named = "RDEPENDS += \"x\"\n";
+    assert_eq!(
+        check_at(&env, r, named, "classes-recipe/kernel-fit-image.bbclass").len(),
+        1
+    );
 }
 
 /// The fixture workspace plus `lint/override/missing-package/no-packages`: its recipes in
@@ -522,6 +559,78 @@ fn filesextrapaths() {
     assert_eq!(lines(&env, r, "good.bb"), []);
 }
 
+#[test]
+fn filesextrapaths_dot_operators_and_references() {
+    // B9: `=.` with the trailing colon and `.=` with the leading one extend the list (in
+    // good.bb); without the colon, on a conditional name or in a .conf they do not.
+    let env = Env::new();
+    let r = &OverrideFilesextrapaths;
+    assert_eq!(
+        lines(&env, r, "bad-dot.bb"),
+        [(2, E), (3, E), (4, E), (6, E)]
+    );
+    let m = messages(&env, r, "bad-dot.bb");
+    assert!(m[0].contains("without the trailing `:`"), "{}", m[0]);
+    assert!(!m[0].contains("without `:prepend`"), "{}", m[0]);
+    assert!(m[1].contains("without the leading `:`"), "{}", m[1]);
+    assert!(m[2].contains("without `:prepend`"), "{}", m[2]);
+    assert!(m[3].contains("without the trailing `:`"), "{}", m[3]);
+    assert_eq!(lines(&env, r, "bad-dot.conf"), [(2, E)]);
+}
+
+/// `(path, line)` of the rule's findings on `files` (under the workspace) after adding them.
+fn file_findings(env: &Env, rule: &dyn Rule, files: &[&str]) -> Vec<String> {
+    let files: Vec<PathBuf> = files.iter().map(|f| env.root.join(f)).collect();
+    env.run(&Target::Files { files, lines: None }, false, &[rule])
+        .findings
+        .iter()
+        .map(|f| format!("{}", f.loc))
+        .collect()
+}
+
+#[test]
+fn filesextrapaths_in_an_inc_beside_its_recipes() {
+    // clang/common.inc: included only by recipes of its own directory, a late
+    // ${FILE_DIRNAME} is that directory, so `=` / `=.` without `:=` is right.
+    let inc = fixture("filesextrapaths", "beside.inc");
+    let dir = "meta-mine/recipes-app/clangish";
+    let env = Env::with(&[
+        (&format!("{dir}/common.inc"), inc.clone()),
+        (
+            &format!("{dir}/clangish_1.0.bb"),
+            "SUMMARY = \"x\"\nrequire common.inc\n".into(),
+        ),
+        (
+            &format!("{dir}/clangish-native_1.0.bb"),
+            "SUMMARY = \"x\"\nrequire common.inc\n".into(),
+        ),
+    ]);
+    let r = &OverrideFilesextrapaths;
+    assert_eq!(
+        file_findings(&env, r, &[&format!("{dir}/common.inc")]),
+        [] as [&str; 0]
+    );
+    // Included from another directory too: the late value is that recipe's directory.
+    let env = Env::with(&[
+        (&format!("{dir}/common.inc"), inc),
+        (
+            &format!("{dir}/clangish_1.0.bb"),
+            "SUMMARY = \"x\"\nrequire common.inc\n".into(),
+        ),
+        (
+            "meta-mine/recipes-app/other/other_1.0.bb",
+            "SUMMARY = \"x\"\nrequire recipes-app/clangish/common.inc\n".into(),
+        ),
+    ]);
+    assert_eq!(
+        file_findings(&env, r, &[&format!("{dir}/common.inc")]),
+        [
+            "meta-mine:recipes-app/clangish/common.inc:3",
+            "meta-mine:recipes-app/clangish/common.inc:4"
+        ]
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // Recipe-scope rules, on the real datastore
 
@@ -630,6 +739,77 @@ fn shadowed_on_the_real_datastore() {
     let env = recipe_env("shadowed", "good", "shadowgood");
     assert_eq!(
         rows(&recipe_findings(&env, "shadowgood", &OverrideShadowed)),
+        [] as [&str; 0]
+    );
+}
+
+#[test]
+fn shadowed_is_not_judged_from_one_includer_of_a_shared_file() {
+    // B8: u-boot-common.inc's values are replaced in u-boot-kiss, not in u-boot-tools.
+    let dir = "meta-mine/recipes-app/ub";
+    let env = Env::with(&[
+        (
+            &format!("{dir}/shared.inc"),
+            fixture("shadowed", "shared.inc"),
+        ),
+        (
+            &format!("{dir}/ub-kiss_1.0.bb"),
+            fixture("shadowed", "shared-kiss.bb"),
+        ),
+        (
+            &format!("{dir}/ub-tools_1.0.bb"),
+            fixture("shadowed", "shared-tools.bb"),
+        ),
+    ]);
+    // Only the assignment replaced in the shared file itself.
+    let want = ["info meta-mine:recipes-app/ub/shared.inc:9"];
+    assert_eq!(
+        rows(&recipe_findings(&env, "ub-kiss", &OverrideShadowed)),
+        want
+    );
+    assert_eq!(
+        rows(&recipe_findings(&env, "ub-tools", &OverrideShadowed)),
+        want
+    );
+    // With one includer, the .inc is the recipe's own and is judged as before.
+    let env = Env::with(&[
+        (
+            &format!("{dir}/shared.inc"),
+            fixture("shadowed", "shared.inc"),
+        ),
+        (
+            &format!("{dir}/ub-kiss_1.0.bb"),
+            fixture("shadowed", "shared-kiss.bb"),
+        ),
+    ]);
+    assert_eq!(
+        rows(&recipe_findings(&env, "ub-kiss", &OverrideShadowed)),
+        [
+            "info meta-mine:recipes-app/ub/shared.inc:5",
+            "info meta-mine:recipes-app/ub/shared.inc:6",
+            "info meta-mine:recipes-app/ub/shared.inc:7",
+            "info meta-mine:recipes-app/ub/shared.inc:9",
+        ]
+    );
+}
+
+#[test]
+fn shadowed_is_not_judged_from_a_recipe_that_requires_another() {
+    // B8: buildtools-docs-tarball.bb requires buildtools-tarball.bb and replaces LICENSE;
+    // in buildtools-tarball itself LICENSE is live.
+    let dir = "meta-mine/recipes-app/bt";
+    let env = Env::with(&[
+        (
+            &format!("{dir}/bt-tarball_1.0.bb"),
+            "SUMMARY = \"x\"\nLICENSE = \"MIT\"\n".into(),
+        ),
+        (
+            &format!("{dir}/bt-docs-tarball_1.0.bb"),
+            "require bt-tarball_1.0.bb\nLICENSE = \"GPL-2.0-only\"\n".into(),
+        ),
+    ]);
+    assert_eq!(
+        rows(&recipe_findings(&env, "bt-docs-tarball", &OverrideShadowed)),
         [] as [&str; 0]
     );
 }

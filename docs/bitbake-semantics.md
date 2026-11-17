@@ -514,6 +514,17 @@ BB_DANGLINGAPPENDS_WARNONLY", 2024-11-21); `lib/bb/cooker.py` has it on branch `
 under a `BBFILES_DYNAMIC` entry whose collection is absent is not collected at all, so
 BitBake neither applies nor reports it (live: meta-arm's
 `dynamic-layers/meta-tpm2/.../tpm2-tools_5.7.bbappend` is not in `show-appends`).
+**`BBFILES_DYNAMIC`** (checked for B3 in BitBake 2.18 `6e260eb6` `lib/bb/cookerdata.py`
+`parseConfigurationFiles`, after the layer confs): the value is split on whitespace; each
+word must be `<collection>:<glob>` (split on the first `:`; anything else is fatal,
+"BBFILES_DYNAMIC entries must be of the form {!}<collection name>:<filename pattern>"); a
+leading `!` inverts the test; the glob is appended to `BBFILES` when the collection is in
+`BBFILE_COLLECTIONS` (or, inverted, when it is not). `collect_bbfiles` then treats it as
+any other `BBFILES` glob. The index does not fold these into `BBFILES`, so such files have
+no `bbappend` edge and `query::orphan_appends` (a collected append whose edge has no
+target) never lists them: `org/append-no-match` cannot report them, rightly when the
+collection is absent and as a miss when it is present. `layers show=appends` evaluates
+the entries itself.
 
 Static expansion of reference arguments (`resolve::expand_with`): the scanner resolves
 `${VAR}` in `require` / `include` / `inherit` arguments only for values that follow from the
@@ -848,6 +859,34 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
 (immediate expansion and the trailing colon both matter).
 
+**Which `FILESEXTRAPATHS` forms keep the list** (checked for B9 against BitBake 2.18
+`6e260eb6` `lib/bb/parse/ast.py` `DataNode.eval` and OE-core Wrynose `33a6bd6c`
+`bitbake.conf:387` `FILESEXTRAPATHS ?= "__default:"`, `utils.bbclass` `base_set_filespath`,
+`insane.bbclass` "FILESEXTRAPATHS-variable, must always use :prepend"):
+`base_set_filespath` removes the text `__default:`, splits the rest on `:` and skips empty
+entries; insane.bbclass warns when `__default` is no longer one of the `:`-split entries.
+`predot` (`=.`) stores `value + old` and `postdot` (`.=`) `old + value`, unexpanded, at parse
+time. So, in a recipe, `.inc`, bbappend or class (all parsed after `bitbake.conf`):
+
+| Form | Result | Right? |
+|---|---|---|
+| `:prepend = / := "<p>:"` | `<p>:` before the final value | yes |
+| `:append = / := ":<p>"` | `:<p>` after it | yes |
+| `=. "<p>:"` | `<p>:__default:` | yes |
+| `.= ":<p>"` | `__default::<p>` (the empty entry is skipped) | yes |
+| `=. "<p>"` / `:prepend = "<p>"` | `<p>__default:`: the marker and the path are glued | no |
+| `.= "<p>"` / `:append = "<p>"` | right after the default by luck, glued to any earlier append | no |
+| `=`, `:=` | the default is gone | no |
+| `+=`, `=+` | a space joins `<p>` to the neighbouring entry | no |
+| `FILESEXTRAPATHS:<cond> =. "<p>:"` | builds `FILESEXTRAPATHS:<cond>` = `<p>:`, which replaces the list when `<cond>` is active | no |
+
+In a `layer.conf` (parsed before `bitbake.conf`) `=.` / `.=` set the variable before the
+`?=`, which then does nothing, so the default is lost; `:prepend` / `:append` are applied
+at read time and are fine anywhere. `=.` / `.=` cannot be combined with `:=`, so the value
+stays unexpanded: `${THISDIR}` (`base.bbclass`: `os.path.dirname(d.getVar('FILE'))`) and
+`${FILE_DIRNAME}` expand late, to the directory of the `.bb`; that is right in the `.bb` and
+in an `.inc` of the same directory, wrong in a bbappend or an `.inc` elsewhere.
+
 Verified (T8.3) against OE-Core `9518ce9` and BitBake `5495a54`; this is what `recipe
 show=sources` reproduces:
 
@@ -968,7 +1007,18 @@ reproduces it from the indexed statements:
     `mirrors.edge.kernel.org/yocto-sources/`), each with `DEBUG: Mirror fetch failure for
     url <mirror url> (original url: <url>)`. On the console the two ERROR lines carry the
     `<PF> do_fetch: ` prefix, then `Logfile of failure stored in:`, the runqueue line and
-    the summary, as described above; no `Log data follows:`.
+    the summary, as described above; no `Log data follows:`. What the `log` digest takes
+    from this (B16): the `Fetch command ... failed with exit code <n>, <output>` text is
+    `runfetchcmd`'s (`lib/bb/fetch2/__init__.py`, BitBake 2.18 `6e260eb6`: `<output>` is
+    `output:\n<stdout>\n<stderr>`, or `see logfile for output` when the command's output
+    went to the log); the cause a user needs is the downloader's own first error line
+    (`wget: unable to resolve host address '<host>'`, `<date> <time> ERROR 404: Not
+    Found.`), not the command. The task's **exit status is not in the task log**: only
+    `ERROR: Task (<file>:<task>) failed with exit code '<n>'` on the console
+    (`runqueue.py` `TaskFailure`) carries it, so it is read from the build's console log
+    (`BB_CONSOLELOG`) or a job's output. `do_fetch` itself is `base_do_fetch` of the global
+    `base.bbclass` (`EXPORT_FUNCTIONS do_fetch`), which no recipe's inherit tree contains:
+    the task-definition pointer looks in `base` and the static `INHERIT` classes too.
   - Patch: `NOTE: Applying patch '<name>' (<path>)`, then on failure
     `ERROR: Applying patch '<file>' on target directory '<dir>'` followed by the repr of
     the patch tool's `CmdError` (quilt's output with `\n` turned into newlines).
@@ -1439,7 +1489,12 @@ Checked by the wave 4 lint tasks against OE-core master (2026-11) unless marked:
   `PACKAGES` is not empty, for each listed variable (`RDEPENDS`, `RRECOMMENDS`,
   `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `pkg_preinst`,
   `pkg_postinst`, `pkg_prerm`, `pkg_postrm`, `ALLOW_EMPTY`), `if d.getVar(var, False):`
-  reports it as set without a package. `override/missing-package` follows it.
+  reports it as set without a package. `override/missing-package` follows it. Confirmed
+  for B10 on OE-core Wrynose `33a6bd6c` (`insane.bbclass:1586-1591`): `getVar(var, False)`
+  is the unexpanded final value, so an empty one (`bitbake.conf:336 FILES = ""`) is never
+  reported, and `+=` of an empty value (which stores a space) is. `image.bbclass:31` sets
+  `PACKAGES = ""`, so its own `RDEPENDS +=` / `RRECOMMENDS +=` (lines 34-35) are never
+  checked.
 - **`populate_lic_qa_checksum`** (`insane.bbclass`): `if lic == "CLOSED": return`, then
   `if not lic_files and d.getVar('SRC_URI')` is an error. So `LIC_FILES_CHKSUM` is required
   only when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (`hygiene/missing-metadata`).

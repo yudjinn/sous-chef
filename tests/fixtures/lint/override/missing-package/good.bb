@@ -11,3 +11,8 @@ SUMMARY = "SUMMARY also has a recipe-wide meaning"
 LICENSE = "MIT"
 RDEPENDS[doc] = "a flag, not a value"
 RDEPENDS_${PN} = "legacy syntax is another rule's business"
+# OE-core bitbake.conf:336: an empty value gives the variable no value (pkgvarcheck tests
+# `if d.getVar(var, False)`).
+FILES = ""
+RDEPENDS ?= ""
+RRECOMMENDS:append = ""
