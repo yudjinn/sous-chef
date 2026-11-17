@@ -642,7 +642,7 @@ async fn obtain(
         args,
         kind: HandleKind::Env,
     };
-    let job = match ctx.jobs.start(env, spec, &cache_dir(ctx).join("jobs"))? {
+    let job = match ctx.jobs.start(env, spec, &ctx.jobs_dir())? {
         Started::Started(j) => j,
         Started::AlreadyRunning(j) => return Err(busy(&j)),
     };

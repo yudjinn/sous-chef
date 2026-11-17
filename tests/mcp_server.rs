@@ -47,8 +47,12 @@ struct Session {
 
 impl Session {
     fn start() -> Session {
+        Session::start_in(tempfile::tempdir().unwrap())
+    }
+
+    /// As [`Session::start`], with `XDG_CACHE_HOME` = `cache`.
+    fn start_in(cache: tempfile::TempDir) -> Session {
         let ws = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ws");
-        let cache = tempfile::tempdir().unwrap();
         let mut child = Command::new(env!("CARGO_BIN_EXE_sous-chef"))
             .arg("serve")
             .arg("--build-dir")
@@ -126,6 +130,20 @@ impl Session {
 
     fn call(&mut self, tool: &str, args: Value) -> Value {
         self.result("tools/call", json!({"name": tool, "arguments": args}))
+    }
+
+    /// Closes stdin, waits for the server to exit and returns the cache directory.
+    fn finish_keep_cache(mut self) -> tempfile::TempDir {
+        drop(self.stdin.take());
+        let deadline = Instant::now() + TIMEOUT;
+        while self.child.try_wait().unwrap().is_none() {
+            if Instant::now() > deadline {
+                let _ = self.child.kill();
+                panic!("server did not exit after stdin closed");
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        std::mem::replace(&mut self._cache, tempfile::tempdir().unwrap())
     }
 
     /// Closes stdin and waits for a clean exit.
@@ -252,5 +270,51 @@ fn serve_initialize_list_and_status() {
     let missing = s.request("resources/read", json!({"uri": "sous-chef://nope"}));
     assert!(missing["error"].is_object(), "{missing}");
 
+    s.finish();
+}
+
+fn initialize(s: &mut Session) {
+    s.result(
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "sous-chef-test", "version": "0"}
+        }),
+    );
+}
+
+#[test]
+fn server_start_removes_output_files_of_a_dead_server() {
+    // The first server creates the workspace's cache directory.
+    let mut s = Session::start();
+    initialize(&mut s);
+    let cache = s.finish_keep_cache();
+    let dirs: Vec<_> = std::fs::read_dir(cache.path().join("sous-chef"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(dirs.len(), 1, "{dirs:?}");
+    let jobs = dirs[0].join("jobs");
+    std::fs::create_dir_all(&jobs).unwrap();
+    // A job output file of a pid that is not alive, last written two days ago.
+    let mut dead = 4_000_000u32;
+    while Path::new("/proc").join(dead.to_string()).exists() {
+        dead += 1;
+    }
+    let stale = jobs.join(format!("{dead}-1.out"));
+    std::fs::File::create(&stale)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60))
+        .unwrap();
+
+    // The next server removes it without any job being started.
+    let mut s = Session::start_in(cache);
+    initialize(&mut s);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while stale.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!stale.exists(), "{} is still there", stale.display());
     s.finish();
 }

@@ -29,8 +29,11 @@
 //! runs no destructor: its job's group, a group of its own, keeps running. Either way the
 //! output file stays behind.
 //!
-//! Output files of a server that is gone are removed by the next server's first
-//! [`JobTable::start`] in that directory ([`remove_stale_outputs`]): a `<pid>-<n>.out` whose
+//! Output files of a server that is gone are removed when the next server opens its
+//! context (`mcp::Ctx::open` calls [`JobTable::sweep_in_background`] on `<cache dir>/jobs`,
+//! on a thread of its own so start-up does not wait), or, when that thread could not be
+//! started or a job writes to another directory, by the first [`JobTable::start`] in that
+//! directory ([`remove_stale_outputs`]): a `<pid>-<n>.out` whose
 //! pid is not a live process and which was last modified more than [`STALE_AFTER`] ago. A
 //! file whose pid is alive is never removed (a reused pid keeps a stale file until that
 //! process exits); the age guards a server in another pid namespace sharing the cache
@@ -234,6 +237,25 @@ impl JobTable {
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Removes the stale output files in `dir` ([`remove_stale_outputs`]) on a thread of its
+    /// own, so the caller (`mcp::Ctx::open`, at server start) does not wait for it, and
+    /// records `dir` as swept so [`JobTable::start`] does not sweep it again. Returns the
+    /// thread's handle (the files it removed), or `None` when no thread could be started;
+    /// then the first job started in `dir` sweeps it.
+    pub fn sweep_in_background(&self, dir: &Path) -> Option<std::thread::JoinHandle<Vec<PathBuf>>> {
+        let mut inner = self.lock();
+        if inner.swept.iter().any(|d| d == dir) {
+            return None;
+        }
+        let owned = dir.to_path_buf();
+        let handle = std::thread::Builder::new()
+            .name("sous-chef-stale-outputs".into())
+            .spawn(move || remove_stale_outputs(&owned, STALE_AFTER))
+            .ok()?;
+        inner.swept.push(dir.to_path_buf());
+        Some(handle)
     }
 
     /// Starts `spec` in `env`, writing its output under `dir`. Must be called inside a
@@ -525,5 +547,22 @@ mod tests {
             assert!(kept.exists(), "{}", kept.display());
         }
         assert!(remove_stale_outputs(&d.join("missing"), STALE_AFTER).is_empty());
+    }
+
+    #[test]
+    fn a_background_sweep_runs_once_per_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        let stale = d.join(format!("{}-1.out", dead_pid()));
+        File::create(&stale)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60))
+            .unwrap();
+        let table = JobTable::new();
+        let removed = table.sweep_in_background(d).unwrap().join().unwrap();
+        assert_eq!(removed, std::slice::from_ref(&stale));
+        // Recorded as swept: neither a second sweep nor the first job sweeps it again.
+        assert!(table.sweep_in_background(d).is_none());
+        assert!(table.lock().swept.iter().any(|p| p == d));
     }
 }

@@ -14,7 +14,6 @@
 //! No MCP progress notifications: tool functions do not see the rmcp request context
 //! (`mcp::Server` dispatches through its own table), so the agent polls with `op: status`.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use schemars::JsonSchema;
@@ -160,7 +159,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
                     msg: format!("no bitbake environment: {reason}"),
                 },
             )?;
-            match ctx.jobs.start(&env, plan.spec, &jobs_dir(ctx))? {
+            match ctx.jobs.start(&env, plan.spec, &ctx.jobs_dir())? {
                 Started::Started(job) => {
                     let notes = [format!(
                         "started; poll with bitbake op=status job={}, stop with op=cancel",
@@ -179,12 +178,6 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
             }
         }
     }
-}
-
-/// Where job output is written while it runs: `<cache dir>/jobs`, next to `handles/`.
-fn jobs_dir(ctx: &Ctx) -> PathBuf {
-    let h = ctx.handles.dir();
-    h.parent().unwrap_or(h).join("jobs")
 }
 
 fn pick_job(ctx: &Ctx, id: Option<&str>) -> Result<JobInfo> {
