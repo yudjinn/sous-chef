@@ -34,7 +34,6 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 use serde::de::DeserializeOwned;
-use sha2::{Digest, Sha256};
 
 use crate::bitbake::JobTable;
 use crate::config::Config;
@@ -77,7 +76,9 @@ impl Ctx {
             log(&format!("configuration problem: {e}"));
         }
         let index = Index::open(&workspace).map_err(|e| ("opening the index", e))?;
-        let handles = HandleStore::open(&cache_dir(&workspace).join("handles"))
+        // After `Index::open`, and in the index's own directory: the store keeps its rows in
+        // the index database, which a schema rebuild replaces.
+        let handles = HandleStore::open(&index.cache_dir().join("handles"))
             .map_err(|e| ("opening the handle store", e))?;
         Ok(Ctx {
             config,
@@ -89,37 +90,13 @@ impl Ctx {
     }
 }
 
-/// The per-workspace cache directory, as docs/architecture.md describes it:
-/// `$XDG_CACHE_HOME/sous-chef/<first 16 hex of sha256 of the workspace roots>/`
-/// (`$HOME/.cache` when `XDG_CACHE_HOME` is unset or empty).
-///
-/// The roots hashed are the layer roots in `BBLAYERS` order, then the build directory, each
-/// followed by a newline. `Index::open` (T2.1) must use the same directory; if it ends up
-/// with its own definition, this function should call it instead.
+/// The per-workspace cache directory. The single definition is [`crate::index::cache_dir`]
+/// (`$XDG_CACHE_HOME/sous-chef/<workspace key>/`, `$HOME/.cache` as the fallback root), so
+/// this always names the directory `Index::open` uses. Only when neither variable gives a
+/// usable root (where `Index::open` itself fails) does it fall back to the temp directory.
 pub fn cache_dir(ws: &Workspace) -> PathBuf {
-    let base = match std::env::var_os("XDG_CACHE_HOME") {
-        Some(v) if !v.is_empty() => PathBuf::from(v),
-        _ => std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join(".cache"))
-            .unwrap_or_else(std::env::temp_dir),
-    };
-    let mut hasher = Sha256::new();
-    for root in ws
-        .layers
-        .iter()
-        .map(|l| l.root.as_path())
-        .chain(ws.build_dir.as_deref())
-    {
-        hasher.update(root.as_os_str().as_encoded_bytes());
-        hasher.update(b"\n");
-    }
-    let hex: String = hasher
-        .finalize()
-        .iter()
-        .take(8)
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    base.join("sous-chef").join(hex)
+    crate::index::cache_dir(ws)
+        .unwrap_or_else(|_| crate::index::cache_dir_in(&std::env::temp_dir(), ws))
 }
 
 /// Path of the index database for a workspace (see [`cache_dir`]).

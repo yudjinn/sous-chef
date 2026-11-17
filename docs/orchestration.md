@@ -95,8 +95,8 @@ Every subagent prompt contains, in this order:
 
 | Wave | State | Notes |
 |---|---|---|
-| 0 | **done** (commit `2879e75` on `dev`, gate passes) | Paused here at the user's request; wave 1 not launched. See "Wave 0 hand-off notes" below. |
-| 1 | not started | |
+| 0 | **done** (commit `2879e75` on `dev`, gate passes) | See "Wave 0 hand-off notes" below. |
+| 1 | **done** (all five streams merged on `dev`, gate passes, 170 tests) | Paused here at the user's request; wave 2 not launched. See "Wave 1 hand-off notes" below. |
 | 2 | not started | |
 | 3 | not started | |
 | 4 | not started | |
@@ -138,3 +138,63 @@ Open items, not verified by M0:
 - `hello.inc` uses `FILES:${PN} +=`; T4.2 must decide whether
   `override/plus-equals-with-override` ignores package overrides (it should: that form is
   idiomatic).
+
+## Wave 1 hand-off notes (for whoever launches wave 2)
+
+State: T1.1, T1.2, T1.3, T1.5, T2.1, T2.4, T2.5 and T5.1 are merged on `dev` (branches
+`w1-a` .. `w1-e`, one `--no-ff` merge each, gate after each). The gate passes with 170 tests.
+`sous-chef serve` has now run end to end on the fixture workspace: `status` reports
+`state: ready` and three layers. `Index::refresh` is still the stub, so `status` shows
+`refresh failed: not implemented` and `sous-chef index` fails until T2.2.
+
+Orchestrator changes at integration:
+
+- `mcp::cache_dir` had its own hash of the workspace roots, different from the index's. It
+  now calls `index::cache_dir`, and `Ctx::open` opens the handle store in
+  `index.cache_dir().join("handles")`.
+- `docs/architecture.md`: added the `handles` table (it was missing from the contract), the
+  schema additions, the `Index` write API, and the additions each stream made. Read the
+  "As implemented" paragraphs there before briefing wave 2.
+- `docs/bitbake-semantics.md`: added the layer behaviour T1.3 checked against the BitBake
+  source.
+
+How the agents were run: each one was launched with worktree isolation and renamed its
+branch to `w<wave>-<stream>`. The orchestrator integrated on its own worktree branch and
+fast-forwarded `dev` after the wave's gate passed.
+
+Things wave 2 agents need to know:
+
+- **Stream A (T1.4 -> T2.2 -> T2.3):** replace the private `mod conf_reader` in
+  `src/workspace/layers.rs` (marked TEMPORARY) with `parse()`; the `Vars` datastore logic
+  around it stays. The reader ignores `BBLAYERS:append`-style assignments and
+  `include` / `require` inside `bblayers.conf` and `layer.conf`. Compare against canonical
+  paths (`Layer.root` is canonical). The scanner writes through `Index::write` and never
+  touches `statements_fts`.
+- **`status`** counts files by walking the disk; switch it to `query::layer_stats()` once
+  T2.3 lands. `status.job` is always null until T5.4 gives `JobTable` a query API.
+- **JSON output:** `status` serialises its own report with serde_json. Tools that render a
+  table should use `Table::render_as(format, budget)`.
+- **Handle retention limits** are not in `Config` / `sous-chef.toml` yet (T5.1 says
+  "configurable"). Whoever next owns `src/config.rs` should add them.
+- `Cargo.toml` still has `[lints.cargo] unused_dependencies = "allow"`.
+
+Open decisions and discrepancies (not resolved in wave 1):
+
+- **Diagnostic severity (affects T4.1).** `hygiene/parse-error` turns every parser
+  diagnostic into an Error, but two diagnostics are not BitBake errors: whitespace after a
+  trailing `\`, and the `addtask` quirk that concatenates repeated `before` / `after` groups.
+  Making them warnings needs a severity field on `ParseDiagnostic` (a contract change).
+- **Milestone and fixture README disagree with BitBake in three places.** The parser follows
+  the BitBake source and adds a diagnostic in each case; `docs/milestones/M1-parser-workspace.md`
+  (T1.1) and `tests/fixtures/README.md` have not been corrected:
+  1. whitespace after a trailing `\` does continue the line (BitBake right-strips first);
+  2. an indented comment is an "unparsed line" error in BitBake (`comments.bb` line 3);
+  3. BitBake does not strip a UTF-8 BOM (`bom.bb` line 1 fails there).
+- **Legacy detection:** the rule "suffix is a known machine, distro or class override" needs
+  the index, so the parser does not apply it (`VAR_qemux86` is not flagged). Lint must.
+- **`.conf` grammar:** `parse()` accepts `inherit`, functions and `addtask` in `.conf` files,
+  which BitBake rejects.
+- **Layers:** `priority`, `compat` and `depends` come from a layer's first collection only;
+  `writable_layers` matches layer names, not collection names.
+- Still open from wave 0: the CI workflow has never run on GitHub; the fixture README items
+  marked *verify* (class parse order, bbappend order, `FILE_LAYERNAME`).

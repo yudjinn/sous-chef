@@ -238,13 +238,45 @@ provides(file_id INT, name TEXT)                     -- PN plus PROVIDES words t
 depends(file_id INT, kind TEXT,                      -- DEPENDS | RDEPENDS | PACKAGECONFIG
         pkg TEXT NULL, target TEXT, line INT)
 statements_fts(name, snippet)                        -- FTS5, content = statements
+handles(id TEXT PK,                                  -- "h:" + 10 hex
+        sha256 TEXT,                                 -- blob at <cache dir>/handles/<2 hex>/<sha256>
+        kind TEXT,                                   -- log | env | build | value | text
+        command TEXT, bytes INT,
+        created INT)                                 -- seconds since the Unix epoch
+  INDEX(created)
 ```
+
+As implemented in `index/schema.rs` (T2.1), which is the authority for the exact DDL:
+
+- **Foreign keys are on.** `files.layer_id` and every `file_id` / `src_file` cascade on
+  delete; `edges.target_file` is set to NULL. Deleting a `files` row removes its statements,
+  edges, tasks, provides and depends, and leaves edges that pointed at it unresolved. A child
+  row whose parent does not exist is rejected.
+- **`statements_fts` is kept in sync by triggers.** Writers insert, update and delete
+  `statements` only and never touch the FTS table.
+- Extra indexes: `files(pn)`, `provides(name)`, and the `file_id` of tasks, provides, depends.
+- Pragmas: WAL, `busy_timeout` 30 s, `synchronous=NORMAL`. `SCHEMA_VERSION` is stored in
+  `user_version`; a mismatch, or a file that is not a database, deletes and recreates it.
+- **Cache key:** first 16 hex of the sha256 over the build directory (if any) and every layer
+  root, sorted and deduplicated, each followed by `\n`. Cache root: `$XDG_CACHE_HOME` if set
+  and absolute, else `$HOME/.cache`. `index::cache_dir(ws)` is the single definition;
+  `mcp::cache_dir` calls it.
+- **`handles` rows do not survive a rebuild** (the blobs do); the handle store's retention
+  sweeps blobs without a row. Open the handle store after `Index::open`, in
+  `index.cache_dir().join("handles")`.
 
 ```rust
 pub struct Index { /* rusqlite::Connection */ }
 impl Index {
     pub fn open(ws: &Workspace) -> Result<Index>;
+    pub fn open_in(cache_root: &Path, ws: &Workspace) -> Result<Index>;   // tests: explicit cache root
+    pub fn open_at(path: &Path) -> Result<Index>;                         // tests: exact file
     pub fn refresh(&mut self, ws: &Workspace) -> Result<RefreshReport>;   // call at the start of every tool
+    pub fn conn(&self) -> &rusqlite::Connection;                          // reads (query.rs)
+    pub fn write<T>(&mut self, f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<T>) -> Result<T>;
+                                                                          // BEGIN IMMEDIATE; the only write path
+    pub fn path(&self) -> &Path;                                          // the database file
+    pub fn cache_dir(&self) -> &Path;                                     // its directory
 }
 pub struct RefreshReport { pub scanned: u32, pub reindexed: Vec<Loc>, pub removed: u32, pub millis: u64 }
 ```
@@ -367,6 +399,46 @@ pub fn index_command(config: &Config) -> Result<String>;
 The server does not use rmcp's `#[tool]` / `#[tool_router]` macros: tool files depend only
 on `serde`/`schemars`, and the table is served by implementing `ServerHandler::list_tools`
 and `call_tool` directly. The future returned by `run` must be `Send`.
+
+As implemented in T2.5:
+
+- **Deferred tools** are still listed by `tools/list`, with a one-line description, and every
+  tool carries `_meta["sous-chef/loading"] = "always" | "deferred"`. MCP and rmcp have no
+  standard field for this; T7.5 may add a client-specific one.
+- **The server does not exit on a startup failure.** If the configuration or the workspace
+  cannot be loaded it serves degraded (`serve_degraded`): `status` reports
+  `state: "degraded"` with `startup_error`, and every other tool returns a one-line error
+  naming the failed step. A `Config::validate` failure is logged and reported by `status` as
+  `config_problem`, not fatal.
+- Tool failures are `Ok(CallToolResult::error("<tool>: <message>; <hint>"))`. Unknown tools
+  and unknown resource URIs are protocol errors.
+- Resources `sous-chef://help` (generated from `TOOLS` and the argument schemas) and
+  `sous-chef://rules` (generated from `docs/lint-rules.md`).
+- The protocol version exercised by the integration test is `2025-06-18`.
+
+Parser additions (T1.1/T1.2): `parse::parse_bytes(&[u8])` (lossy decode, then `parse`),
+`parse::split_var(name, flag) -> VarRef`, and the public items of `parse::lexer`. An empty
+function or `def` body has `body.end < body.start`; treat it as an empty range.
+`AddTask.name`, `DelTask.name` and `AddHandler.name` hold every name given, joined by single
+spaces, as written (no `do_` prefix added). `parse()` does not know the file kind and applies
+the `.bb` grammar to `.conf` files too.
+
+Workspace additions (T1.3/T1.5): `Layer.root` and `Workspace.build_dir` are canonical paths.
+`workspace::BUILD_LAYER` (`"build"`) is the pseudo-layer for the build directory.
+`layers::read_bblayers` returns the layers plus the `BBLAYERS` entries it could not resolve.
+A `--layer` flag replaces the `layers` list of `sous-chef.toml`; `Config::load` returns
+absolute paths.
+
+Rendering additions (T2.4): `Table::{limited, note, len, is_empty, render_as, to_json,
+render_json}`, `JsonTable`, `escape_cell` / `unescape_cell`, `snippet`, `truncate_value`,
+`python_note`. Tools produce `format: "json"` output with `Table::render_as`. Notes and the
+header always appear and count against the budget before any row. JSON output keeps the rows
+the text layout keeps and is not itself budget-limited.
+
+Handle store (T5.1): `HandleStore::open(dir)` (uses `<dir>/../index.sqlite`),
+`open_with(dir, db, retention)`, `from_connection(dir, conn, retention)`; `put`, `put_file`,
+`get`, `meta`, `list`, `total_bytes`, `apply_retention`. Retention limits are not read from
+`sous-chef.toml` yet.
 
 Lint (`src/lint/mod.rs`): `Scope`, `Severity` (ordered `Info < Warning < Error`,
 deserialises lowercase), `Finding`, `Rule` and `all_rules()` as in M0 T0.3, plus:

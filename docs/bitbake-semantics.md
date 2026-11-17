@@ -251,6 +251,26 @@ Layer priority decides which recipe wins when two layers provide the same `PN` a
 and the order in which bbappends are applied (lower priority first, so the highest priority
 layer has the last word). *Verify* append ordering against `bitbake-layers show-appends`.
 
+Checked by T1.3 against BitBake master (`lib/bb/cookerdata.py`, `cooker.py`,
+`parse/ast.py`):
+
+- **Finding `bblayers.conf`:** `findConfigFile` looks in `$BBPATH/conf/` first, then walks up
+  from the working directory, stopping before `/`. `TOPDIR` is the directory that contains
+  `conf/bblayers.conf`. (sous-chef does not consult the `BBPATH` environment variable, and
+  does check `/`.)
+- **`BBLAYERS` entries:** the value is expanded and split on whitespace; a trailing `/` is
+  stripped; entries are not passed through realpath. A missing directory is fatal, and so is
+  an empty `BBLAYERS`.
+- **`LAYERDIR`:** set per layer; after each `layer.conf` every `${LAYERDIR}` reference in the
+  datastore is replaced (`expandVarref`). One datastore is shared by all layer confs.
+- **Priority:** `BBFILE_PRIORITY_<c>` must be an integer. An unset or `0` priority becomes
+  the highest priority among the layer's dependencies plus one, starting from the lowest
+  explicit priority. `LAYERDEPENDS` uses the `explode_dep_versions2` format.
+- **Weak defaults:** `?=`, `+=`, `.=` and the other operators read the current value with
+  `noweakdefault=True`, so they ignore a `??=` default. The last `??=` wins.
+
+Not reproduced by sous-chef: the fatal `LAYERSERIES_COMPAT` and `LAYERDEPENDS` validation.
+
 ## Parse order
 
 Configuration, once:
