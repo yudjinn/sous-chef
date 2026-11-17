@@ -1,8 +1,27 @@
-//! `override/plus-equals-on-default`: `VAR +=` in a conf file on a variable defaulted with `?=` elsewhere.
+//! `override/plus-equals-on-default`: `VAR += ` in a conf file for a variable that is given
+//! its value with `?=` elsewhere in the workspace, so the default is lost.
 //!
-//! See docs/lint-rules.md. Stub (M0): T4.2 implements `check`.
+//! See docs/lint-rules.md and bitbake-semantics.md ("Datastore"): `+=` on an unset variable
+//! gives it a value (`" x"`), and a `?=` parsed later sees that value and does nothing. So
+//! `DISTRO_FEATURES += "wayland"` in `local.conf` (parsed before the distro conf) leaves
+//! `DISTRO_FEATURES` as just `wayland`. `:append` is applied at the end and keeps the
+//! default.
+//!
+//! Reported for `+=`, `=+`, `.=`, `=.` on a plain name (no override, no flag) in a `.conf`
+//! file when a `?=` of the same plain name is parsed **later** and nothing gave the variable
+//! a value **before** (then the `?=` would have done nothing anyway). The order comes from
+//! the evaluated configuration (`eval::evaluate` with no recipe): its history orders every
+//! configuration file and global class. A `?=` in a recipe, bbappend, recipe class or
+//! non-configuration `.inc` is always parsed after every `.conf`. A `?=` later in the same
+//! file is after by line. When the order cannot be told (a `.conf` the configuration does
+//! not reach, compared with another such file), nothing is reported.
 
+use crate::eval::{self, DataStore, VarOp};
+use crate::index::query::{self, StatementFilter, StatementRow};
+use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
+use crate::parse::{ParsedFile, StatementKind};
+use crate::types::{AssignOp, FileKind, LineSpan, Loc};
 
 pub struct OverridePlusEqualsOnDefault;
 
@@ -19,5 +38,172 @@ impl Rule for OverridePlusEqualsOnDefault {
         Severity::Warning
     }
 
-    fn check(&self, _cx: &LintContext<'_>, _out: &mut Vec<Finding>) {}
+    fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
+        let Some(file) = cx.file else { return };
+        if cx.kind != Some(FileKind::Conf) {
+            return;
+        }
+        // Evaluated lazily, once per file (the configuration pass itself is cached).
+        let mut config: Option<Option<DataStore>> = None;
+        for s in &file.statements {
+            let StatementKind::Assign { var, op, value, .. } = &s.kind else {
+                continue;
+            };
+            if !matches!(
+                op,
+                AssignOp::Append | AssignOp::Prepend | AssignOp::AppendDot | AssignOp::PrependDot
+            ) || var.legacy_syntax
+                || var.flag.is_some()
+                || !var.overrides.is_empty()
+            {
+                continue;
+            }
+            let base = var.base.as_str();
+            let defaults = defaults_of(cx, file, base);
+            if defaults.is_empty() {
+                continue;
+            }
+            let config = config.get_or_insert_with(|| {
+                eval::evaluate(cx.index, cx.ws, &eval::Target::default()).ok()
+            });
+            let history: Vec<VarOp> = config
+                .as_ref()
+                .map(|ds| {
+                    ds.history(base)
+                        .into_iter()
+                        .map(|(op, _)| op)
+                        .filter(|op| op.var.overrides.is_empty() && !op.var.legacy_syntax)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let here = Loc {
+                lines: LineSpan::line(s.span.start),
+                ..cx.loc.clone()
+            };
+            let pos = position(&history, &here);
+            // Something gave the variable a value before this line: a later `?=` would have
+            // done nothing anyway.
+            let earlier_value = match pos {
+                Some(p) => history[..p].iter().any(|op| op.op != AssignOp::WeakDefault),
+                None => {
+                    !history.is_empty()
+                        || file.statements.iter().any(|t| {
+                            t.span.start < s.span.start
+                                && matches!(&t.kind, StatementKind::Assign { var: v, op: o, .. }
+                                    if v.base == base && v.overrides.is_empty()
+                                        && v.flag.is_none() && !v.legacy_syntax
+                                        && *o != AssignOp::WeakDefault)
+                        })
+                }
+            };
+            if earlier_value {
+                continue;
+            }
+            let Some(lost) = defaults
+                .iter()
+                .find(|d| parsed_after(d, &here, pos, &history))
+            else {
+                continue;
+            };
+            let fix_op = match op {
+                AssignOp::Append | AssignOp::AppendDot => "append",
+                _ => "prepend",
+            };
+            let v: String = value.split_whitespace().collect::<Vec<_>>().join(" ");
+            let v = if v.chars().count() > 40 {
+                v.chars().take(37).collect::<String>() + "..."
+            } else {
+                v
+            };
+            // `+=` / `=+` add the space; `.=` / `=.` keep whatever the value has.
+            let v = match op {
+                AssignOp::Append => format!(" {v}"),
+                AssignOp::Prepend => format!("{v} "),
+                AssignOp::AppendDot if value.starts_with(char::is_whitespace) => format!(" {v}"),
+                AssignOp::PrependDot if value.ends_with(char::is_whitespace) => format!("{v} "),
+                _ => v,
+            };
+            out.push(helpers::finding(
+                self,
+                cx,
+                LineSpan::line(s.span.start),
+                format!(
+                    "`{base} {}` gives {base} a value before the `?=` default at {} is parsed, \
+                     so that default is lost; write `{base}:{fix_op} = \"{v}\"`",
+                    op.as_str(),
+                    lost
+                ),
+            ));
+        }
+    }
+}
+
+/// Every `{base} ?= ...` on the plain name: in this file (from its parse, so a file the
+/// index does not hold counts too) and in the other files of the workspace (index).
+fn defaults_of(cx: &LintContext<'_>, file: &ParsedFile, base: &str) -> Vec<Loc> {
+    let mut out: Vec<Loc> = file
+        .statements
+        .iter()
+        .filter(|s| {
+            matches!(&s.kind, StatementKind::Assign { var, op: AssignOp::Default, .. }
+                if var.base == base && var.overrides.is_empty() && var.flag.is_none()
+                    && !var.legacy_syntax)
+        })
+        .map(|s| Loc {
+            lines: LineSpan::line(s.span.start),
+            ..cx.loc.clone()
+        })
+        .collect();
+    let scope = StatementFilter {
+        kinds: vec!["assign".into()],
+        ..StatementFilter::default()
+    };
+    out.extend(
+        query::statements_by_base(cx.index, base, &scope)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r: &StatementRow| {
+                r.op.as_deref() == Some("?=")
+                    && r.overrides.is_empty()
+                    && r.flag.is_none()
+                    && !r.legacy
+                    && !(r.loc.layer == cx.loc.layer && r.loc.path == cx.loc.path)
+            })
+            .map(|r| Loc {
+                lines: LineSpan::line(r.loc.lines.start),
+                ..r.loc
+            }),
+    );
+    out
+}
+
+fn same_line(a: &Loc, b: &Loc) -> bool {
+    a.layer == b.layer && a.path == b.path && a.lines.start == b.lines.start
+}
+
+fn position(history: &[VarOp], at: &Loc) -> Option<usize> {
+    history.iter().position(|op| same_line(&op.loc, at))
+}
+
+/// Whether the `?=` statement `d` is parsed after the statement at `here` (`pos` is the
+/// latter's position in the configuration history, if it is there).
+fn parsed_after(d: &Loc, here: &Loc, pos: Option<usize>, history: &[VarOp]) -> bool {
+    if d.layer == here.layer && d.path == here.path {
+        return d.lines.start > here.lines.start;
+    }
+    let kind = FileKind::from_path(&d.path);
+    let in_conf_dir = d.path.components().any(|c| c.as_os_str() == "conf");
+    match position(history, d) {
+        Some(dp) => match pos {
+            Some(p) => dp > p,
+            // This file is not reached by the configuration; a global class still comes
+            // after every configuration file.
+            None => kind == Some(FileKind::Class),
+        },
+        None => match kind {
+            Some(FileKind::Recipe | FileKind::Append | FileKind::Class) => true,
+            Some(FileKind::Include) => !in_conf_dir,
+            _ => false,
+        },
+    }
 }

@@ -1,0 +1,9 @@
+# ??= after the variable already has a value in the same file.
+MY_A = "x"
+MY_A ??= "y"
+MY_B ?= "x"
+MY_B ??= "y"
+MY_C[doc] = "d"
+MY_C[doc] ??= "e"
+MY_D:qemux86 := "x"
+MY_D:qemux86 ??= "y"

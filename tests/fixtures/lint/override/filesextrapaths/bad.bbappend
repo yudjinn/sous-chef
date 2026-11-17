@@ -1,0 +1,5 @@
+# FILESEXTRAPATHS mistakes.
+FILESEXTRAPATHS:prepend := "${THISDIR}/files"
+FILESEXTRAPATHS:prepend = "${THISDIR}/${PN}:"
+FILESEXTRAPATHS += "${THISDIR}/more:"
+FILESEXTRAPATHS:append := "${THISDIR}/late:"
