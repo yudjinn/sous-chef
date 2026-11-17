@@ -408,68 +408,26 @@ fn shorten(line: &str) -> String {
     format!("{kept} ... [+{cut} bytes of this line]")
 }
 
-/// The `bitbake -e` block of variable `name`: its comment block (`# $NAME ...` through the
-/// pre-expansion value) and its final assignment, or its function definition.
+/// The `bitbake -e` block of variable or function `name`, as 0-based end-exclusive lines.
 ///
-/// The layout follows "Build output" in docs/bitbake-semantics.md (still marked *verify*
-/// there; T5.5 confirms it against recorded output). Accepted forms of the final line:
-/// `NAME="..."`, `export NAME="..."` (a value continued with a trailing `\` takes the
-/// following lines), `NAME() {` / `python NAME () {` up to a line that is exactly `}`, and
-/// `unset NAME`.
+/// The blocks are found by the dump parser, [`crate::bitbake::envdump`] (the format is in
+/// "Build output" in docs/bitbake-semantics.md): for a variable, from `# $NAME` through
+/// its history, its pre-expansion value and its final assignment (`NAME="..."`,
+/// `export NAME="..."` or `unset NAME`, none when the value is `None`); for a shell
+/// function, from its `# line: N, file: F` comment to the closing `}`; for a python
+/// function, from `python NAME () {` to the closing `}`. An override variant
+/// (`T:task-clean`) is a block of its own.
 fn var_block(lines: &[&str], name: &str) -> Option<Range<usize>> {
-    let def = lines.iter().position(|l| is_definition(l, name))?;
-    // The comment block directly above (history, or `# line: N, file: F` for a function),
-    // unless it belongs to another variable.
-    let mut k = def;
-    while k > 0 && lines[k - 1].starts_with('#') && lines[k - 1].trim_end() != "#" {
-        k -= 1;
-        if is_header(lines[k], name) {
-            break;
+    let mut found = None;
+    crate::bitbake::envdump::for_each_line_entry(lines.iter().copied(), |e| {
+        if found.is_none() && e.name() == Some(name) {
+            found = e.span();
         }
-        if lines[k].starts_with("# $") {
-            k = def; // another variable's header: no block of our own
-            break;
-        }
-    }
-    let start = k;
-    let end = definition_end(lines, def);
+    });
+    let span = found?;
+    let start = (span.start.max(1) as usize - 1).min(lines.len());
+    let end = (span.end as usize).clamp(start, lines.len());
     Some(start..end)
-}
-
-fn is_header(line: &str, name: &str) -> bool {
-    line.strip_prefix("# $")
-        .and_then(|r| r.strip_prefix(name))
-        .is_some_and(|r| r.is_empty() || r.starts_with(' '))
-}
-
-fn is_definition(line: &str, name: &str) -> bool {
-    let l = line.strip_prefix("export ").unwrap_or(line);
-    if let Some(rest) = l.strip_prefix(name)
-        && (rest.starts_with("=\"") || rest.starts_with("()") || rest.starts_with(" ()"))
-    {
-        return true;
-    }
-    if let Some(rest) = l.strip_prefix("python ").and_then(|r| r.strip_prefix(name)) {
-        return rest.starts_with("()") || rest.starts_with(" ()");
-    }
-    line.strip_prefix("unset ")
-        .is_some_and(|r| r.trim_end() == name)
-}
-
-/// One past the last line of the definition starting at `def`.
-fn definition_end(lines: &[&str], def: usize) -> usize {
-    let first = lines[def].trim_end();
-    if first.ends_with('{') {
-        return lines[def + 1..]
-            .iter()
-            .position(|l| l.trim_end() == "}")
-            .map_or(lines.len(), |p| def + 1 + p + 1);
-    }
-    let mut end = def;
-    while end < lines.len() && lines[end].trim_end().ends_with('\\') {
-        end += 1;
-    }
-    (end + 1).min(lines.len())
 }
 
 fn one_line(s: &str) -> String {
@@ -480,28 +438,70 @@ fn one_line(s: &str) -> String {
 mod tests {
     use super::*;
 
+    // The layout of BitBake 2.18.0's `bitbake -e` (see docs/bitbake-semantics.md): one
+    // operation has no count and no pre-expansion value; a value of `None` prints no
+    // assignment; functions follow the variables, shell then python.
     const ENV: &str = "\
 #
-# $A [1 operations]
+# $A [2 operations]
 #   set /x/a.conf:1
 #     \"one\"
+#   set /x/doc.conf:2
+#     [doc] \"about A\"
 # pre-expansion value:
 #   \"one\"
 A=\"one\"
 #
 # $AB
+#   set /x/a.conf:3
+#     \"two\"
 AB=\"two\"
+#
+# $FLAGONLY
+#   set /x/doc.conf:4
+#     [doc] \"no value\"
+#
+# $GONE [2 operations]
+#   set /x/a.conf:5
+#     \"x\"
+#   set /x/a.conf:6
+#     [unexport] \"1\"
+# pre-expansion value:
+#   \"x\"
+unset GONE
+#
+# $LONG
+#   set /x/a.conf:7
+#     \"a
+#     b\"
+LONG=\"a \\
+b\"
+#
+# $PATH
+#   set /x/a.conf:9
+#     \"/bin\"
 export PATH=\"/bin\"
 # line: 3, file: /x/base.bbclass
 do_compile() {
 \toe_runmake
 }
+
+# line: 9, file: /x/base.bbclass
+do_install() {
+\tif true; then
+\t\t:
+\tfi
+}
+
+
+
 python do_fetch () {
     pass
 }
-LONG=\"a \\
-b\"
-unset GONE
+
+
+python do_unpack () {
+    pass}
 ";
 
     fn lines() -> Vec<&'static str> {
@@ -511,13 +511,16 @@ unset GONE
     #[test]
     fn var_block_takes_the_history_and_assignment() {
         let l = lines();
-        assert_eq!(var_block(&l, "A"), Some(1..7));
-        assert_eq!(var_block(&l, "AB"), Some(8..10));
-        assert_eq!(var_block(&l, "PATH"), Some(10..11));
-        assert_eq!(var_block(&l, "do_compile"), Some(11..15));
-        assert_eq!(var_block(&l, "do_fetch"), Some(15..18));
-        assert_eq!(var_block(&l, "LONG"), Some(18..20));
-        assert_eq!(var_block(&l, "GONE"), Some(20..21));
+        assert_eq!(var_block(&l, "A"), Some(1..9));
+        assert_eq!(var_block(&l, "AB"), Some(10..14));
+        assert_eq!(var_block(&l, "FLAGONLY"), Some(15..18));
+        assert_eq!(var_block(&l, "GONE"), Some(19..27));
+        assert_eq!(var_block(&l, "LONG"), Some(28..34));
+        assert_eq!(var_block(&l, "PATH"), Some(35..39));
+        assert_eq!(var_block(&l, "do_compile"), Some(39..43));
+        assert_eq!(var_block(&l, "do_install"), Some(44..50));
+        assert_eq!(var_block(&l, "do_fetch"), Some(53..56));
+        assert_eq!(var_block(&l, "do_unpack"), Some(58..60));
         assert_eq!(var_block(&l, "B"), None);
     }
 

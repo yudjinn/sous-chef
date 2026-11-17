@@ -767,21 +767,97 @@ reproduces it from the indexed statements:
     `ERROR: Fatal QA errors were found, failing task.` (`meta/lib/oe/qa.py`).
   - The compiler, configure, make, wget and quilt messages inside logs are those tools'
     own formats; they were not checked against a source.
-- `bitbake -e <recipe>` prints, for each variable, a comment block with its history followed
-  by the final assignment:
+### `bitbake -e` output (verified, T5.5)
 
-  ```
-  # $VAR [3 operations]
-  #   set /path/to/file.conf:12
-  #     "value"
-  #   append /path/to/recipe.bb:30
-  #     "more"
-  # pre-expansion value:
-  #   "value more"
-  VAR="value more"
-  ```
+Confirmed against real output of BitBake 2.18.0 (`bitbake -e curl` on the live
+environment, kas 5.5, OE-core `33a6bd6`; trimmed copy in
+`tests/fixtures/outputs/envdump/`) and against the code that writes it in that BitBake:
+`lib/bb/cooker.py` `showEnvironment`, `lib/bb/data.py` `emit_var` / `emit_env`,
+`lib/bb/data_smart.py` `IncludeHistory.emit` / `VariableHistory.emit` and the `op` names
+recorded by `lib/bb/parse/ast.py`, `data_smart.py` and `data.py`. The parser is
+`bitbake::envdump`. In order:
 
-  *Verify* the exact format against real output before writing the parser.
+1. **Leading noise.** Whatever ran first prints before the dump. Through `kas shell`:
+   kas's log lines (`2026-11-17 16:28:01 - INFO     - kas 5.5 started on ...`, one per
+   repository, `To start the default build, run: ...`); then the cooker's `NOTE:
+   Reconnecting to bitbake server...`, `Loading cache...done.`, `Loaded 0 entries from
+   dependency cache.`, `Parsing recipes...done.`, `Parsing of N .bb files complete ...` and
+   `NOTE: Resolving any missing task queue dependencies`. A job captures stdout and stderr
+   together, so these are interleaved as printed.
+2. **Include history**: `#`, `# INCLUDE HISTORY:`, `#`, then one `# <file>` per
+   configuration file, indented two spaces per level, with ` includes:` after a file that
+   includes others. Paths are as BitBake opened them: absolute and not normalised
+   (`.../build/../openembedded-core/meta/conf/layer.conf`), or relative to `BBPATH` for
+   files found there (`conf/site.conf`). Classes inherited globally are part of it.
+3. **Variables**: every key that is not a function (`func` flag), sorted by name, each as a
+   block. Keys starting `__` are left out. Override variants are separate keys and blocks
+   (`ABIEXTENSION:class-crosssdk`, `T:task-clean`, `FILES:curl`), and names may hold `:`,
+   `-`, `.`, `/` (`PREFERRED_PROVIDER_virtual/kernel`).
+
+   ```
+   #
+   # $FILE_LAYERNAME [2 operations]
+   #   set /…/build/../openembedded-core/meta/conf/bitbake.conf:801
+   #     [_defaultval] "config"
+   #   set cookerdata.py:513 [_parse_recipe]
+   #     "core"
+   # pre-expansion value:
+   #   "core"
+   FILE_LAYERNAME="core"
+   ```
+
+   - The header is `# $NAME` with one operation and `# $NAME [N operations]` with more
+     (never `[1 operations]`). A variable without history prints `#   [no history
+     recorded]`, `#`, `#   "<value>"` instead of operations.
+   - Each operation is `#   <op> <file>:<line>`, then `#     ` and the detail in double
+     quotes, prefixed with `[<flag>] ` for a flag operation. The detail is the value as
+     written in the statement (`+= "x"` records `x`), not the result. Multi-line details
+     continue on lines starting `#     `. Nothing inside the quotes is escaped.
+   - When python code recorded the operation (`d.appendVar`, `expandKeys`, the cooker),
+     the file is only a basename and ` [<function>]` follows the line number
+     (`append base.bbclass:508 [appendVar]`, `rename from FILES:${PN} data.py:97
+     [expandKeys]`).
+   - Operation names seen: `set` (`=`, `setVar`), `set?` (`?=`), `immediate` (`:=`),
+     `append` (`+=`, or `appendVar` / `appendVarFlag`, which add no space), `prepend`,
+     `postdot` (`.=`), `predot` (`=.`), `:append`, `:prepend`, `:remove` (the override
+     operators; with a condition `:append[class-target]` for `VAR:append:class-target`),
+     `exported` (`export VAR`, a set of the `export` flag), `del`, `delFlag`, `rename from
+     <old key>`, `rename (to)`, `from env` and `auto env export` (inherited from the
+     environment BitBake started in). `??=` is not an operation of its own: it is `set`
+     of the flag `_defaultval` (`_defaultval_flag_<f>` for `VAR[f] ??=`).
+   - Flag operations (`[doc]`, `[vardeps]`, `[sha256sum]`, `[export]`, `[unexport]`,
+     PACKAGECONFIG options) are part of the same history. No final flag value is printed.
+   - The base block repeats each override variant's operations, prefixed
+     `override[<override>]:` (`override[class-native]:set`, `override[curl-dbg]:rename
+     from ALLOW_EMPTY:${PN}-dbg`); the variant also has its own block. The variable's own
+     operations come first, in the order they ran.
+   - `# pre-expansion value:` and `#   "<value>"` follow only with more than one
+     operation. The value is the unexpanded one; continuation lines start with `#` alone
+     (no spaces), and an unset value prints `"None"`.
+   - The final line is `NAME="<value>"`, or `export NAME="<value>"` when the `export` flag
+     is set (`AR`, `PWD`, `systemd_unitdir`). The value is expanded; `"`, backtick and `$`
+     are escaped with a backslash and each newline becomes ` \` plus a newline (backslashes
+     are not escaped). **`unset NAME` means the `unexport` flag is set** (`SHELL`), not that
+     the variable is unset; no value is printed then. **A variable whose value is `None`
+     prints no final line at all**: only flags were set (`ALTERNATIVE`, `[doc]` only), or
+     every value operation was conditional (`ALLOW_EMPTY`, only package overrides).
+   - A variable whose expansion raised prints `# expansion of NAME threw <Error>:
+     <message>` and no block (not seen in the recording; from `emit_var`).
+4. **Shell functions**, sorted, directly after the last variable (no `#` before them):
+   `# line: <n>, file: <file>`, `NAME() {`, the expanded body, `}`, a blank line. An
+   `EXPORT_FUNCTIONS` stub has `# line: 1, file: autogenerated`. Functions have no history
+   block, and names containing `-`, `.`, `+`, `{` or `}` are not printed.
+5. **Python functions**, sorted, last: a blank line, `python NAME () {`, the body as
+   stored, `}` (on the body's last line when the body does not end with a newline), a
+   blank line. No location is printed. Anonymous python is printed under its mangled name
+   (`__anon_<line>_<path with / . - as _>`), so these names encode the absolute path.
+
+Departures from the earlier description here: the example's `[3 operations]` header with
+a pre-expansion value is right only for more than one operation; values of `None`
+print no assignment; `unset NAME` is an unexported variable; operations recorded by
+python show a basename and the function; override variants repeat their operations in
+the base block; there is leading noise before the dump; functions follow the variables
+without history and without a `#` separator.
 
 ## Running BitBake (for T5.4)
 

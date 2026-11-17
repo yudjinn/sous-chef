@@ -211,15 +211,14 @@ const ENV_DUMP: &str = "\
 SRC_URI=\"file://a.patch file://b.patch\"
 #
 # $SRC_URIX
+#   set /src/meta-mine/recipes/hello/hello_1.0.bb:6
+#     \"no\"
 SRC_URIX=\"no\"
 #
-# $PATH [1 operations]
+# $PATH
 #   set /src/conf/bitbake.conf:10
 #     \"/usr/bin\"
-# pre-expansion value:
-#   \"/usr/bin\"
 export PATH=\"/usr/bin\"
-#
 # line: 12, file: /src/meta-core/classes/base.bbclass
 do_compile() {
 \toe_runmake

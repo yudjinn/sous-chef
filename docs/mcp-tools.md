@@ -190,8 +190,61 @@ unexpanded; a warning per anonymous python function that changes the variable by
 one for each that is opaque (changes variables through computed names or hands `d` to other
 code), since anonymous python is never run; a count of the other anonymous functions;
 `note: global configuration only (no recipe)` without a recipe; the python note when the
-value depends on python. `authoritative: true` returns the error `bitbake is not
-available: no initialised build environment was found` until T5.5 implements it.
+value depends on python.
+
+**Authoritative mode** (`authoritative: true`) answers from `bitbake -e [<recipe>]`
+instead of the static evaluator:
+
+- Without a usable BitBake environment the error is `bitbake is not available: ...`.
+  `machine` and `distro` are refused (BitBake uses the build configuration's). `recipe`
+  must be a name BitBake accepts (letters, digits and `_ . + - /`; not a pointer).
+- **Names.** Only the recipe name is passed to BitBake, validated like every target. The
+  variable name is never put on a command line: it is looked up in the parsed output, so
+  `FILES:${PN}` (expanded with BitBake's own `PN`), `SRC_URI:append` or `T:task-clean`
+  need no relaxed validation.
+- **Running.** `bitbake -e` runs as a background job (operation `env`, visible to
+  `bitbake op=status` / `op=cancel`) and the tool waits up to 120 s for it (about 15 s on a
+  real environment). One job runs at a time because BitBake allows one client per build
+  directory: while another job (a build) runs, the tool answers from a cached dump if the
+  tree is unchanged, and otherwise returns an error naming the running job and suggesting
+  static mode. If its own job is still running after 120 s it returns the job id; the next
+  call for the same recipe waits for that job instead of starting another. A failed run is
+  an error with the first `ERROR:` lines and the output's handle.
+- **Cache.** The output is stored as an `env` handle, one per recipe (and one for the
+  global configuration), keyed by the index state of the recipe's `.bb` files and
+  bbappends and of every `.conf`, `.bbclass` and `.inc` in the workspace; an unchanged
+  tree reuses it, also after a server restart while the handle is kept. The source line
+  says `reused` then.
+- **Output**: the static table (`status op override loc snippet`), one row per operation
+  in BitBake's history, in BitBake's order (the variable's own operations as they ran,
+  then those of its override variants). `status` is `inactive` when an override the
+  operation depends on is not in BitBake's final `OVERRIDES` and `active` otherwise:
+  BitBake records that an operation ran, not whether it contributed, so there is no
+  `applied` / `shadowed`. `op` is the statement's operator (`??=` included); for an
+  operation recorded by python code it is BitBake's own name (`set`, `append`, `rename`)
+  and `loc` is BitBake's `file.py:line`. `loc` is a pointer when the file is in the
+  workspace, else the absolute path with `..` resolved. Flag operations follow with
+  `flags: true` (`final[flag]:` only when the history gives the value without guessing:
+  `bitbake -e` prints no flag values). A function is one row (`shell` with its
+  `# line:` location, or `python`), with a `final:` line giving its length and the
+  `slice` call for its body.
+- Notes: `final:` as in static mode (cut at 600 characters, full text in a `value`
+  handle), `final: X is not set` when BitBake printed no value, `final: not printed
+  (unexported)` with the pre-expansion value for an unexported variable (`bitbake -e`
+  prints `unset X`), `note: exported ...` for an exported one, then
+  `source: BitBake (bitbake -e curl), handle h:...` with the `slice` call for the raw
+  block, the status note, and a count of dump lines the parser did not recognise.
+
+`FILE_LAYERNAME` of `curl` (live environment, BitBake 2.18.0):
+
+```
+status	op	override	loc	snippet
+active	??=	-	meta:conf/bitbake.conf:801	FILE_LAYERNAME ??= "config"
+active	set	-	cookerdata.py:513	_parse_recipe: FILE_LAYERNAME set "core"
+final: "core"
+source: BitBake (bitbake -e curl), handle h:0bf91ad514; slice handle=h:0bf91ad514 var=FILE_LAYERNAME shows the raw block
+note: status is inactive when an override the operation needs is not in BitBake's final OVERRIDES, else active (BitBake records that an operation ran, not whether it contributes)
+```
 
 `EXTRA_OECONF` of `hello` with `machine: boardx`:
 
@@ -793,7 +846,12 @@ is an error.
 | `handle` | `h:<id>` required |
 | one of | `lines: "A-B"`, `grep: "RE"` (+ `context`), `var: "NAME"` (env dumps), `failures: true`, `page: K` |
 
-Capped at 8 KB; says what it cut.
+Capped at 8 KB; says what it cut. `var` finds the block with the `bitbake -e` parser: for a
+variable, from `# $NAME` to its final assignment (`NAME="..."`, `export NAME="..."`,
+`unset NAME`, or the last history line when BitBake printed no value); for a shell
+function, from its `# line:` comment to the closing `}`; for a python function, from
+`python NAME () {` to the closing `}`. Override variants (`T:task-clean`) are blocks of
+their own; names are exact.
 
 ### `status`
 No arguments. Workspace roots, the release (`release`, e.g. `wrynose (LAYERSERIES_CORENAMES)`),
