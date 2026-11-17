@@ -1,0 +1,5 @@
+SUMMARY = "Floating revisions"
+SRC_URI = "git://example.org/x.git;protocol=https;branch=main"
+SRCREV = "${AUTOREV}"
+SRCREV_meta ?= "${AUTOREV}"
+SRCREV:pn-other = "${AUTOREV}"

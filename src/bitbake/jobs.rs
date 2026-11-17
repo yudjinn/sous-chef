@@ -5,8 +5,9 @@
 //! (`<dir>/<pid>-<n>.out`), so the output is on disk as it arrives and nothing has to read
 //! a pipe. A tokio task waits for the process ([`Supervised::wait`]) and records how it
 //! ended. The table never holds a reference to the handle store: whoever next looks at the
-//! table with one ([`JobTable::settle`], called by the `bitbake`, `log` and `status`
-//! tools) stores the output of each finished job under a handle and removes the file.
+//! table with one ([`JobTable::settle`], called by the `bitbake` tool on every call and by
+//! `log` when given `job`; `status` does not call it) stores the output of each finished job
+//! under a handle and removes the file.
 //!
 //! One job runs at a time, of any kind: BitBake takes a lock on the build directory, so a
 //! second `bitbake -e` or `bitbake-layers` while a build runs would wait for it or fail.
