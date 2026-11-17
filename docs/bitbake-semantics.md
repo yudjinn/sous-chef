@@ -1863,11 +1863,10 @@ These are reported, never silently guessed. Authoritative mode (M5) covers them.
 Statements above that rest on documentation, memory or the source alone, not on a check
 against BitBake's behaviour or output:
 
-- kas: `layers` set to null (*verify*: the schema allows it, the code would not accept it);
-  whether sous-chef should read `KAS_MACHINE` / `KAS_DISTRO` / `KAS_TARGET` / `KAS_TASK`
-  (*verify*); what `kas shell -k` does before the first checkout (*verify*); YAML 1.1
-  specifics, `kas-container` path rewriting and the other kas keys sous-chef does not read
-  (*verify* if ever needed).
+- kas: `layers` null and `{}`, the `KAS_*` overrides, what `kas shell -k` does (before the
+  first checkout and with `{repo, file}` includes), the YAML 1.1 rules and `kas-container`
+  were settled from the kas 5.5 and PyYAML 6.0.3 source (see "kas"), not by running kas;
+  the kas keys sous-chef does not read (`env`, `patches`, ...) were not looked at.
 - `bitbake -e`: the `# expansion of NAME threw ...` line is from `emit_var`, not seen in
   real output.
 - Task logs: the compiler, configure, make, wget and quilt messages are those tools' own

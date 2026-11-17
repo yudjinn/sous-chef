@@ -236,10 +236,11 @@ edit = false       # the reindex and lint after an edit
   build environment: an OE `oe-init-build-env`, a bitbake-setup `init-build-env`, an
   environment the server was started in, or a kas project with `kas` on `PATH`
   (`status` shows which).
-- **Not modelled.** `BBCLASSEXTEND` variants such as `-native` (no provider, not
-  evaluated), `BBMASK`, `SKIP_RECIPE`, `COMPATIBLE_MACHINE` / `COMPATIBLE_HOST`,
-  `PREFERRED_PROVIDERS`; `addpylib`; `BBFILES_DYNAMIC` (only `layers show=appends` reads
-  it). `PACKAGECONFIG` dependencies are listed from the flags, since OE-core adds them with
+- **Not modelled.** `BBCLASSEXTEND` variants such as `-native` (named as class-extended
+  variants, no provider, not evaluated); `PREFERRED_PROVIDERS`; `INCOMPATIBLE_LICENSE`.
+  Partly: a static `BBMASK` marks the files it masks (with the default machine and
+  distro), and `SKIP_RECIPE` / `COMPATIBLE_MACHINE` / `COMPATIBLE_HOST` give a "BitBake
+  would skip this recipe" note when every value involved is static. `PACKAGECONFIG` dependencies are listed from the flags, since OE-core adds them with
   anonymous python. Reverse dependencies see unconditional statements as written. Tasks
   added by anonymous python are not seen. The `.inc` split checks statement order
   statically; it does not evaluate the result.

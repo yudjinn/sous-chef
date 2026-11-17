@@ -36,7 +36,7 @@ agree with each other and with `Cargo.toml`; every command they run is a real su
 `hook::HANDLERS` and every handled tool has a matcher; each hook command, run with `sh -c`
 as Claude Code runs it, reaches its handler when `sous-chef` is on `PATH` and exits 0 with
 no output when it is not; the MCP command, started outside the project, serves the
-workspace in `$CLAUDE_PROJECT_DIR` and lists the registry's 14 tools; the events captured
+workspace in `$CLAUDE_PROJECT_DIR` and lists every tool of the registry (16 now); the events captured
 from a real session give the expected context; the skill's tool names are all registered.
 
 ### Decisions
@@ -150,8 +150,9 @@ build) on `PATH`:
   covered by `tests/plugin_packaging.rs` through the plugin's own hook command, and by the
   handler tests, against the hand-written events.
 - The server's start-up line on stderr (`sous-chef: serving 14 tools on stdio for 3
-  layers`) appears in Claude Code's debug log at `[ERROR]` level: Claude Code logs all server
-  stderr that way. Harmless.
+  layers`, as captured that day; `diff` and `audit` came later, and the line now says 16)
+  appears in Claude Code's debug log at `[ERROR]` level: Claude Code logs all server stderr
+  that way. Harmless.
 
 ### Real events
 
