@@ -68,9 +68,8 @@ impl Index {
     }
 
     /// Brings the index up to date with the files on disk. Call at the start of every tool.
-    pub fn refresh(&mut self, _ws: &Workspace) -> Result<RefreshReport> {
-        // Stub: T2.2 implements this in scan.rs.
-        Err(Error::not_implemented())
+    pub fn refresh(&mut self, ws: &Workspace) -> Result<RefreshReport> {
+        scan::refresh(self, ws)
     }
 
     /// The database file.
