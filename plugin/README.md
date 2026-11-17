@@ -62,8 +62,11 @@ A command hook gets one JSON object on stdin. Common fields: `session_id`, `prom
   than imperative instructions.
 - `hookSpecificOutput.updatedToolOutput` replaces the output before Claude sees it, for
   built-in tools too; the value must match the tool's output shape or it is ignored.
-  (`updatedMCPToolOutput` is the older MCP-only form.) Not used by T7.1 / T7.2. Relevant to
-  T7.3: replacing Bash output is possible with `{stdout, stderr, interrupted, isImage}`.
+  (`updatedMCPToolOutput` is the older MCP-only form.) Used by the Bash hook (T7.3): it
+  replaces the output of a large `bitbake`, `devtool` or `bitbake-layers` command with a
+  digest, as `{stdout, stderr, interrupted, isImage}` with the other fields kept, after
+  storing the full output under a handle. The Grep / Read hook (T7.2) and the edit hook
+  (T7.4) use `additionalContext` only and never replace the output.
 - Top-level `decision: "block"` + `reason` on `PostToolUse` only adds the reason next to the
   result; not used.
 - Timeouts: default 600 s for command hooks; a timed-out hook's output is discarded. The

@@ -255,8 +255,14 @@ of bitbake-semantics.md. `find_class` / `class_candidates` honour `SplitClassDir
 `Config.release: Option<String>`, `LintConfig.severity: BTreeMap<String, Severity>`.
 
 `Layer::lint_releases(&self, ws: &Workspace) -> Vec<Release>`: the supported releases in the
-layer's `compat`, plus `ws.release.release`, sorted and de-duplicated. For a layer that is
-not writable it is the workspace release alone.
+layer's `compat`, plus `ws.release.release`, sorted and de-duplicated.
+
+Which layers get the full list (decided 2026-11-17, overview.md "Lint and multi-release
+layers"): a writable layer; a layer that is the lint target or contains it (a named layer,
+a file or a recipe in it); every layer when the workspace has no writable layer. A layer
+that is not writable and is linted only because a whole-workspace run has `--all` is
+checked against the workspace release alone, and so is a file outside every layer. Scaffold
+uses the full list for its target layer, which is always writable.
 
 Who reads it:
 
@@ -277,7 +283,9 @@ Who reads it:
 ## Index contract (`src/index`)
 
 Location: `$XDG_CACHE_HOME/sous-chef/<sha256 of workspace roots, 16 hex>/index.sqlite`.
-The index is derived: any schema change bumps `user_version` and rebuilds from scratch.
+The index is derived: any schema change bumps `user_version` and rebuilds from scratch. The
+index also records the workspace release, and is rebuilt when the release changes (a new
+`release` in `sous-chef.toml`), so what depends on it is recomputed.
 
 ```sql
 layers(id INTEGER PK, name TEXT UNIQUE, root TEXT, priority INT, collections TEXT,
@@ -623,7 +631,8 @@ A generator task registers itself by replacing `None` with `Some(&<file>::<Struc
 its kind's arm of `scaffold::generator()` (an edit in `src/scaffold/mod.rs`, outside the
 generator's own file). Paths must be absolute, pass `Workspace::confine` and lie in a
 writable layer; a plan with `new_layer` may also modify `<build>/conf/bblayers.conf`.
-`RuleLint` calls `lint::run` on exactly the written files (default options, so
+`RuleLint` calls `lint::run` on exactly the written files that are BitBake metadata
+(patches and other files a bbappend adds are skipped; default options, so
 `[lint] disable`, `[lint.severity]` and inline suppression apply); files of a new layer are
 skipped because they are not in the workspace until `bblayers.conf` lists it. `sha256_hex`, `file_sha256`, `line_count`; test seam `tools::scaffold::run_with`.
 
@@ -640,14 +649,15 @@ files }`, `Node`, `NodeState`: the recipe tree in parse order, static), `recipe:
 `file_label`, `outline_kind`; `item::matching(stmts, name)`, `read_confined(ws, loc)`,
 `hex12`, `CAP_BYTES`; `search::item_label`, `DEFAULT_LIMIT`. **The walk is static: an
 `include` or `inherit` whose argument needs evaluation is unresolved, and `base.bbclass` and
-the `INHERIT` classes are not part of it.** `recipe` summary values are read from direct
-statements, not from the replay.
+the `INHERIT` classes are not part of it.** `recipe` summary values were read from direct
+statements in wave 3; since wave 4 they are evaluated (see "As implemented in wave 4").
 
 Replay (T3.4, `eval::replay`): `evaluate(index, ws, target)` uses a process-wide
 `ConfigCache` (`global_cache()`); `evaluate_with(&ConfigCache, index, ws, target)` takes an
 explicit one; `ConfigCache::{new, passes, clear}`. **The caller must refresh the index
-first.** `Target.recipe` is a recipe name (with `version`, `%` allowed, else the preferred
-one), an absolute path to a `.bb`, or `layer:path` ending in `.bb`; `None` evaluates the
+first.** `Target.recipe` is a recipe name (with `version`, `%` allowed, else the one
+provider selection picks: see `eval::providers` in "As implemented in wave 4"), an
+absolute path to a `.bb`, or `layer:path` ending in `.bb`; `None` evaluates the
 configuration only; an unknown recipe is `NotFound`. `machine` / `distro` in the target are
 set first and set again after every plain assignment to them in the configuration pass, so
 they win over the configured values. A cache entry is keyed by (index file, workspace key, machine, distro)
@@ -677,11 +687,10 @@ handlers and anonymous python never run.
 Lint engine (T4.1, `lint`): `Rule` keeps `id`, `scope`, `default_severity`, `check` and
 gains two methods with defaults: `releases() -> RangeInclusive<Release>` (default: every
 supported release) and `default_enabled() -> bool` (default true; false means the rule runs
-only when selected by its exact id or an alias of it). **The wave 4 hygiene task (T4.4) must
-override `default_enabled` to return false in `hygiene_variable_order.rs`; the M0 stub does
-not, so the rule is on by default until then.** `LintContext.releases` is oldest first and
-never empty: `Layer::lint_releases` of the unit's layer, or the workspace release alone for
-a file outside every layer. `lint::run(ws, index, config, &Target, &Options) ->
+only when selected by its exact id or an alias of it); T4.4 made `hygiene/variable-order`
+return false. `LintContext.releases` is oldest first and never empty: the releases the
+unit's layer is checked against (see "Release contract"), or the workspace release alone
+for a file outside every layer. `lint::run(ws, index, config, &Target, &Options) ->
 Result<Report>` is the contract (the milestone's `run(target, options) -> Vec<Finding>` is
 superseded): `Target { Workspace, Layer(name), Recipe { name, version }, Files { files,
 lines } }`, `Options { rules, min_severity, all }`, `Report { findings, notes, files, layers
@@ -717,12 +726,13 @@ argv; validates every name with `validate_name`), `check_destructive`, `status::
 workspace's release (`Feature::PrInWorkdir`); `meta_from_path` returns it as it is.
 
 Hooks (T7.1, T7.2, `hook`): `sous-chef hook` reads one Claude Code hook event on stdin and
-writes nothing or one `hookSpecificOutput` object with `additionalContext`; no handler
-rewrites tool output. The wire format it was built against is recorded in
+writes nothing or one `hookSpecificOutput` object; the Grep / Read and edit handlers add
+`additionalContext`, and since T7.3 the Bash handler replaces the output instead (see
+"As implemented in wave 4"). The wire format it was built against is recorded in
 `plugin/README.md`. `Handler` (`name`, `events`, `tools`, `handle(&mut Ctx, &Event) ->
 Result<Option<Response>>`), `HANDLERS` and `handler_for` (`grep_read::GrepRead` for Grep and
-Read; stubs `bash::BashDigest` for Bash and `edit::EditFollowUp` for Edit, Write and
-MultiEdit, which T7.3 and T7.4 fill in), `Event` (`parse`, `input_str`, `abs_path`),
+Read; `bash::BashDigest` for Bash and `edit::EditFollowUp` for Edit, Write and MultiEdit,
+stubs in wave 3 that T7.3 and T7.4 filled in), `Event` (`parse`, `input_str`, `abs_path`),
 `Response` (`context` caps the text at `CONTEXT_CAP`, 9,000 bytes; `to_json`), `Ctx` (`env`,
 `elapsed`, `over_budget`, `check_budget`, `note`), `Env { ws, index }` with
 `fresh_file(abs)` (the index row only for a Yocto file inside the workspace whose bytes on
@@ -731,9 +741,109 @@ error, panic or overrun gives no output), `BUDGET` (150 ms, `SOUS_CHEF_HOOK_BUDG
 overrides), `WATCHDOG` (2 s, `arm_watchdog`, `begin_output`), the debug log `hook.log` in the
 cache directory. `Index::open_read_only(path, busy)` opens an existing database read-only:
 it never creates, rebuilds or writes, and a missing file or another schema version is an
-error. A file edited since the last index refresh gets no annotation until the index is
-refreshed. **What the index should offer hooks and does not yet: `refresh_file(ws, abs)`,
-which reindexes one file. The wave 4 edit hook (T7.4) needs it.**
+error. A file edited since the last index refresh gets no Grep / Read annotation until the
+index is refreshed. `Index::refresh_file(ws, abs)`, which reindexes one file, was added in
+wave 4 for the edit hook.
+
+### As implemented in wave 4
+
+As for wave 3: the additions each stream made; the module docs in the named files are the
+detailed reference, docs/mcp-tools.md describes the tools and docs/lint-rules.md the rules.
+
+Provider selection (T3.7, `eval::providers`): `Providers::new(index, ws, machine, distro)`
+(evaluates the configuration through the process-wide cache), `Providers::with_config(cache,
+index, ws, target, config)`, `best_version(pn, version) -> Option<Selection>`,
+`providers(name) -> ProviderSet`, `evaluate(&RecipeRow)`, `target_for(&RecipeRow)`,
+`setting(name) -> Option<Setting>`, `config()`; `Selection { recipe, reason: VersionReason
+{ Requested, Required, Preferred, Latest }, setting, default_preference, notes }` with
+`describe()`; `ProviderSet { name, providers, reason: ProviderReason { None, Only,
+PreferredProvider, SameName, FirstOfSeveral }, preferred_provider, excluded, notes }` with
+`selected()`; `Provider { pn, selection, provides_loc, python }`; `Setting { name, value, loc,
+python }`; `preferred_recipe(index, ws, pn, version, machine, distro)`;
+`recipes_using(index, &FileRow)` (the recipes a `.bb`, bbappend, include or class is part
+of). **A recipe name in `Target` is now resolved through provider selection after the
+configuration pass, so `REQUIRED_VERSION`, `PREFERRED_VERSION` and `DEFAULT_PREFERENCE` are
+honoured; a path target is resolved before it. The doc comment of `eval::evaluate` still
+says "preferred by layer priority and version" and is out of date.** `query::preferred_recipe`
+(layer priority and version only, no configuration) is still what `item`, `search`, the
+`bbappend` generator and `bitbake::logs` use. Not handled by provider selection:
+`BBCLASSEXTEND` variants (`-native` names find no provider), `BBMASK`, `SKIP_RECIPE` and
+`COMPATIBLE_*`.
+
+Query layer (T3.7, `index::query`): `DependRow { file, kind, pkg, target, line }`,
+`files_providing(index, name)`, `provides_of(index, file_id)`, `depends_on(index, target)`
+(rows of the `provides` and `depends` tables).
+
+Variable tools (T3.5, T3.6, T3.7, `mcp::tools::{var, overrides, deps}`): helpers shared by
+the three in `var`: `recipe_target(index, recipe, machine, distro) -> Target` (an exact `pn`
+is passed to the evaluator as a name; a `pn_pv`, a pointer or an inexact name goes through
+`recipe::resolve_recipe` and becomes `layer:path`), `replay_notes(ds, name)` (the warnings
+about anonymous python and unfollowed references), `status_str`, `op_snippet`,
+`override_str`, `MAX_FINAL_CHARS` (600). **All three warn about anonymous python through
+`replay_notes`, as wave 3 required.** `recipe` summary key values come from `eval::evaluate`
+of the chosen file, and a bare `pn` is resolved with `providers::preferred_recipe`.
+`overrides` with `show: dead` evaluates the configuration once per machine conf and once
+per distro conf of the workspace (cached by `ConfigCache`). `deps` has no machine or distro
+argument; `reverse` is static (index `depends` table).
+
+Lint rules (T4.2, T4.3, T4.4, `lint::rules`): the 38 rules are filled in; no rule id was
+added or removed. Public items besides the rule structs: `org_upstream_edit::{TIMEOUT,
+MAX_FINDINGS}` (5 s, 20). `hygiene/variable-order` returns false from `default_enabled`.
+Engine changes: an alias group (`style`) selected with `--rule` counts as naming its rules
+by exact id, so it runs rules that are off by default or disabled; a recipe target is
+resolved with `providers::preferred_recipe` (the file BitBake uses). Recipe-scope rules run
+once per `.bb` of the target, so `override/dead` and `override/shadowed` report only when
+the `.bb` is linted, and their findings can be in another layer's bbappend. **The releases
+a layer is checked against follow the decided rule in "Release contract" (a layer that is
+the lint target, or contains it, gets its full list even when not writable).**
+
+Index (T7.4, `index`): `Index::refresh_file(ws, abs) -> FileRefresh` (`Unchanged`,
+`Reindexed(Loc)`, `Removed(Loc)`, `NotIndexed`) reindexes one file without walking the layers:
+stat and hash check, reparse, its rows replaced in one transaction. When the file was
+already indexed and is not a `conf/layer.conf`, only its own reference edges are
+recomputed (its `bbappend` edges and the edges pointing at it are kept); a new file, a
+deleted one, or a changed `conf/layer.conf` recomputes every edge as the full refresh does.
+A path the full walk would skip, or a file that is not BitBake metadata, is `NotIndexed`.
+**`refresh_file` does not sync the `layers` table: a layer the index does not know is an
+error, and an edit to a `layer.conf` (priority, collections, compat) is not reflected in
+`layers` until the next full `refresh`.** `Index::open_existing(path, busy)` opens an
+existing database read-write (never creates or rebuilds it; another schema version is an
+error; a lock held longer than `busy` makes a write fail).
+
+Hooks (T7.3, T7.4, `hook::{bash, edit}`): `hook::Ctx::config()` (the configuration the
+workspace was discovered with); `HandleStore::without_retention(dir, conn)` (opens the
+store on an existing connection without the retention sweep, so a short-lived process never
+removes a blob the server is writing).
+
+- **Bash** (`BashDigest`, `runs_bitbake(command)`, `MIN_BYTES` 3 KiB, `TAIL_LINES` 10):
+  for a `bitbake`, `devtool` or `bitbake-layers` command (the first word of any command in
+  the line, after variable assignments and `sudo`, `time`, `env`, `nice`, `exec`,
+  `command`, `nohup`) whose stdout plus stderr is over 3 KiB, the hook stores the full output
+  under a `build` handle and **replaces** the output with `updatedToolOutput`: `stdout`
+  becomes one line naming the handle and size, then the log digest (`bitbake::logs`) when a
+  failure is detected, else the last 10 lines, then a `slice` hint; `stderr` is emptied; the
+  other fields of `tool_response` are kept. Other commands, smaller outputs and image
+  output (`isImage`) are left untouched. A missing index, a locked database (50 ms busy timeout) or any write error
+  gives no output, so the original output stays.
+- **Edit** (`EditFollowUp`, `MAX_FINDINGS` 5, `WRITE_BUSY` 50 ms): for a BitBake file in
+  the workspace, reindexes it with `refresh_file` (opened with `open_existing`), runs the
+  file-scope rules that are enabled by default and not disabled through `lint::run` on that
+  file, and adds as `additionalContext` at most five findings at warning level or above
+  (after `[lint.severity]` and suppression), then `+N more`; plus one line when the file is
+  in a layer that is not writable. Nothing when there are no findings and the layer is
+  writable. A file the index does not hold, or a locked database, gives no output. The tool
+  output is never replaced.
+
+Scaffold (T6.2, T6.3, `scaffold::{recipe, append, layer, class}`): the four generators
+are registered in `scaffold::generator()` (`RecipeGen`, `AppendGen`, `LayerGen`,
+`ClassGen`), each with its `OPTIONS`; `class::{DEFAULT_AFTER, DEFAULT_BEFORE}` (`do_install`,
+`do_build`). `inc_split` and `where` are still `None` (wave 5). The shared helpers
+(`opt_words`, `quote`, `check_parses`, `assign_list`...) are `pub(crate)` in `recipe.rs`.
+**`execute` refreshes the index before a generator plans, so `GenContext.index` is
+current.** The post-write lint skips files that are not BitBake metadata. Generators read
+the target layer's releases with `Layer::lint_releases`. A layer created by `layer` is not
+part of the running server's workspace until it discovers the workspace again (restart),
+so its files are not linted after the write and cannot be a scaffold target until then.
 
 ## Errors
 

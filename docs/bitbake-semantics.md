@@ -373,6 +373,13 @@ Verified (T1.4) against BitBake `master` (commit `5495a547`, 2026-11-16), and re
 sous-chef differences: only files inside the workspace (layer roots and the build directory)
 are ever found; `BBMASK` is not applied by `recipe_files`.
 
+**A bbappend that matches no recipe** (checked by T4.3 in `cooker.py`
+`show_appends_with_no_recipes`, master and branches `2.0` and `2.8`): BitBake stops with a
+fatal error ("No recipes available for"). On BitBake 2.0 (Kirkstone) and 2.8 (Scarthgap)
+`BB_DANGLINGAPPENDS_WARNONLY` set makes it a warning; master has no such variable. The
+release that dropped it was not checked (*verify*). The `layers` tool (`show: appends`)
+and `org/append-no-match` report these appends.
+
 Static expansion of reference arguments (`resolve::expand_with`): the scanner resolves
 `${VAR}` in `require` / `include` / `inherit` arguments only for values that follow from the
 file's own path. From OE-Core `meta/conf/bitbake.conf` and `meta/conf/layer.conf` (master
@@ -437,7 +444,19 @@ Checked by T1.3 against BitBake master (`lib/bb/cookerdata.py`, `cooker.py`,
   `LAYERDIR_RE` (`re.escape` of the layer path) is set alongside `LAYERDIR`; both are deleted
   after the last layer.
 
-Not reproduced by sous-chef: the fatal `LAYERSERIES_COMPAT` and `LAYERDEPENDS` validation.
+**Layer validation** (checked by T4.3 in `lib/bb/cookerdata.py` `parseConfigurationFiles`
+and `lib/bb/cooker.py` `handleCollections`, master and branches `2.0` and `2.8`, which agree):
+
+- `LAYERSERIES_COMPAT_<c>` not set: a warning on every run ("should set
+  LAYERSERIES_COMPAT_<c>"); the layer is accepted.
+- `LAYERSERIES_COMPAT_<c>` with no name in common with `LAYERSERIES_CORENAMES`: fatal
+  ("Layer <c> is not compatible with the core layer"). Only names are compared.
+- The same collection added by two layers: fatal ("Found duplicated BBFILE_COLLECTIONS").
+- A `LAYERDEPENDS_<c>` entry that no layer adds: an error that stops BitBake ("depends on
+  layer '<d>', but this layer is not enabled in your configuration").
+
+The replay does not reproduce these checks (it never stops on them); `org/layer-conf`
+reports them.
 
 ## Parse order
 
@@ -581,7 +600,13 @@ evaluating each; a `PROVIDES` word that needs expansion, or one from a global cl
 found. The file order inside a bucket is layer then path, not BitBake's collection order.
 `DEFAULT_PREFERENCE`, `PE` and `PR` come from evaluating each candidate only when some
 non-`.conf` file (or a `.conf` statement with an override) sets one of them; values set by
-anonymous python are not seen. `BBMASK`, `SKIP_RECIPE` and `COMPATIBLE_*` are not applied.
+anonymous python are not seen. `BBMASK`, `SKIP_RECIPE` and `COMPATIBLE_*` are not applied,
+and `BBCLASSEXTEND` variants (`-native`, `nativesdk-`) are not providers.
+
+*Verify* (used by `org/policy-in-recipe`, not checked against the source by any task):
+`PREFERRED_PROVIDER_*` is read only from the configuration datastore (`cooker.py`
+`handlePrefProviders`, `providers.findBestProvider`), so a recipe's own value never takes
+part in the choice.
 
 ### `PACKAGECONFIG` (verified, T3.7)
 
@@ -839,6 +864,33 @@ instead") and that the `meta-poky/conf/templates/default` templates moved to OE-
 first, and oe-init-build-env if not found". So a `bitbake-setup` build directory appears to
 have its own `init-build-env` script; its location and whether `oe-init-build-env` still
 works for such builds were not checked.
+
+## OE-core checks and defaults used by lint
+
+Checked by the wave 4 lint tasks against OE-core master (2026-11) unless marked:
+
+- **`pkgvarcheck`** (`meta/classes-global/insane.bbclass`, anonymous python): only when
+  `PACKAGES` is not empty, for each listed variable (`RDEPENDS`, `RRECOMMENDS`,
+  `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `pkg_preinst`,
+  `pkg_postinst`, `pkg_prerm`, `pkg_postrm`, `ALLOW_EMPTY`), `if d.getVar(var, False):`
+  reports it as set without a package. `override/missing-package` follows it.
+- **`populate_lic_qa_checksum`** (`insane.bbclass`): `if lic == "CLOSED": return`, then
+  `if not lic_files and d.getVar('SRC_URI')` is an error. So `LIC_FILES_CHKSUM` is required
+  only when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (`hygiene/missing-metadata`).
+- **`meta/conf/bitbake.conf` defaults** that lint must not count as set:
+  `SUMMARY ?= "${PN} version ${PV}-${PR}"`, `LICENSE ??= "INVALID"`, `HOMEPAGE = ""`,
+  `SRCREV ??= "INVALID"`. The `UNPACKDIR` defaults per release are in the table under
+  "Scaffold: sources, `S` and build-system classes" (none on kirkstone and scarthgap).
+
+*Verify* (relied on by lint, not checked by any task):
+
+- that OE-core has an `uppercase-pn` QA check reporting upper-case letters in `PN`
+  (`org/recipe-path`);
+- that `IMAGE_INSTALL` is read only by image recipes (`org/policy-in-recipe`);
+- the fetcher's checksum lookup, as `hygiene/src-uri-checksum` assumes it: an entry with
+  `name=<n>` uses `SRC_URI[<n>.sha256sum]`, one without uses `SRC_URI[sha256sum]`, and a
+  `sha256sum=` parameter also counts; and the `SRCREV` lookup order for a git entry with
+  `name=<n>` (`SRCREV_<n>`, else `SRCREV`).
 
 ## What the static evaluator cannot do
 
