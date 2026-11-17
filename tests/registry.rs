@@ -45,6 +45,7 @@ fn tool_registry_matches_docs() {
         "slice",
         "status",
         "audit",
+        "diff",
     ];
     let registered: Vec<_> = sous_chef::mcp::TOOLS.iter().map(|t| t.name).collect();
     assert_eq!(registered, expected);
