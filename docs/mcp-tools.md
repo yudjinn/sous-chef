@@ -1256,6 +1256,176 @@ yocto-kiss is the lock file `live-env.sh` wrote. With `scratch/sous-chef.toml` u
 (no `kas` key) kas detection finds five candidate kas files, so the report shows no pins
 and says why.
 
+### `diff`
+A statement-level diff of a layer's recipes between two git revisions, and what it means
+for the bbappends of the workspace's own (writable) layers (T8.4, `src/diff.rs`). The
+question it answers: an upstream layer moved (a new release branch, a stable update);
+which of the recipes we use changed, and which of our bbappends no longer apply, now apply
+to another version, or carry patches whose source changed.
+
+| Arg | Notes |
+|---|---|
+| `layer` | required: a layer name of the workspace; the git repository is the one holding the layer's directory (a layer outside any repository is an error) |
+| `from` | required: the old revision, a branch, tag or commit of that repository |
+| `to` | the new revision; default **the working tree** (`HEAD` plus uncommitted and untracked files): that is what the workspace builds now and what `item` reads, so the `to` pointers can be opened directly. Give `HEAD` to compare committed states only |
+| `recipe` | one recipe by `PN`; an unknown name is an error listing similar names of the layer |
+| `all` | every recipe of the layer (unchanged ones are counted, not listed) |
+| `budget_tokens`, `format` | as every tool; a diff over the budget is stored whole under a `text` handle |
+
+Default selection (no `recipe`, no `all`): the recipes of the layer that the writable
+layers (other than `layer`) **append** (a bbappend whose `PN` is the recipe's) or **use**:
+a static word of `DEPENDS`, `RDEPENDS*`, `RRECOMMENDS*`, `IMAGE_INSTALL`,
+`CORE_IMAGE_EXTRA_INSTALL`, `PACKAGE_INSTALL`, `TOOLCHAIN_*_TASK` or
+`PREFERRED_PROVIDER_*` that is the recipe's `PN` (also after removing `-native`, `-cross`,
+`-crosssdk`, `nativesdk-`), or a `PREFERRED_VERSION_<pn>`; plus, per own file that
+`require`s / `include`s files of the layer (the index's edges), those files as one tree.
+
+**Revisions.** Validated before they reach git: no leading `-`, no whitespace or control
+character, no `:` (a `rev:path`), no `..` (a range), at most 200 characters; then resolved
+with `git rev-parse --verify --end-of-options <rev>^{commit}`, and only the full hash is
+used after that. A revision that is not a commit is an error; nothing is fetched. Git is
+run read-only (`ls-tree`, `cat-file --batch`, `ls-files`, `diff --name-status`,
+`rev-parse`), argv only, with a timeout, no optional locks, no fsmonitor and the
+`GIT_DIR` family removed; nothing is checked out and nothing is written into the
+repository. The old side is read with one `git cat-file --batch` of every `.bb`, `.inc`,
+`.bbclass` and `.bbappend` of the layer; the working tree from disk (a symlink out of the
+layer is not read).
+
+**What is compared.**
+
+- *Recipe identity*: the `PN` of the file name, as the scanner derives it; the `.bb`
+  files are those the layer's current `BBFILES` (and active `BBFILES_DYNAMIC`) globs match,
+  at both revisions (`BBMASK` is not applied). Several versions of one `PN`: equal versions
+  pair first; each remaining old version, highest first, pairs with the new version that
+  shares the longest version prefix (`fiptool-native` 2.10.4 with 2.10.30, not 2.14.1);
+  a pair with different versions is a version change (`renamed`), the rest are added or
+  removed. A `.bb` in another directory is `moved`.
+- *The tree*: the `.bb` and the files it `require`s / `include`s **inside the layer at that
+  revision** (relative to the including file, then to the layer root, as BitBake's search
+  starts; `${PN}`, `${BPN}`, `${PV}`, `${BP}`, `${THISDIR}` from the file name). An include
+  found in another layer, an absolute path outside the layer, a missing file or an argument
+  needing evaluation is a `file ... not compared` row saying which. Classes are not part of
+  a tree.
+- *Statements, as written, never evaluated*: assignments keyed by the left-hand side as
+  written (`SRC_URI:append:qemux86 +=`, `SRC_URI[sha256sum] =`), so the operations of one
+  variable and its override and flag variants sort together; functions and tasks by name
+  (bodies compared; the first differing code line shown); `inherit` per class;
+  `require`, `include`, `addhandler`, `EXPORT_FUNCTIONS` and unparsed lines as
+  directives; and `SRC_URI` word by word (`parse::words`, so a `${@...}` expression is one
+  entry). A statement that moved between files of the tree is `changed` only if its text
+  changed. Statements that differ only in whitespace, and tree files that differ only in
+  comments, blank lines or line positions, are counted, not listed. More than 20 flag
+  statements of one variable with one change (a kernel's `CVE_STATUS[...]`) are one row in
+  the table; the CLI's JSON lists each.
+- *Classes*: every `.bbclass` of the layer that differs, once, with the statement count,
+  the compared recipes that inherit it directly, and the own files that inherit it,
+  directly or through other files (`query::inheritors` on the index as the workspace is
+  now); a `classes-global/` class is marked as able to affect every recipe.
+
+**Your bbappends.** Every bbappend of a writable layer whose `PN` is a compared recipe's,
+matched by file name exactly as `resolve::append_matches` (the `%` rule), at each revision:
+
+| Severity | When |
+|---|---|
+| `no longer applies` | it matched at `from`, not at `to`: names the file and version it applied to and the recipe now there, says it is pinned when it has no `%` and suggests the rename; BitBake stops on a dangling bbappend (a warning only with `BB_DANGLINGAPPENDS_WARNONLY`, before Walnascar) |
+| `applies to a different version` | a `%` append matched both, the version changed |
+| `source changed under a patch` | it carries `SRC_URI` patches and the recipe's source changed: version (file name), `PV`, `SRCREV*`, `LINUX_VERSION`, `KBRANCH`, `SRCBRANCH`, `BRANCH`, a fetch URL (a non-`file://` entry) or a `SRC_URI[...sum]` checksum |
+| `recipe changed` | still applies, the recipe tree changed |
+| `now applies` | it did not match at `from` |
+| `unchanged` | still applies to an unchanged tree |
+
+Each append row adds the variables and functions it sets that changed in the recipe (`it
+sets SRC_URI, do_install, which changed in the recipe`) and the source changes; one row
+per patch gives the patch file found next to the append (`<dir>/${PN}`, `${BPN}`, `${BP}`,
+`files`, `<dir>`), "the source it applies to changed: check it" when so, and whether a
+patch of the same name was **added** to the recipe upstream (in its `SRC_URI` or under its
+directory: the fix may have been upstreamed) or **removed** from it (the fix may now be in
+the source). Whether a patch still applies is never claimed: that needs the source, which
+is not fetched.
+
+**Output.** Rows `recipe kind name change value from to`; `from` and `to` are pointers at
+each revision (`from` pointers name files at the old commit: read them with `git show
+<hash>:<path>`, the hash is in the notes). First `summary` (recipes compared, changed,
+renamed or moved, added, removed, unchanged; own files' includes; bbappends affected by
+severity; classes changed), `revisions` and `layer files` (files of the layer that differ,
+by kind, from `git diff --name-status` plus untracked files); then the bbappends, most
+severe first, each followed by its `bbappend patch` rows; then per recipe (own-appended
+first, then by name, then the own files' includes) a `recipe` row (version, number of
+changes, why it was selected, source changes) and its `file`, `var`, `function`, `task`,
+`inherit`, `directive` and `SRC_URI entry` rows; then `class` rows; notes last. Everything
+is sorted; the output depends only on the two revisions and the workspace. When the whole
+table is over `budget_tokens`, it is stored under a `text` handle, and the answer is the
+table cut to the budget with `full diff h:...: N rows, B bytes` and the `slice` hint.
+
+The fixture repository of `tests/release_diff.rs` (two commits, a tag `v1`; the snapshot
+`tests/snapshots/release_diff__release_diff_text.snap`; recipe rows cut here):
+
+```
+recipe	kind	name	change	value	from	to
+-	summary	-	-	meta-up: 4 recipes compared (recipes your layers (meta-mine) append or use): 3 changed (1 renamed or moved), 0 added, 0 removed, 1 unchanged; your files requiring files of the layer: 1, 1 with changes; bbappends affected: 3 (1 no longer applies, 1 applies to a different version, 1 source changed under a patch); 1 more: 0 recipe changed, 0 now applies, 1 unchanged; 1 class changed	-	-
+-	revisions	meta-up	-	from v1 (cdcd020d327c) to HEAD (3e56cf071d6c)	cdcd020d327c	3e56cf071d6c
+-	layer files	-	-	bb 2 changed 3 added 3 removed; inc 3 changed 0 added 0 removed; bbclass 1 changed 0 added 0 removed; patch 0 changed 1 added 0 removed	-	-
+hello	bbappend	meta-mine:recipes-core/hello/hello_1.0.bbappend:1	no longer applies	applied to hello_1.0.bb (version 1.0) at v1; at HEAD the recipe is hello_1.1.bb (version 1.1); it is pinned to version 1.0: rename it (or use hello_%.bbappend) if it should still apply; BitBake stops on a bbappend that matches no recipe (a warning only with BB_DANGLINGAPPENDS_WARNONLY, before Walnascar)	meta-up:recipes-core/hello/hello_1.0.bb:1	-
+hello	bbappend	meta-mine:recipes-core/hello/hello_%.bbappend:1	applies to a different version	its % now applies to version 1.1 (hello_1.1.bb) instead of 1.0 (hello_1.0.bb): check the append against the new version; its patches now apply to different source; it sets SRC_URI, do_install, which changed in the recipe; source: SRC_URI[sha256sum] = "aaaa" -> "bbbb"; version 1.0 -> 1.1 (file name)	meta-up:recipes-core/hello/hello_1.0.bb:1	meta-up:recipes-core/hello/hello_1.1.bb:1
+hello	bbappend patch	file://fix.patch	-	patch meta-mine:recipes-core/hello/hello/fix.patch:1; the source it applies to changed: check it; a patch named fix.patch was added to the recipe upstream: the fix may have been upstreamed; check whether this one is still needed	-	meta-mine:recipes-core/hello/hello_%.bbappend:1
+widget	bbappend	meta-mine:recipes-core/widget/widget_git.bbappend:1	source changed under a patch	still applies to widget_git.bb; the source its patches apply to changed: check them; source: SRCREV = "1111111111111111111111111111111111111111" -> "2222222222222222222222222222222222222222"	meta-up:recipes-core/widget/widget_git.bb:1	meta-up:recipes-core/widget/widget_git.bb:1
+...
+hello	file	recipes-core/hello/hello_1.1.bb	renamed	recipes-core/hello/hello_1.0.bb -> recipes-core/hello/hello_1.1.bb; version 1.0 -> 1.1	meta-up:recipes-core/hello/hello_1.0.bb:1	meta-up:recipes-core/hello/hello_1.1.bb:1
+hello	file	conf/distro/elsewhere.inc	not compared	not in the layer at this revision: not compared	meta-up:recipes-core/hello/hello_1.0.bb:7	meta-up:recipes-core/hello/hello_1.1.bb:7
+hello	var	DEPENDS =	changed	"zlib" -> "zlib openssl"	meta-up:recipes-core/hello/hello.inc:2	meta-up:recipes-core/hello/hello.inc:2
+hello	function	do_install	changed	4 lines -> 5 lines; first difference at code line 3: "... hello ${D}${bindir}" -> "... hello ${D}${bindir}/hello"	meta-up:recipes-core/hello/hello_1.0.bb:17-20	meta-up:recipes-core/hello/hello_1.1.bb:19-23
+hello	inherit	inherit pkgconfig	added	-	-	meta-up:recipes-core/hello/hello_1.1.bb:17
+hello	SRC_URI entry	file://${@bb.utils.contains(...)}	added	-	-	meta-up:recipes-core/hello/hello_1.1.bb:9-13
+hello	SRC_URI entry	file://fix.patch	added	-	-	meta-up:recipes-core/hello/hello_1.1.bb:9-13
+...
+-	class	classes/autotools.bbclass	changed	1 statement differs; inherited directly by compared hello; inherited by your meta-mine:recipes-app/app/app_1.0.bb:5	meta-up:classes/autotools.bbclass:1	meta-up:classes/autotools.bbclass:1
+note: statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once
+...
+```
+
+The CLI: `sous-chef diff LAYER FROM [TO] [--recipe PN] [--all] [--format text|json]
+[--output FILE]` prints the whole table (`text`), or the whole diff as JSON, with the time
+on stderr; exit status 0 when the diff was produced, 2 when it could not be (a refused or
+unknown revision, an unknown layer). A revision starting with `-` must follow `--` to
+reach the validation, which refuses it. JSON top-level fields: `schema`
+(`"sous-chef-diff/1"`), `layer`, `layer_path` (relative to the repository's top level),
+`from` and `to` (`given`, `commit`, `uncommitted`: the count of changed or untracked
+files of the layer for the working tree, else null), `selection`, `summary` (`line`,
+`compared`, `changed`, `unchanged`, `added`, `removed`, `renamed`, `included_files`,
+`appends` by severity, `classes_changed`), `appends` (`append`, `recipe`, `severity`,
+`detail`, `from_recipe`, `to_recipe`, `patches` (`entry`, `file`, `upstream`), `touches`,
+`source_changes`), `recipes` (`name`, `kind`, `status`, `own_appended`, `reason`,
+`from_file`, `to_file`, `from_version`, `to_version`, `moved`, `tree_from`, `tree_to`,
+`changes` (`kind`, `group`, `name`, `change`, `old`, `new`, `detail`, `from`, `to`),
+`whitespace_only`, `cosmetic_files`, `source_changes`), `classes` (`path`, `change`,
+`statements`, `inherited_by`, `own_users`), `layer_files` (`kind`, `added`, `removed`,
+`changed`), `notes`. The fixture's JSON is
+`tests/snapshots/release_diff__release_diff_json.snap`.
+
+**On the live workspace** (live-environment.md; `scratch/sous-chef.toml`, own layers
+`meta-kiss` and `meta-kiss-ti`; release build, 2026-11-17), OE-core's `meta` and meta-arm
+against their wrynose checkouts (`33a6bd6c`, `673e8d7c`), working tree as `to`:
+
+| Comparison | Time | Output |
+|---|---|---|
+| `meta yocto-6.0.3` (default selection) | 0.2 s | 7.1 KB, 44 lines |
+| `meta yocto-5.0` (scarthgap to wrynose, default selection) | 0.6 s | 51 KB, 288 lines |
+| `meta yocto-6.0 HEAD --all` (949 recipes) | 0.5 s | 278 KB |
+| `meta yocto-5.0 --all` (986 recipes) | 0.9 s | 3.3 MB |
+| `meta-arm yocto-5.0 --all` (83 recipes) | 0.1 s | 0.7 MB |
+
+So `all` stays a tool call (the table goes to a handle). The default selection on
+yocto-kiss picks `dropbear`, `packagegroup-core-boot` (`IMAGE_INSTALL` of `kiss-image`),
+`ncurses` (`DEPENDS` of `sl`), `gnutls` (`gnutls-native` in `u-boot-kiss`), and the
+includes of `u-boot-kiss_git.bb` (`u-boot-common.inc`, `u-boot.inc`) and of
+`dogbonedark.conf`; from yocto-6.0.3 it shows the CVE patches added to `dropbear` and
+`gnutls`, and `CVE_PRODUCT` moved from `u-boot.inc` to `u-boot-common.inc` with a new
+value as one changed statement. yocto-kiss's only bbappend (`meta-kiss-ti`'s
+`linux-kiss_%.bbappend`) appends its own `meta-kiss` recipe, so no upstream bbappend is
+affected there. What the static view cannot see: classes used through `inherit ${VAR}`
+(`KERNEL_CLASSES`) have no users listed, and a recipe that only a `virtual/` provider or a
+package name (not the `PN`) names is not selected by default.
+
 ## MCP resources
 
 - `sous-chef://help`: this document condensed, generated from the tool registry and the

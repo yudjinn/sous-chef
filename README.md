@@ -169,6 +169,7 @@ fakeroot do_install() {
 | `slice` | Part of a stored output, by lines, regex, variable or failures |
 | `status` | Workspace roots, release, index, build environment, kas project, running job |
 | `audit` | One findings report over every layer of the repository (inventory with git facts and kas pins, releases, layer structure, lint, parse problems, what was not checked), stored under a handle; returns a digest |
+| `diff` | Statement-level diff of a layer's recipes between two git revisions (variables, tasks, inherits, `SRC_URI` entries, version renames, changed classes) and which of your bbappends no longer apply, apply to another version or carry patches on changed source; read-only, no checkout |
 
 Every argument and output format is in [docs/mcp-tools.md](docs/mcp-tools.md); the lint
 rules are in [docs/lint-rules.md](docs/lint-rules.md). The server also offers the resources
@@ -182,6 +183,7 @@ rules are in [docs/lint-rules.md](docs/lint-rules.md). The server also offers th
 | `sous-chef index` | Refreshes the index and prints what changed |
 | `sous-chef lint [TARGET] [--rule ID]... [--severity S] [--fail-on S] [--format text\|json] [--all]` | Lints a recipe, pointer, layer or path; default the writable layers and the build configuration. Exit status 0 clean, 1 a finding at or above `--fail-on` (default `error`), 2 lint could not run |
 | `sous-chef audit [ROOT] [--format md\|json] [--output FILE]` | Writes one findings report for a whole build repository: every layer under ROOT (default: the working directory), enabled or not, with git facts, releases, layer structure, lint findings of every layer and parse problems. Read-only; takes about as long as `lint --all` (15 to 30 s on a large workspace), progress on stderr. Exit status 0 when the report was written, 2 when it could not be |
+| `sous-chef diff LAYER FROM [TO] [--recipe PN] [--all] [--format text\|json] [--output FILE]` | The `diff` tool's whole table (or the whole diff as JSON) between two revisions of the layer's repository; `TO` defaults to the working tree. Read-only (no checkout, no fetch); about a second for every recipe of OE-core. Exit status 0 when the diff was produced, 2 when it could not be |
 | `sous-chef hook` | Claude Code hook: reads one event on stdin, writes nothing or one response object; always exits 0 |
 
 Global flags: `--build-dir DIR`, `--config FILE`, `--layer DIR` (repeatable).

@@ -2948,7 +2948,12 @@ pub fn table(d: &Diff) -> Table {
         }
     }
     for c in &d.classes {
-        let mut v = format!("{} differ", plural(c.statements, "statement"));
+        let verb = if c.statements == 1 {
+            "differs"
+        } else {
+            "differ"
+        };
+        let mut v = format!("{} {verb}", plural(c.statements, "statement"));
         if c.path.starts_with("classes-global/") {
             v.push_str("; a global class (base or INHERIT): it can affect every recipe");
         }
