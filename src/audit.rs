@@ -10,9 +10,10 @@
 //! - git facts per repository ([`crate::gitcmd::git`]: read-only commands, argv only, a
 //!   timeout, the `GIT_DIR` family removed; any failure is "unknown");
 //! - release detection ([`crate::release`]) and each layer's `LAYERSERIES_COMPAT`;
-//! - `org/layer-conf`'s checks ([`org_layer_conf::layer_problems`]), the `layers` tool's
-//!   `compat` and `appends` views (`BBLAYERS` order rows, bbappends `BBFILES` does not
-//!   collect), [`query::shadowed`] and [`query::orphan_appends`];
+//! - `org/layer-conf`'s checks ([`org_layer_conf::layer_problems`]), the `BBLAYERS` order
+//!   checks ([`layers_tool::order_problems`], the rows `layers show=compat` shows), the
+//!   `layers` tool's `appends` view (bbappends `BBFILES` does not collect),
+//!   [`query::shadowed`] and [`query::orphan_appends`];
 //! - every enabled lint rule over every layer, as `sous-chef lint --all` ([`lint::run`]);
 //! - the index's parse and resolution results (unparsed statements, unresolved `include` /
 //!   `require` / `inherit`, files BitBake does not collect).
@@ -326,7 +327,7 @@ pub struct Structure {
     pub summary: String,
     /// `org/layer-conf`'s checks per enabled layer, in `BBLAYERS` order then check order.
     pub problems: Vec<StructureProblem>,
-    /// `BBLAYERS` order rows of `layers show=compat`.
+    /// `BBLAYERS` order rows ([`layers_tool::order_problems`], as `layers show=compat`).
     pub order: Vec<StructureProblem>,
     pub shadowed: Vec<Shadowed>,
     /// bbappends `BBFILES` collects that match no recipe (pointers).
@@ -487,7 +488,7 @@ pub struct NotChecked {
 // Building
 
 /// Builds the report for the workspace of `ctx`. Refreshes the index, calls the `layers`
-/// tool's `compat` and `appends` views, then assembles the rest with the index locked.
+/// tool's `appends` view, then assembles the rest with the index locked.
 pub async fn build(ctx: &Ctx, opts: &Options) -> Result<Audit> {
     let root = canonical_dir(&opts.root)?;
     opts.say("refreshing the index");
@@ -495,17 +496,15 @@ pub async fn build(ctx: &Ctx, opts: &Options) -> Result<Audit> {
         let mut index = ctx.index.lock().await;
         index.refresh(&ctx.workspace)?;
     }
-    opts.say("reading the layers views (compat, appends)");
-    let compat = view(ctx, layers_tool::Show::Compat).await;
+    opts.say("reading the layers view (appends)");
     let appends = view(ctx, layers_tool::Show::Appends).await;
     let index = ctx.index.lock().await;
-    let views = Views { compat, appends };
+    let views = Views { appends };
     assemble(&ctx.workspace, &index, &ctx.config, &root, opts, &views)
 }
 
 /// What the `layers` tool's views returned (or why they failed).
 struct Views {
-    compat: std::result::Result<JsonTable, String>,
     appends: std::result::Result<JsonTable, String>,
 }
 
@@ -1386,27 +1385,20 @@ fn structure(
         }
     }
     let mut order = Vec::new();
-    match &views.compat {
-        Ok(t) => {
-            for row in &t.rows {
-                let cell = |i: usize| row.get(i).map(|c| unescape_cell(c)).unwrap_or_default();
-                if cell(1) == "order" {
-                    order.push(StructureProblem {
-                        layer: cell(0),
-                        check: "order".into(),
-                        severity: cell(2),
-                        pointer: cell(4),
-                        message: cell(3),
-                    });
-                }
-            }
+    match layers_tool::order_problems(index, ws) {
+        Ok(rows) => {
+            order.extend(rows.into_iter().map(|o| StructureProblem {
+                layer: o.layer,
+                check: "order".into(),
+                severity: o.severity.as_str().into(),
+                pointer: o.loc,
+                message: o.message,
+            }));
             if ws.build_dir.is_none() {
                 notes.push("no build directory, so no BBLAYERS order to check".into());
             }
         }
-        Err(e) => notes.push(format!(
-            "BBLAYERS order not checked: `layers show=compat` failed: {e}"
-        )),
+        Err(e) => notes.push(format!("BBLAYERS order not checked: {e}")),
     }
     let mut shadowed = Vec::new();
     for s in query::shadowed(index, ws)? {

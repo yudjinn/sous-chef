@@ -1088,7 +1088,8 @@ JSON, a `kas` object with the same fields. The `bitbake` row's mode is `init-scr
 A findings report over a whole build repository (T8.6, `src/audit.rs`): every layer under
 the root, enabled or not, with its releases, structure, lint findings and parse problems,
 for a person to read. It adds no analysis of its own; it runs layer discovery, release
-detection, `org/layer-conf`'s checks, `layers show=compat` and `show=appends`,
+detection, `org/layer-conf`'s checks, the `BBLAYERS` order checks of `layers
+show=compat` (`layers::order_problems`), `layers show=appends`,
 `query::shadowed`, `query::orphan_appends`, every enabled lint rule as `sous-chef lint
 --all`, and the index's parse and resolution results, and assembles them. It is
 read-only: it writes nothing into the repository, runs no BitBake and no kas, fetches
@@ -1177,7 +1178,8 @@ that differs between two runs on the same repository state), then:
   some layer claims plus the workspace's; `**missing**` where a layer does not claim the
   workspace release; names older than the floor or unknown in the last column).
 - `## 3. Layer structure`: `org/layer-conf`'s problems (through `layer_problems`, so they
-  agree with the rule) and the `BBLAYERS` order rows of `layers show=compat` (their shared
+  agree with the rule) and the `BBLAYERS` order rows of `layers show=compat` (through
+  `layers::order_problems`, the function the view calls; their shared
   explanation said once); shadowed recipes and classes; bbappends that match no recipe and
   those BitBake does not collect (`layers show=appends`); `org/append-wildcard-broad` and
   `org/duplicate-versions` findings from the lint run.

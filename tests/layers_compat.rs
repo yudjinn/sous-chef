@@ -7,15 +7,17 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use sous_chef::audit;
 use sous_chef::bitbake::JobTable;
 use sous_chef::config::Config;
 use sous_chef::handles::HandleStore;
 use sous_chef::index::Index;
+use sous_chef::lint::Severity;
 use sous_chef::lint::rules::org_layer_conf::{OrgLayerConf, layer_problems};
 use sous_chef::lint::{self, Options, Target};
 use sous_chef::mcp::Ctx;
 use sous_chef::mcp::tools::layers::{self, Show};
-use sous_chef::render::Format;
+use sous_chef::render::{self, Format, JsonTable};
 use sous_chef::workspace::Workspace;
 
 struct Fixture {
@@ -151,9 +153,11 @@ async fn lint_fixture_layers_agree_with_the_rule() {
     }
 }
 
-#[tokio::test]
-async fn bblayers_order() {
-    let (_tmp, root) = common::temp_ws();
+/// The fixture workspace with meta-mine (which depends on core, and has a class at the same
+/// path as meta-core) and meta-vendor (compatible with scarthgap only) listed before
+/// meta-core in `BBLAYERS`.
+fn misordered_ws() -> (tempfile::TempDir, PathBuf) {
+    let (tmp, root) = common::temp_ws();
     let root = fs::canonicalize(root).unwrap();
     // meta-mine (depends on core) first; it also has a class at the same path as meta-core.
     let conf = root.join("build/conf/bblayers.conf");
@@ -175,7 +179,12 @@ async fn bblayers_order() {
         .unwrap()
         .replace("\"scarthgap wrynose\"", "\"scarthgap\"");
     fs::write(&vconf, text).unwrap();
+    (tmp, root)
+}
 
+#[tokio::test]
+async fn bblayers_order() {
+    let (_tmp, root) = misordered_ws();
     let f = fixture_with(common::ws_config(&root));
     let out = compat(&f, None).await;
     insta::assert_snapshot!("layers_compat_order", out);
@@ -192,4 +201,71 @@ async fn bblayers_order() {
         "{out}"
     );
     assert!(out.contains("meta-vendor\tcompat\terror\t"), "{out}");
+}
+
+/// `layers::order_problems` is the one implementation: its typed rows are the `order` rows
+/// of `layers show=compat` and of the audit report's section 3, field for field.
+#[tokio::test]
+async fn order_rows_are_typed_and_shared_with_the_audit() {
+    let (_tmp, root) = misordered_ws();
+    let f = fixture_with(common::ws_config(&root));
+    let rows = {
+        let index = f.ctx.index.lock().await;
+        layers::order_problems(&index, &f.ctx.workspace).unwrap()
+    };
+    let got: Vec<(String, Severity)> = rows.iter().map(|o| (o.layer.clone(), o.severity)).collect();
+    assert_eq!(
+        got,
+        [
+            ("meta-mine".to_string(), Severity::Warning),
+            ("meta-vendor".to_string(), Severity::Info)
+        ]
+    );
+    assert!(
+        rows.iter()
+            .all(|o| o.loc.starts_with("build:conf/bblayers.conf:")),
+        "{rows:#?}"
+    );
+
+    // The view's rows, read back from its JSON.
+    let json: JsonTable = serde_json::from_str(&compat(&f, Some(Format::Json)).await).unwrap();
+    let view: Vec<Vec<String>> = json
+        .rows
+        .iter()
+        .filter(|r| r.get(1).map(String::as_str) == Some("order"))
+        .map(|r| r.iter().map(|c| render::unescape_cell(c)).collect())
+        .collect();
+    let typed: Vec<Vec<String>> = rows
+        .iter()
+        .map(|o| {
+            vec![
+                o.layer.clone(),
+                "order".into(),
+                o.severity.as_str().into(),
+                o.message.clone(),
+                o.loc.clone(),
+            ]
+        })
+        .collect();
+    assert_eq!(view, typed);
+
+    // The audit's, built from the typed rows.
+    let a = audit::build(&f.ctx, &audit::Options::new(&root))
+        .await
+        .unwrap();
+    let from_audit: Vec<Vec<String>> = a
+        .structure
+        .order
+        .iter()
+        .map(|p| {
+            vec![
+                p.layer.clone(),
+                p.check.clone(),
+                p.severity.clone(),
+                p.message.clone(),
+                p.pointer.clone(),
+            ]
+        })
+        .collect();
+    assert_eq!(from_audit, typed);
 }

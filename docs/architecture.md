@@ -1061,6 +1061,11 @@ sous-chef runs git: argv only, stdin closed, no prompts, `--no-optional-locks`,
 timeout. `org/upstream-edit` and the audit both use it (`audit::git` is gone;
 `org_upstream_edit::TIMEOUT` and `audit::GIT_TIMEOUT` are `gitcmd::TIMEOUT`).
 
+`mcp::tools::layers::order_problems(index, ws) -> Result<Vec<OrderProblem>>` (`OrderProblem
+{ layer, severity: Severity, message, loc }`, all public): the `BBLAYERS` order checks, the
+`order` rows of `layers show=compat`. The audit calls it instead of reading those rows
+back from the view's JSON (it still reads `layers show=appends` that way).
+
 ## Errors
 
 `error::Error` (thiserror) with variants `Io(io::Error)`, `Sqlite(rusqlite::Error)`,
