@@ -270,3 +270,116 @@ fn a_collected_recipe_keeps_every_check() {
         .collect();
     assert!(rules.contains(&"override/legacy-syntax"), "{rules:?}");
 }
+
+// ---------------------------------------------------------------------------------------
+// Item 3: BBFILES_DYNAMIC in the index
+// ---------------------------------------------------------------------------------------
+
+fn dynamic_layers(root: &Path) {
+    append_to(
+        root,
+        "meta-mine/conf/layer.conf",
+        "BBFILES_DYNAMIC += \"core:${LAYERDIR}/dynamic-layers/core/*/*/*.bbappend \\\n    \
+         tpm2:${LAYERDIR}/dynamic-layers/tpm2/*/*/*.bbappend \\\n    \
+         !tpm2:${LAYERDIR}/dynamic-layers/no-tpm2/*/*/*.bbappend \\\n    \
+         !core:${LAYERDIR}/dynamic-layers/no-core/*/*/*.bbappend\"\n",
+    );
+    for (dir, var) in [
+        ("core", "DYN_CORE"),
+        ("tpm2", "DYN_TPM2"),
+        ("no-tpm2", "DYN_NO_TPM2"),
+        ("no-core", "DYN_NO_CORE"),
+    ] {
+        write(
+            root,
+            &format!("meta-mine/dynamic-layers/{dir}/recipes-core/hello/hello_%.bbappend"),
+            &format!("{var} = \"1\"\nRDEPENDS_${{PN}} = \"x\"\n"),
+        );
+    }
+}
+
+#[test]
+fn bbfiles_dynamic_is_folded_into_the_collection() {
+    let fx = modified(dynamic_layers);
+    let ds = eval(&fx, "hello");
+    // Present collection, and `!` of an absent one: collected, applied to the recipe.
+    assert_eq!(ds.value("DYN_CORE").map(|v| v.text).as_deref(), Some("1"));
+    assert_eq!(
+        ds.value("DYN_NO_TPM2").map(|v| v.text).as_deref(),
+        Some("1")
+    );
+    // Absent collection, and `!` of a present one: not collected.
+    assert!(ds.value("DYN_TPM2").is_none());
+    assert!(ds.value("DYN_NO_CORE").is_none());
+
+    let hello = query::find_recipes(&fx.idx, "hello")
+        .unwrap()
+        .into_iter()
+        .find(|r| r.file.layer == "meta-core")
+        .unwrap();
+    let appends: Vec<String> = query::appends_for(&fx.idx, hello.file.id)
+        .unwrap()
+        .iter()
+        .map(|f| f.path.display().to_string())
+        .collect();
+    assert!(
+        appends.contains(&"dynamic-layers/core/recipes-core/hello/hello_%.bbappend".to_string())
+            && appends
+                .contains(&"dynamic-layers/no-tpm2/recipes-core/hello/hello_%.bbappend".into()),
+        "{appends:?}"
+    );
+    for dir in ["tpm2", "no-core"] {
+        let f = query::file_by_path(
+            &fx.idx,
+            "meta-mine",
+            Path::new(&format!(
+                "dynamic-layers/{dir}/recipes-core/hello/hello_%.bbappend"
+            )),
+        )
+        .unwrap()
+        .unwrap();
+        let why = query::not_collected(&fx.idx, f.id).unwrap().unwrap();
+        assert!(why.contains("BBFILES_DYNAMIC"), "{dir}: {why}");
+        assert!(!appends.iter().any(|a| a.contains(&format!("/{dir}/"))));
+    }
+
+    // Lint: the collected ones are linted (a legacy override each), the others are not.
+    let found = lint_all(&fx, &["override/legacy-syntax"]);
+    let dirs: Vec<String> = found
+        .iter()
+        .filter(|f| f.loc.path.starts_with("dynamic-layers"))
+        .map(|f| f.loc.path.display().to_string())
+        .collect();
+    assert_eq!(
+        dirs,
+        [
+            "dynamic-layers/core/recipes-core/hello/hello_%.bbappend",
+            "dynamic-layers/no-tpm2/recipes-core/hello/hello_%.bbappend"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn layers_appends_reads_bbfiles_dynamic_from_the_index() {
+    use sous_chef::mcp::tools::layers;
+    let fx = modified(dynamic_layers);
+    let ctx = ctx_for(&fx);
+    let out = layers::run(
+        &ctx,
+        layers::Args {
+            show: layers::Show::Appends,
+            budget_tokens: Some(8000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap();
+    for want in [
+        "meta-mine:dynamic-layers/core/recipes-core/hello/hello_%.bbappend\t10\tmeta-core:recipes-core/hello/hello_1.0.bb\tapplies (BBFILES_DYNAMIC)",
+        "meta-mine:dynamic-layers/no-tpm2/recipes-core/hello/hello_%.bbappend\t10\tmeta-core:recipes-core/hello/hello_1.0.bb\tapplies (BBFILES_DYNAMIC)",
+        "meta-mine:dynamic-layers/tpm2/recipes-core/hello/hello_%.bbappend\t10\t-\tnot collected (dynamic layer `tpm2` not present)",
+        "meta-mine:dynamic-layers/no-core/recipes-core/hello/hello_%.bbappend\t10\t-\tnot collected (BBFILES_DYNAMIC `!core`: layer `core` is present)",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}

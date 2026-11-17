@@ -572,11 +572,21 @@ word must be `<collection>:<glob>` (split on the first `:`; anything else is fat
 "BBFILES_DYNAMIC entries must be of the form {!}<collection name>:<filename pattern>"); a
 leading `!` inverts the test; the glob is appended to `BBFILES` when the collection is in
 `BBFILE_COLLECTIONS` (or, inverted, when it is not). `collect_bbfiles` then treats it as
-any other `BBFILES` glob. The index does not fold these into `BBFILES`, so such files have
-no `bbappend` edge and `query::orphan_appends` (a collected append whose edge has no
-target) never lists them: `org/append-no-match` cannot report them, rightly when the
-collection is absent and as a miss when it is present. `layers show=appends` evaluates
-the entries itself.
+any other `BBFILES` glob. The first release with `BBFILES_DYNAMIC` is BitBake 1.36
+(`04f8bd50a`, 2017, `git describe --contains`: `1.35.0~73`), the `!` form came with
+`bfd729cfe` (2020, `1.48.0~144`); both are in `lib/bb/cookerdata.py` on branch `2.0`
+(Kirkstone), so every supported release has them and no `Feature` gates them. A word with
+an empty collection (`:glob`) makes `l[0]` raise in BitBake. sous-chef (w6,
+`resolve::collect` / `resolve::bbfiles_dynamic`, used by `resolve::recipe_files` and so by
+the index): each layer's `conf/layer.conf` is parsed and its `BBFILES_DYNAMIC` assignments
+applied in order (`${LAYERDIR}` replaced by that layer's root, as `expandVarref` does after
+each file; `=` replaces, `+=` adds, `:append` / `:prepend` / `:remove` after all; no
+`include` in a layer.conf, no conditional assignment followed); an active entry's glob is
+added to the globs, sorted by its layer's priority like the static ones; a malformed word or
+one with another `${...}` is left out. The index marks a file only an inactive entry matches
+`files.not_collected = 'dynamic'`; an active entry's files get `bbappend` edges, are
+evaluated with their recipe, linted, and `org/append-no-match` sees a dangling one.
+`layers show=appends` reads the index.
 
 **A `.bb` or `.bbappend` that no `BBFILES` glob matches** (BitBake 2.18.0 `lib/bb/cooker.py`): BitBake knows only the files `collect_bbfiles`
 returns; recipe names, providers (`bb.providers` over the parsed recipes) and

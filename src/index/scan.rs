@@ -1164,9 +1164,18 @@ fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
     tx.execute("DELETE FROM edges", [])?;
     let ecx = edge_ctx(tx, ws)?;
     insert_ref_edges(tx, ws, &ecx, None)?;
-    let collected = collected_ids(ws, &ecx);
+    let collection = resolve::collect(ws);
+    let collected = collected_ids(&collection.files, &ecx);
+    let inactive = collected_ids(
+        &collection
+            .inactive_dynamic
+            .iter()
+            .map(|(p, _)| p.clone())
+            .collect::<Vec<_>>(),
+        &ecx,
+    );
     insert_append_edges(tx, &collected)?;
-    mark_collected(tx, &collected)?;
+    mark_collected(tx, &collected, &inactive)?;
     mark_data(tx)?;
     for (k, v) in [
         (super::schema::META_RELEASE, ws.release.release.codename()),
@@ -1342,10 +1351,10 @@ fn insert_ref_edges(
     Ok(())
 }
 
-/// The indexed files BitBake collects (`resolve::recipe_files`, the `BBFILES` globs), in
-/// collection order.
-fn collected_ids(ws: &Workspace, ecx: &EdgeCtx) -> Vec<(i64, PathBuf)> {
-    resolve::recipe_files(ws)
+/// The indexed files among `files` (from `resolve::collect`: the `BBFILES` globs and the
+/// active `BBFILES_DYNAMIC` ones), in that order.
+fn collected_ids(files: &[PathBuf], ecx: &EdgeCtx) -> Vec<(i64, PathBuf)> {
+    files
         .iter()
         .filter_map(|p| {
             let n = normalize(p);
@@ -1354,9 +1363,14 @@ fn collected_ids(ws: &Workspace, ecx: &EdgeCtx) -> Vec<(i64, PathBuf)> {
         .collect()
 }
 
-/// `files.not_collected`: `bbfiles` for every `.bb` / `.bbappend` not in `collected`, NULL
+/// `files.not_collected`: `bbfiles` for every `.bb` / `.bbappend` not in `collected`,
+/// `dynamic` for those only an inactive `BBFILES_DYNAMIC` glob matches (`inactive`), NULL
 /// for the others (see `schema.rs`).
-fn mark_collected(tx: &Transaction<'_>, collected: &[(i64, PathBuf)]) -> Result<()> {
+fn mark_collected(
+    tx: &Transaction<'_>,
+    collected: &[(i64, PathBuf)],
+    inactive: &[(i64, PathBuf)],
+) -> Result<()> {
     tx.execute(
         "UPDATE files SET not_collected = CASE WHEN kind IN ('bb', 'bbappend') THEN ?1 END",
         [super::schema::NOT_COLLECTED_BBFILES],
@@ -1364,6 +1378,10 @@ fn mark_collected(tx: &Transaction<'_>, collected: &[(i64, PathBuf)]) -> Result<
     let mut st = tx.prepare_cached("UPDATE files SET not_collected = NULL WHERE id = ?1")?;
     for (id, _) in collected {
         st.execute([id])?;
+    }
+    let mut st = tx.prepare_cached("UPDATE files SET not_collected = ?1 WHERE id = ?2")?;
+    for (id, _) in inactive {
+        st.execute(params![super::schema::NOT_COLLECTED_DYNAMIC, id])?;
     }
     Ok(())
 }
