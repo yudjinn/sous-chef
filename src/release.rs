@@ -175,18 +175,24 @@ impl Feature {
     pub fn last(self) -> Option<Release> {
         match self {
             Feature::WorkdirAsSourceDir => Some(Release::Scarthgap),
-            Feature::PrInWorkdir => Some(Release::Kirkstone),
+            Feature::PrInWorkdir => Some(Release::Mickledore),
             _ => None,
         }
     }
 
     /// Whether both ends of the range were checked against a source. A feature that is not
-    /// verified must not be used to report an error.
-    ///
-    /// `PrInWorkdir`: Kirkstone has it and Scarthgap does not (both `bitbake.conf` files
-    /// were read); the releases in between were not checked.
+    /// verified must not be used to report an error. Every current feature is verified (see
+    /// the "Releases" table in bitbake-semantics.md); a new one whose range is a guess is
+    /// added here as `false` until it is checked.
     pub fn verified(self) -> bool {
-        !matches!(self, Feature::PrInWorkdir)
+        match self {
+            Feature::SplitClassDirs
+            | Feature::InheritDefer
+            | Feature::IncludeAll
+            | Feature::UnpackDir
+            | Feature::WorkdirAsSourceDir
+            | Feature::PrInWorkdir => true,
+        }
     }
 }
 
@@ -415,8 +421,9 @@ mod tests {
         assert!(Release::Walnascar.has(IncludeAll));
         assert!(Release::Styhead.has(UnpackDir));
         assert!(!Release::Styhead.has(WorkdirAsSourceDir));
-        assert!(!PrInWorkdir.verified());
-        assert!(UnpackDir.verified());
+        assert!(Release::Mickledore.has(PrInWorkdir));
+        assert!(!Release::Nanbield.has(PrInWorkdir));
+        assert!(Feature::ALL.iter().all(|f| f.verified()));
     }
 
     #[test]

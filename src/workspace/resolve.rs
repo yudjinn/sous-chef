@@ -14,7 +14,9 @@
 //!   then `classes/<name>.bbclass` along the whole `BBPATH`. `<type>` is `recipe` for
 //!   `inherit` in recipes and `global` for `INHERIT` (and `base`) in the configuration
 //!   (`__bbclasstype`, `cookerdata.py`). A name ending in `.bbclass` is searched on `BBPATH`
-//!   as given; an absolute one is used as is.
+//!   as given; an absolute one is used as is. BitBake 2.0 (Kirkstone) has no
+//!   `classes-<type>/` step: only `classes/<name>.bbclass` along `BBPATH` (branch `2.0`).
+//!   The step is taken when `ws.release` has [`Feature::SplitClassDirs`].
 //! - **bbappends** (`cooker.py` `get_file_appends`): with `b` the append's file name with
 //!   `.bbappend` replaced by `.bb` and `f` the recipe's file name, the append applies when
 //!   `b == f`, or when `b` contains `%` and `b` starts with the first `i` characters of `f`,
@@ -31,6 +33,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::{Workspace, layers};
 use crate::parse::IncludeMode;
+use crate::release::Feature;
 
 /// `BBPATH` of the workspace: the value the layer configuration leaves
 /// ([`layers::read_bbpath`]), entries made canonical when they exist, relative entries and
@@ -175,7 +178,7 @@ impl Resolver {
 
     /// The class file `inherit name` (or `INHERIT`, when `global`) loads.
     pub fn find_class(&self, ws: &Workspace, name: &str, global: bool) -> Option<PathBuf> {
-        for group in class_paths(name, global) {
+        for group in class_paths(name, global, split_class_dirs(ws)) {
             let found = match group {
                 ClassPath::Abs(p) => self.first(ws, [p]),
                 ClassPath::Rel(rel) => self.first(ws, self.bbpath.iter().map(|e| e.join(&rel))),
@@ -191,7 +194,7 @@ impl Resolver {
     /// one [`Resolver::find_class`] returns, the rest are shadowed.
     pub fn class_candidates(&self, ws: &Workspace, name: &str, global: bool) -> Vec<PathBuf> {
         let mut out: Vec<PathBuf> = Vec::new();
-        for group in class_paths(name, global) {
+        for group in class_paths(name, global, split_class_dirs(ws)) {
             let cands: Vec<PathBuf> = match group {
                 ClassPath::Abs(p) => vec![p],
                 ClassPath::Rel(rel) => self.bbpath.iter().map(|e| e.join(&rel)).collect(),
@@ -263,8 +266,16 @@ enum ClassPath {
     Rel(PathBuf),
 }
 
-/// The two search groups of `BBHandler.inherit`, in order.
-fn class_paths(name: &str, global: bool) -> Vec<ClassPath> {
+/// Whether the workspace release searches `classes-recipe/` / `classes-global/` before
+/// `classes/` ([`Feature::SplitClassDirs`]).
+fn split_class_dirs(ws: &Workspace) -> bool {
+    ws.release.release.has(Feature::SplitClassDirs)
+}
+
+/// The search groups of `BBHandler.inherit`, in order. With `split` (BitBake 2.2 / Langdale
+/// and later) `classes-<type>/` is searched through `BBPATH`, then `classes/`; without it
+/// (BitBake 2.0 / Kirkstone) only `classes/`. See "Releases" in bitbake-semantics.md.
+fn class_paths(name: &str, global: bool, split: bool) -> Vec<ClassPath> {
     let ty = if global {
         "classes-global"
     } else {
@@ -278,10 +289,12 @@ fn class_paths(name: &str, global: bool) -> Vec<ClassPath> {
         return vec![ClassPath::Rel(p.to_path_buf())];
     }
     let file = format!("{name}.bbclass");
-    vec![
-        ClassPath::Rel(Path::new(ty).join(&file)),
-        ClassPath::Rel(Path::new("classes").join(&file)),
-    ]
+    let classes = ClassPath::Rel(Path::new("classes").join(&file));
+    if split {
+        vec![ClassPath::Rel(Path::new(ty).join(&file)), classes]
+    } else {
+        vec![classes]
+    }
 }
 
 /// Resolves an `include` / `require` target with the workspace's `BBPATH`. See
@@ -291,7 +304,8 @@ pub fn find_in_bbpath(ws: &Workspace, rel: &str, from: &Path) -> Option<PathBuf>
 }
 
 /// Resolves `inherit name` (`global == false`: `classes-recipe/` then `classes/`) or an
-/// `INHERIT` class (`global == true`: `classes-global/` then `classes/`).
+/// `INHERIT` class (`global == true`: `classes-global/` then `classes/`). On a release
+/// without [`Feature::SplitClassDirs`] (Kirkstone) only `classes/` is searched.
 pub fn find_class(ws: &Workspace, name: &str, global: bool) -> Option<PathBuf> {
     Resolver::new(ws).find_class(ws, name, global)
 }

@@ -137,6 +137,58 @@ fn class_in_each_directory() {
 }
 
 #[test]
+fn kirkstone_searches_only_classes_dir() {
+    use sous_chef::release::{Release, ReleaseSource};
+    let (_tmp, ws_root) = temp_ws();
+    let mut ws = Workspace::discover(&ws_config(&ws_root)).unwrap();
+    let core = root(&ws, "meta-core");
+    let vendor = root(&ws, "meta-vendor");
+    fs::create_dir_all(vendor.join("classes")).unwrap();
+    fs::write(vendor.join("classes/autotoolsish.bbclass"), "X = \"v\"\n").unwrap();
+
+    // Wrynose (the fixture): classes-recipe/ wins over a classes/ copy.
+    assert_eq!(
+        resolve::class_candidates(&ws, "autotoolsish", false),
+        vec![
+            core.join("classes-recipe/autotoolsish.bbclass"),
+            vendor.join("classes/autotoolsish.bbclass"),
+        ]
+    );
+
+    ws.release.release = Release::Kirkstone;
+    ws.release.source = ReleaseSource::Config;
+    // classes-recipe/ and classes-global/ are not searched at all.
+    assert_eq!(
+        resolve::find_class(&ws, "autotoolsish", false),
+        Some(vendor.join("classes/autotoolsish.bbclass"))
+    );
+    assert_eq!(
+        resolve::class_candidates(&ws, "autotoolsish", false),
+        vec![vendor.join("classes/autotoolsish.bbclass")]
+    );
+    assert_eq!(resolve::find_class(&ws, "sanityish", true), None);
+    assert_eq!(
+        resolve::find_class(&ws, "base", true),
+        Some(core.join("classes/base.bbclass"))
+    );
+    // A path ending in .bbclass is searched as given on every release.
+    assert_eq!(
+        resolve::find_class(&ws, "classes-global/sanityish.bbclass", true),
+        Some(core.join("classes-global/sanityish.bbclass"))
+    );
+    // Through a Resolver too.
+    let r = Resolver::new(&ws);
+    assert_eq!(r.find_class(&ws, "sanityish", true), None);
+
+    // Langdale is the first release with the split directories.
+    ws.release.release = Release::Langdale;
+    assert_eq!(
+        resolve::find_class(&ws, "sanityish", true),
+        Some(core.join("classes-global/sanityish.bbclass"))
+    );
+}
+
+#[test]
 fn class_shadowed_across_layers() {
     let (_tmp, ws_root) = temp_ws();
     let ws = Workspace::discover(&ws_config(&ws_root)).unwrap();
