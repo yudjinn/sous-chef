@@ -15,8 +15,12 @@
 //! Files that are not Yocto files, are outside the workspace, are not indexed, or changed
 //! since they were indexed are skipped ([`super::Env::fresh_file`]).
 //!
-//! The `Grep` `content` text format is not documented by Claude Code; see
-//! `plugin/README.md` ("Not verified") for what is assumed.
+//! The `Grep` `content` text format is not documented by Claude Code. Hit lines
+//! (`<path>:<line>:<text>`, paths relative to `cwd` for `path: "."`) were captured from a
+//! real session; context lines and the single-file form follow ripgrep's documentation and
+//! are read conservatively ([`ContentParser`]): a line that is not certainly a hit is
+//! skipped. `numFiles` is never used (0 in content mode), nor `filenames` in content mode.
+//! See `plugin/README.md` ("Not verified").
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -163,22 +167,10 @@ fn cached(cell: &'static OnceLock<Option<Regex>>, pattern: &str) -> Option<&'sta
     cell.get_or_init(|| Regex::new(pattern).ok()).as_ref()
 }
 
-/// `<path>:<line>:` at the start of a ripgrep content line, for a Yocto file.
-fn hit_captures(l: &str) -> Option<regex::Captures<'_>> {
-    static RE: OnceLock<Option<Regex>> = OnceLock::new();
-    cached(&RE, r"^(.+?\.(?:bb|bbappend|inc|bbclass|conf)):(\d+):")?.captures(l)
-}
-
 /// `<path>:<count>` (count mode).
 fn count_captures(l: &str) -> Option<regex::Captures<'_>> {
     static RE: OnceLock<Option<Regex>> = OnceLock::new();
     cached(&RE, r"^(.+?\.(?:bb|bbappend|inc|bbclass|conf)):\d+$")?.captures(l)
-}
-
-/// `<line>:` (content of a single-file search, no file name).
-fn line_captures(l: &str) -> Option<regex::Captures<'_>> {
-    static RE: OnceLock<Option<Regex>> = OnceLock::new();
-    cached(&RE, r"^(\d+):")?.captures(l)
 }
 
 /// One Grep hit: the file and, in content mode, the line.
@@ -188,9 +180,171 @@ pub struct Hit {
     pub line: Option<u32>,
 }
 
-/// The Yocto hits in a Grep result (at most [`MAX_HITS`]). Relative paths are taken
-/// against the search directory, or `cwd`.
-pub fn grep_hits(ev: &Event) -> Vec<Hit> {
+/// The hits found in a search's output, and how many output lines were left unread
+/// because [`MAX_HITS`] hits had been found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Hits {
+    pub hits: Vec<Hit>,
+    /// Output lines after the [`MAX_HITS`]th hit, not looked at.
+    pub unread: usize,
+}
+
+/// How [`content_hit`] reads a line of `grep -n` / `rg -n` / Grep `content` output.
+///
+/// The forms, as GNU grep 3.12, ugrep 7.8.4 and ripgrep 15.2.0 document them (`--help`)
+/// and print them (checked on the fixture workspace):
+///
+/// - a matching line is `<path>:<line>:<text>` (the field match separator `:`), with the
+///   path as the search named it (relative paths stay relative), when more than one file
+///   is searched or `-H` is given;
+/// - a context line (`-A` / `-B` / `-C`) is `<path>-<line>-<text>` (the field context
+///   separator `-`); `--` separates context groups;
+/// - one file searched without `-H`: `<line>:<text>` and `<line>-<text>`.
+///
+/// `<text>` can itself contain `x.bb:3:` or `x.bb-3-`, and a path may contain `-` and
+/// digits, so a line is a hit only when exactly one of its `<prefix>:<n>:` /
+/// `<prefix>-<n>-` splits names an existing Yocto file (under one of the candidate bases),
+/// and that split is a match (`:`). A context line, a line no split explains, and a line
+/// two splits explain are all skipped: never attributed to the wrong place.
+pub struct ContentParser<'a> {
+    /// Bases a relative path may be relative to (deduplicated by the caller's order).
+    bases: Vec<PathBuf>,
+    /// The one file searched, for the `<line>:<text>` form; `None` when the search named a
+    /// directory or several files.
+    single_file: Option<PathBuf>,
+    /// Existence checks, memoised.
+    exists: std::cell::RefCell<std::collections::HashMap<PathBuf, bool>>,
+    is_file: &'a dyn Fn(&Path) -> bool,
+}
+
+impl<'a> ContentParser<'a> {
+    /// A parser for output whose relative paths are relative to one of `bases`.
+    pub fn new(
+        bases: Vec<PathBuf>,
+        single_file: Option<PathBuf>,
+        is_file: &'a dyn Fn(&Path) -> bool,
+    ) -> ContentParser<'a> {
+        let mut uniq: Vec<PathBuf> = Vec::new();
+        for b in bases {
+            if !uniq.contains(&b) {
+                uniq.push(b);
+            }
+        }
+        ContentParser {
+            bases: uniq,
+            single_file,
+            exists: std::cell::RefCell::new(std::collections::HashMap::new()),
+            is_file,
+        }
+    }
+
+    fn file_exists(&self, p: &Path) -> bool {
+        if let Some(e) = self.exists.borrow().get(p) {
+            return *e;
+        }
+        let e = (self.is_file)(p);
+        self.exists.borrow_mut().insert(p.to_path_buf(), e);
+        e
+    }
+
+    /// The existing files `prefix` can name (absolute: itself; relative: under each base).
+    fn existing(&self, prefix: &str) -> Vec<PathBuf> {
+        let p = Path::new(prefix);
+        let candidates: Vec<PathBuf> = if p.is_absolute() {
+            vec![p.to_path_buf()]
+        } else {
+            self.bases.iter().map(|b| b.join(p)).collect()
+        };
+        let mut out: Vec<PathBuf> = Vec::new();
+        for c in candidates {
+            if self.file_exists(&c) && !out.contains(&c) {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    /// The hit on line `l`, or `None` for anything else (see the type documentation).
+    pub fn content_hit(&self, l: &str) -> Option<Hit> {
+        let bytes = l.as_bytes();
+        let mut found: Vec<(PathBuf, u32, bool)> = Vec::new();
+        for (i, &c) in bytes.iter().enumerate() {
+            if c != b':' && c != b'-' {
+                continue;
+            }
+            let prefix = &l[..i];
+            if prefix.is_empty() || !is_yocto_path(Path::new(prefix)) {
+                continue;
+            }
+            let rest = &bytes[i + 1..];
+            let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+            if digits == 0 || rest.get(digits) != Some(&c) {
+                continue;
+            }
+            let Some(n) = std::str::from_utf8(&rest[..digits])
+                .ok()
+                .and_then(|d| d.parse::<u32>().ok())
+                .filter(|n| *n > 0)
+            else {
+                continue;
+            };
+            for p in self.existing(prefix) {
+                found.push((p, n, c == b':'));
+            }
+            if found.len() > 1 {
+                return None;
+            }
+        }
+        match found.pop() {
+            Some((path, n, true)) => Some(Hit {
+                path,
+                line: Some(n),
+            }),
+            Some((_, _, false)) => None,
+            None => self.single_file_hit(l),
+        }
+    }
+
+    /// `<line>:<text>` when one file was searched without its name in the output.
+    fn single_file_hit(&self, l: &str) -> Option<Hit> {
+        let f = self.single_file.as_ref().filter(|f| is_yocto_path(f))?;
+        let digits = l.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 || l.as_bytes().get(digits) != Some(&b':') {
+            return None;
+        }
+        let n = l[..digits].parse::<u32>().ok().filter(|n| *n > 0)?;
+        Some(Hit {
+            path: f.clone(),
+            line: Some(n),
+        })
+    }
+
+    /// The hits in `content`, at most [`MAX_HITS`].
+    pub fn hits(&self, content: &str) -> Hits {
+        let mut out = Hits::default();
+        let mut lines = content.lines();
+        for l in lines.by_ref() {
+            if out.hits.len() >= MAX_HITS {
+                out.unread = 1;
+                break;
+            }
+            if let Some(h) = self.content_hit(l) {
+                out.hits.push(h);
+            }
+        }
+        if out.unread > 0 {
+            out.unread += lines.count();
+        }
+        out
+    }
+}
+
+/// The Yocto hits in a Grep result (at most [`MAX_HITS`]). In content mode, a relative
+/// path may be relative to the session's `cwd` (as captured from Claude Code 2.1.326 for
+/// `path: "."`) or to the search directory (not captured); a line whose path exists under
+/// both, as different files, is skipped. `numFiles` is not used (it is 0 in content mode),
+/// nor is `filenames` in content mode (it is empty there).
+pub fn grep_hits(ev: &Event) -> Hits {
     let resp = &ev.tool_response;
     let mode = resp
         .get("mode")
@@ -202,6 +356,16 @@ pub fn grep_hits(ev: &Event) -> Vec<Hit> {
         .and_then(|p| ev.abs_path(p))
         .or_else(|| ev.cwd.clone());
     let single_file = search.clone().filter(|p| p.is_file());
+    let content = resp.get("content").and_then(Value::as_str).unwrap_or("");
+    if mode == "content" {
+        let mut bases: Vec<PathBuf> = ev.cwd.iter().cloned().collect();
+        if let Some(s) = search.as_ref().filter(|_| single_file.is_none()) {
+            bases.push(s.clone());
+        }
+        let is_file = |p: &Path| p.is_file();
+        let parser = ContentParser::new(bases, single_file, &is_file);
+        return parser.hits(content);
+    }
     let base = match (&search, &single_file) {
         (Some(s), None) => Some(s.clone()),
         _ => ev.cwd.clone(),
@@ -214,82 +378,67 @@ pub fn grep_hits(ev: &Event) -> Vec<Hit> {
             base.as_ref().map(|b| b.join(p))
         }
     };
-    let content = resp.get("content").and_then(Value::as_str).unwrap_or("");
-    let mut hits = Vec::new();
-    match mode {
-        "content" => {
-            for l in content.lines() {
-                if hits.len() >= MAX_HITS {
-                    break;
-                }
-                if let Some(c) = hit_captures(l) {
-                    let line = c[2].parse().ok();
-                    if let Some(path) = resolve(&c[1]) {
-                        hits.push(Hit { path, line });
-                    }
-                } else if let Some(f) = &single_file
-                    && is_yocto_path(f)
-                    && let Some(c) = line_captures(l)
-                {
-                    hits.push(Hit {
-                        path: f.clone(),
-                        line: c[1].parse().ok(),
-                    });
-                }
-            }
-        }
-        _ => {
-            let mut names: Vec<String> = resp
-                .get("filenames")
-                .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default();
-            if names.is_empty() && mode == "count" {
-                names = content
-                    .lines()
-                    .filter_map(|l| count_captures(l).map(|c| c[1].to_string()))
-                    .collect();
-            }
-            for n in names.iter().take(MAX_HITS) {
-                if let Some(path) = resolve(n) {
-                    hits.push(Hit { path, line: None });
-                }
-            }
+    let mut names: Vec<String> = resp
+        .get("filenames")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    if names.is_empty() && mode == "count" {
+        names = content
+            .lines()
+            .filter_map(|l| count_captures(l).map(|c| c[1].to_string()))
+            .collect();
+    }
+    let mut out = Hits::default();
+    for n in names.iter().take(MAX_HITS) {
+        if let Some(path) = resolve(n) {
+            out.hits.push(Hit { path, line: None });
         }
     }
-    hits.retain(|h| is_yocto_path(&h.path));
-    hits
+    out.unread = names.len().saturating_sub(MAX_HITS);
+    out.hits.retain(|h| is_yocto_path(&h.path));
+    out
 }
 
 fn grep(cx: &mut Ctx<'_>, ev: &Event) -> Result<Option<Response>> {
     let hits = grep_hits(ev);
-    if hits.is_empty() {
+    if hits.hits.is_empty() {
         return Ok(None);
     }
     let mut env = cx.env()?;
+    Ok(annotate_hits(&mut env, &hits)?.map(Response::context))
+}
+
+/// The context for a search's hits, shared by the Grep handler and the grep-through-Bash
+/// handler (`bash_grep.rs`): each multi-line item a hit falls in (hits in one item
+/// grouped), then one line per recipe a hit belongs to, then a note when [`MAX_HITS`]
+/// capped the search. `None` when there is nothing to say.
+pub fn annotate_hits(env: &mut Env<'_>, hits: &Hits) -> Result<Option<String>> {
     // (file, item id) -> index into `items`, so hits in one item share a line.
     let mut items: Vec<(i64, i64, String, Vec<u32>, String)> = Vec::new();
     let mut recipe_ids: Vec<FileRow> = Vec::new();
     let mut seen_files = HashSet::new();
-    for hit in &hits {
+    let mut known = 0usize;
+    for hit in &hits.hits {
         env.check_budget()?;
         let Some(file) = env.fresh_file(&hit.path)? else {
             continue;
         };
+        known += 1;
         if seen_files.insert(file.id) {
-            for r in recipes_of(&env, &file)? {
+            for r in recipes_of(env, &file)? {
                 if !recipe_ids.iter().any(|x| x.id == r.id) {
                     recipe_ids.push(r);
                 }
             }
         }
         let Some(line) = hit.line else { continue };
-        let Some(item) = multiline_item(&env, file.id, line)? else {
+        let Some(item) = multiline_item(env, file.id, line)? else {
             continue;
         };
         let Some(label) = bracket(&item) else {
@@ -315,7 +464,7 @@ fn grep(cx: &mut Ctx<'_>, ev: &Event) -> Result<Option<Response>> {
     let total_recipes = recipe_ids.len();
     for r in recipe_ids.iter().take(MAX_RECIPES) {
         env.check_budget()?;
-        out.push(recipe_line(&env, r)?);
+        out.push(recipe_line(env, r)?);
     }
     if total_recipes > MAX_RECIPES {
         out.push(format!("(+{} more recipes)", total_recipes - MAX_RECIPES));
@@ -323,9 +472,15 @@ fn grep(cx: &mut Ctx<'_>, ev: &Event) -> Result<Option<Response>> {
     if out.is_empty() {
         return Ok(None);
     }
+    if hits.unread > 0 && known > 0 {
+        out.push(format!(
+            "(only the first {MAX_HITS} hits were looked at; {} more output lines were not)",
+            hits.unread
+        ));
+    }
     let mut text = String::from("sous-chef index context for the Yocto hits above:\n");
     text.push_str(&out.join("\n"));
-    Ok(Some(Response::context(text)))
+    Ok(Some(text))
 }
 
 // ---- Read ----
@@ -482,31 +637,107 @@ mod tests {
         Event::parse(json).unwrap()
     }
 
-    #[test]
-    fn content_hits_absolute_relative_and_single_file() {
-        let e = ev(
-            r#"{"hook_event_name":"PostToolUse","tool_name":"Grep","cwd":"/w",
-            "tool_input":{"pattern":"x","path":"sub"},
-            "tool_response":{"mode":"content","numFiles":2,"filenames":[],
-              "content":"/a/b.conf.d/x.bb:3:foo\nrel/y.bbappend:12:bar:baz\nz.c:4:no\n/a/q.inc-5-context\n--\n/a/q.inc:6:x"}}"#,
+    /// A parser over a fake file system holding `files`.
+    fn parse(content: &str, bases: &[&str], single: Option<&str>, files: &[&str]) -> Vec<Hit> {
+        let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+        let is_file = move |p: &Path| files.iter().any(|f| f == p);
+        let parser = ContentParser::new(
+            bases.iter().map(PathBuf::from).collect(),
+            single.map(PathBuf::from),
+            &is_file,
         );
+        parser.hits(content).hits
+    }
+
+    fn hit(path: &str, line: u32) -> Hit {
+        Hit {
+            path: path.into(),
+            line: Some(line),
+        }
+    }
+
+    #[test]
+    fn content_hits_absolute_relative_and_context() {
+        let files = [
+            "/a/b.conf.d/x.bb",
+            "/w/rel/y.bbappend",
+            "/a/q.inc",
+            "/a/z.c",
+            "/a/my-1-file.bb",
+        ];
+        let content = "/a/b.conf.d/x.bb:3:foo\n\
+                       rel/y.bbappend:12:bar:baz\n\
+                       /a/z.c:4:no\n\
+                       /a/q.inc-5-context\n\
+                       --\n\
+                       /a/q.inc:6:x\n\
+                       /a/my-1-file.bb:7:a path with -1- in it\n\
+                       /a/my-1-file.bb-8-context";
         assert_eq!(
-            grep_hits(&e),
+            parse(content, &["/w"], None, &files),
             vec![
-                Hit {
-                    path: "/a/b.conf.d/x.bb".into(),
-                    line: Some(3)
-                },
-                Hit {
-                    path: "/w/sub/rel/y.bbappend".into(),
-                    line: Some(12)
-                },
-                Hit {
-                    path: "/a/q.inc".into(),
-                    line: Some(6)
-                },
+                hit("/a/b.conf.d/x.bb", 3),
+                hit("/w/rel/y.bbappend", 12),
+                hit("/a/q.inc", 6),
+                hit("/a/my-1-file.bb", 7),
             ]
         );
+    }
+
+    #[test]
+    fn context_lines_that_look_like_hits_are_skipped() {
+        let files = ["/a/q.inc", "/a/x.bb"];
+        // Context lines whose text holds `<file>:<n>:`: skipped. A match line whose text
+        // does: attributed to its own file and line.
+        let content = "/a/q.inc-5-require /a/x.bb:3:\n\
+                       /a/q.inc-6-FOO = \"/a/x.bb:9:x\"\n\
+                       /a/q.inc:7:BAR = \"/a/x.bb:2:\"";
+        assert_eq!(
+            parse(content, &["/w"], None, &files),
+            vec![hit("/a/q.inc", 7)]
+        );
+        // Unknown files and unparsable lines are skipped too.
+        let content = "/a/gone.bb:3:x\nno line number\n/a/q.inc:x:y\n/a/q.inc:0:zero";
+        assert_eq!(parse(content, &["/w"], None, &files), vec![]);
+    }
+
+    #[test]
+    fn a_relative_path_under_two_bases_is_skipped() {
+        let files = ["/w/r.bb", "/w/sub/r.bb", "/w/sub/only.bb"];
+        assert_eq!(
+            parse("r.bb:1:x\nonly.bb:2:y", &["/w", "/w/sub"], None, &files),
+            vec![hit("/w/sub/only.bb", 2)]
+        );
+    }
+
+    #[test]
+    fn single_file_lines() {
+        let files = ["/a/q.inc"];
+        assert_eq!(
+            parse(
+                "15:do_install:append() {\n16-context\n17:x",
+                &["/w"],
+                Some("/a/q.inc"),
+                &files
+            ),
+            vec![hit("/a/q.inc", 15), hit("/a/q.inc", 17)]
+        );
+        // Not for a non-Yocto file, and not without a single file.
+        assert_eq!(parse("15:x", &["/w"], Some("/a/q.c"), &files), vec![]);
+        assert_eq!(parse("15:x", &["/w"], None, &files), vec![]);
+    }
+
+    #[test]
+    fn hits_are_capped() {
+        let files = ["/a/q.inc"];
+        let content: String = (1..=MAX_HITS + 5)
+            .map(|i| format!("/a/q.inc:{i}:x\n"))
+            .collect();
+        let is_file = |p: &Path| files.iter().any(|f| Path::new(f) == p);
+        let parser = ContentParser::new(vec!["/w".into()], None, &is_file);
+        let hits = parser.hits(&content);
+        assert_eq!(hits.hits.len(), MAX_HITS);
+        assert_eq!(hits.unread, 5);
     }
 
     #[test]
@@ -516,7 +747,7 @@ mod tests {
             "tool_input":{"pattern":"x"},
             "tool_response":{"mode":"files_with_matches","numFiles":2,"filenames":["/a/x.bb","/a/x.c","r.inc"]}}"#,
         );
-        let hits = grep_hits(&e);
+        let hits = grep_hits(&e).hits;
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[1].path, PathBuf::from("/w/r.inc"));
         let e = ev(
@@ -525,7 +756,7 @@ mod tests {
             "tool_response":{"numFiles":1,"filenames":[],"content":"/a/x.bb:3\n/a/x.c:1"}}"#,
         );
         assert_eq!(
-            grep_hits(&e),
+            grep_hits(&e).hits,
             vec![Hit {
                 path: "/a/x.bb".into(),
                 line: None

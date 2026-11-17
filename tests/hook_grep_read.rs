@@ -42,6 +42,86 @@ fn grep_content_hits_get_their_items_and_recipes() {
     assert_eq!(snapshot(&ws_root()), before);
 }
 
+/// Captured from Claude Code 2.1.326: paths relative to `cwd`, `numFiles` 0, `filenames`
+/// empty, an extra `totalLines`; hits in ripgrep's order, one in meta-legacy (outside the
+/// workspace).
+#[test]
+fn captured_grep_content_event() {
+    let cache = indexed_cache(&ws_root());
+    let ev = event("captured/grep_content");
+    let v: Value = serde_json::from_str(&ev).unwrap();
+    assert_eq!(v["tool_response"]["numFiles"], 0);
+    let ctx = context_of(&run_hook(ev.as_bytes(), cache.path()));
+    assert_eq!(
+        ctx,
+        "sous-chef index context for the Yocto hits above:\n\
+         meta-mine:recipes-app/app/app_0.1.bb:26 in [do_install 25-29]\n\
+         meta-core:recipes-core/hello/hello.inc:16 in [do_install:append 15-18]\n\
+         recipe app_0.1.bb (meta-mine): 0 bbappends, 0 included files; \
+         `recipe app` / `var <NAME> recipe=app` give the merged view."
+    );
+    // `numFiles` and `filenames` play no part in content mode.
+    let mut v2 = v.clone();
+    v2["tool_response"]["numFiles"] = Value::from(7);
+    v2["tool_response"]["filenames"] =
+        serde_json::json!(["meta-core/recipes-core/hello/hello_1.0.bb"]);
+    assert_eq!(
+        context_of(&run_hook(v2.to_string().as_bytes(), cache.path())),
+        ctx
+    );
+}
+
+/// Context lines (`-C 1`), as ripgrep 15.2.0 printed them for this search on the fixture
+/// (`rg -n -C1 'install -d' meta-core`): `<path>-<line>-<text>` lines and `--` are skipped,
+/// only the match line is annotated. Claude Code's Grep with `-C` was not captured; the
+/// format is ripgrep's documented `--field-context-separator`.
+#[test]
+fn grep_context_lines_are_not_hits() {
+    let cache = indexed_cache(&ws_root());
+    let mut v: Value = serde_json::from_str(&event("captured/grep_content")).unwrap();
+    v["tool_input"]["-C"] = Value::from(1);
+    v["tool_response"]["content"] = Value::String(
+        "meta-core/recipes-core/hello/hello.inc-15-do_install:append() {\n\
+         meta-core/recipes-core/hello/hello.inc:16:\tinstall -d ${D}${sysconfdir}\n\
+         meta-core/recipes-core/hello/hello.inc-17-\techo \"greeting=hello\" > ${D}${sysconfdir}/hello.conf\n\
+         --\n\
+         meta-mine/recipes-app/app/app_0.1.bb-29-}\n\
+         meta-mine/recipes-app/app/app_0.1.bb-30-FOO = \"meta-core/recipes-core/hello/hello.inc:2:\""
+            .into(),
+    );
+    let ctx = context_of(&run_hook(v.to_string().as_bytes(), cache.path()));
+    assert_eq!(
+        ctx,
+        "sous-chef index context for the Yocto hits above:\n\
+         meta-core:recipes-core/hello/hello.inc:16 in [do_install:append 15-18]"
+    );
+}
+
+/// A relative search directory: the captured event (`path: "."`) printed paths relative to
+/// `cwd`; whether they are relative to `cwd` or to the search directory for another
+/// relative `path` was not captured, so both are tried, and a line is used only when one
+/// of them names a file.
+#[test]
+fn grep_in_a_relative_directory_resolves_against_cwd_or_the_directory() {
+    let cache = indexed_cache(&ws_root());
+    let mut v: Value = serde_json::from_str(&event("captured/grep_content")).unwrap();
+    v["tool_input"]["path"] = Value::from("meta-core");
+    v["tool_response"]["content"] =
+        Value::String("meta-core/recipes-core/hello/hello.inc:16:\tinstall -d".into());
+    let want = "sous-chef index context for the Yocto hits above:\n\
+                meta-core:recipes-core/hello/hello.inc:16 in [do_install:append 15-18]";
+    assert_eq!(
+        context_of(&run_hook(v.to_string().as_bytes(), cache.path())),
+        want
+    );
+    v["tool_response"]["content"] =
+        Value::String("recipes-core/hello/hello.inc:16:\tinstall -d".into());
+    assert_eq!(
+        context_of(&run_hook(v.to_string().as_bytes(), cache.path())),
+        want
+    );
+}
+
 #[test]
 fn grep_files_mode_names_the_recipes() {
     let cache = indexed_cache(&ws_root());
