@@ -141,7 +141,7 @@ pub fn resolve_recipe(index: &Index, name: &str, version: Option<&str>) -> Resul
             }
         }
     }
-    let candidates = recipe_names_like(index, name)?;
+    let candidates = query::recipe_names_like(index, name, 20)?;
     if candidates.is_empty() {
         return Err(Error::NotFound {
             what: format!("recipe {name}"),
@@ -206,24 +206,6 @@ fn recipe_row(file: FileRow) -> Option<RecipeRow> {
         pv: file.pv.clone().unwrap_or_default(),
         file,
     })
-}
-
-/// Private query (candidate for `index::query`): distinct recipe names containing `q`,
-/// ASCII case-insensitive, at most 20.
-fn recipe_names_like(index: &Index, q: &str) -> Result<Vec<String>> {
-    let escaped: String = q
-        .chars()
-        .flat_map(|c| match c {
-            '%' | '_' | '\\' => vec!['\\', c],
-            c => vec![c],
-        })
-        .collect();
-    let mut st = index.conn().prepare(
-        "SELECT DISTINCT pn FROM files WHERE kind = 'bb' AND pn LIKE ?1 ESCAPE '\\' \
-         ORDER BY pn LIMIT 20",
-    )?;
-    let rows = st.query_map([format!("%{escaped}%")], |r| r.get::<_, String>(0))?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 // ---- the recipe walk ----

@@ -12,7 +12,7 @@ use crate::index::{Index, query};
 use crate::lint::{Finding, LintContext, Rule};
 use crate::parse::Statement;
 use crate::release::{Feature, Release};
-use crate::types::{LineSpan, Loc, VarRef};
+use crate::types::{FileKind, LineSpan, Loc, VarRef};
 
 // ---------------------------------------------------------------------------------------
 // Findings
@@ -413,13 +413,9 @@ impl KnownOverrides {
     /// Collects the set from the index.
     pub fn from_index(index: &Index) -> Result<KnownOverrides> {
         let mut out = KnownOverrides::default();
-        let mut st = index
-            .conn()
-            .prepare("SELECT path, kind FROM files WHERE kind IN ('conf', 'bbclass')")?;
-        let rows = st.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        for row in rows {
-            let (path, kind) = row?;
-            let p = std::path::Path::new(&path);
+        for f in query::files_by_kind(index, &[FileKind::Conf, FileKind::Class])? {
+            let kind = f.kind;
+            let p = f.path.as_path();
             let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
@@ -427,7 +423,7 @@ impl KnownOverrides {
                 .parent()
                 .map(|d| d.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            if kind == "bbclass" {
+            if kind == FileKind::Class {
                 out.classes.insert(stem.to_string());
             } else if parent.ends_with("conf/machine") {
                 out.machines.insert(stem.to_string());

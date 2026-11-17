@@ -94,7 +94,7 @@ impl Found {
 fn find_class(index: &Index, ctx: &Ctx, name: &str) -> Result<Found> {
     let files = query::class_files(index, &ctx.workspace, name, false)?;
     if files.is_empty() {
-        let candidates = class_names_like(index, name)?;
+        let candidates = query::class_names_like(index, name, 20)?;
         if candidates.is_empty() {
             return Err(Error::NotFound {
                 what: format!("class {name}"),
@@ -225,30 +225,4 @@ fn outline(index: &Index, found: &Found) -> Result<Table> {
         }
     }
     Ok(t)
-}
-
-/// Private query (candidate for `index::query`): class names (file stems) containing `q`,
-/// at most 20.
-fn class_names_like(index: &Index, q: &str) -> Result<Vec<String>> {
-    let mut st = index
-        .conn()
-        .prepare("SELECT path FROM files WHERE kind = 'bbclass' ORDER BY path")?;
-    let rows = st.query_map([], |r| r.get::<_, String>(0))?;
-    let q = q.to_ascii_lowercase();
-    let mut out: Vec<String> = Vec::new();
-    for p in rows {
-        let p = p?;
-        let stem = p
-            .rsplit('/')
-            .next()
-            .unwrap_or(&p)
-            .trim_end_matches(".bbclass")
-            .to_string();
-        if stem.to_ascii_lowercase().contains(&q) && !out.contains(&stem) {
-            out.push(stem);
-        }
-    }
-    out.sort();
-    out.truncate(20);
-    Ok(out)
 }

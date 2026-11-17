@@ -347,25 +347,10 @@ fn target_layers_all(ws: &Workspace) -> Vec<String> {
 
 /// Absolute paths of the indexed files of a layer, by path.
 fn layer_files(ws: &Workspace, index: &Index, layer: &str) -> Result<Vec<PathBuf>> {
-    // query.rs has no "files of a layer" reader yet; this is the one read the engine makes
-    // itself.
-    let mut st = index.conn().prepare(
-        "SELECT f.path FROM files f JOIN layers l ON l.id = f.layer_id \
-         WHERE l.name = ?1 ORDER BY f.path",
-    )?;
-    let rows = st.query_map([layer], |r| r.get::<_, String>(0))?;
-    let mut out = Vec::new();
-    for rel in rows {
-        let loc = Loc {
-            layer: layer.to_string(),
-            path: PathBuf::from(rel?),
-            lines: LineSpan::line(1),
-        };
-        if let Some(abs) = ws.abs_path(&loc) {
-            out.push(abs);
-        }
-    }
-    Ok(out)
+    Ok(query::files_in_layer(index, layer)?
+        .iter()
+        .filter_map(|f| ws.abs_path(&f.loc(LineSpan::line(1))))
+        .collect())
 }
 
 /// The files of a recipe target: the `.bb`, the files its `require` / `include` /

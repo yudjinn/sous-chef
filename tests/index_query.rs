@@ -813,3 +813,97 @@ fn rows_serialize() {
     assert_eq!(json[0]["pv"], "1.1");
     let _: PathBuf = rows[0].file.path.clone();
 }
+
+#[test]
+fn all_files_by_layer_then_path() {
+    let fx = fixture();
+    let rows = query::all_files(&fx.idx).unwrap();
+    assert!(rows.iter().all(|f| f.sha256.len() == 64));
+    let all: Vec<String> = rows.iter().map(lp).collect();
+    assert_eq!(all.len(), 21);
+    // Layer row order (BBLAYERS order, build directory last), then path.
+    assert_eq!(all[0], "meta-core:classes-global/sanityish.bbclass");
+    assert_eq!(all.last().unwrap(), "build:conf/local.conf");
+    let mut layers: Vec<&str> = all.iter().map(|s| s.split(':').next().unwrap()).collect();
+    layers.dedup();
+    assert_eq!(layers, ["meta-core", "meta-vendor", "meta-mine", "build"]);
+}
+
+#[test]
+fn files_by_kind_and_in_layer() {
+    let fx = fixture();
+    let appends: Vec<String> = query::files_by_kind(&fx.idx, &[FileKind::Append])
+        .unwrap()
+        .iter()
+        .map(lp)
+        .collect();
+    assert_eq!(
+        appends,
+        [
+            "meta-vendor:recipes-core/hello/hello_%.bbappend",
+            "meta-mine:recipes-app/orphan/orphan_9.%.bbappend",
+            "meta-mine:recipes-core/hello/hello_1.1.bbappend",
+        ]
+    );
+    let some = query::files_by_kind(&fx.idx, &[FileKind::Class, FileKind::Conf]).unwrap();
+    assert_eq!(some.len(), 3 + 9);
+    assert!(
+        some.iter()
+            .all(|f| matches!(f.kind, FileKind::Class | FileKind::Conf))
+    );
+    assert!(query::files_by_kind(&fx.idx, &[]).unwrap().is_empty());
+
+    let mine: Vec<String> = query::files_in_layer(&fx.idx, "meta-mine")
+        .unwrap()
+        .iter()
+        .map(lp)
+        .collect();
+    assert_eq!(
+        mine,
+        [
+            "meta-mine:conf/layer.conf",
+            "meta-mine:recipes-app/app/app_0.1.bb",
+            "meta-mine:recipes-app/orphan/orphan_9.%.bbappend",
+            "meta-mine:recipes-core/hello/hello_1.1.bbappend",
+        ]
+    );
+    assert_eq!(query::files_in_layer(&fx.idx, "build").unwrap().len(), 2);
+    assert!(query::files_in_layer(&fx.idx, "nope").unwrap().is_empty());
+}
+
+#[test]
+fn recipe_and_class_names_like() {
+    let fx = fixture();
+    assert_eq!(
+        query::recipe_names_like(&fx.idx, "LIB", 20).unwrap(),
+        ["libfoo", "libfoo-alt"]
+    );
+    assert_eq!(
+        query::recipe_names_like(&fx.idx, "l", 1).unwrap(),
+        ["hello"]
+    );
+    // `_` and `%` are literal, not wildcards.
+    assert!(
+        query::recipe_names_like(&fx.idx, "_", 20)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        query::recipe_names_like(&fx.idx, "%", 20)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        query::class_names_like(&fx.idx, "ISH", 20).unwrap(),
+        ["autotoolsish", "sanityish"]
+    );
+    assert_eq!(
+        query::class_names_like(&fx.idx, "", 2).unwrap(),
+        ["autotoolsish", "base"]
+    );
+    assert!(
+        query::class_names_like(&fx.idx, "zzz", 20)
+            .unwrap()
+            .is_empty()
+    );
+}

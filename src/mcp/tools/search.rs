@@ -13,7 +13,6 @@
 //! (default 30) cuts the hits with a `+N more (limit=L)` marker; the budget cuts rows after.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use regex::RegexBuilder;
 use schemars::JsonSchema;
@@ -23,7 +22,7 @@ use super::item::read_confined;
 use super::recipe;
 use crate::error::{Error, Result};
 use crate::index::Index;
-use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
+use crate::index::query::{self, StatementFilter, StatementRow};
 use crate::mcp::Ctx;
 use crate::render::{self, Format, Table};
 use crate::types::{FileKind, LineSpan, Loc};
@@ -194,7 +193,7 @@ fn regex_search(
                 e.to_string().lines().last().unwrap_or("invalid pattern")
             ),
         })?;
-    let mut files = indexed_files(index)?;
+    let mut files = query::all_files(index)?;
     files.retain(|f| {
         filter.layer.as_ref().is_none_or(|l| f.layer == *l)
             && filter.file_kind.is_none_or(|k| f.kind == k)
@@ -272,28 +271,4 @@ fn enclosing(stmts: &[StatementRow], line: u32) -> Option<&StatementRow> {
         .iter()
         .filter(|s| s.loc.lines.start <= line && s.loc.lines.end >= line)
         .max_by_key(|s| s.loc.lines.start)
-}
-
-/// Private query (candidate for `index::query`): every indexed file, by layer row id then
-/// path.
-fn indexed_files(index: &Index) -> Result<Vec<FileRow>> {
-    let mut st = index.conn().prepare(
-        "SELECT f.id, l.name, f.layer_id, f.path, f.kind, f.sha256, f.pn, f.pv, l.priority \
-         FROM files f JOIN layers l ON l.id = f.layer_id ORDER BY l.id, f.path",
-    )?;
-    let rows = st.query_map([], |r| {
-        let kind: String = r.get(4)?;
-        Ok(FileRow {
-            id: r.get(0)?,
-            layer: r.get(1)?,
-            layer_id: r.get(2)?,
-            path: PathBuf::from(r.get::<_, String>(3)?),
-            kind: kind.parse().unwrap_or(FileKind::Conf),
-            sha256: r.get::<_, Option<String>>(5)?.unwrap_or_default(),
-            pn: r.get(6)?,
-            pv: r.get(7)?,
-            priority: r.get::<_, Option<i32>>(8)?.unwrap_or(0),
-        })
-    })?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }

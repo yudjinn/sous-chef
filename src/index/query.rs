@@ -277,6 +277,78 @@ pub fn file_by_abs(index: &Index, ws: &Workspace, abs: &Path) -> Result<Option<F
     }
 }
 
+/// Every indexed file (the build pseudo-layer included), by layer row id then path.
+pub fn all_files(index: &Index) -> Result<Vec<FileRow>> {
+    let sql = format!("SELECT {FILE_COLS} FROM {FILE_FROM} ORDER BY l.id, f.path");
+    collect(index, &sql, &[], |r| file_row(r, 0))
+}
+
+/// Every indexed file of one of `kinds`, by layer row id then path. An empty `kinds`
+/// returns nothing.
+pub fn files_by_kind(index: &Index, kinds: &[FileKind]) -> Result<Vec<FileRow>> {
+    if kinds.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names: Vec<&'static str> = kinds.iter().map(|k| k.as_str()).collect();
+    let marks: Vec<String> = (1..=names.len()).map(|i| format!("?{i}")).collect();
+    let sql = format!(
+        "SELECT {FILE_COLS} FROM {FILE_FROM} WHERE f.kind IN ({}) ORDER BY l.id, f.path",
+        marks.join(", ")
+    );
+    let refs: Vec<&dyn ToSql> = names.iter().map(|n| n as &dyn ToSql).collect();
+    collect(index, &sql, &refs, |r| file_row(r, 0))
+}
+
+/// The indexed files of the layer named `layer` (`build` for the build pseudo-layer), by
+/// path. An unknown layer has none.
+pub fn files_in_layer(index: &Index, layer: &str) -> Result<Vec<FileRow>> {
+    let sql = format!("SELECT {FILE_COLS} FROM {FILE_FROM} WHERE l.name = ?1 ORDER BY f.path");
+    collect(index, &sql, &[&layer], |r| file_row(r, 0))
+}
+
+/// `%` / `_` / `\` escaped for a `LIKE ... ESCAPE '\'` pattern.
+fn like_escape(s: &str) -> String {
+    s.chars()
+        .flat_map(|c| match c {
+            '%' | '_' | '\\' => vec!['\\', c],
+            c => vec![c],
+        })
+        .collect()
+}
+
+/// Distinct recipe names (`PN` of `.bb` files) containing `q`, ASCII case-insensitive,
+/// sorted, at most `limit`. For "did you mean" lists.
+pub fn recipe_names_like(index: &Index, q: &str, limit: usize) -> Result<Vec<String>> {
+    let sql = format!(
+        "SELECT DISTINCT pn FROM files WHERE kind = 'bb' AND pn LIKE ?1 ESCAPE '\\' \
+         ORDER BY pn LIMIT {limit}"
+    );
+    let pattern = format!("%{}%", like_escape(q));
+    collect(index, &sql, &[&pattern], |r| r.get::<_, String>(0))
+}
+
+/// Distinct class names (stems of indexed `.bbclass` files, any directory) containing `q`,
+/// ASCII case-insensitive, sorted, at most `limit`. For "did you mean" lists.
+pub fn class_names_like(index: &Index, q: &str, limit: usize) -> Result<Vec<String>> {
+    let q = q.to_ascii_lowercase();
+    let mut out: Vec<String> = Vec::new();
+    for f in files_by_kind(index, &[FileKind::Class])? {
+        let path = f.path.to_string_lossy();
+        let stem = path
+            .rsplit('/')
+            .next()
+            .unwrap_or(&path)
+            .trim_end_matches(".bbclass")
+            .to_string();
+        if stem.to_ascii_lowercase().contains(&q) && !out.contains(&stem) {
+            out.push(stem);
+        }
+    }
+    out.sort();
+    out.truncate(limit);
+    Ok(out)
+}
+
 // ---- recipes ----
 
 /// Every recipe file whose `PN` is `name`: all versions, all layers. Ordered by layer
@@ -518,14 +590,7 @@ pub fn search_names(
     filter: &StatementFilter,
     limit: usize,
 ) -> Result<Vec<StatementRow>> {
-    let escaped: String = query
-        .chars()
-        .flat_map(|c| match c {
-            '%' | '_' | '\\' => vec!['\\', c],
-            c => vec![c],
-        })
-        .collect();
-    let pattern = format!("%{escaped}%");
+    let pattern = format!("%{}%", like_escape(query));
     statements_where(
         index,
         "s.name LIKE ?1 ESCAPE '\\'",

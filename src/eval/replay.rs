@@ -348,25 +348,30 @@ struct Files {
 
 impl Files {
     fn load(index: &Index, ws: &Workspace) -> Result<Files> {
-        let mut st = index.conn().prepare(
-            "SELECT f.id, l.name, f.path, f.kind, f.sha256 FROM files f \
-             JOIN layers l ON l.id = f.layer_id ORDER BY l.name, f.path",
-        )?;
-        let rows = st.query_map([], |r| {
-            let kind: String = r.get(3)?;
-            Ok(FileInfo {
-                id: r.get(0)?,
-                layer: r.get(1)?,
-                path: PathBuf::from(r.get::<_, String>(2)?),
-                kind: kind.parse().unwrap_or(FileKind::Conf),
-                sha256: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+        // By layer name then path, compared as bytes (SQLite's text order): the order the
+        // cache fingerprint is computed in.
+        let mut rows: Vec<FileInfo> = query::all_files(index)?
+            .into_iter()
+            .map(|f| FileInfo {
+                id: f.id,
+                layer: f.layer,
+                path: f.path,
+                kind: f.kind,
+                sha256: f.sha256,
             })
-        })?;
+            .collect();
+        rows.sort_by(|a, b| {
+            a.layer.cmp(&b.layer).then_with(|| {
+                a.path
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .cmp(b.path.as_os_str().as_encoded_bytes())
+            })
+        });
         let mut by_abs = HashMap::new();
         let mut by_loc = HashMap::new();
         let mut h = Sha256::new();
-        for row in rows {
-            let f = row?;
+        for f in rows {
             match f.kind {
                 FileKind::Conf => {
                     h.update(format!("c {} {} {}\n", f.layer, f.path.display(), f.sha256))
