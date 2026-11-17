@@ -881,15 +881,8 @@ fn kas_defaults(ws: &Workspace) -> Vec<(String, String, String)> {
 /// `KasProject::setting_source` (which also knows the `KAS_MACHINE` / `KAS_DISTRO`
 /// environment overrides) is available, it should decide the text here.
 fn kas_origin(k: &crate::workspace::kas::KasProject, machine: bool) -> String {
-    let (setting, what) = if machine {
-        (k.machine.as_ref(), "machine")
-    } else {
-        (k.distro.as_ref(), "distro")
-    };
-    match setting {
-        Some(s) => format!("the kas file {}", s.loc.display_in(&k.root)),
-        None => format!("kas's default (no {what} in the kas files)"),
-    }
+    // A `KAS_MACHINE` / `KAS_DISTRO` override is named as such (`setting_source`).
+    k.setting_source(machine)
 }
 
 fn recipe_pass(
