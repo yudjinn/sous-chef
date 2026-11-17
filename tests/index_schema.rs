@@ -121,7 +121,16 @@ fn fresh_index_has_every_table_and_column() {
         (
             "files",
             &[
-                "id", "layer_id", "path", "kind", "mtime", "size", "sha256", "pn", "pv",
+                "id",
+                "layer_id",
+                "path",
+                "kind",
+                "mtime",
+                "size",
+                "sha256",
+                "pn",
+                "pv",
+                "not_collected",
             ],
         ),
         (

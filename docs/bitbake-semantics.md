@@ -405,6 +405,22 @@ Verified (T1.4) against BitBake `master` (commit `5495a547`, 2026-11-16), and re
 sous-chef differences: only files inside the workspace (layer roots and the build directory)
 are ever found; `BBMASK` is not applied by `recipe_files`.
 
+**A `.bb` or `.bbappend` that no `BBFILES` glob matches** (verified, w5 fix of differential
+bug 4, BitBake 2.18.0 `lib/bb/cooker.py`): BitBake knows only the files `collect_bbfiles`
+returns; recipe names, providers (`bb.providers` over the parsed recipes) and
+`get_file_appends` all start from that list, so such a `.bb` is never a recipe for a name
+(`bitbake -e example` for OE-core's `meta/lib/bblayers/templates/example.bb`: "Nothing
+PROVIDES 'example'") and such a `.bbappend` applies to nothing. `matchFiles`, used for
+`bitbake -b <file>`, takes any existing path (`os.stat(bf)` succeeds: `return [bf]`), so a
+file named directly is still parsed, with the collected appends only. sous-chef keeps the
+file in the index (`item`, `search`, `layers` show it) and marks it
+(`files.not_collected = 'bbfiles'`, set with the edges from `resolve::recipe_files`);
+`query::find_recipes`, `recipe_names_like`, `files_providing` and
+`providers::recipes_using` leave it out, it takes part in no `bbappend` edge, and an
+evaluation addressed to it by path (`layer:path`) adds the note "not matched by any layer's
+BBFILES" (`ReplayNotes::target_notes`). A file `BBMASK` masks would be another value of the
+same column (not implemented: `BBMASK` is evaluated configuration).
+
 **A bbappend that matches no recipe** (checked by T4.3 in `cooker.py`
 `show_appends_with_no_recipes`, master and branches `2.0` and `2.8`): BitBake stops with a
 fatal error ("No recipes available for"). On BitBake 2.0 (Kirkstone) and 2.8 (Scarthgap)

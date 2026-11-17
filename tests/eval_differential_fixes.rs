@@ -173,3 +173,104 @@ fn package_functions_with_expanded_names_are_functions() {
     assert!(!ds.is_function("EXTRA_OEMAKE"));
     assert!(!ds.is_function("pkg_preinst:app"));
 }
+
+// ---------------------------------------------------------------------------------------
+// Bug 4: a `.bb` no BBFILES glob matches is not a recipe
+// ---------------------------------------------------------------------------------------
+
+fn template_recipe(root: &Path) {
+    // meta-mine's BBFILES is `${LAYERDIR}/recipes-*/*/*.bb`: `templates/` is not matched.
+    write(
+        root,
+        "meta-mine/templates/example/example_1.0.bb",
+        "LICENSE = \"CLOSED\"\nPROVIDES = \"virtual/foo\"\nX = \"template\"\n",
+    );
+    write(
+        root,
+        "meta-mine/templates/example/hello_%.bbappend",
+        "X = \"uncollected append\"\n",
+    );
+}
+
+#[test]
+fn a_recipe_outside_bbfiles_is_indexed_but_not_a_recipe() {
+    let fx = modified(template_recipe);
+    let file = query::file_by_path(
+        &fx.idx,
+        "meta-mine",
+        Path::new("templates/example/example_1.0.bb"),
+    )
+    .unwrap()
+    .expect("still indexed");
+    assert_eq!(
+        query::not_collected(&fx.idx, file.id).unwrap().as_deref(),
+        Some("not matched by any layer's BBFILES")
+    );
+    let collected = query::file_by_path(
+        &fx.idx,
+        "meta-mine",
+        Path::new("recipes-app/app/app_0.1.bb"),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(query::not_collected(&fx.idx, collected.id).unwrap(), None);
+
+    // Not found by name.
+    assert!(query::find_recipes(&fx.idx, "example").unwrap().is_empty());
+    assert!(
+        !query::recipe_names_like(&fx.idx, "exam", 10)
+            .unwrap()
+            .contains(&"example".to_string())
+    );
+    let e = eval::evaluate_with(
+        &ConfigCache::new(),
+        &fx.idx,
+        &fx.ws,
+        &target(Some("example")),
+    );
+    assert!(
+        matches!(e, Err(sous_chef::error::Error::NotFound { .. })),
+        "{:?}",
+        e.map(|_| ())
+    );
+
+    // Found by path, with the note.
+    let ds = eval(
+        &fx,
+        &target(Some("meta-mine:templates/example/example_1.0.bb")),
+    );
+    assert_eq!(text(&ds, "X").as_deref(), Some("template"));
+    let notes = &ds.replay().target_notes;
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("not matched by any layer's BBFILES")),
+        "{notes:?}"
+    );
+    assert!(ds.replay().appends.is_empty());
+
+    // Not a provider.
+    let p = eval::providers::Providers::new(&fx.idx, &fx.ws, None, None)
+        .unwrap()
+        .providers("virtual/foo")
+        .unwrap();
+    let pns: Vec<&str> = p.providers.iter().map(|p| p.pn.as_str()).collect();
+    assert!(!pns.contains(&"example"), "{pns:?}");
+    assert!(pns.contains(&"libfoo"), "{pns:?}");
+
+    // An append outside BBFILES applies to nothing and is not an orphan either (the
+    // org/layer-conf lint rule reports it).
+    let hello = eval(
+        &fx,
+        &target(Some("meta-core:recipes-core/hello/hello_1.1.bb")),
+    );
+    assert_ne!(text(&hello, "X").as_deref(), Some("uncollected append"));
+    assert!(
+        !query::orphan_appends(&fx.idx)
+            .unwrap()
+            .iter()
+            .any(|f| f.path.starts_with("templates"))
+    );
+    // A collected recipe evaluates without the note.
+    assert!(hello.replay().target_notes.is_empty());
+}

@@ -83,6 +83,11 @@ pub struct ReplayNotes {
     pub appends: Vec<Loc>,
     /// `FILE_LAYERNAME`: the collection whose `BBFILE_PATTERN` matches the recipe.
     pub layer_name: Option<String>,
+    /// Notes about the evaluation as a whole that every tool showing evaluated values
+    /// prints (`note: ...` lines): a recipe file BitBake does not collect, where the
+    /// machine came from when not from the configuration, no `MACHINE` at all.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub target_notes: Vec<String>,
     /// Anonymous python functions, in parse order (configuration classes included: BitBake
     /// runs those for every recipe too).
     pub anonymous: Vec<AnonPython>,
@@ -563,10 +568,21 @@ fn recipe_pass(
     if let Some(l) = &layername {
         put(&mut r.ds, "FILE_LAYERNAME", l);
     }
+    let not_collected = query::not_collected(index, recipe.id)?;
     {
         let notes = Arc::make_mut(&mut r.ds.notes);
         notes.recipe = Some(recipe_loc.clone());
         notes.layer_name = layername;
+        if let Some(why) = not_collected {
+            // cooker.py: only collected files are recipes (`collect_bbfiles`); a file named
+            // with `bitbake -b` is parsed anyway (`matchFiles` takes any existing path).
+            notes.target_notes.push(format!(
+                "note: {} is {why}: BitBake does not collect it, so no recipe name or \
+                 provider resolves to it and no bbappend applies; it is evaluated as \
+                 `bitbake -b` would parse it",
+                format_args!("{}:{}", recipe.layer, recipe.path.display())
+            ));
+        }
     }
     r.visit(&abs, FileKind::Recipe, Vec::new(), false)?;
 

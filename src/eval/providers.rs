@@ -686,7 +686,8 @@ fn file_label(f: &FileRow) -> String {
     format!("{}:{}", f.layer, f.path.display())
 }
 
-/// The recipe files that use `file`: the file itself for a `.bb`, the recipes a bbappend
+/// The recipe files that use `file` (collected ones only, see `query::not_collected`): the
+/// file itself for a `.bb`, the recipes a bbappend
 /// applies to, and for an include or class every recipe that pulls it in (through other
 /// includes, classes and bbappends), following the index edges.
 pub fn recipes_using(index: &Index, file: &FileRow) -> Result<Vec<RecipeRow>> {
@@ -700,7 +701,9 @@ pub fn recipes_using(index: &Index, file: &FileRow) -> Result<Vec<RecipeRow>> {
         }
         match f.kind {
             FileKind::Recipe => {
+                // A `.bb` no BBFILES glob matches is not a recipe to BitBake.
                 if let (Some(pn), Some(pv)) = (f.pn.clone(), f.pv.clone())
+                    && query::not_collected(index, f.id)?.is_none()
                     && seen.insert(f.id)
                 {
                     out.push(RecipeRow { file: f, pn, pv });

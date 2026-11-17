@@ -12,7 +12,7 @@ use rusqlite::{Connection, OpenFlags, TransactionBehavior};
 use crate::error::Result;
 
 /// Stored in `PRAGMA user_version`. Bump on every change to [`DDL`].
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// `PRAGMA busy_timeout`.
 pub const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -30,6 +30,11 @@ pub const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 /// - `meta(key, value)`: facts about the whole index. `release` is the codename of the
 ///   release the edges were resolved for ([`META_RELEASE`]); `Index::refresh` recomputes the
 ///   edges when it differs from the workspace's (schema version 2).
+/// - `files.not_collected` (schema version 3): for a `.bb` / `.bbappend` that BitBake does
+///   not collect, why ([`NOT_COLLECTED_BBFILES`]: no layer's `BBFILES` glob matches it);
+///   NULL for a collected one and for every other kind. Set with the edges. Such a file
+///   stays indexed (`item`, `search` show it) but is never a recipe for a name, a provider
+///   or an append. A `BBMASK` reason would be another value of the same column.
 pub const DDL: &str = r#"
 CREATE TABLE IF NOT EXISTS layers(
     id          INTEGER PRIMARY KEY,
@@ -52,6 +57,7 @@ CREATE TABLE IF NOT EXISTS files(
     sha256   TEXT,
     pn       TEXT,
     pv       TEXT,
+    not_collected TEXT,
     UNIQUE(layer_id, path)
 );
 CREATE INDEX IF NOT EXISTS files_pn ON files(pn);
@@ -143,6 +149,9 @@ CREATE TABLE IF NOT EXISTS meta(
     value TEXT
 );
 "#;
+
+/// `files.not_collected` of a `.bb` / `.bbappend` that no layer's `BBFILES` glob matches.
+pub const NOT_COLLECTED_BBFILES: &str = "bbfiles";
 
 /// The `meta` key holding the codename of the release the edges were resolved for.
 pub const META_RELEASE: &str = "release";

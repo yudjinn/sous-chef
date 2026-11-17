@@ -47,6 +47,9 @@
 //!   skipped and version constraints dropped.
 //! - `provides`: a recipe's `PN`, plus the words of unconditional `PROVIDES` assignments that
 //!   need no expansion, in any file kind except `.conf`.
+//! - `files.not_collected`: set with the edges (step 6) from the same `BBFILES` collection:
+//!   `bbfiles` for a `.bb` / `.bbappend` no glob matches, NULL otherwise. Only collected files
+//!   take part in `bbappend` edges.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -1104,7 +1107,9 @@ fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
     tx.execute("DELETE FROM edges", [])?;
     let ecx = edge_ctx(tx, ws)?;
     insert_ref_edges(tx, ws, &ecx, None)?;
-    insert_append_edges(tx, ws, &ecx)?;
+    let collected = collected_ids(ws, &ecx);
+    insert_append_edges(tx, &collected)?;
+    mark_collected(tx, &collected)?;
     tx.execute(
         "INSERT INTO meta(key, value) VALUES (?1, ?2) \
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -1250,21 +1255,38 @@ fn insert_ref_edges(
     Ok(())
 }
 
-/// Inserts every `bbappend` edge, in BBFILES collection order (the order BitBake applies
-/// appends in).
-fn insert_append_edges(tx: &Transaction<'_>, ws: &Workspace, ecx: &EdgeCtx) -> Result<()> {
-    let by_path = &ecx.by_path;
-    let mut ins = tx.prepare_cached(
-        "INSERT INTO edges(src_file, kind, target_text, target_file, line) VALUES (?1, ?2, ?3, ?4, ?5)",
-    )?;
-    let collected = resolve::recipe_files(ws);
-    let ids: Vec<(i64, PathBuf)> = collected
+/// The indexed files BitBake collects (`resolve::recipe_files`, the `BBFILES` globs), in
+/// collection order.
+fn collected_ids(ws: &Workspace, ecx: &EdgeCtx) -> Vec<(i64, PathBuf)> {
+    resolve::recipe_files(ws)
         .iter()
         .filter_map(|p| {
             let n = normalize(p);
-            by_path.get(&n).map(|id| (*id, n))
+            ecx.by_path.get(&n).map(|id| (*id, n))
         })
-        .collect();
+        .collect()
+}
+
+/// `files.not_collected`: `bbfiles` for every `.bb` / `.bbappend` not in `collected`, NULL
+/// for the others (see `schema.rs`).
+fn mark_collected(tx: &Transaction<'_>, collected: &[(i64, PathBuf)]) -> Result<()> {
+    tx.execute(
+        "UPDATE files SET not_collected = CASE WHEN kind IN ('bb', 'bbappend') THEN ?1 END",
+        [super::schema::NOT_COLLECTED_BBFILES],
+    )?;
+    let mut st = tx.prepare_cached("UPDATE files SET not_collected = NULL WHERE id = ?1")?;
+    for (id, _) in collected {
+        st.execute([id])?;
+    }
+    Ok(())
+}
+
+/// Inserts every `bbappend` edge, in BBFILES collection order (the order BitBake applies
+/// appends in). Only collected files take part.
+fn insert_append_edges(tx: &Transaction<'_>, ids: &[(i64, PathBuf)]) -> Result<()> {
+    let mut ins = tx.prepare_cached(
+        "INSERT INTO edges(src_file, kind, target_text, target_file, line) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
     let recipes: Vec<&(i64, PathBuf)> = ids
         .iter()
         .filter(|(_, p)| p.extension().is_some_and(|e| e == "bb"))
