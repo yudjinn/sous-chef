@@ -1,0 +1,7 @@
+# Findings of the `override` group over the fixture workspace (tests/fixtures/ws, every
+# layer: `--all`), as `severity<TAB>rule<TAB>pointer`, in report order.
+#
+# local.conf:13 `DISTRO_FEATURES +=` is parsed before testdistro.conf:5 `?=` (true finding).
+# The vendor append's `:boradx` is the deliberate typo of `boardx` (true finding).
+warning	override/plus-equals-on-default	build:conf/local.conf:13
+warning	override/dead	meta-vendor:recipes-core/hello/hello_%.bbappend:9

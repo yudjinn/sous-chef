@@ -1,8 +1,18 @@
-//! `override/append-no-space`: `:append` without a leading space or `:prepend` without a trailing space on a list variable.
+//! `override/append-no-space`: `:append` without a leading space, or `:prepend` without a
+//! trailing space, on a space-separated list variable.
 //!
-//! See docs/lint-rules.md. Stub (M0): T4.2 implements `check`.
+//! See docs/lint-rules.md. BitBake adds no space for `:append` / `:prepend`
+//! (bitbake-semantics.md, "Overrides"), so `DEPENDS:append = "zlib"` glues `zlib` to the
+//! last word. Only variables [`helpers::list_kind`] knows to be space lists are checked
+//! (never colon lists such as `FILESEXTRAPATHS`, scalars, flags or unknown variables), only
+//! assignments (function bodies are never checked), and not values that start with `${@`
+//! (python may supply the space). `+=` / `=+` on an `:append` / `:prepend` name add the
+//! space themselves and are skipped.
 
+use crate::lint::helpers::{self, ListKind};
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
+use crate::parse::StatementKind;
+use crate::types::{AssignOp, LineSpan};
 
 pub struct OverrideAppendNoSpace;
 
@@ -19,5 +29,76 @@ impl Rule for OverrideAppendNoSpace {
         Severity::Warning
     }
 
-    fn check(&self, _cx: &LintContext<'_>, _out: &mut Vec<Finding>) {}
+    fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
+        let Some(file) = cx.file else { return };
+        for s in &file.statements {
+            let StatementKind::Assign { var, op, value, .. } = &s.kind else {
+                continue;
+            };
+            if var.legacy_syntax
+                || matches!(op, AssignOp::Append | AssignOp::Prepend)
+                || helpers::list_kind(var) != ListKind::Space
+                || value.trim().is_empty()
+                || value.starts_with("${@")
+            {
+                continue;
+            }
+            // The keyword decides; `VAR:append:foo` and `VAR:foo:append` both append.
+            let Some(kw) = var
+                .overrides
+                .iter()
+                .find(|o| matches!(o.as_str(), "append" | "prepend" | "remove"))
+            else {
+                continue;
+            };
+            let name = full_name(&var.base, &var.overrides);
+            let msg = match kw.as_str() {
+                "append" if !value.starts_with(char::is_whitespace) => format!(
+                    "`{name}` value has no leading space, so it is glued to the last word of \
+                     {base}; write `{name} = \" {v}\"`",
+                    base = var.base,
+                    v = short(value, false)
+                ),
+                "prepend" if !value.ends_with(char::is_whitespace) => format!(
+                    "`{name}` value has no trailing space, so it is glued to the first word of \
+                     {base}; write `{name} = \"{v} \"`",
+                    base = var.base,
+                    v = short(value, true)
+                ),
+                _ => continue,
+            };
+            out.push(helpers::finding(
+                self,
+                cx,
+                LineSpan::line(s.span.start),
+                msg,
+            ));
+        }
+    }
+}
+
+/// The value for the message: whitespace runs collapsed, at most 40 characters. A longer
+/// value keeps its start (`keep_end` false: `:append`, where the start matters) or its end
+/// (`:prepend`), with `...` for the cut.
+fn short(value: &str, keep_end: bool) -> String {
+    let words: Vec<&str> = value.split_whitespace().collect();
+    let s = words.join(" ");
+    let n = s.chars().count();
+    if n <= 40 {
+        return s;
+    }
+    if keep_end {
+        "...".to_string() + &s.chars().skip(n - 37).collect::<String>()
+    } else {
+        s.chars().take(37).collect::<String>() + "..."
+    }
+}
+
+fn full_name(base: &str, overrides: &[String]) -> String {
+    let mut s = base.to_string();
+    for o in overrides {
+        s.push(':');
+        s.push_str(o);
+    }
+    s
 }

@@ -1,0 +1,13 @@
+# Package overrides with += are idiomatic; conditional changes use :append.
+FILES:${PN} += "${datadir}/x"
+FILES:${PN}-dev += "${includedir}/x"
+RDEPENDS:${PN}-ptest += "bash"
+RDEPENDS:libfoo += "bash"
+INSANE_SKIP:${PN} += "ldflags"
+INSANE_SKIP:libfoo-dev += "dev-so"
+SUMMARY:${PN}-doc += "(docs)"
+EXTRA_OECONF:append:qemux86 = " --enable-qemu"
+EXTRA_OECONF += "--x"
+EXTRA_OECONF:${MACHINE} += "--computed"
+MY_VAR:Upper += "not an override"
+DEPENDS:append += "zlib"

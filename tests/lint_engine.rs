@@ -1067,8 +1067,11 @@ fn cli_exit_codes_and_output() {
     let env = garbage_env(|_| {});
     let (code, out) = cli(&env, LintCliArgs::default());
     assert_eq!(code, 1, "{out}");
-    assert!(out.starts_with("1 finding in "), "{out}");
+    // The whole workspace includes build/conf/local.conf, whose line 13 is a fixture
+    // workspace hit of override/plus-equals-on-default (T4.2).
+    assert!(out.starts_with("2 findings in "), "{out}");
     assert!(out.contains("error\thygiene/parse-error\tmeta-mine:recipes-app/bad/bad_1.0.bb:2\t"));
+    assert!(out.contains("warning\toverride/plus-equals-on-default\tbuild:conf/local.conf:13\t"));
 
     let (code, _) = cli(
         &env,
