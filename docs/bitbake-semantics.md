@@ -534,6 +534,38 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
   *Verify* the exact format against real output before writing the parser.
 
+## Running BitBake (for T5.4)
+
+Checked 2026-11-17 against bitbake `master` (`lib/bb/main.py`, `lib/bb/cooker.py`,
+`lib/bblayers/query.py`) and OE-core `master` (`scripts/lib/devtool/standard.py`,
+`scripts/lib/devtool/build.py`); the devtool positionals were also checked on OE-core
+`kirkstone` (`standard.py`), where they are the same.
+
+- `bitbake` options: `-k` / `--continue` (`dest="halt"`, store_false: "Continue as much as
+  possible after an error"), `-f` / `--force` ("Force the specified targets/task to run
+  (invalidating any existing stamp file)"), `-c` / `--cmd` (the task, e.g. `compile`),
+  `-e` / `--environment` ("Show the global or per-recipe environment"). The cooker adds
+  `do_` to a task that lacks it (`buildTargets`: `if not task.startswith("do_"): task =
+  "do_%s" % task`), so `-c compile` and `-c do_compile` are the same; the tool passes the
+  short form.
+- `bitbake-layers` (`lib/bblayers/query.py`) registers `show-layers` (no arguments),
+  `show-overlayed` (options `-f`, `-s`, `--mc` only), `show-recipes` (`pnspec`,
+  `nargs='*'`, optional; options `-f -r -m -i -l -b --mc --show-variants`), `show-appends`
+  (`pnspec`, `nargs='*'`, optional; `--mc`) and `show-cross-depends`. The tool passes at most
+  one `pnspec`, and only to `show-recipes` and `show-appends`.
+- `devtool`: `modify <recipename> [srctree]` (`srctree` is `nargs='?'`; the tool never
+  passes it, so devtool uses its default under the workspace), `status` (no positionals),
+  `reset [recipename...]` (`nargs='*'`; with none it requires `-a`/`--all`, which the tool
+  does not offer, so the tool requires a target), `finish <recipename> <destination>`
+  (both required; destination is "Layer/path to put recipe into", which may be a layer
+  name from `bblayers.conf`; the tool accepts only the name of a writable workspace
+  layer), `build <recipename>` (`build.py`; required; options `-s`, `-c` not offered).
+- *Verify* (not checked): whether the BitBake server process started by a job leaves the
+  job's process group (it daemonises) and so survives a cancel, which terminates only the
+  group; and whether a second `bitbake` client (`-e`, `bitbake-layers`) waits for or
+  fails on the lock while a build runs. The tool avoids the second question by running
+  one job at a time.
+
 ## Releases
 
 Added by T1.6 (2026-11-17). Wrynose (6.0 LTS) is the primary target, Scarthgap (5.0 LTS) is

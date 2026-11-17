@@ -599,8 +599,10 @@ fn python_tb_block(p: &Patterns, lines: &[String], i: usize) -> (Option<Failure>
 pub struct LogMeta {
     /// `PN`.
     pub recipe: Option<String>,
-    /// The version directory under `WORKDIR` (`PV`, or `PV-PR` before scarthgap) or `PV`
-    /// from the recipe file name.
+    /// `PV`: from the version directory under `WORKDIR`, or from the recipe file name.
+    /// [`meta_from_path`] alone cannot tell the layouts apart and gives the directory name
+    /// as it is (`1.0-r0` on a release with `Feature::PrInWorkdir`);
+    /// [`meta_from_path_in`] uses the workspace release and gives `PV`.
     pub version: Option<String>,
     /// `PF` from a console prefix, when the recipe name is not known otherwise.
     pub pf: Option<String>,
@@ -625,9 +627,10 @@ impl LogMeta {
 }
 
 /// From a task log path `.../work/<arch>/<pn>/<version>/temp/log.do_<task>[.<pid>]`
-/// (`WORKDIR = ${BASE_WORKDIR}/${MULTIMACH_TARGET_SYS}/${PN}/${PV}` in OE-core scarthgap
-/// and later; `.../${PN}/${EXTENDPE}${PV}-${PR}` before). The task comes from the file
-/// name even when the directory layout differs.
+/// (`WORKDIR = ${BASE_WORKDIR}/${MULTIMACH_TARGET_SYS}/${PN}/${PV}` in OE-core from
+/// nanbield; `.../${PN}/${EXTENDPE}${PV}-${PR}` up to mickledore, `Feature::PrInWorkdir`).
+/// The version directory is returned as it is; [`meta_from_path_in`] splits it by release.
+/// The task comes from the file name even when the directory layout differs.
 pub fn meta_from_path(path: &Path) -> LogMeta {
     let mut meta = LogMeta::default();
     let name = path
@@ -651,6 +654,29 @@ pub fn meta_from_path(path: &Path) -> LogMeta {
         meta.version = Some(parts[n - 3].clone());
     }
     meta
+}
+
+/// [`meta_from_path`], with the version directory read for the workspace's release: on a
+/// release with `Feature::PrInWorkdir` it is `${EXTENDPE}${PV}-${PR}` (`EXTENDPE` is
+/// `${PE}_` when `PE` is set), so `PV` is what is left after removing the last `-<PR>`
+/// and a leading `<digits>_`. On later releases, and without a workspace, it is `PV`.
+pub fn meta_from_path_in(path: &Path, ws: Option<&Workspace>) -> LogMeta {
+    let mut meta = meta_from_path(path);
+    let pr_in_workdir =
+        ws.is_some_and(|ws| ws.release.release.has(crate::release::Feature::PrInWorkdir));
+    if pr_in_workdir && let Some(dir) = &meta.version {
+        meta.version = Some(pv_from_pr_workdir(dir).to_string());
+    }
+    meta
+}
+
+/// `PV` from `${EXTENDPE}${PV}-${PR}`. A name without `-` is returned whole.
+fn pv_from_pr_workdir(dir: &str) -> &str {
+    let without_pr = dir.rsplit_once('-').map_or(dir, |(pv, _)| pv);
+    match without_pr.split_once('_') {
+        Some((pe, pv)) if !pe.is_empty() && pe.bytes().all(|b| b.is_ascii_digit()) => pv,
+        _ => without_pr,
+    }
 }
 
 /// From log or console text: the knotty prefix (`PF`, task), `ERROR: Task (<file>:<task>)
@@ -918,7 +944,7 @@ pub struct Digest {
 pub fn digest(input: &DigestInput<'_>) -> Digest {
     let text_meta = meta_from_text(input.text);
     let meta = match input.log_path {
-        Some(p) => meta_from_path(p).or(text_meta),
+        Some(p) => meta_from_path_in(p, input.ws).or(text_meta),
         None => text_meta,
     };
     let failures = detect(input.text);

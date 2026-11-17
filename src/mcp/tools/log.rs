@@ -3,6 +3,9 @@
 //! Finds the log (through `bitbake-getvar` when a build environment is available, else by
 //! searching the build directory), stores it whole under a `log` handle and returns the
 //! digest from [`crate::bitbake::logs`]. Every file is read through `Workspace::confine`.
+//!
+//! `job=<id>` digests a finished `bitbake` job: the failing task's log named in the job's
+//! output, else the output itself (stored under the job's handle).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,10 +13,10 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::bitbake::BbEnv;
 use crate::bitbake::logs::{self, DigestInput};
+use crate::bitbake::{BbEnv, JobState};
 use crate::error::{Error, Result};
-use crate::handles::HandleKind;
+use crate::handles::{Handle, HandleKind};
 use crate::mcp::Ctx;
 use crate::render::{DEFAULT_BUDGET_TOKENS, Format};
 
@@ -35,38 +38,47 @@ pub struct Args {
 }
 
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
-    if let Some(job) = &args.job {
-        // The job table (T5.4) has no query API yet; when it does, read the job's output
-        // handle, locate its task log with `logs::failure_logfiles` and digest that.
-        return Err(Error::Invalid {
-            msg: format!(
-                "job {job:?}: looking up jobs is not available yet; pass recipe and task instead"
-            ),
-        });
-    }
     let task = args.task.as_deref().map(logs::normalize_task).transpose()?;
     if let Some(r) = &args.recipe {
         logs::check_name("recipe", r)?;
     }
-    let build_dir = ctx
-        .workspace
-        .build_dir
-        .clone()
-        .ok_or_else(|| Error::NotFound {
-            what: "a build directory (task logs live under <build>/tmp/work); set build_dir in \
-               sous-chef.toml or pass --build-dir"
-                .into(),
-        })?;
-
     let mut notes = Vec::new();
-    let path = locate(
-        ctx,
-        &build_dir,
-        args.recipe.as_deref(),
-        task.as_deref(),
-        &mut notes,
-    )
-    .await?;
+    let path = match &args.job {
+        Some(job) => {
+            match locate_job(
+                ctx,
+                job,
+                args.recipe.as_deref(),
+                task.as_deref(),
+                &mut notes,
+            )? {
+                JobLog::Task(p) => p,
+                JobLog::Console { text, handle } => {
+                    return render_digest(ctx, &args, &text, None, None, handle.as_ref(), notes)
+                        .await;
+                }
+            }
+        }
+        None => {
+            let build_dir = ctx
+                .workspace
+                .build_dir
+                .clone()
+                .ok_or_else(|| Error::NotFound {
+                    what: "a build directory (task logs live under <build>/tmp/work); set \
+                           build_dir in sous-chef.toml or pass --build-dir"
+                        .into(),
+                })?;
+            locate(
+                ctx,
+                &build_dir,
+                args.recipe.as_deref(),
+                task.as_deref(),
+                &mut notes,
+            )
+            .await?
+        }
+    };
 
     let resolved = ctx.workspace.confine(&path)?;
     let bytes = fs::read(&resolved)?;
@@ -77,8 +89,34 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
 
     let run_script =
         logs::shell_trace(&text).and_then(|t| read_run_file(ctx, &resolved, &t.run_file));
+    render_digest(
+        ctx,
+        &args,
+        &text,
+        Some(&resolved),
+        run_script.as_deref(),
+        Some(&handle),
+        notes,
+    )
+    .await
+}
 
-    let meta = logs::meta_from_path(&resolved).or(logs::meta_from_text(&text));
+/// Digests `text` (a task log at `log_path`, or a job's console output) with a pointer to
+/// the task definition, and renders it.
+async fn render_digest(
+    ctx: &Ctx,
+    args: &Args,
+    text: &str,
+    log_path: Option<&Path>,
+    run_script: Option<&str>,
+    handle: Option<&Handle>,
+    mut notes: Vec<String>,
+) -> Result<String> {
+    let text_meta = logs::meta_from_text(text);
+    let meta = match log_path {
+        Some(p) => logs::meta_from_path_in(p, Some(&ctx.workspace)).or(text_meta),
+        None => text_meta,
+    };
     let definition = match (&meta.recipe, &meta.task) {
         (Some(r), Some(t)) => {
             let mut index = ctx.index.lock().await;
@@ -92,11 +130,11 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     };
 
     let mut d = logs::digest(&DigestInput {
-        text: &text,
-        log_path: Some(&resolved),
-        run_script: run_script.as_deref(),
+        text,
+        log_path,
+        run_script,
         ws: Some(&ctx.workspace),
-        handle: Some(&handle),
+        handle,
         definition: definition.as_ref(),
     });
     d.notes = notes;
@@ -108,6 +146,82 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         n => n,
     };
     Ok(d.render(args.format.unwrap_or_default(), budget))
+}
+
+/// What `log job=...` digests.
+enum JobLog {
+    /// The failing task's log, named in the job's output.
+    Task(PathBuf),
+    /// The job's own output, when it names no readable task log.
+    Console {
+        text: String,
+        handle: Option<Handle>,
+    },
+}
+
+/// The log of a finished job: the first failed task's log (`ERROR: Task (...) failed`
+/// after `Logfile of failure stored in:`), then any other log the output names
+/// ([`logs::failure_logfiles`]), filtered by `recipe` and `task`; else the console output.
+fn locate_job(
+    ctx: &Ctx,
+    id: &str,
+    recipe: Option<&str>,
+    task: Option<&str>,
+    notes: &mut Vec<String>,
+) -> Result<JobLog> {
+    ctx.jobs.settle(&ctx.handles);
+    let job = ctx.jobs.get(id).ok_or_else(|| Error::NotFound {
+        what: format!("job {id:?}; `bitbake op=status` shows the last job"),
+    })?;
+    if job.state == JobState::Running {
+        return Err(Error::Invalid {
+            msg: format!(
+                "{} is still running; poll with bitbake op=status, then call log again",
+                job.id
+            ),
+        });
+    }
+    let bytes = match &job.handle {
+        Some(h) => ctx.handles.get(h)?,
+        None => fs::read(&job.output)?,
+    };
+    let out = String::from_utf8_lossy(&bytes).into_owned();
+    let mut candidates: Vec<PathBuf> = logs::failed_tasks(&out)
+        .into_iter()
+        .filter_map(|t| t.log)
+        .collect();
+    for p in logs::failure_logfiles(&out) {
+        if !candidates.contains(&p) {
+            candidates.push(p);
+        }
+    }
+    candidates.retain(|p| {
+        let meta = logs::meta_from_path_in(p, Some(&ctx.workspace));
+        task.is_none_or(|t| meta.task.as_deref() == Some(t))
+            && recipe.is_none_or(|r| meta.recipe.as_deref() == Some(r))
+    });
+    if let Some(p) = candidates
+        .iter()
+        .find(|p| ctx.workspace.confine(p).is_ok_and(|r| r.is_file()))
+    {
+        return Ok(JobLog::Task(p.clone()));
+    }
+    match candidates.first() {
+        Some(p) => notes.push(format!(
+            "note: the task log {} is not readable; digest of the {} output",
+            p.display(),
+            job.id
+        )),
+        None => notes.push(format!(
+            "note: {} ({}) names no task log; digest of its output",
+            job.id,
+            job.state.as_str()
+        )),
+    }
+    Ok(JobLog::Console {
+        text: out,
+        handle: job.handle,
+    })
 }
 
 /// Finds the log to digest. Order:

@@ -1,0 +1,8 @@
+# Fake init script for job tests (never a real BitBake). Sources the fake
+# oe-init-build-env next to it, then the per-test settings in $BUILDDIR/fakebb.env
+# (`export FAKEBB_...=...` lines), if that file exists. A test rewrites the file between
+# jobs to change how the next fake bitbake behaves without touching its own environment.
+source "$(dirname "${BASH_SOURCE[0]}")/oe-init-build-env" "$1" || return 1
+if [ -f "$BUILDDIR/fakebb.env" ]; then
+    . "$BUILDDIR/fakebb.env"
+fi
