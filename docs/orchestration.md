@@ -96,7 +96,7 @@ Every subagent prompt contains, in this order:
 | Wave | State | Notes |
 |---|---|---|
 | 0 | **done** (commit `2879e75` on `dev`, gate passes) | See "Wave 0 hand-off notes" below. |
-| 1 | **done** (all five streams merged on `dev`, gate passes, 170 tests) | Paused here at the user's request; wave 2 not launched. See "Wave 1 hand-off notes" below. |
+| 1 | **done** (all five streams merged, gate passes, 170 tests) | Integrated on branch `worktree-orchestrator`; `dev` must be fast-forwarded to it before wave 2 (`git merge --ff-only worktree-orchestrator`). Paused here at the user's request; wave 2 not launched. See "Wave 1 hand-off notes" below. |
 | 2 | not started | |
 | 3 | not started | |
 | 4 | not started | |
@@ -141,8 +141,12 @@ Open items, not verified by M0:
 
 ## Wave 1 hand-off notes (for whoever launches wave 2)
 
-State: T1.1, T1.2, T1.3, T1.5, T2.1, T2.4, T2.5 and T5.1 are merged on `dev` (branches
-`w1-a` .. `w1-e`, one `--no-ff` merge each, gate after each). The gate passes with 170 tests.
+State: T1.1, T1.2, T1.3, T1.5, T2.1, T2.4, T2.5 and T5.1 are merged (branches `w1-a` ..
+`w1-e`, one `--no-ff` merge each, gate after each) on the integration branch
+`worktree-orchestrator`, which is `dev` plus wave 1. `dev` itself was not moved: it is
+checked out in the user's main checkout, which the orchestrator session could not touch.
+Fast-forward it first (`git merge --ff-only worktree-orchestrator` in the main checkout) and
+cut wave 2 branches from the result. The gate passes with 170 tests.
 `sous-chef serve` has now run end to end on the fixture workspace: `status` reports
 `state: ready` and three layers. `Index::refresh` is still the stub, so `status` shows
 `refresh failed: not implemented` and `sous-chef index` fails until T2.2.
@@ -159,8 +163,9 @@ Orchestrator changes at integration:
   source.
 
 How the agents were run: each one was launched with worktree isolation and renamed its
-branch to `w<wave>-<stream>`. The orchestrator integrated on its own worktree branch and
-fast-forwarded `dev` after the wave's gate passed.
+branch to `w<wave>-<stream>`. The orchestrator integrated on its own worktree branch
+(`.claude/worktrees/orchestrator`). The agent worktrees are under `.claude/worktrees/`,
+which `.gitignore` does not list, so they show as untracked in the main checkout.
 
 Things wave 2 agents need to know:
 
