@@ -121,6 +121,15 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
             }
         }
     };
+    // The evaluated views carry it from the replay already.
+    if matches!(args.show, Show::Summary | Show::Tree | Show::Outline)
+        && let Some(why) = query::not_collected(&index, recipe.file.id)?
+    {
+        table.note(&format!(
+            "note: {} is {why}: BitBake does not collect it, so no recipe name or provider resolves to it and no bbappend applies",
+            file_label(&recipe.file)
+        ));
+    }
     if let Some(line) = render::freshness_line(&report) {
         table.note(&line);
     }
@@ -262,7 +271,13 @@ fn resolve_pointer(index: &Index, name: &str, version: Option<&str>) -> Result<R
             }
             match targets.len() {
                 0 => Err(Error::NotFound {
-                    what: format!("a recipe that {} applies to", file_label(&file)),
+                    what: match query::not_collected(index, file.id)? {
+                        Some(why) => format!(
+                            "a recipe that {} applies to: it is {why}, so BitBake does not apply it",
+                            file_label(&file)
+                        ),
+                        None => format!("a recipe that {} applies to", file_label(&file)),
+                    },
                 }),
                 1 => Ok(targets.remove(0)),
                 _ => Err(Error::Ambiguous {
@@ -719,6 +734,9 @@ mod views {
             "note: evaluated for MACHINE={machine} DISTRO={distro} (static replay of the configuration, classes, recipe and bbappends; python not run)"
         ));
         let notes = ds.replay();
+        for n in &notes.target_notes {
+            t.note(n);
+        }
         let mut other = 0usize;
         for a in &notes.anonymous {
             let named: Vec<&str> = a

@@ -11,7 +11,8 @@
 //! `scripts/differential.sh`; its raw dumps are in `$SOUS_CHEF_LIVE/runs/differential/env/`.
 //! This test runs the script itself for any dump that is missing. The static side is
 //! `eval::evaluate` on the workspace discovered from the same build directory, with the
-//! index in `$SOUS_CHEF_LIVE/runs/differential/cache` (never in the user's cache).
+//! index in `$SOUS_CHEF_LIVE/runs/differential/cache` (never in the user's cache; `$SOUS_CHEF_DIFF_DIR`
+//! moves the cache and the report elsewhere).
 //!
 //! Each compared value is put in exactly one class (docs/differential.md): equal, equal
 //! after normalising whitespace, flagged (the static value carries `unevaluated_python` or
@@ -20,10 +21,13 @@
 //! `tests/fixtures/outputs/live/differential/` (with the live prefix replaced by
 //! `{{LIVE}}`).
 //!
-//! The dump reader here is deliberately minimal (final `VAR="value"` / `export VAR="value"`
-//! lines and the `# $VAR` history comments; functions skipped). It should be replaced by
-//! the `bitbake -e` parser of `src/bitbake/envdump.rs` (T5.5) and its compare helper once
-//! that is merged.
+//! The dumps are read with `src/bitbake/envdump.rs` (`parse_str`), and every value is first
+//! put through its `compare`; the classes below refine its `Agreement` (an `Equal` with no
+//! value on either side is `unset`, `NotPrinted` is `not-printed`, whitespace is checked
+//! before the flags, and a difference is traced to its cause).
+//!
+//! With `SOUS_CHEF_DIFF_NO_BITBAKE` set, a missing dump fails the test instead of running
+//! the script (for runs that must not start BitBake).
 //!
 //! What fails the test: only what the milestone says it must fail on, a **bug** on a tracked
 //! variable (`tracked`) in the sample evaluated with the build's machine and distro. The
@@ -37,6 +41,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use sous_chef::bitbake::envdump::{self, Agreement, EnvDump};
 use sous_chef::config::Config;
 use sous_chef::eval::providers::Providers;
 use sous_chef::eval::{self, DataStore, OpStatus, Target, Value};
@@ -126,173 +131,6 @@ fn tracked(name: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------------------
-// Minimal `bitbake -e` reader (to be replaced by src/bitbake/envdump.rs)
-// ---------------------------------------------------------------------------------------
-
-/// One operation from the `# $VAR [n operations]` history comment.
-#[derive(Debug, Clone)]
-struct DumpOp {
-    /// `set`, `:append[class-target]`, `append`, `set?`, ...
-    op: String,
-    /// As printed: an absolute path for a statement, a basename for python.
-    file: String,
-    line: Option<u32>,
-    /// `[func]`: the python function that made the change (`__anon_...`, a handler, or a
-    /// BitBake internal such as `handleVirtRecipeProviders`).
-    func: Option<String>,
-    /// The value line starts with `[flag]`: a flag operation, not the variable's value.
-    flag: bool,
-}
-
-#[derive(Debug, Clone, Default)]
-struct DumpVar {
-    value: String,
-    ops: Vec<DumpOp>,
-    pre: Option<String>,
-}
-
-#[derive(Debug, Default)]
-struct Dump {
-    vars: HashMap<String, DumpVar>,
-}
-
-fn unescape(v: &str) -> String {
-    let mut out = String::with_capacity(v.len());
-    let mut it = v.chars().peekable();
-    while let Some(c) = it.next() {
-        if c == '\\' {
-            match it.peek() {
-                Some('"') | Some('$') => {
-                    out.push(it.next().unwrap());
-                    continue;
-                }
-                Some('\n') => {
-                    // ` \` + newline is how emit_var prints a newline in the value.
-                    it.next();
-                    if out.ends_with(' ') {
-                        out.pop();
-                    }
-                    out.push('\n');
-                    continue;
-                }
-                _ => {}
-            }
-        }
-        out.push(c);
-    }
-    out
-}
-
-/// True when `s` (the text after the opening quote) ends with an unescaped `"`.
-fn closed(s: &str) -> bool {
-    if !s.ends_with('"') {
-        return false;
-    }
-    let body = &s[..s.len() - 1];
-    let bs = body.chars().rev().take_while(|&c| c == '\\').count();
-    bs % 2 == 0
-}
-
-fn parse_history_op(line: &str) -> Option<DumpOp> {
-    // "#   <op> <file>:<line>[ [func]]" (the value follows on the next line, indented more).
-    let rest = line.strip_prefix("#   ")?;
-    if rest.starts_with(' ') {
-        return None;
-    }
-    let (op, rest) = rest.split_once(' ')?;
-    let (loc, func) = match rest.rsplit_once(" [") {
-        Some((l, f)) if f.ends_with(']') => (l, Some(f.trim_end_matches(']').to_string())),
-        _ => (rest, None),
-    };
-    let (file, line) = match loc.rsplit_once(':') {
-        Some((f, l)) => (f.to_string(), l.parse().ok()),
-        None => (loc.to_string(), None),
-    };
-    Some(DumpOp {
-        op: op.to_string(),
-        file,
-        line,
-        func,
-        flag: false,
-    })
-}
-
-fn parse_dump(text: &str) -> Dump {
-    let mut dump = Dump::default();
-    let lines: Vec<&str> = text.lines().collect();
-    let mut i = 0;
-    let mut hist: Vec<DumpOp> = Vec::new();
-    let mut pre: Option<String> = None;
-    let mut in_pre = false;
-    while i < lines.len() {
-        let l = lines[i];
-        i += 1;
-        if let Some(c) = l.strip_prefix('#') {
-            if c.starts_with(" $") {
-                hist.clear();
-                pre = None;
-                in_pre = false;
-            } else if c == " pre-expansion value:" {
-                in_pre = true;
-            } else if in_pre {
-                let v = c.trim_start();
-                pre = Some(
-                    v.strip_prefix('"')
-                        .and_then(|v| v.strip_suffix('"'))
-                        .unwrap_or(v)
-                        .to_string(),
-                );
-                in_pre = false;
-            } else if let Some(op) = parse_history_op(l) {
-                hist.push(op);
-            } else if let Some(v) = l.strip_prefix("#     ")
-                && v.starts_with('[')
-                // `??=` is stored as the `_defaultval` flag but is an operation on the value.
-                && !v.starts_with("[_defaultval]")
-                && let Some(last) = hist.last_mut()
-            {
-                last.flag = true;
-            }
-            continue;
-        }
-        // Functions: `name() {` / `python name () {` ... `}`.
-        if l.ends_with('{') && l.contains("()") {
-            while i < lines.len() && lines[i] != "}" {
-                i += 1;
-            }
-            i += 1;
-            hist.clear();
-            pre = None;
-            continue;
-        }
-        let body = l.strip_prefix("export ").unwrap_or(l);
-        let Some(eq) = body.find("=\"") else {
-            continue;
-        };
-        let name = &body[..eq];
-        if name.is_empty() || name.contains(' ') {
-            continue;
-        }
-        let mut val = body[eq + 2..].to_string();
-        while !closed(&val) && i < lines.len() {
-            val.push('\n');
-            val.push_str(lines[i]);
-            i += 1;
-        }
-        val.pop(); // closing quote
-        dump.vars.insert(
-            name.to_string(),
-            DumpVar {
-                value: unescape(&val),
-                ops: std::mem::take(&mut hist),
-                pre: pre.take(),
-            },
-        );
-    }
-    dump
-}
-
-// ---------------------------------------------------------------------------------------
 // Classification
 // ---------------------------------------------------------------------------------------
 
@@ -300,6 +138,9 @@ fn parse_dump(text: &str) -> Dump {
 enum Class {
     /// Unset on both sides: not counted as a compared value.
     Unset,
+    /// BitBake printed no value to compare with (`unset NAME` / unexported, or its
+    /// expansion failed: `envdump::Agreement::NotPrinted`): not counted either.
+    NotPrinted,
     Equal,
     EqualWs,
     /// `true` when the literal text around the unevaluated parts matches BitBake's value.
@@ -312,6 +153,7 @@ impl Class {
     fn label(&self) -> String {
         match self {
             Class::Unset => "unset".into(),
+            Class::NotPrinted => "not-printed".into(),
             Class::Equal => "equal".into(),
             Class::EqualWs => "equal-ws".into(),
             Class::Flagged(true) => "flagged".into(),
@@ -328,12 +170,13 @@ const GAP_PYTHON_RUN: &str = "python-at-parse"; // anonymous python, handlers, d
 const GAP_LAYERDIR: &str = "layerdir-canonical"; // LAYERDIR is the canonical root, not BBLAYERS text
 const GAP_BBCLASSEXTEND: &str = "bbclassextend"; // variants not resolved
 
-/// Not documented anywhere in docs/: a bug when it changes an unflagged value.
-const VIRT_HINT: &str =
-    "BB_RECIPE_VIRTUAL_PROVIDERS rewrite of DEPENDS (ast.handleVirtRecipeProviders) not modelled";
+/// The static `DEPENDS` still holds a `BB_RECIPE_VIRTUAL_PROVIDERS` word, which BitBake
+/// replaces (`ast.handleVirtRecipeProviders`, reproduced by the replay since differential
+/// bug 3 was fixed): a bug when it changes an unflagged value.
+const VIRT_HINT: &str = "a BB_RECIPE_VIRTUAL_PROVIDERS word is left in the static DEPENDS (ast.handleVirtRecipeProviders)";
 
 struct Ctx<'a> {
-    bb: &'a Dump,
+    bb: &'a EnvDump,
     ds: &'a DataStore,
     /// symlinked layer path prefix -> canonical, for `GAP_LAYERDIR`.
     path_map: &'a [(String, String)],
@@ -404,27 +247,13 @@ fn literal_parts_match(st: &str, bb: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Variable names referenced as `${NAME}` in `text` (python references skipped).
+/// Variable names referenced as `${NAME}` in `text` (`envdump::references`: python
+/// references skipped), nested references left out.
 fn refs(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let b = text.as_bytes();
-    let mut i = 0;
-    while i + 1 < b.len() {
-        if b[i] == b'$'
-            && b[i + 1] == b'{'
-            && b.get(i + 2) != Some(&b'@')
-            && let Some(end) = text[i + 2..].find('}')
-        {
-            let n = &text[i + 2..i + 2 + end];
-            if !n.is_empty() && !n.contains('{') && !n.contains('$') {
-                out.push(n.to_string());
-            }
-            i += 2 + end;
-            continue;
-        }
-        i += 1;
-    }
-    out
+    envdump::references(text)
+        .into_iter()
+        .filter(|n| !n.contains('{') && !n.contains('$'))
+        .collect()
 }
 
 impl Ctx<'_> {
@@ -451,24 +280,63 @@ impl Ctx<'_> {
         c
     }
 
-    fn classify_inner(&mut self, bb_name: &str, st_name: &str) -> (Class, String) {
-        let bv = self.bb.vars.get(bb_name);
-        let sv = self.ds.value(st_name);
-        let (b, s) = match (bv, &sv) {
-            (None, None) => return (Class::Unset, String::new()),
-            (Some(b), Some(s)) => (b.value.as_str(), s.text.as_str()),
-            (Some(b), None) => (b.value.as_str(), ""),
-            (None, Some(s)) => ("", s.text.as_str()),
+    /// `envdump::compare` of the static `st_name` with BitBake's `bb_name`. The names
+    /// differ only in `${PN}`, which each side expands with its own `PN` (they differ when
+    /// the static side picked another recipe): the dump's entry is then looked at under the
+    /// static name.
+    fn comparison(&self, bb_name: &str, st_name: &str) -> envdump::Comparison {
+        let sn = if st_name.contains("${") {
+            self.ds.expand(st_name).text
+        } else {
+            st_name.to_string()
         };
-        if bv.is_some() && sv.is_some() && b == s {
-            return (Class::Equal, String::new());
+        let mut c = if sn == bb_name {
+            envdump::compare(self.ds, self.bb, &[bb_name])
+        } else {
+            let mut one = EnvDump::default();
+            if let Some(v) = self.bb.variable(bb_name) {
+                let mut v = v.clone();
+                v.name = sn.clone();
+                one.variables.insert(sn.clone(), v);
+            }
+            envdump::compare(self.ds, &one, &[sn.as_str()])
+        };
+        c.remove(0)
+    }
+
+    fn classify_inner(&mut self, bb_name: &str, st_name: &str) -> (Class, String) {
+        let bv = self.bb.variable(bb_name);
+        let sv = self.ds.value(st_name);
+        let cmp = self.comparison(bb_name, st_name);
+        let (b, s) = (
+            cmp.bitbake_value.as_deref().unwrap_or(""),
+            cmp.static_value.as_deref().unwrap_or(""),
+        );
+        // `compare`'s order puts python before whitespace; this classification keeps its
+        // own (equal, equal-ws, flagged, ...), and an unset value equals "".
+        match cmp.agreement {
+            Agreement::Equal if cmp.bitbake_value.is_none() => {
+                return (Class::Unset, String::new());
+            }
+            Agreement::Equal => return (Class::Equal, String::new()),
+            Agreement::NotPrinted => {
+                let why = bv.and_then(|v| v.error.clone()).unwrap_or_else(|| {
+                    "unexported (unset NAME): bitbake -e prints no value".into()
+                });
+                return (Class::NotPrinted, why);
+            }
+            _ => {}
         }
         if norm_ws(b) == norm_ws(s) {
             return (Class::EqualWs, String::new());
         }
         if let Some(sv) = &sv
-            && flagged(sv)
+            && matches!(
+                cmp.agreement,
+                Agreement::StaticPython | Agreement::StaticUnresolved
+            )
         {
+            debug_assert!(flagged(sv));
             let s = sv.text.as_str();
             let why = if sv.unevaluated_python {
                 "unevaluated_python".to_string()
@@ -498,7 +366,7 @@ impl Ctx<'_> {
         }
         // Follow references: the first referenced variable that differs decides.
         let mut names: Vec<String> = Vec::new();
-        if let Some(pre) = bv.and_then(|v| v.pre.as_deref()) {
+        if let Some(pre) = bv.and_then(|v| v.pre_expansion.as_deref()) {
             names.extend(refs(pre));
         }
         if let Some(raw) = self.ds.raw(st_name) {
@@ -532,7 +400,7 @@ impl Ctx<'_> {
     /// Operations BitBake made from python at parse time (anonymous python, handlers,
     /// `d.setVar` in classes and BitBake internals), as `op file:line [func]`.
     fn python_ops(&self, bb_name: &str) -> Vec<String> {
-        let Some(b) = self.bb.vars.get(bb_name) else {
+        let Some(b) = self.bb.variable(bb_name) else {
             return Vec::new();
         };
         b.ops
@@ -545,7 +413,7 @@ impl Ctx<'_> {
                         Some(rest) => format!("__anon_{}", rest.split("__").next().unwrap_or("")),
                         None => f.clone(),
                     };
-                    format!("{} {}:{} [{f}]", o.op, o.file, o.line.unwrap_or(0))
+                    format!("{} {}:{} [{f}]", o.raw, o.file, o.line.unwrap_or(0))
                 })
             })
             .filter(|s| !s.contains("[expandKeys]") && !s.contains("[handleVirtRecipeProviders]"))
@@ -561,9 +429,8 @@ impl Ctx<'_> {
         }
         let virt: Vec<&str> = self
             .bb
-            .vars
-            .get("BB_RECIPE_VIRTUAL_PROVIDERS")
-            .map(|v| v.value.split_whitespace().collect())
+            .value("BB_RECIPE_VIRTUAL_PROVIDERS")
+            .map(|v| v.split_whitespace().collect())
             .unwrap_or_default();
         static_text.split_whitespace().any(|w| virt.contains(&w))
     }
@@ -573,10 +440,9 @@ impl Ctx<'_> {
     fn divergence(&self, bb_name: &str, st_name: &str) -> String {
         let b = self
             .bb
-            .vars
-            .get(bb_name)
-            .and_then(|v| v.ops.last())
-            .map(|o| format!("{} {}:{}", o.op, self.canon(&o.file), o.line.unwrap_or(0)))
+            .variable(bb_name)
+            .and_then(|v| v.value_ops().last())
+            .map(|o| format!("{} {}:{}", o.raw, self.canon(&o.file), o.line.unwrap_or(0)))
             .unwrap_or_else(|| "unset".into());
         let base = st_name.split(':').next().unwrap_or(st_name);
         let s = self
@@ -609,13 +475,14 @@ struct Row {
 /// BitBake's python operations (`[func]`) and flag operations are left out; the static
 /// side's operations of every status are included (BitBake lists overridden ones too).
 fn history_files(
-    bb: &Dump,
+    bb: &EnvDump,
     ds: &DataStore,
     ws: &Workspace,
     pmap: &[(String, String)],
     name: &str,
 ) -> Option<(Vec<String>, Vec<String>)> {
-    let v = bb.vars.get(name)?;
+    // Only names BitBake printed a value for, as the reader before envdump did.
+    let v = bb.variable(name).filter(|v| v.value.is_some())?;
     let canon = |s: &str| {
         let mut s = s.to_string();
         for (a, b) in pmap {
@@ -626,7 +493,7 @@ fn history_files(
     let b: std::collections::BTreeSet<String> = v
         .ops
         .iter()
-        .filter(|o| o.func.is_none() && !o.flag && o.file.starts_with('/'))
+        .filter(|o| o.func.is_none() && o.flag.is_none() && o.file.starts_with('/'))
         .map(|o| canon(&o.file))
         .collect();
     let s: std::collections::BTreeSet<String> = ds
@@ -670,6 +537,14 @@ fn build_dir(live: &Path) -> PathBuf {
         .unwrap_or_else(|| live.join("bitbake-builds/kiss-wrynose-dogbonedark/build"))
 }
 
+/// Where the index cache and `report.txt` go: `$SOUS_CHEF_DIFF_DIR`, else
+/// `$SOUS_CHEF_LIVE/runs/differential` (the dumps are always read from there).
+fn work_dir(live: &Path) -> PathBuf {
+    std::env::var_os("SOUS_CHEF_DIFF_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| live.join("runs/differential"))
+}
+
 fn dump_path(live: &Path, recipe: &str) -> PathBuf {
     live.join("runs/differential/env")
         .join(format!("{}.env", recipe.replace('/', "_")))
@@ -689,6 +564,10 @@ fn ensure_dumps(live: &Path) {
     if missing.is_empty() && !ws_missing {
         return;
     }
+    assert!(
+        std::env::var_os("SOUS_CHEF_DIFF_NO_BITBAKE").is_none(),
+        "dumps missing ({missing:?}, workspace listings missing: {ws_missing}) and SOUS_CHEF_DIFF_NO_BITBAKE is set"
+    );
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/differential.sh");
     let mut cmd = Command::new(script);
     cmd.env("SOUS_CHEF_LIVE", live);
@@ -708,7 +587,7 @@ fn workspace(live: &Path) -> (Workspace, Index) {
     };
     cfg.bitbake.enabled = false;
     let ws = Workspace::discover(&cfg).expect("discovering the live workspace");
-    let mut idx = Index::open_in(&live.join("runs/differential/cache"), &ws).unwrap();
+    let mut idx = Index::open_in(&work_dir(live).join("cache"), &ws).unwrap();
     idx.refresh(&ws).unwrap();
     (ws, idx)
 }
@@ -792,10 +671,7 @@ fn own_vars(ds: &DataStore) -> Vec<String> {
             }
             // Functions are stored as pointers on the static side; they are not compared.
             let expanded = ds.expand(&key).text;
-            if ds.is_function(&key)
-                || ds.is_function(&expanded)
-                || ds.value(&key).is_some_and(|v| is_pointer_list(&v.text))
-            {
+            if ds.is_function(&key) || ds.is_function(&expanded) {
                 continue;
             }
             if seen.insert(key.clone()) {
@@ -806,18 +682,8 @@ fn own_vars(ds: &DataStore) -> Vec<String> {
     out
 }
 
-/// A function's static value: one `layer:path:A-B` pointer per line.
-fn is_pointer_list(text: &str) -> bool {
-    let re = regex::Regex::new(r"^[\w.+-]+:[^\s:]+:\d+(-\d+)?( -> \S+)?$").unwrap();
-    !text.trim().is_empty()
-        && text
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .all(|l| re.is_match(l.trim()))
-}
-
-fn bb_key(name: &str, bb: &Dump) -> String {
-    let pn = bb.vars.get("PN").map(|v| v.value.as_str()).unwrap_or("");
+fn bb_key(name: &str, bb: &EnvDump) -> String {
+    let pn = bb.value("PN").unwrap_or("");
     name.replace("${PN}", pn)
 }
 
@@ -844,9 +710,9 @@ fn run_recipe(
         format!("{recipe}@default")
     };
     let text = fs::read_to_string(dump_path(live, recipe)).unwrap_or_default();
-    let bb = parse_dump(&text);
+    let bb = envdump::parse_str(&text);
     let mut note = String::new();
-    if bb.vars.is_empty() {
+    if !bb.stats.found_header || bb.variables.is_empty() {
         let err = fs::read_to_string(format!("{}.err", dump_path(live, recipe).display()))
             .unwrap_or_default();
         return RecipeResult {
@@ -926,7 +792,7 @@ fn run_recipe(
             var: key.clone(),
             class,
             why,
-            bb: bb.vars.get(&key).map(|v| v.value.clone()),
+            bb: bb.value(&key).map(str::to_string),
             st: ds.value(&name),
             files,
         });
@@ -1182,13 +1048,14 @@ fn differential_against_bitbake() {
     );
     let _ = writeln!(
         report,
-        "recipe\tcompared\tequal\tequal-ws\tflagged\tgap\tbug\tunset-both\tnote"
+        "recipe\tcompared\tequal\tequal-ws\tflagged\tgap\tbug\tunset-both\tnot-printed\tnote"
     );
     for res in &results {
         let mut c: BTreeMap<&str, usize> = BTreeMap::new();
         for row in &res.rows {
             let k = match row.class {
                 Class::Unset => "unset",
+                Class::NotPrinted => "not-printed",
                 Class::Equal => "equal",
                 Class::EqualWs => "equal-ws",
                 Class::Flagged(_) => "flagged",
@@ -1206,7 +1073,10 @@ fn differential_against_bitbake() {
                 }
             }
             if explicit_run(&res.recipe)
-                && !matches!(row.class, Class::Equal | Class::EqualWs | Class::Unset)
+                && !matches!(
+                    row.class,
+                    Class::Equal | Class::EqualWs | Class::Unset | Class::NotPrinted
+                )
             {
                 *by_var
                     .entry(row.var.split(':').next().unwrap().to_string())
@@ -1219,26 +1089,29 @@ fn differential_against_bitbake() {
         let g = |k| c.get(k).copied().unwrap_or(0);
         let _ = writeln!(
             report,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             res.recipe,
-            res.rows.len() - g("unset"),
+            res.rows.len() - g("unset") - g("not-printed"),
             g("equal"),
             g("equal-ws"),
             g("flagged"),
             g("gap"),
             g("bug"),
             g("unset"),
+            g("not-printed"),
             res.note
         );
     }
     let total: usize = totals
         .iter()
-        .filter(|(k, _)| k.as_str() != "unset" && !k.starts_with('('))
+        .filter(|(k, _)| {
+            k.as_str() != "unset" && k.as_str() != "not-printed" && !k.starts_with('(')
+        })
         .map(|(_, v)| v)
         .sum();
     let _ = writeln!(
         report,
-        "\n## Totals ({total} values compared, explicit machine and distro; `unset` = unset on both sides, not counted)"
+        "\n## Totals ({total} values compared, explicit machine and distro; `unset` = unset on both sides, `not-printed` = BitBake printed no value; neither counted)"
     );
     for (k, v) in &totals {
         let _ = writeln!(report, "{k}\t{v}");
@@ -1365,7 +1238,8 @@ fn differential_against_bitbake() {
         cfg.value("DISTRO")
     );
 
-    let out_dir = live.join("runs/differential");
+    let out_dir = work_dir(&live);
+    fs::create_dir_all(&out_dir).unwrap();
     fs::write(out_dir.join("report.txt"), &report).unwrap();
     // Recorded summary in the repository: the per-recipe table and totals only.
     let rec_dir =
@@ -1420,15 +1294,19 @@ fn differential_against_bitbake() {
     );
 }
 
+/// What the classification reads from a dump, through `envdump` (the reader this test used
+/// before T5.5 is gone; this is the sample it was checked on).
 #[test]
 fn dump_reader_basics() {
-    let text = "#\n# $A [1 operations]\n#   set /x/a.conf:3\n#     \"1\"\n# pre-expansion value:\n#   \"${B} 1\"\nA=\"2 1\"\nexport C=\"q \\\"x\\\" \\$y\"\ndo_x() {\n\techo\n}\nD=\"one \\\ntwo\"\n";
-    let d = parse_dump(text);
-    assert_eq!(d.vars["A"].value, "2 1");
-    assert_eq!(d.vars["A"].pre.as_deref(), Some("${B} 1"));
-    assert_eq!(d.vars["A"].ops[0].file, "/x/a.conf");
-    assert_eq!(d.vars["C"].value, "q \"x\" $y");
-    assert_eq!(d.vars["D"].value, "one\ntwo");
-    assert!(!d.vars.contains_key("do_x"));
-    assert_eq!(refs("${A} ${@x} ${B_C}"), vec!["A", "B_C"]);
+    let text = "#\n# $A [1 operations]\n#   set /x/a.conf:3\n#     \"1\"\n# pre-expansion value:\n#   \"${B} 1\"\nA=\"2 1\"\n#\n# $C\nexport C=\"q \\\"x\\\" \\$y\"\n#\n# $D\nD=\"one \\\ntwo\"\n\n# line: 4, file: /x/base.bbclass\ndo_x() {\n\techo\n}\n";
+    let d = envdump::parse_str(text);
+    assert_eq!(d.value("A"), Some("2 1"));
+    let a = d.variable("A").unwrap();
+    assert_eq!(a.pre_expansion.as_deref(), Some("${B} 1"));
+    assert_eq!(a.ops[0].file, "/x/a.conf");
+    assert_eq!(a.ops[0].raw, "set");
+    assert_eq!(d.value("C"), Some("q \"x\" $y"));
+    assert_eq!(d.value("D"), Some("one\ntwo"), "{:?}", d.variable("D"));
+    assert!(d.variable("do_x").is_none() && d.function("do_x").is_some());
+    assert_eq!(refs("${A} ${@x} ${B_C} ${X${Y}}"), vec!["A", "B_C"]);
 }

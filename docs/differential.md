@@ -8,7 +8,8 @@ Measured on 2026-11-17 on the live environment ([live-environment.md](live-envir
 yocto-kiss at `cc621c5d`, BitBake 2.18.0, OE-core / meta-arm / meta-yocto at the pins listed
 there, MACHINE `dogbonedark`, DISTRO `kiss`, in the **bitbake-setup build**
 (`bitbake-builds/kiss-wrynose-dogbonedark/build`; 7 layers: core, yoctobsp, yocto,
-arm-toolchain, meta-arm, meta-kiss, meta-kiss-ti). sous-chef at `67909a3`.
+arm-toolchain, meta-arm, meta-kiss, meta-kiss-ti). sous-chef at `67909a3` (the first
+measurement; the re-run after the fixes is under "After the w5 fixes").
 
 ## How to run it
 
@@ -36,10 +37,56 @@ cargo test --release --test differential -- --ignored --nocapture
   variables by number of differences), `classes.tsv` (every compared value with its class and
   cause), `workspace.txt` (history files, layers, bbappend order, recipe files, configuration
   without a machine).
-- The dump reader in the test is minimal (final `VAR="value"` and `export VAR="value"` lines,
-  ` \`-continued values, the `# $VAR` history comments; functions skipped). Replace it with
-  the `bitbake -e` parser of `src/bitbake/envdump.rs` (T5.5) and its compare helper once that
-  is merged.
+- The dumps are read with `src/bitbake/envdump.rs` (`parse_str`, T5.5) and each value goes
+  through its `compare` first; the test's classes refine the `Agreement` (an `Equal` with no
+  value on either side is `unset`; `NotPrinted`, a variable BitBake unexported or failed to
+  expand, is `not-printed` and not counted; whitespace is checked before the flags). The
+  minimal reader the first measurement used is gone (w5 fix, item 7); on the same dumps the
+  switch changed no class (see "After the w5 fixes").
+- `SOUS_CHEF_DIFF_NO_BITBAKE=1` makes a missing dump fail the test instead of running the
+  script; `SOUS_CHEF_DIFF_DIR=<dir>` puts the index cache and `report.txt` there instead of
+  `$SOUS_CHEF_LIVE/runs/differential` (the dumps are still read from there), so a run with
+  another schema version does not rebuild a cache someone else uses.
+
+## After the w5 fixes (branch `w5-fix-eval`)
+
+Re-run on 2026-11-17 against the **same dumps** (no BitBake run: `SOUS_CHEF_DIFF_NO_BITBAKE=1`),
+after the fixes of bugs 1 to 4, observation 6 and the reader switch:
+
+| | Compared | Equal | Flagged (of which literal differs) | Known gap | Bug |
+|---|---|---|---|---|---|
+| Sample, explicit machine and distro: before | 1019 | 656 | 336 (22) | 27 | 0 |
+| Sample, explicit machine and distro: after | 1019 | 656 | 336 (20) | 27 | 0 |
+| `curl@default`: before / after | 38 / 38 | 22 / 24 | 13 / 13 | 1 / 1 | 2 / **0** |
+| `sl@default`: before / after | 30 / 30 | 17 / 19 | 10 / 10 | 1 / 1 | 2 / **0** |
+| `virtual/kernel@default`: before / after | 32 / 27 | 8 / 13 | 14 / 12 | 2 / 2 | 8 / **0** |
+
+- **The `@default` probe has no bug left**: with no machine or distro given, the evaluation
+  reads `conf/toolcfg.conf` and applies `OE_FRAGMENTS` (bug 1), so `MACHINE = dogbonedark`,
+  `DISTRO = kiss`, `virtual/kernel` resolves to `linux-kiss` (`PreferredProvider`) and every
+  `@default` row is the same as its explicit row. Two causes were behind bug 1, not one:
+  the replay ignored `addfragments`, and the build directory was not on `BBPATH` (a
+  bitbake-setup `bblayers.conf` sets no `BBPATH`; BitBake gets the build directory from the
+  environment, `BBPATH=$BUILDDIR`), so neither `toolcfg.conf` nor `local.conf` was read.
+- **Flagged literal differs 22 -> 20**: the two `DEPENDS` values of bug 3 (`linux-kiss`,
+  `virtual/kernel`) now have the virtual providers rewritten (`binutils-cross-${@...}`,
+  `gcc-cross-${@...}`) and match BitBake's text outside the python parts; they stay flagged
+  because `DEPENDS` holds python from `base.bbclass`.
+- **Everything else is unchanged**, class by class (`classes.tsv`), which also shows the
+  envdump reader classifies these dumps as the old reader did. The 27 known gaps are the
+  `LAYERDIR` symlink spelling (`FILE`, `FILESEXTRAPATHS`); the 20 flagged-literal-differs
+  are the python cases listed under "Known gaps" below (15 named by BitBake's history, 5
+  built from python-set variables or classes the replay could not inherit).
+- **Files in the history**: same set for 828 of 832 names (was 784). `MACHINE` / `DISTRO`
+  now name `toolcfg.conf` on both sides. Left: `kiss-image` `DEPENDS` and `B` (classes
+  behind `${IMGCLASSES}` / `${SDK_CLASSES}`, unchanged), and `DEPENDS` of `linux-kiss` and
+  `virtual/kernel`, where the static history ends with the rewrite, located at the
+  `PREFERRED_PROVIDER_virtual/cross-*` assignment in `tcmode-default.inc`, while BitBake
+  records it at `ast.py` (`[handleVirtRecipeProviders]`, a python operation the comparison
+  leaves out).
+- **Workspace level**: bbappend order agrees for all 26 recipes (`optee-os` fixed, bug 2);
+  `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
+  without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
 **The test fails only on what the milestone names:** a value classified **bug** on a tracked
 variable (`SRC_URI`, `DEPENDS`, `RDEPENDS:*`, `FILES:*`, `PACKAGECONFIG`, `EXTRA_OECONF`,
@@ -168,6 +215,11 @@ All 12 come from bug 1.
 
 ## Bugs (unflagged wrong answers), most serious first
 
+All four are **fixed on branch `w5-fix-eval`** (rules and sources in bitbake-semantics.md:
+"Configuration fragments", "`BBPATH` from the environment", "The sort is a string sort",
+"Recipe virtual providers", "A `.bb` or `.bbappend` that no `BBFILES` glob matches"); the
+text below is the first measurement's description.
+
 **1. `addfragments` (OE configuration fragments) is not replayed, so a bitbake-setup build
 has the wrong MACHINE and DISTRO.** Wrynose's `bitbake-setup` writes MACHINE and DISTRO as
 fragments: `conf/toolcfg.conf` has `OE_FRAGMENTS += "distro/kiss machine/dogbonedark"`, and
@@ -227,7 +279,9 @@ index also holds `meta-arm/dynamic-layers/meta-tpm2/.../tpm2-tools_5.7.bbappend`
 under `BBFILES_DYNAMIC` for a layer that is absent; that one is a known gap
 (`BBFILES_DYNAMIC` not reproduced).
 
-Smaller observation, not counted: `DataStore::is_function` returns false for
+Smaller observation, not counted (fixed on `w5-fix-eval`: `is_function` also knows names a
+function statement wrote, BitBake's own `func` flag is lost by `renameVar`; the test no
+longer recognises functions by shape): `DataStore::is_function` returns false for
 `pkg_postinst:busybox`, `pkg_postrm:dropbear` and similar package-specific functions whose
 static value is a pointer list; the test recognises functions by the value's shape instead.
 
@@ -272,13 +326,13 @@ On this workspace, with the machine and distro given:
   and in 22 flagged values even the part sous-chef could expand was incomplete (python adds
   packages, dependencies and files). 135 correct values were flagged too. For a flagged
   value, use `var` with `authoritative: true` (or `bitbake -e`).
-- **Give the machine and distro in a bitbake-setup build.** Until bug 1 is fixed, a tool
-  call without `machine` / `distro` evaluates MACHINE unset and DISTRO `nodistro`, and some of
-  the resulting wrong values (provider choice, `PN`, `PV`, `SRC_URI`) carry no flag. `deps`
-  cannot be told the machine at all.
-- Bug 2 matters only when two bbappends for one recipe sit in sibling directories whose
-  names share a prefix and assign the same variable; bug 3 only for a `DEPENDS` without
-  python that names a cross-toolchain virtual provider.
+- **A bitbake-setup build needs no explicit machine any more** (since the w5 fixes): a tool
+  call without `machine` / `distro`, and `deps` and lint, which take none, evaluate the
+  fragment machine and distro; the `@default` probe equals the explicit run. When nothing
+  sets `MACHINE`, the output says so ("no MACHINE is set"). Bugs 2 to 4 are fixed too (bug 2
+  mattered only for sibling bbappend directories sharing a name prefix, bug 3 only for a
+  `DEPENDS` without python that names a cross-toolchain virtual provider). Since then 20
+  flagged values (not 22) have a literal part that differs.
 
 Limits of this measurement: one machine, one distro, 23 evaluable targets, one release
 (Wrynose); functions and variable flags were not compared; the classification follows

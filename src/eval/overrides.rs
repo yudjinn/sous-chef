@@ -153,6 +153,12 @@ impl Eval<'_> {
         if self.ds.notes.python_vars.contains(base_of(name)) {
             v.unevaluated_python = true;
         }
+        // A statement the replay could not apply may set it (`addfragments`).
+        if let Some(us) = self.ds.notes.unresolved_vars.get(base_of(name)) {
+            for u in us {
+                push_unique(&mut v.unresolved, u);
+            }
+        }
         let unknown_entries = (trace.inactive_seen || trace.multi_active) && self.ovr.uncertain();
         if trace.consulted && (self.ovr.unstable || unknown_entries) {
             if self.ovr.python {

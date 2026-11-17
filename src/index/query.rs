@@ -82,7 +82,7 @@ pub struct StatementRow {
     /// 0-based position in the file.
     pub ord: u32,
     /// `assign`, `function`, `pydef`, `inherit`, `include`, `addtask`, `deltask`,
-    /// `addhandler`, `export_functions`, `export`, `unset`, `unknown`.
+    /// `addhandler`, `export_functions`, `export`, `unset`, `addfragments`, `unknown`.
     pub kind: String,
     pub name: Option<String>,
     pub base: Option<String>,
@@ -97,7 +97,7 @@ pub struct StatementRow {
 /// What [`enclosing_item`] returns.
 pub type ItemRow = StatementRow;
 
-/// One edge (`require`, `include`, `include_all`, `inherit`, `bbappend`).
+/// One edge (`require`, `include`, `include_all`, `inherit`, `addfragments`, `bbappend`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EdgeRow {
     pub id: i64,
@@ -325,6 +325,22 @@ pub fn files_in_layer(index: &Index, layer: &str) -> Result<Vec<FileRow>> {
     collect(index, &sql, &[&layer], |r| file_row(r, 0))
 }
 
+/// Why BitBake does not collect the indexed file `id`: `Some("not matched by any layer's
+/// BBFILES")` for a `.bb` / `.bbappend` no `BBFILES` glob matches (`files.not_collected`,
+/// see `schema.rs`); `None` for a collected file, any other kind, or an unknown id.
+pub fn not_collected(index: &Index, id: i64) -> Result<Option<String>> {
+    let reason: Option<Option<String>> = index
+        .conn()
+        .query_row("SELECT not_collected FROM files WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    Ok(reason.flatten().map(|r| match r.as_str() {
+        super::schema::NOT_COLLECTED_BBFILES => "not matched by any layer's BBFILES".to_string(),
+        other => format!("not collected by BitBake ({other})"),
+    }))
+}
+
 /// `%` / `_` / `\` escaped for a `LIKE ... ESCAPE '\'` pattern.
 fn like_escape(s: &str) -> String {
     s.chars()
@@ -335,12 +351,12 @@ fn like_escape(s: &str) -> String {
         .collect()
 }
 
-/// Distinct recipe names (`PN` of `.bb` files) containing `q`, ASCII case-insensitive,
-/// sorted, at most `limit`. For "did you mean" lists.
+/// Distinct recipe names (`PN` of collected `.bb` files) containing `q`, ASCII
+/// case-insensitive, sorted, at most `limit`. For "did you mean" lists.
 pub fn recipe_names_like(index: &Index, q: &str, limit: usize) -> Result<Vec<String>> {
     let sql = format!(
-        "SELECT DISTINCT pn FROM files WHERE kind = 'bb' AND pn LIKE ?1 ESCAPE '\\' \
-         ORDER BY pn LIMIT {limit}"
+        "SELECT DISTINCT pn FROM files WHERE kind = 'bb' AND not_collected IS NULL \
+         AND pn LIKE ?1 ESCAPE '\\' ORDER BY pn LIMIT {limit}"
     );
     let pattern = format!("%{}%", like_escape(q));
     collect(index, &sql, &[&pattern], |r| r.get::<_, String>(0))
@@ -371,10 +387,13 @@ pub fn class_names_like(index: &Index, q: &str, limit: usize) -> Result<Vec<Stri
 // ---- recipes ----
 
 /// Every recipe file whose `PN` is `name`: all versions, all layers. Ordered by layer
-/// priority (highest first), then version (highest first), then layer and path.
+/// priority (highest first), then version (highest first), then layer and path (as
+/// strings, [`resolve::py_str_cmp`]). Files BitBake does not collect ([`not_collected`])
+/// are left out: no name resolves to them.
 pub fn find_recipes(index: &Index, name: &str) -> Result<Vec<RecipeRow>> {
     let sql = format!(
         "SELECT {FILE_COLS} FROM {FILE_FROM} WHERE f.kind = 'bb' AND f.pn = ?1 \
+         AND f.not_collected IS NULL \
          ORDER BY l.priority DESC, l.id, f.path"
     );
     let mut rows: Vec<RecipeRow> = collect(index, &sql, &[&name], |r| file_row(r, 0))?
@@ -393,7 +412,7 @@ pub fn find_recipes(index: &Index, name: &str) -> Result<Vec<RecipeRow>> {
             .cmp(&a.file.priority)
             .then_with(|| vercmp(&b.pv, &a.pv))
             .then_with(|| a.file.layer_id.cmp(&b.file.layer_id))
-            .then_with(|| a.file.path.cmp(&b.file.path))
+            .then_with(|| resolve::py_str_cmp(&a.file.path, &b.file.path))
     });
     Ok(rows)
 }
@@ -421,7 +440,7 @@ pub fn preferred_recipe(
             .priority
             .cmp(&a.file.priority)
             .then_with(|| a.file.layer_id.cmp(&b.file.layer_id))
-            .then_with(|| a.file.path.cmp(&b.file.path))
+            .then_with(|| resolve::py_str_cmp(&a.file.path, &b.file.path))
     });
     if let Some(v) = version {
         let v = strip_epoch(v);
@@ -494,11 +513,13 @@ pub struct DependRow {
 }
 
 /// Files whose `provides` rows name `name` (recipes by `PN` or `PROVIDES`, and any other
-/// non-conf file with a static `PROVIDES`), by layer row id then path.
+/// non-conf file with a static `PROVIDES`), by layer row id then path. Recipes and appends
+/// BitBake does not collect ([`not_collected`]) are left out.
 pub fn files_providing(index: &Index, name: &str) -> Result<Vec<FileRow>> {
     let sql = format!(
         "SELECT DISTINCT {FILE_COLS} FROM provides p JOIN files f ON f.id = p.file_id \
-         JOIN layers l ON l.id = f.layer_id WHERE p.name = ?1 ORDER BY l.id, f.path"
+         JOIN layers l ON l.id = f.layer_id WHERE p.name = ?1 AND f.not_collected IS NULL \
+         ORDER BY l.id, f.path"
     );
     collect(index, &sql, &[&name], |r| file_row(r, 0))
 }

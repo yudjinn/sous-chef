@@ -38,6 +38,10 @@
 //!   for includes; `inherit` / `inherit_defer` for inherits; `shell` / `python`, prefixed
 //!   with `fakeroot ` when so declared, for functions; `python` for `def`.
 //! - `statements.value` is the raw value for assignments and the text of `unknown` lines.
+//! - `statements.kind` `addfragments`: an `addfragments` line (the parser's unknown statement
+//!   that `Statement::add_fragments` reads); `name` is its argument text, `value` the line.
+//!   Its edge (kind `addfragments`, `target_text` the argument text) is never resolved: the
+//!   files it includes follow from the evaluated fragments variable.
 //! - `edges.target_text` is the argument as written when it resolves to one target, else the
 //!   expanded word; for `bbappend` edges it is the recipe file name the append stands for
 //!   (`hello_%.bb`), and `line` is NULL.
@@ -47,6 +51,9 @@
 //!   skipped and version constraints dropped.
 //! - `provides`: a recipe's `PN`, plus the words of unconditional `PROVIDES` assignments that
 //!   need no expansion, in any file kind except `.conf`.
+//! - `files.not_collected`: set with the edges (step 6) from the same `BBFILES` collection:
+//!   `bbfiles` for a `.bb` / `.bbappend` no glob matches, NULL otherwise. Only collected files
+//!   take part in `bbappend` edges.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -838,7 +845,13 @@ fn file_rows(text: &str, kind: FileKind, file_name: &str) -> FileRows {
                 row.name = Some(names.join(" "));
             }
             StatementKind::Unknown { text } => {
-                row.kind = "unknown";
+                match st.add_fragments() {
+                    Some(af) => {
+                        row.kind = "addfragments";
+                        row.name = Some(af.rest.trim_start_matches(lexer::py_space).to_string());
+                    }
+                    None => row.kind = "unknown",
+                }
                 row.value = Some(text.clone());
             }
         }
@@ -1104,7 +1117,9 @@ fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
     tx.execute("DELETE FROM edges", [])?;
     let ecx = edge_ctx(tx, ws)?;
     insert_ref_edges(tx, ws, &ecx, None)?;
-    insert_append_edges(tx, ws, &ecx)?;
+    let collected = collected_ids(ws, &ecx);
+    insert_append_edges(tx, &collected)?;
+    mark_collected(tx, &collected)?;
     tx.execute(
         "INSERT INTO meta(key, value) VALUES (?1, ?2) \
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -1194,7 +1209,7 @@ fn insert_ref_edges(
     let refs: Vec<(i64, String, String, String, u32)> = {
         let mut st = tx.prepare(
             "SELECT file_id, kind, name, op, start_line FROM statements \
-             WHERE kind IN ('include', 'inherit') AND name IS NOT NULL \
+             WHERE kind IN ('include', 'inherit', 'addfragments') AND name IS NOT NULL \
              AND (?1 IS NULL OR file_id = ?1) ORDER BY file_id, ord",
         )?;
         st.query_map([only], |r| {
@@ -1216,6 +1231,19 @@ fn insert_ref_edges(
         let Some(info) = files.get(&file_id) else {
             continue;
         };
+        if kind == "addfragments" {
+            // Which files it includes follows from the evaluated fragments variable
+            // (`OE_FRAGMENTS`), never from the file alone: always unresolved here, the replay
+            // resolves it.
+            ins.execute(params![
+                file_id,
+                "addfragments",
+                text,
+                Option::<i64>::None,
+                line
+            ])?;
+            continue;
+        }
         let (edge_kind, ref_kind) = if kind == "inherit" {
             // A class in `classes-global/` inherits in global context, but only on a release
             // that has that directory (`resolve::class_dir`, as the resolver searches).
@@ -1250,21 +1278,38 @@ fn insert_ref_edges(
     Ok(())
 }
 
-/// Inserts every `bbappend` edge, in BBFILES collection order (the order BitBake applies
-/// appends in).
-fn insert_append_edges(tx: &Transaction<'_>, ws: &Workspace, ecx: &EdgeCtx) -> Result<()> {
-    let by_path = &ecx.by_path;
-    let mut ins = tx.prepare_cached(
-        "INSERT INTO edges(src_file, kind, target_text, target_file, line) VALUES (?1, ?2, ?3, ?4, ?5)",
-    )?;
-    let collected = resolve::recipe_files(ws);
-    let ids: Vec<(i64, PathBuf)> = collected
+/// The indexed files BitBake collects (`resolve::recipe_files`, the `BBFILES` globs), in
+/// collection order.
+fn collected_ids(ws: &Workspace, ecx: &EdgeCtx) -> Vec<(i64, PathBuf)> {
+    resolve::recipe_files(ws)
         .iter()
         .filter_map(|p| {
             let n = normalize(p);
-            by_path.get(&n).map(|id| (*id, n))
+            ecx.by_path.get(&n).map(|id| (*id, n))
         })
-        .collect();
+        .collect()
+}
+
+/// `files.not_collected`: `bbfiles` for every `.bb` / `.bbappend` not in `collected`, NULL
+/// for the others (see `schema.rs`).
+fn mark_collected(tx: &Transaction<'_>, collected: &[(i64, PathBuf)]) -> Result<()> {
+    tx.execute(
+        "UPDATE files SET not_collected = CASE WHEN kind IN ('bb', 'bbappend') THEN ?1 END",
+        [super::schema::NOT_COLLECTED_BBFILES],
+    )?;
+    let mut st = tx.prepare_cached("UPDATE files SET not_collected = NULL WHERE id = ?1")?;
+    for (id, _) in collected {
+        st.execute([id])?;
+    }
+    Ok(())
+}
+
+/// Inserts every `bbappend` edge, in BBFILES collection order (the order BitBake applies
+/// appends in). Only collected files take part.
+fn insert_append_edges(tx: &Transaction<'_>, ids: &[(i64, PathBuf)]) -> Result<()> {
+    let mut ins = tx.prepare_cached(
+        "INSERT INTO edges(src_file, kind, target_text, target_file, line) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
     let recipes: Vec<&(i64, PathBuf)> = ids
         .iter()
         .filter(|(_, p)| p.extension().is_some_and(|e| e == "bb"))

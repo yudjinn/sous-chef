@@ -39,6 +39,7 @@ use crate::index::Index;
 use crate::index::query::{self, FileRow, RecipeRow, StatementFilter};
 use crate::types::{FileKind, Loc};
 use crate::workspace::Workspace;
+use crate::workspace::resolve;
 
 /// A configuration variable that took part in a selection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -576,7 +577,7 @@ fn order(a: &Info, b: &Info) -> Ordering {
         .cmp(&a.recipe.file.priority)
         .then_with(|| a.dp.cmp(&b.dp))
         .then_with(|| a.recipe.file.layer_id.cmp(&b.recipe.file.layer_id))
-        .then_with(|| a.recipe.file.path.cmp(&b.recipe.file.path))
+        .then_with(|| resolve::py_str_cmp(&a.recipe.file.path, &b.recipe.file.path))
 }
 
 fn versions(infos: &[Info]) -> String {
@@ -685,7 +686,8 @@ fn file_label(f: &FileRow) -> String {
     format!("{}:{}", f.layer, f.path.display())
 }
 
-/// The recipe files that use `file`: the file itself for a `.bb`, the recipes a bbappend
+/// The recipe files that use `file` (collected ones only, see `query::not_collected`): the
+/// file itself for a `.bb`, the recipes a bbappend
 /// applies to, and for an include or class every recipe that pulls it in (through other
 /// includes, classes and bbappends), following the index edges.
 pub fn recipes_using(index: &Index, file: &FileRow) -> Result<Vec<RecipeRow>> {
@@ -699,7 +701,9 @@ pub fn recipes_using(index: &Index, file: &FileRow) -> Result<Vec<RecipeRow>> {
         }
         match f.kind {
             FileKind::Recipe => {
+                // A `.bb` no BBFILES glob matches is not a recipe to BitBake.
                 if let (Some(pn), Some(pv)) = (f.pn.clone(), f.pv.clone())
+                    && query::not_collected(index, f.id)?.is_none()
                     && seen.insert(f.id)
                 {
                     out.push(RecipeRow { file: f, pn, pv });

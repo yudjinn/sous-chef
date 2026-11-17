@@ -537,6 +537,11 @@ impl DataStore {
             self.update_overrides(newkey);
         }
         self.del_var(key);
+        if self.notes.functions.contains(key) {
+            let notes = Arc::make_mut(&mut self.notes);
+            notes.functions.remove(key);
+            notes.functions.insert(newkey.to_string());
+        }
     }
 
     /// Recorded assignments for `name` (see [`DataStore::history`]): non-flag ones when

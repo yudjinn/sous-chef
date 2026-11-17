@@ -79,7 +79,7 @@ linux-kiss	PR	equal
 linux-kiss	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 linux-kiss	FILE_LAYERNAME	equal	
 linux-kiss	SRC_URI	flagged	unevaluated_python
-linux-kiss	DEPENDS	flagged-literal-differs	unevaluated_python; also: BB_RECIPE_VIRTUAL_PROVIDERS rewrite of DEPENDS (ast.handleVirtRecipeProviders) not modelled
+linux-kiss	DEPENDS	flagged	unevaluated_python
 linux-kiss	RDEPENDS:linux-kiss	unset	
 linux-kiss	PACKAGECONFIG	unset	
 linux-kiss	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:118 [__anon_168]; append kernel-devicetree.bbclass:10 [__anon_13]
@@ -1005,7 +1005,7 @@ virtual/kernel	PR	equal
 virtual/kernel	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 virtual/kernel	FILE_LAYERNAME	equal	
 virtual/kernel	SRC_URI	flagged	unevaluated_python
-virtual/kernel	DEPENDS	flagged-literal-differs	unevaluated_python; also: BB_RECIPE_VIRTUAL_PROVIDERS rewrite of DEPENDS (ast.handleVirtRecipeProviders) not modelled
+virtual/kernel	DEPENDS	flagged	unevaluated_python
 virtual/kernel	RDEPENDS:linux-kiss	unset	
 virtual/kernel	PACKAGECONFIG	unset	
 virtual/kernel	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:118 [__anon_168]; append kernel-devicetree.bbclass:10 [__anon_13]
@@ -1088,20 +1088,20 @@ curl@default	PACKAGECONFIG	flagged	unevaluated_python
 curl@default	PACKAGES	flagged	unevaluated_python
 curl@default	FILES:curl	flagged	unevaluated_python
 curl@default	OVERRIDES	flagged	unevaluated_python
-curl@default	MACHINEOVERRIDES	flagged	unresolved: MACHINE
+curl@default	MACHINEOVERRIDES	flagged	unevaluated_python
 curl@default	DISTROOVERRIDES	flagged	unevaluated_python
-curl@default	S	flagged-literal-differs	unevaluated_python
-curl@default	B	flagged-literal-differs	unevaluated_python
-curl@default	WORKDIR	flagged-literal-differs	unevaluated_python
+curl@default	S	flagged	unevaluated_python
+curl@default	B	flagged	unevaluated_python
+curl@default	WORKDIR	flagged	unevaluated_python
 curl@default	LICENSE	equal	
 curl@default	INHERIT	equal	
 curl@default	PROVIDES	equal	
 curl@default	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 curl@default	EXTRA_OECMAKE	unset	
-curl@default	CFLAGS	flagged-literal-differs	unevaluated_python
+curl@default	CFLAGS	flagged	unevaluated_python
 curl@default	FILESPATH	flagged	unevaluated_python
-curl@default	MACHINE	bug	bitbake last op: set {{LIVE}}/yocto-kiss/openembedded-core/meta/conf/documentation.conf:272; static last applied: no applied operation
-curl@default	DISTRO	bug	bitbake last op: set {{LIVE}}/yocto-kiss/openembedded-core/meta/conf/documentation.conf:138; static last applied: meta:conf/bitbake.conf:788 WeakDefault
+curl@default	MACHINE	equal	
+curl@default	DISTRO	equal	
 curl@default	TMPDIR	equal	
 curl@default	BBCLASSEXTEND	equal	
 curl@default	BUGTRACKER	equal	
@@ -1129,20 +1129,20 @@ sl@default	PACKAGECONFIG	unset
 sl@default	PACKAGES	equal	
 sl@default	FILES:sl	flagged	unevaluated_python
 sl@default	OVERRIDES	flagged	unevaluated_python
-sl@default	MACHINEOVERRIDES	flagged	unresolved: MACHINE
+sl@default	MACHINEOVERRIDES	flagged	unevaluated_python
 sl@default	DISTROOVERRIDES	flagged	unevaluated_python
-sl@default	S	flagged-literal-differs	unevaluated_python
-sl@default	B	flagged-literal-differs	unevaluated_python
-sl@default	WORKDIR	flagged-literal-differs	unevaluated_python
+sl@default	S	flagged	unevaluated_python
+sl@default	B	flagged	unevaluated_python
+sl@default	WORKDIR	flagged	unevaluated_python
 sl@default	LICENSE	equal	
 sl@default	INHERIT	equal	
 sl@default	PROVIDES	equal	
 sl@default	EXTRA_OECONF	equal	
 sl@default	EXTRA_OECMAKE	unset	
-sl@default	CFLAGS	flagged-literal-differs	unevaluated_python
+sl@default	CFLAGS	flagged	unevaluated_python
 sl@default	FILESPATH	flagged	unevaluated_python
-sl@default	MACHINE	bug	bitbake last op: set {{LIVE}}/yocto-kiss/openembedded-core/meta/conf/documentation.conf:272; static last applied: no applied operation
-sl@default	DISTRO	bug	bitbake last op: set {{LIVE}}/yocto-kiss/openembedded-core/meta/conf/documentation.conf:138; static last applied: meta:conf/bitbake.conf:788 WeakDefault
+sl@default	MACHINE	equal	
+sl@default	DISTRO	equal	
 sl@default	TMPDIR	equal	
 sl@default	EXTRA_OEMAKE	equal	
 sl@default	HOMEPAGE	equal	
@@ -1150,39 +1150,33 @@ sl@default	INSANE_SKIP:sl	equal
 sl@default	LIC_FILES_CHKSUM	equal	
 sl@default	SRCREV	equal	
 sl@default	SUMMARY	equal	
-virtual/kernel@default	PN	bug	bitbake last op: set {{LIVE}}/yocto-kiss/openembedded-core/meta/conf/documentation.conf:325; static last applied: meta:conf/bitbake.conf:243 Set
-virtual/kernel@default	PV	bug	bitbake last op: set {{LIVE}}/yocto-kiss/openembedded-core/meta/classes-global/sstate.bbclass:51; static last applied: meta:conf/bitbake.conf:244 Set
+virtual/kernel@default	PN	equal	
+virtual/kernel@default	PV	equal	
 virtual/kernel@default	PR	equal	
-virtual/kernel@default	FILE	gap:python-at-parse	set ConfHandler.py:153 [handle]; set ConfHandler.py:153 [handle]; set ConfHandler.py:156 [handle]; set ConfHandler.py:153 [handle]; set ConfHandler.py:156 [handle]; set ConfHandler.py:153 [handle]; set ConfHandler.py:156 [handle]; set ConfH...
-virtual/kernel@default	FILE_LAYERNAME	gap:python-at-parse	set cookerdata.py:513 [_parse_recipe]
-virtual/kernel@default	SRC_URI	bug	via ${MAJOR_VER}: bitbake last op: set {{LIVE}}/yocto-kiss/meta-kiss/recipes-kernel/linux/linux-kiss.inc:14; static last applied: no applied operation
+virtual/kernel@default	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
+virtual/kernel@default	FILE_LAYERNAME	equal	
+virtual/kernel@default	SRC_URI	flagged	unevaluated_python
 virtual/kernel@default	DEPENDS	flagged	unevaluated_python
 virtual/kernel@default	RDEPENDS:linux-kiss	unset	
 virtual/kernel@default	PACKAGECONFIG	unset	
 virtual/kernel@default	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:118 [__anon_168]; append kernel-devicetree.bbclass:10 [__anon_13]
-virtual/kernel@default	FILES:linux-kiss	flagged-literal-differs	unevaluated_python
-virtual/kernel@default	OVERRIDES	flagged-literal-differs	unevaluated_python
-virtual/kernel@default	MACHINEOVERRIDES	flagged	unresolved: MACHINE
+virtual/kernel@default	FILES:linux-kiss	equal	
+virtual/kernel@default	OVERRIDES	flagged	unevaluated_python
+virtual/kernel@default	MACHINEOVERRIDES	flagged	unevaluated_python
 virtual/kernel@default	DISTROOVERRIDES	flagged	unevaluated_python
-virtual/kernel@default	S	flagged-literal-differs	unevaluated_python
-virtual/kernel@default	B	flagged-literal-differs	unevaluated_python
-virtual/kernel@default	WORKDIR	flagged-literal-differs	unevaluated_python
+virtual/kernel@default	S	flagged	unevaluated_python
+virtual/kernel@default	B	flagged	unevaluated_python
+virtual/kernel@default	WORKDIR	flagged	unevaluated_python
 virtual/kernel@default	LICENSE	equal	
 virtual/kernel@default	INHERIT	equal	
-virtual/kernel@default	PROVIDES	bug	via ${PN}: bitbake last op: set {{LIVE}}/yocto-kiss/openembedded-core/meta/conf/documentation.conf:325; static last applied: meta:conf/bitbake.conf:243 Set
+virtual/kernel@default	PROVIDES	equal	
 virtual/kernel@default	EXTRA_OECONF	equal	
 virtual/kernel@default	EXTRA_OECMAKE	unset	
-virtual/kernel@default	CFLAGS	flagged-literal-differs	unevaluated_python
+virtual/kernel@default	CFLAGS	flagged	unevaluated_python
 virtual/kernel@default	FILESPATH	flagged	unevaluated_python
-virtual/kernel@default	MACHINE	bug	bitbake last op: set {{LIVE}}/yocto-kiss/openembedded-core/meta/conf/documentation.conf:272; static last applied: no applied operation
-virtual/kernel@default	DISTRO	bug	bitbake last op: set {{LIVE}}/yocto-kiss/openembedded-core/meta/conf/documentation.conf:138; static last applied: meta:conf/bitbake.conf:788 WeakDefault
+virtual/kernel@default	MACHINE	equal	
+virtual/kernel@default	DISTRO	equal	
 virtual/kernel@default	TMPDIR	equal	
-virtual/kernel@default	ALLOW_EMPTY	unset	
-virtual/kernel@default	COMPATIBLE_HOST	equal	
-virtual/kernel@default	DESCRIPTION	flagged-literal-differs	unevaluated_python
-virtual/kernel@default	FILES	equal	
-virtual/kernel@default	INHIBIT_DEFAULT_DEPS	equal	
-virtual/kernel@default	LIC_FILES_CHKSUM	bug	bitbake last op: set {{LIVE}}/yocto-kiss/meta-kiss/recipes-kernel/linux/linux-kiss.inc:16; static last applied: meta:recipes-kernel/linux/linux-dummy.bb:8 Set
-virtual/kernel@default	PACKAGES_DYNAMIC	bug	via ${PN}: bitbake last op: set {{LIVE}}/yocto-kiss/openembedded-core/meta/conf/documentation.conf:325; static last applied: meta:conf/bitbake.conf:243 Set
-virtual/kernel@default	SECTION	flagged-literal-differs	unevaluated_python
-virtual/kernel@default	SUMMARY	flagged-literal-differs	unevaluated_python
+virtual/kernel@default	FILESEXTRAPATHS	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
+virtual/kernel@default	LIC_FILES_CHKSUM	equal	
+virtual/kernel@default	MAJOR_VER	flagged	unevaluated_python

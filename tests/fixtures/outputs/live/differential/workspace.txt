@@ -1,11 +1,11 @@
 
-## Files in the history (832 variables without overrides; same set of files: 784)
+## Files in the history (832 variables without overrides; same set of files: 828)
 
 ### Files only in BitBake's history (file, count, first uses)
-{{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/build/conf/toolcfg.conf	46	curl:MACHINE curl:DISTRO sl:MACHINE sl:DISTRO
 {{LIVE}}/yocto-kiss/openembedded-core/meta/classes-recipe/image_types_wic.bbclass	1	kiss-image:DEPENDS
 {{LIVE}}/yocto-kiss/openembedded-core/meta/classes-recipe/populate_sdk_ext.bbclass	1	kiss-image:B
 ### Files only in the static history (file, count, first uses)
+{{LIVE}}/yocto-kiss/openembedded-core/meta/conf/distro/include/tcmode-default.inc	2	linux-kiss:DEPENDS virtual/kernel:DEPENDS
 
 ## Layers (bitbake-layers show-layers vs Workspace::discover)
 bitbake: 7 layers, static: 7 layers
@@ -31,12 +31,8 @@ same	linux-yocto-rt_6.18.bb	1 bbappend(s)
 same	linux-yocto-tiny_6.18.bb	1 bbappend(s)
 same	linux-yocto_6.18.bb	2 bbappend(s)
 same	musl_git.bb	1 bbappend(s)
-DIFF	optee-os_4.9.0.bb	2 bbappend(s)
-	bitbake: ["{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend", "{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee/optee-os_%.bbappend"]
-	static:  ["{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee/optee-os_%.bbappend", "{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend"]
-DIFF	optee-os_git.bb	2 bbappend(s)
-	bitbake: ["{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend", "{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee/optee-os_%.bbappend"]
-	static:  ["{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee/optee-os_%.bbappend", "{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend"]
+same	optee-os_4.9.0.bb	2 bbappend(s)
+same	optee-os_git.bb	2 bbappend(s)
 same	psplash_git.bb	1 bbappend(s)
 same	systemd-boot_259.5.bb	1 bbappend(s)
 same	systemd_259.5.bb	1 bbappend(s)
@@ -50,8 +46,8 @@ same	xserver-xf86-config_0.1.bb	1 bbappend(s)
 
 ## Recipe files (index vs workspace::resolve::recipe_files)
 indexed .bb: 1035; matched by BBFILES: 1034
-indexed but not matched by BBFILES: {{LIVE}}/yocto-kiss/openembedded-core/meta/lib/bblayers/templates/example.bb (evaluate("example"): succeeds, FILE = "{{LIVE}}/yocto-kiss/openembedded-core/meta/lib/bblayers/templates/example.bb")
+indexed but not matched by BBFILES: {{LIVE}}/yocto-kiss/openembedded-core/meta/lib/bblayers/templates/example.bb (evaluate("example"): error: not found: recipe example; list recipes with the recipe tool)
 
 ## Configuration without an explicit machine and distro
-MACHINE = None
-DISTRO = Some(Value { text: "nodistro", unevaluated_python: false, unresolved: [] })
+MACHINE = Some(Value { text: "dogbonedark", unevaluated_python: false, unresolved: [] })
+DISTRO = Some(Value { text: "kiss", unevaluated_python: false, unresolved: [] })

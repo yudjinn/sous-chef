@@ -177,7 +177,19 @@ fn statement(text: &str, span: LineSpan, diags: &mut Vec<ParseDiagnostic>) -> St
         }
     }
     let word = text.split(py_space).next().unwrap_or("");
-    if word == "addpylib" || word == "addfragments" {
+    if let Some(af) = crate::parse::ast::add_fragments_line(text) {
+        // Kept as an unknown statement (see `ast::AddFragments`); the replay reads it with
+        // `Statement::add_fragments`. Fewer than three arguments match no release's
+        // regular expression: BitBake reports "unparsed line".
+        let why = if af.groups(3).is_some() {
+            "`addfragments` directive (configuration fragments): kept as an unknown \
+             statement; the evaluator applies it (`Statement::add_fragments`)"
+        } else {
+            "unparsed line: `addfragments` needs at least three arguments"
+        };
+        return unknown(text, span, diags, why);
+    }
+    if word == "addpylib" {
         // Valid BitBake (configuration only) that the AST does not model.
         return unknown(
             text,

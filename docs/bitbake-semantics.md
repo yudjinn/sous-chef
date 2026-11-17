@@ -60,7 +60,8 @@ reproduces:
 Statement match order (first match wins): function header, `def`, `EXPORT_FUNCTIONS`,
 `addtask`, `deltask`, `addhandler`, `inherit`, `inherit_defer` (BBHandler), then assignment,
 `include`, `require`, `include_all`, `export VAR`, `unset VAR`, `unset VAR[flag]`, `addpylib`
-(base configuration only), `addfragments` (ConfHandler); anything else is "unparsed line".
+(base configuration only), `addfragments` (ConfHandler, any file; see "Configuration
+fragments"); anything else is "unparsed line".
 Consequences: `include = "x"` is an assignment, `inherit = "x"` inherits `= "x"`. Every
 keyword needs whitespace after it (`inherit_deferred = "1"` is an assignment). `.conf` files
 use only the ConfHandler part (no functions, `inherit`, `addtask`...); `parse()` does not know
@@ -263,6 +264,22 @@ def helper(d):                       top-level python def, body is the indented 
 A shell or `python` function body ends at the first line that is exactly `}` in column 0
 (trailing whitespace after the `}` is allowed; see "Lines").
 
+**The `func` flag of renamed and keyword functions** (verified, w5 fix of differential
+observation 6, BitBake 2.18.0 `lib/bb/parse/ast.py` `MethodNode.eval` and
+`lib/bb/data_smart.py` `renameVar`, `setVar`): `MethodNode.eval` does
+`setVar(name, body, parsing=True)` and `setVarFlag(name, "func", 1)` with the name as
+written. For `pkg_postinst:${PN}:prepend () {` the `setVar` puts the body in the prepend
+list of `pkg_postinst:${PN}` and the flag lands on the separate name
+`pkg_postinst:${PN}:prepend`. `expandKeys` then renames `pkg_postinst:${PN}` to
+`pkg_postinst:busybox` with `renameVar`, which copies the value and only the
+`_append` / `_prepend` / `_remove` flags; `func` is lost. So in BitBake
+`getVarFlag("pkg_postinst:busybox", "func")` is `None` and `bitbake -e` prints it as a
+variable (`pkg_postinst:busybox="..."`, checked in the busybox dump of the differential
+run), although its text is the shell body. sous-chef keeps the same flags
+(`raw_flag(name, "func")`), and `DataStore::is_function` answers the question tools need,
+"is this value a function body": the flag, or a name a function statement wrote (followed
+through `expand_keys`).
+
 ### Directives
 
 ```
@@ -322,6 +339,81 @@ Verified (T1.2) against BitBake `master` 2026-11 and the release branches on Git
   `deltask` expands its argument; `addhandler` does not.
 - `EXPORT_FUNCTIONS` takes space-separated names.
 
+### Configuration fragments (`addfragments`, verified, w5 fix of differential bug 1)
+
+Checked in BitBake `lib/bb/parse/parse_py/ConfHandler.py` (`__addfragments_regexp__`,
+`feeder`) and `lib/bb/parse/ast.py` (`AddFragmentsNode`, `handleAddFragments`) on the
+branches `2.10`, `2.12` (head `ac0973009`), `2.16` (head `713fbbdb9`) and `2.18` (the live
+environment, `6e260eb6a`, BitBake 2.18.0), the tags `yocto-5.1.4`, `yocto-5.2.4`,
+`yocto-5.3`, `yocto-6.0`, the history of both files (`f68774670` "parse: add support for
+'addfragments' directive", 2024-12-05; `ed9a3ca94` flagged variables; `3b9d7bea9` built-in
+fragments, 2025-06-18, first in yocto-5.3; `406b1e3de` / `79fff3f42` fatal "Could not find
+fragment"; `cfddce7ab` error for a built-in fragment next to an assignment; `5ed1dee9a`
+`_BB_SKIP_FRAGMENTS`), `lib/bb/utils.py` `get_file_layer`, and OE-core
+`meta/conf/bitbake.conf` (Wrynose, lines 813-822).
+
+- **Where.** OE-core's `bitbake.conf` includes `conf/site.conf`, `conf/auto.conf`,
+  `conf/toolcfg.conf` (written by `bitbake-config-build` / `bitbake-setup`, in the build
+  directory, found on `BBPATH`) and `conf/local.conf`, then sets
+  `OE_FRAGMENTS_PREFIX ?= "conf/fragments"`,
+  `OE_FRAGMENTS_METADATA_VARS ?= "BB_CONF_FRAGMENT_SUMMARY BB_CONF_FRAGMENT_DESCRIPTION"`,
+  `OE_FRAGMENTS_BUILTIN ?= "machine:MACHINE distro:DISTRO"` and runs
+  `addfragments ${OE_FRAGMENTS_PREFIX} OE_FRAGMENTS OE_FRAGMENTS_METADATA_VARS OE_FRAGMENTS_BUILTIN`,
+  **before** `include conf/machine/${MACHINE}.conf` and `include conf/distro/${DISTRO}.conf`.
+  ConfHandler parses a file into statements and evaluates them in order, so the directive
+  sees everything the earlier includes set and the machine and distro confs see its result.
+- **Syntax.** BitBake 2.12 (Walnascar): `addfragments\s+(.+)\s+(.+)\s+(.+)`; from 2.16
+  (Whinlatter): `addfragments\s+(.+)\s+(.+)\s+(.+)\s+(.+)`. `re.match` on the line (after
+  `rstrip`), every group greedy, so extra words go to the first group (`a b c d` with three
+  groups is `a b` / `c` / `d`). A line the release's regex does not match is "unparsed line"
+  (a parse error): the three-argument form on 2.16 and later, anything on 2.10 and earlier,
+  where the directive does not exist. The test is in `ConfHandler.feeder` with no `baseconfig`
+  condition, so BBHandler accepts it in a recipe too. Groups are used unexpanded: the first
+  is a path prefix (expanded when the file name is built), the others are variable names.
+- **Evaluation** (`AddFragmentsNode.eval`, 2.18): return at once if `_BB_SKIP_FRAGMENTS` is
+  `1` (2.16 and later; set by `bitbake-config-build`). Read `fragments = getVar(<2nd>)`,
+  `BBLAYERS`, `getVar(<3rd>).split()` and, from 2.16, the built-in map
+  `{prefix: variable}` from `getVar(<4th>).split()` split on `:` (an unset list variable or
+  a word without `:` is a python exception). Return if `fragments` is empty. Warn when two
+  built-in fragments name the same prefix (the last wins). Then for each word `f` of
+  `fragments`, in order:
+  - **built-in** (2.16+, `check_and_set_builtin_fragment`): `prefix, value =
+    f.split('/', 1)`; when `prefix` is in the map, `bb.fatal` if
+    `getVar(<variable>, noweakdefault=True)` is not `None` ("A builtin fragment '...' is
+    used while MACHINE has already got an assignment"; a `??=` default is allowed), else
+    `setVar(<variable>, value, parsing=True)` with the history pointing at the last `set`
+    or `append` (`=` / `+=`) of the fragments variable whose value contains `f`
+    (`toolcfg.conf:6` "kiss (OE_FRAGMENTS contains "distro/kiss")" in the live dump).
+  - **named** otherwise: `layerid, name = f.split('/', 1)` (a word without `/` raises
+    `ValueError`); the file is `<prefix>/<name>.conf` expanded, looked for under each
+    `BBLAYERS` entry in order (`os.path.join(entry, file)`), the first that exists **and**
+    whose collection (`bb.utils.get_file_layer`: the `BBFILES_PRIORITIZED` entry it matches,
+    else the collection with the longest `BBFILE_PATTERN` regex that `re.match`es the path)
+    is `layerid` wins. So `core/yocto/sstate-mirror-cdn` is
+    `meta/conf/fragments/yocto/sstate-mirror-cdn.conf` of the layer whose collection is
+    `core`. It is included like `include` (`ConfHandler.include`, "include fragment"); then
+    for each variable `v` of the third argument: `setVarFlag(v, f, getVar(v))` and
+    `setVar(v, None)` (the fragment's summary moves to a flag named after the fragment).
+    Not found: `bb.fatal("Could not find fragment ...")` on 2.16 and later, `bb.error` (and
+    go on) on 2.12.
+- **sous-chef** (`src/eval/replay.rs` `add_fragments`, `Release::has(Feature::AddFragments)`
+  / `Feature::BuiltinFragments`): the parser keeps the line as an unknown statement with a
+  diagnostic starting `` `addfragments` `` (a `StatementKind` variant of its own needs an
+  arm in `src/scaffold/inc_split.rs`, which this change could not edit) and
+  `Statement::add_fragments` / `AddFragments::groups` reproduce the regex; the index stores
+  it as kind `addfragments` with an `addfragments` edge whose target is always unresolved
+  (the files follow from the evaluated fragments variable, never from the file alone). The
+  replay does the above at the statement's place, with these differences: `BBLAYERS` is
+  the workspace's layer list (canonical roots, the `LAYERDIR` gap); the
+  `BBFILES_PRIORITIZED` step of `get_file_layer` is skipped (a `.conf` never matches a
+  `.bb` glob in practice); a fatal error, an unknown fragment, a fragment list that needs
+  python or undefined variables, and the directive on a release without it are
+  `ReplayNotes::references` entries (`RefProblem::Fatal`, `NotFound`, `Python` /
+  `Undefined`, `NotInRelease`) and the replay goes on; when the list cannot be expanded,
+  the variables of the built-in map are flagged (`ReplayNotes::unresolved_vars`: their
+  values carry the fragments variable in `unresolved`). A `machine` / `distro` given to the
+  evaluator wins over a built-in fragment and does not count as an earlier assignment.
+
 ## Finding files
 
 - `BBPATH` is the search path: by convention each `layer.conf` does `BBPATH .= ":${LAYERDIR}"`,
@@ -363,16 +455,30 @@ Verified (T1.4) against BitBake `master` (commit `5495a547`, 2026-11-16), and re
   are compared, never directories.
 - **`BBFILES` expansion** (`cooker.py` `collect_bbfiles`): the words of `BBFILES` are sorted
   (stably) by the priority of the collection whose `BBFILE_PATTERN` matches the glob text,
-  lowest first; each word is used as is when the path exists, otherwise expanded with
-  `glob.glob` (not recursive; `*` does not match a leading `.`) and sorted; a directory match
-  is walked for `.bb` / `.bbappend`; duplicates are dropped (first kept); `BBMASK` regexes
-  are applied afterwards. The `.bbappend` files are kept in this order, which is the order
-  `get_file_appends` returns them in, so appends apply **lowest layer priority first** (the
-  highest priority layer has the last word), ties in `BBFILES` order. The matches of one
-  glob are sorted **as strings** (`sorted(globbed)`, `cooker.py:1894` in 2.18), so
-  `optee-ftpm/optee-os_%.bbappend` comes before `optee/optee-os_%.bbappend` (`-` < `/`);
-  a path-component sort gives the opposite. Confirmed against `bitbake-layers
-  show-appends` by T9.2 (BitBake 2.18.0, meta-arm `673e8d7c`; `tests/fixtures/outputs/live/kas-shell-show-appends.out`).
+  lowest first; a word that is a directory (`os.path.isdir`) is walked for `.bb` /
+  `.bbappend` (`find_bbfiles`, `os.walk` order); any other word is expanded with
+  `glob.glob` (not recursive; `*` does not match a leading `.`), a word that matches nothing
+  but exists is kept as is, and the matches are taken in `sorted(globbed)` order; duplicates
+  are dropped (first kept); `BBMASK` regexes are applied afterwards and only names ending in
+  `.bb` / `.bbappend` are kept (a directory a glob matches is not walked). The `.bbappend`
+  files are kept in this order, which is the order `get_file_appends` returns them in, so
+  appends apply **lowest layer priority first** (the highest priority layer has the last
+  word), ties in `BBFILES` order.
+- **The sort is a string sort** (verified, w5 fix of differential bug 2, BitBake 2.18.0
+  `lib/bb/cooker.py` `CookerCollectFiles.collect_bbfiles`, `for g in sorted(globbed)`):
+  Python compares `str` by code point, so `-` (U+002D) sorts before `/` (U+002F) and
+  `.../recipes-x/foo-bar/a_%.bbappend` comes before `.../recipes-x/foo/a_%.bbappend`; the
+  `foo/` append is applied last. A `Path` comparison (component by component) gives the
+  opposite. sous-chef compares the path strings by code point (`resolve::py_str_cmp`); a
+  byte that is not valid UTF-8 counts as `U+DC00 + byte`, as Python's `surrogateescape`
+  decoding of file names makes it (exact for single invalid bytes; for a longer invalid
+  sequence Rust's and Python's decoders agree on which bytes are invalid as both follow
+  the Unicode "maximal subpart" rule, not separately checked). The same order breaks ties
+  between recipe files of one layer in provider selection and `query::find_recipes`.
+  `find_bbfiles` (a directory in `BBFILES`) is not sorted by BitBake; sous-chef sorts it the
+  same way for determinism.
+  Confirmed against `bitbake-layers show-appends` by T9.2 (BitBake 2.18.0, meta-arm
+  `673e8d7c`): `optee-ftpm/optee-os_%.bbappend` comes before `optee/optee-os_%.bbappend`.
 - **`BBPATH`** is whatever the configuration leaves in the variable: OE layers usually do
   `BBPATH .= ":${LAYERDIR}"` but some prepend (`BBPATH =. "${LAYERDIR}:"`), so sous-chef reads
   the value from `bblayers.conf` and the layer confs instead of assuming the layer order
@@ -380,6 +486,22 @@ Verified (T1.4) against BitBake `master` (commit `5495a547`, 2026-11-16), and re
 
 sous-chef differences: only files inside the workspace (layer roots and the build directory)
 are ever found; `BBMASK` is not applied by `recipe_files`.
+
+**A `.bb` or `.bbappend` that no `BBFILES` glob matches** (verified, w5 fix of differential
+bug 4, BitBake 2.18.0 `lib/bb/cooker.py`): BitBake knows only the files `collect_bbfiles`
+returns; recipe names, providers (`bb.providers` over the parsed recipes) and
+`get_file_appends` all start from that list, so such a `.bb` is never a recipe for a name
+(`bitbake -e example` for OE-core's `meta/lib/bblayers/templates/example.bb`: "Nothing
+PROVIDES 'example'") and such a `.bbappend` applies to nothing. `matchFiles`, used for
+`bitbake -b <file>`, takes any existing path (`os.stat(bf)` succeeds: `return [bf]`), so a
+file named directly is still parsed, with the collected appends only. sous-chef keeps the
+file in the index (`item`, `search`, `layers` show it) and marks it
+(`files.not_collected = 'bbfiles'`, set with the edges from `resolve::recipe_files`);
+`query::find_recipes`, `recipe_names_like`, `files_providing` and
+`providers::recipes_using` leave it out, it takes part in no `bbappend` edge, and an
+evaluation addressed to it by path (`layer:path`) adds the note "not matched by any layer's
+BBFILES" (`ReplayNotes::target_notes`). A file `BBMASK` masks would be another value of the
+same column (not implemented: `BBMASK` is evaluated configuration).
 
 **A bbappend that matches no recipe** (checked by T4.3 in `cooker.py`
 `show_appends_with_no_recipes`, master and branches `2.0` and `2.8`): BitBake stops with a
@@ -508,8 +630,10 @@ Configuration, once:
 1. `conf/bblayers.conf`
 2. every layer's `conf/layer.conf`, in `BBLAYERS` order
 3. `conf/bitbake.conf` (found on `BBPATH`), which itself includes, in the order written in
-   that file: `conf/site.conf`, `conf/auto.conf`, `conf/local.conf`, the machine conf
-   `conf/machine/${MACHINE}.conf`, the distro conf `conf/distro/${DISTRO}.conf`, and others.
+   that file: `conf/site.conf`, `conf/auto.conf`, `conf/toolcfg.conf` (Wrynose),
+   `conf/local.conf`, the `addfragments` directive (Walnascar and later; see "Configuration
+   fragments"), the machine conf `conf/machine/${MACHINE}.conf`, the distro conf
+   `conf/distro/${DISTRO}.conf`, and others.
    **Follow the includes as written; do not hard-code the list.**
 4. classes named in `INHERIT`, plus `base.bbclass`
 
@@ -530,6 +654,17 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
 `data_smart.py` `expandVarref`) and OE-Core `master` (`meta/conf/bitbake.conf`,
 `meta/classes-global/base.bbclass`). This is what `src/eval/replay.rs` reproduces:
 
+- **`BBPATH` from the environment** (verified, w5, BitBake 2.18.0 `lib/bb/cookerdata.py`
+  `findTopdir` and `lib/bb/data.py` `inheritFromOS`; OE-core `scripts/oe-buildenv-internal`
+  line 82, `BBPATH=$BUILDDIR` / `export BBPATH`, sourced by `oe-init-build-env` and by
+  bitbake-setup's `init-build-env`; the live curl dump shows `from env data.py:105
+  [inheritFromOS]` as the first `BBPATH` operation): BitBake starts with `BBPATH` = the build
+  directory. A bitbake-setup `bblayers.conf` sets only `BBLAYERS`, so this is how
+  `include conf/site.conf`, `conf/toolcfg.conf` and `conf/local.conf` in `bitbake.conf` find
+  the build directory's files. sous-chef seeds `BBPATH` with the build directory in the
+  replay and in `layers::read_bblayers` (so the index edges agree); a `BBPATH = ...` in
+  `bblayers.conf` replaces it, a `?=` keeps it (kas writes `BBPATH ?= "${TOPDIR}"`, the same
+  value).
 - **Configuration order.** `TOPDIR` = the directory above `conf/bblayers.conf`; parse
   `bblayers.conf`; for each `BBLAYERS` entry (trailing `/` stripped, *not* normalised): set
   `LAYERDIR` and `LAYERDIR_RE` (`re.escape`), parse `<layer>/conf/layer.conf`, then
@@ -567,7 +702,31 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
   show-appends` by T9.2 (see "Finding files" for the string sort of ties).
 - **Finalisation** (`ast.finalize`): deferred inherits (`__BBDEFINHERITS`, first in first
   out, including ones added meanwhile), event handler registration, `expandKeys`, then
-  anonymous python (`runAnonFuncs`), then task processing.
+  anonymous python (`runAnonFuncs`), then `handleVirtRecipeProviders` (BitBake 2.12 and
+  later), then task processing (`bb.build.add_tasks`).
+- **Recipe virtual providers** (verified, w5 fix of differential bug 3, BitBake 2.18.0
+  `lib/bb/parse/ast.py` `handleVirtRecipeProviders`, called from `finalize` right after
+  `runAnonFuncs` and before `add_tasks`; present on branches `2.12`, `2.16`, `2.18`, absent
+  on `2.10`; added by `fb119c788`, 2025-01-21): `depends = (getVar("DEPENDS") or
+  "").split()`, `virtprovs = (getVar("BB_RECIPE_VIRTUAL_PROVIDERS") or "").split()`; every
+  word of `depends` that is in `virtprovs` becomes `getVar("PREFERRED_PROVIDER_" + word)`
+  (empty or unset: `bb.fatal("Error, recipe virtual provider PREFERRED_PROVIDER_%s not
+  set")`); then `setVar("DEPENDS", " ".join(newdeps))`, a plain post-parse `setVar`, so the
+  `:append` / `:prepend` / `:remove` lists and the active override variants are dropped
+  and the words are joined with single spaces. The same is done to the recipe part of each
+  `r:t` entry of the `depends` flag of every task in `__BBTASKS`. Only `DEPENDS` and the
+  task `depends` flags change (not `RDEPENDS`, not `PROVIDES`). OE-core (Wrynose) sets
+  `BB_RECIPE_VIRTUAL_PROVIDERS` to the cross toolchain virtuals (`virtual/cross-cc
+  virtual/cross-c++ virtual/cross-binutils` and the `nativesdk-` ones), whose
+  `PREFERRED_PROVIDER_*` are per `TARGET_ARCH`. sous-chef (`replay::virtual_recipe_providers`,
+  `Feature::RecipeVirtualProviders`) does the `DEPENDS` part after `expand_keys` (it does not
+  run anonymous python, so the rewrite sees `DEPENDS` without what python would add, and
+  the value stays flagged when it was): the new value is stored as a plain assignment whose
+  history entry points at the `PREFERRED_PROVIDER_*` assignment used, with a note naming
+  each rewritten word (`ReplayNotes::var_notes`). Not reproduced: the task `depends` flags;
+  the whitespace normalisation when no word is replaced (the value then differs from
+  BitBake's in whitespace only); `DEPENDS` unset becoming `""`. A missing provider is a
+  reference issue (`RefProblem::Fatal`) and the word is kept.
 - **Inherit** (`BBHandler.inherit`): the argument is expanded and split; a word listed in
   `BB_DEFER_BBCLASSES` is deferred (unless already deferred); a class file in
   `__inherit_cache` is not parsed again. Not found is a parse error.
@@ -1029,6 +1188,20 @@ file name, the layer order. `src/workspace/kas.rs` implements what follows.
   `isar-rootless` `ISAR_ROOTLESS ?= "1"`.
 - The build directory gets `CACHEDIR.TAG`, whose last line is `# kas build directory`
   (observed; the other lines are the cache-directory-tag signature and comments).
+- **Before the first checkout** (no build directory, so no `local.conf`) the evaluator
+  stands in for these two lines (w5, item 5 of the differential fixes): after the layer
+  confs and before `conf/bitbake.conf` it gives `MACHINE` and `DISTRO` the weak defaults
+  `KasProject::machine_or_default` / `distro_or_default` (no history entry), so any value
+  the configuration sets wins, as over kas's `??=`; when the final value is that default,
+  the evaluation says so (`ReplayNotes::target_notes`: `MACHINE = "board1" from the kas file
+  kas/board.yaml:5 ...`). Placing it before `bitbake.conf` instead of at `local.conf`'s
+  place differs from kas only when a `??=` for them comes between the layer confs and
+  `local.conf` (a later `??=` beats an earlier one). With a build directory nothing is
+  added: kas wrote `local.conf`.
+- **No machine at all.** When neither the configuration (including fragments and the kas
+  defaults) nor the caller sets `MACHINE`, the evaluation carries the note "no MACHINE is
+  set ... machine-specific values are not applied" (`ReplayNotes::target_notes`, printed by
+  `var`, `overrides`, `deps` and `recipe`).
 
 **Directories and environment** (environment-variables page; `context.py`).
 
@@ -1107,6 +1280,9 @@ and must not be used to report an error. No row is marked *verify* at present.
 | `IncludeAll` | the `include_all` directive | 5.2 walnascar (BitBake 2.12) | (current) | BitBake release branches, recorded under "Directives" (T1.2) |
 | `UnpackDir` | `do_unpack` unpacks into `UNPACKDIR` (`${WORKDIR}/sources-unpack`), not `WORKDIR` | 5.1 styhead | (current) | Yocto migration guide 5.1 |
 | `WorkdirAsSourceDir` | `S = "${WORKDIR}"` is accepted | 4.0 kirkstone (floor) | 5.0 scarthgap | Yocto migration guide 5.1 ("If a recipe has S set to be WORKDIR, this is no longer supported, and an error will be issued.") |
+| `AddFragments` | the `addfragments` directive (three-argument form) | 5.2 walnascar (BitBake 2.12) | (current) | BitBake `ConfHandler.py` `__addfragments_regexp__` and `ast.py` `AddFragmentsNode`: absent on branch `2.10` and tag `yocto-5.1.4`, present on branch `2.12` (`ac0973009`) and tag `yocto-5.2.4`; added by `f68774670` (see "Configuration fragments") |
+| `BuiltinFragments` | `addfragments` takes a fourth argument, the built-in fragments variable (`machine/x` sets `MACHINE`); the three-argument form is an unparsed line | 5.3 whinlatter (BitBake 2.16) | (current) | `3b9d7bea9` "parse/ast: add support for 'built-in' fragments", first in tag `yocto-5.3`; the four-group regex on branches `2.16` (`713fbbdb9`) and `2.18`, the three-group one on `2.12` and `yocto-5.2.4` |
+| `RecipeVirtualProviders` | `DEPENDS` words in `BB_RECIPE_VIRTUAL_PROVIDERS` are replaced with `PREFERRED_PROVIDER_<word>` at finalisation | 5.2 walnascar (BitBake 2.12) | (current) | `ast.py` `handleVirtRecipeProviders`: absent on branch `2.10`, present on `2.12`, `2.16`, `2.18`; added by `fb119c788` "parse/ast: Add support for BB_RECIPE_VIRTUAL_PROVIDERS" (2025-01-21, in tag `2.12.0`) (see "Replay") |
 | `PrInWorkdir` | `WORKDIR` ends in `${EXTENDPE}${PV}-${PR}` (later: `${PV}`) | 4.0 kirkstone (floor) | 4.2 mickledore | OE-core `meta/conf/bitbake.conf` on branches `kirkstone`, `langdale`, `mickledore` (`.../${PN}/${EXTENDPE}${PV}-${PR}`) and `nanbield`, `scarthgap` (`.../${PN}/${PV}`); Yocto migration guide 4.3, "Versioning changes" ("PE and PR are no longer included in the work directory path") |
 
 Details:

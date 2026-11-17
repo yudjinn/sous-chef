@@ -175,12 +175,17 @@ pub fn recipe_target(
     })
 }
 
-/// Warnings from the replay that bear on `name`: anonymous python (opaque or not) and
-/// references the replay could not follow.
+/// Warnings from the replay that bear on `name`: the notes on the evaluation as a whole
+/// (`ReplayNotes::target_notes`: a recipe file BitBake does not collect, where the machine
+/// came from, no `MACHINE`), anonymous python (opaque or not) and references the replay
+/// could not follow.
 pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
     let notes = ds.replay();
-    let mut out = Vec::new();
+    let mut out = notes.target_notes.clone();
     let base = name.split(':').next().unwrap_or(name).to_string();
+    if let Some(v) = notes.var_notes.get(&base) {
+        out.extend(v.iter().cloned());
+    }
     let opaque: Vec<&eval::AnonPython> = notes.anonymous.iter().filter(|a| a.opaque).collect();
     let naming: Vec<&eval::AnonPython> = notes
         .anonymous
