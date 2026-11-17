@@ -12,7 +12,8 @@
 //! - release detection ([`crate::release`]) and each layer's `LAYERSERIES_COMPAT`;
 //! - `org/layer-conf`'s checks ([`org_layer_conf::layer_problems`]), the `BBLAYERS` order
 //!   checks ([`layers_tool::order_problems`], the rows `layers show=compat` shows), the
-//!   `layers` tool's `appends` view (bbappends `BBFILES` does not collect),
+//!   rows of the `layers` tool's `appends` view ([`layers_tool::append_rows`]: bbappends
+//!   `BBFILES` does not collect, or collects only through `BBFILES_DYNAMIC`),
 //!   [`query::shadowed`] and [`query::orphan_appends`];
 //! - every enabled lint rule over every layer, as `sous-chef lint --all` ([`lint::run`]);
 //! - the index's parse and resolution results (unparsed statements, unresolved `include` /
@@ -43,7 +44,6 @@ use crate::lint::{self, Finding, Severity};
 use crate::mcp::Ctx;
 use crate::mcp::tools::layers as layers_tool;
 use crate::release::Release;
-use crate::render::{Format, JsonTable, unescape_cell};
 use crate::types::FileKind;
 use crate::workspace::{BUILD_LAYER, Workspace, kas, layers};
 
@@ -487,49 +487,23 @@ pub struct NotChecked {
 // ---------------------------------------------------------------------------------------
 // Building
 
-/// Builds the report for the workspace of `ctx`. Refreshes the index, calls the `layers`
-/// tool's `appends` view, then assembles the rest with the index locked.
+/// Builds the report for the workspace of `ctx`: refreshes the index, then assembles the
+/// report with the index locked.
 pub async fn build(ctx: &Ctx, opts: &Options) -> Result<Audit> {
     let root = canonical_dir(&opts.root)?;
     opts.say("refreshing the index");
-    {
-        let mut index = ctx.index.lock().await;
-        index.refresh(&ctx.workspace)?;
-    }
-    opts.say("reading the layers view (appends)");
-    let appends = view(ctx, layers_tool::Show::Appends).await;
-    let index = ctx.index.lock().await;
-    let views = Views { appends };
-    assemble(&ctx.workspace, &index, &ctx.config, &root, opts, &views)
+    let mut index = ctx.index.lock().await;
+    index.refresh(&ctx.workspace)?;
+    assemble(&ctx.workspace, &index, &ctx.config, &root, opts)
 }
 
-/// What the `layers` tool's views returned (or why they failed).
-struct Views {
-    appends: std::result::Result<JsonTable, String>,
-}
-
-async fn view(ctx: &Ctx, show: layers_tool::Show) -> std::result::Result<JsonTable, String> {
-    let out = layers_tool::run(
-        ctx,
-        layers_tool::Args {
-            show,
-            budget_tokens: Some(usize::MAX / 8),
-            format: Some(Format::Json),
-        },
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    serde_json::from_str(&out).map_err(|e| e.to_string())
-}
-
-/// Everything after the views, on a refreshed index.
+/// Everything after the refresh.
 fn assemble(
     ws: &Workspace,
     index: &Index,
     cfg: &Config,
     root: &Path,
     opts: &Options,
-    views: &Views,
 ) -> Result<Audit> {
     let paths = Paths::new(root);
     opts.say("looking for layers under the root and reading git facts");
@@ -566,7 +540,7 @@ fn assemble(
         .map(|l| l.name.clone())
         .chain(std::iter::once(BUILD_LAYER.to_string()))
         .collect();
-    let structure = structure(ws, index, views, &report, &own)?;
+    let structure = structure(ws, index, &report, &own)?;
     let lint = lint_section(ws, &report, &own);
     opts.say("collecting parse and resolution problems");
     let parse = parse_section(ws, index, &own)?;
@@ -1373,7 +1347,6 @@ const STRUCTURE_RULES: &[&str] = &["org/append-wildcard-broad", "org/duplicate-v
 fn structure(
     ws: &Workspace,
     index: &Index,
-    views: &Views,
     report: &lint::Report,
     own: &BTreeSet<String>,
 ) -> Result<Structure> {
@@ -1427,15 +1400,15 @@ fn structure(
         ));
     }
     let mut appends_not_collected = Vec::new();
-    match &views.appends {
-        Ok(t) => {
-            for row in &t.rows {
-                let cell = |i: usize| row.get(i).map(|c| unescape_cell(c)).unwrap_or_default();
-                let status = cell(3);
-                if status != "applies" && status != "no-match" {
+    match layers_tool::append_rows(index, ws) {
+        Ok((rows, _)) => {
+            for row in rows {
+                // Not collected, or collected only through `BBFILES_DYNAMIC`.
+                let collected = !matches!(row.state, layers_tool::AppendState::NotCollected(_));
+                if !collected || row.via_dynamic {
                     appends_not_collected.push(AppendStatus {
-                        append: cell(0),
-                        status,
+                        status: row.status(),
+                        append: row.bbappend,
                     });
                 }
             }
@@ -1443,7 +1416,7 @@ fn structure(
             appends_not_collected.dedup();
         }
         Err(e) => notes.push(format!(
-            "bbappends BitBake does not collect not listed: `layers show=appends` failed: {e}"
+            "bbappends BitBake does not collect not listed: reading the `layers show=appends` rows failed: {e}"
         )),
     }
     let lint: Vec<FindingOut> = report

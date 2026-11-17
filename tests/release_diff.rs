@@ -702,6 +702,208 @@ async fn large_diff_goes_to_a_handle() {
         }
     }
     assert_eq!(lines.join("\n"), stored.trim_end_matches('\n'));
+
+    // Asked for JSON: the handle holds JSON (the diff document), and paging through it
+    // with slice gives back a document that parses.
+    let mut a = args("v1", Some("HEAD"), 600, Some(Format::Json));
+    a.all = Some(true);
+    let out = diff_tool::run(&f.ctx, a).await.unwrap();
+    let t: JsonTable = serde_json::from_str(&out).unwrap();
+    assert!(t.more_over_budget > 0);
+    let hint = t
+        .notes
+        .iter()
+        .find(|n| n.starts_with("slice handle=h:"))
+        .unwrap();
+    let h = hint
+        .trim_start_matches("slice handle=")
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    assert!(
+        t.notes
+            .iter()
+            .any(|n| n.contains("JSON, schema sous-chef-diff/1")),
+        "{:?}",
+        t.notes
+    );
+    let stored = String::from_utf8(f.ctx.handles.get(&Handle(h.clone())).unwrap()).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stored).unwrap();
+    assert_eq!(v["schema"], "sous-chef-diff/1");
+    let mut lines: Vec<String> = Vec::new();
+    for page in 1.. {
+        let json = slice::run(
+            &f.ctx,
+            slice::Args {
+                handle: h.clone(),
+                lines: None,
+                grep: None,
+                context: None,
+                var: None,
+                failures: None,
+                page: Some(page),
+                budget_tokens: None,
+                format: Some(Format::Json),
+            },
+        )
+        .await
+        .unwrap();
+        let t: JsonTable = serde_json::from_str(&json).unwrap();
+        for row in &t.rows {
+            lines.push(render::unescape_cell(&row[1]));
+        }
+        if !t.notes.iter().any(|n| n.contains("; next: slice")) {
+            break;
+        }
+    }
+    let back: serde_json::Value = serde_json::from_str(&lines.join("\n")).unwrap();
+    assert_eq!(back, v);
+}
+
+/// A workspace whose upstream layer `meta-up` has `old_conf` as its `conf/layer.conf` at
+/// tag `v1`, and the standard one (`recipes-*/*/*.bb`) at `HEAD` and on disk. At `v1`
+/// `foo` and `bar` are under `old-recipes/`; at `HEAD` `foo` has moved to
+/// `recipes-core/` and `bar` stays where it was.
+fn bbfiles_repo(old_conf: &str) -> (tempfile::TempDir, PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = fs::canonicalize(tmp.path()).unwrap().join("ws");
+    let repo = root.join("upstream");
+    let up = repo.join("meta-up");
+    write(
+        &root.join("build/conf/bblayers.conf"),
+        "BBPATH = \"${TOPDIR}\"\nBBFILES ?= \"\"\nBBLAYERS ?= \"${TOPDIR}/../upstream/meta-up ${TOPDIR}/../meta-mine\"\n",
+    );
+    write(
+        &root.join("build/conf/local.conf"),
+        "MACHINE ?= \"qemux86\"\n",
+    );
+    write(&up.join("conf/layer.conf"), old_conf);
+    write(&up.join("conf/extra.inc"), "# nothing\n");
+    write(
+        &up.join("old-recipes/foo/foo_1.0.bb"),
+        "SUMMARY = \"Foo\"\nLICENSE = \"MIT\"\n",
+    );
+    write(
+        &up.join("old-recipes/bar/bar_1.0.bb"),
+        "SUMMARY = \"Bar\"\nLICENSE = \"MIT\"\n",
+    );
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-q", "-m", "release 1"]);
+    git(&repo, &["tag", "v1"]);
+    write(&up.join("conf/layer.conf"), &layer_conf("up", 5));
+    fs::create_dir_all(up.join("recipes-core/foo")).unwrap();
+    git(
+        &repo,
+        &[
+            "mv",
+            "meta-up/old-recipes/foo/foo_1.0.bb",
+            "meta-up/recipes-core/foo/foo_1.0.bb",
+        ],
+    );
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-q", "-m", "release 2"]);
+    write(
+        &root.join("meta-mine/conf/layer.conf"),
+        &layer_conf("mine", 10),
+    );
+    (tmp, root)
+}
+
+#[tokio::test]
+async fn old_recipes_are_collected_with_the_old_bbfiles() {
+    let old_conf = "BBPATH .= \":${LAYERDIR}\"\n\
+         BBFILES += \"${LAYERDIR}/old-recipes/*/*.bb\"\n\
+         BBFILE_COLLECTIONS += \"up\"\n\
+         BBFILE_PATTERN_up = \"^${LAYERDIR}/\"\n\
+         BBFILE_PRIORITY_up = \"5\"\n\
+         LAYERSERIES_COMPAT_up = \"wrynose\"\n";
+    let (_tmp, root) = bbfiles_repo(old_conf);
+    let f = fixture(&root);
+    let d = diff::build(
+        &f.ctx,
+        &Options {
+            all: true,
+            ..opts("v1", Some("HEAD"))
+        },
+    )
+    .await
+    .unwrap();
+    let status = |n: &str| d.recipes.iter().find(|r| r.name == n).map(|r| r.status);
+    // With the current BBFILES on both sides, foo would be "added" (old-recipes/ is not
+    // collected) and bar not listed at all.
+    assert_eq!(status("foo"), Some("changed"), "{:?}", d.recipes);
+    assert!(d.recipes.iter().find(|r| r.name == "foo").unwrap().moved);
+    assert_eq!(status("bar"), Some("removed"), "{:?}", d.recipes);
+    assert!(
+        !d.notes.iter().any(|n| n.contains("cannot be decided")),
+        "{:?}",
+        d.notes
+    );
+
+    // The working tree as `to` uses the current BBFILES there; v1 still its own.
+    let d = diff::build(
+        &f.ctx,
+        &Options {
+            all: true,
+            ..opts("v1", None)
+        },
+    )
+    .await
+    .unwrap();
+    let status = |n: &str| d.recipes.iter().find(|r| r.name == n).map(|r| r.status);
+    assert_eq!(status("foo"), Some("changed"));
+    assert_eq!(status("bar"), Some("removed"));
+}
+
+#[tokio::test]
+async fn undecidable_old_bbfiles_fall_back_with_a_note() {
+    let old_conf = "require conf/extra.inc\n\
+         BBFILES += \"${LAYERDIR}/old-recipes/*/*.bb\"\n\
+         BBFILE_COLLECTIONS += \"up\"\n\
+         BBFILE_PATTERN_up = \"^${LAYERDIR}/\"\n\
+         BBFILE_PRIORITY_up = \"5\"\n";
+    let (_tmp, root) = bbfiles_repo(old_conf);
+    let f = fixture(&root);
+    let d = diff::build(
+        &f.ctx,
+        &Options {
+            all: true,
+            ..opts("v1", Some("HEAD"))
+        },
+    )
+    .await
+    .unwrap();
+    let status = |n: &str| d.recipes.iter().find(|r| r.name == n).map(|r| r.status);
+    assert_eq!(status("foo"), Some("added"));
+    assert_eq!(status("bar"), None);
+    assert!(
+        d.notes.iter().any(|n| n.starts_with(
+            "BBFILES at v1 cannot be decided statically (conf/layer.conf includes conf/extra.inc)"
+        )),
+        "{:?}",
+        d.notes
+    );
+    // `?=` depends on what came before.
+    let (_tmp, root) = bbfiles_repo("BBFILES ?= \"${LAYERDIR}/old-recipes/*/*.bb\"\n");
+    let f = fixture(&root);
+    let d = diff::build(
+        &f.ctx,
+        &Options {
+            all: true,
+            ..opts("v1", Some("HEAD"))
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        d.notes
+            .iter()
+            .any(|n| n.contains("BBFILES ?= depends on what was set before")),
+        "{:?}",
+        d.notes
+    );
 }
 
 #[test]

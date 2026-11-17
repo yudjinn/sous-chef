@@ -14,9 +14,27 @@
 //! A second [`JobTable::start`] while one runs returns [`Started::AlreadyRunning`] with the
 //! running job.
 //!
-//! Cancellation ([`JobTable::cancel`]) terminates the job's process group: SIGTERM, then
-//! SIGKILL after [`crate::bitbake::env::KILL_GRACE`]. Unverified: whether a BitBake server
-//! started by the job detaches from the group and survives that.
+//! Cancellation ([`JobTable::cancel`]) terminates the job's process group
+//! ([`Supervised::terminate`]): SIGTERM, then SIGKILL after
+//! [`crate::bitbake::env::KILL_GRACE`], then a wait of up to
+//! [`crate::bitbake::env::GROUP_EXIT_WAIT`] until the group is empty; the job is recorded
+//! as cancelled only after that, so a job that is no longer running has no process left in
+//! its group (unless one outlived that wait). Unverified: whether a BitBake server started
+//! by the job detaches from the group and survives that.
+//!
+//! When the server exits (the client closes stdin, `serve` returns and `main` drops the
+//! tokio runtime), the task waiting for a running job is dropped with the runtime, and
+//! dropping its [`Supervised`] sends SIGKILL to the job's process group (and
+//! `kill_on_drop` to the leader); nothing waits for the group. A server killed by a signal
+//! runs no destructor: its job's group, a group of its own, keeps running. Either way the
+//! output file stays behind.
+//!
+//! Output files of a server that is gone are removed by the next server's first
+//! [`JobTable::start`] in that directory ([`remove_stale_outputs`]): a `<pid>-<n>.out` whose
+//! pid is not a live process and which was last modified more than [`STALE_AFTER`] ago. A
+//! file whose pid is alive is never removed (a reused pid keeps a stale file until that
+//! process exits); the age guards a server in another pid namespace sharing the cache
+//! directory, whose pid is not visible here.
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
@@ -135,6 +153,55 @@ impl Entry {
 struct Inner {
     next: u64,
     jobs: Vec<Entry>,
+    /// Output directories [`remove_stale_outputs`] has swept for this table.
+    swept: Vec<PathBuf>,
+}
+
+/// Output files older than this whose pid is not alive are removed (module docs). A job's
+/// file is written as its output arrives, so a running job's file is this old only after
+/// that long without output.
+pub const STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// The pid in a job output file name, `<pid>-<n>.out` (both decimal), else `None`.
+pub fn output_pid(name: &str) -> Option<u32> {
+    let (pid, n) = name.strip_suffix(".out")?.split_once('-')?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    (digits(pid) && digits(n))
+        .then(|| pid.parse().ok())
+        .flatten()
+}
+
+/// Removes from `dir` the job output files (`<pid>-<n>.out`) whose pid is not a live
+/// process ([`crate::bitbake::env::process_alive`]) and that were last modified more than
+/// `older_than` ago. Never a file of a live pid, of this process, or any other name. Returns
+/// the files removed; a missing directory is no error.
+pub fn remove_stale_outputs(dir: &Path, older_than: Duration) -> Vec<PathBuf> {
+    let mut removed = Vec::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return removed;
+    };
+    let me = std::process::id();
+    let now = SystemTime::now();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(pid) = name.to_str().and_then(output_pid) else {
+            continue;
+        };
+        if pid == me || crate::bitbake::env::process_alive(pid) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age > older_than);
+        if meta.is_file() && old && fs::remove_file(entry.path()).is_ok() {
+            removed.push(entry.path());
+        }
+    }
+    removed.sort();
+    removed
 }
 
 /// Table of background jobs, held in `mcp::Ctx`. Methods take `&self`; clones share the
@@ -183,6 +250,10 @@ impl JobTable {
         let args: Vec<&str> = spec.args.iter().map(String::as_str).collect();
         let mut cmd = env.command(&spec.program, &args)?;
         fs::create_dir_all(dir)?;
+        if !inner.swept.iter().any(|d| d == dir) {
+            remove_stale_outputs(dir, STALE_AFTER);
+            inner.swept.push(dir.to_path_buf());
+        }
         let n = inner.next + 1;
         let output = dir.join(format!("{}-{n}.out", std::process::id()));
         let file = File::create(&output)?;
@@ -281,8 +352,9 @@ impl JobTable {
         self.lock().jobs.iter().map(Entry::snapshot).collect()
     }
 
-    /// Asks a running job to stop (its process group is terminated). Returns the job as it
-    /// is now; see [`JobTable::wait`] for the end.
+    /// Asks a running job to stop: its process group is terminated (module docs), after
+    /// which the job is recorded as cancelled. Returns the job as it is now, still running;
+    /// see [`JobTable::wait`] for the end.
     pub fn cancel(&self, id: &str) -> Result<JobInfo> {
         let id = normalize_id(id);
         let inner = self.lock();
@@ -396,5 +468,62 @@ mod tests {
         let t = JobTable::new();
         assert!(t.running().is_none() && t.last().is_none() && t.get("1").is_none());
         assert!(matches!(t.cancel("1"), Err(Error::NotFound { .. })));
+    }
+
+    #[test]
+    fn output_file_names() {
+        assert_eq!(output_pid("1234-5.out"), Some(1234));
+        for bad in [
+            "1234.out",
+            "-5.out",
+            "1234-.out",
+            "12a4-5.out",
+            "1234-5.txt",
+            "x",
+        ] {
+            assert_eq!(output_pid(bad), None, "{bad}");
+        }
+    }
+
+    /// The pid of a child that has exited and been reaped: not a live process (unless the
+    /// system reuses it within the test, which a 4-million pid space makes unlikely).
+    #[cfg(unix)]
+    fn dead_pid() -> u32 {
+        let mut c = std::process::Command::new("true").spawn().unwrap();
+        let pid = c.id();
+        c.wait().unwrap();
+        assert!(!crate::bitbake::env::process_alive(pid));
+        pid
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stale_outputs_of_dead_servers_are_removed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        let old = SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60);
+        let put = |name: &str, age_old: bool| {
+            let p = d.join(name);
+            let f = File::create(&p).unwrap();
+            if age_old {
+                f.set_modified(old).unwrap();
+            }
+            p
+        };
+        let dead = dead_pid();
+        let me = std::process::id();
+        let parent = std::os::unix::process::parent_id();
+        let stale = put(&format!("{dead}-1.out"), true);
+        let fresh = put(&format!("{dead}-2.out"), false);
+        let mine = put(&format!("{me}-1.out"), true);
+        let live = put(&format!("{parent}-1.out"), true);
+        let other = put("notes-1.txt", true);
+        let removed = remove_stale_outputs(d, STALE_AFTER);
+        assert_eq!(removed, std::slice::from_ref(&stale));
+        assert!(!stale.exists());
+        for kept in [&fresh, &mine, &live, &other] {
+            assert!(kept.exists(), "{}", kept.display());
+        }
+        assert!(remove_stale_outputs(&d.join("missing"), STALE_AFTER).is_empty());
     }
 }

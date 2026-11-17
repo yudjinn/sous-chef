@@ -87,6 +87,38 @@ fn before_checkout_kas_mode_says_to_run_kas_checkout() {
     assert!(e.contains("kas is not on PATH"), "{e}");
 }
 
+#[test]
+fn a_repo_include_keeps_kas_mode_off() {
+    // kas shell -k still runs repo_setup_loop, which fetches and checks out the
+    // repositories `{repo, file}` includes name: sous-chef does not run kas then.
+    let p = Project::after();
+    fs::write(
+        p.path("kas/vendor.yaml"),
+        "header:\n  version: 11\n  includes:\n    - repo: meta-vendor\n      file: kas/vendor-extra.yaml\n",
+    )
+    .unwrap();
+    let cfg = sous_chef::config::Config {
+        kas: vec![p.path("kas/base.yaml"), p.path("kas/vendor.yaml")],
+        ..p.config()
+    };
+    let ws = Workspace::discover_in(&cfg, &sous_chef::workspace::kas::KasEnv::default()).unwrap();
+    assert_eq!(ws.kas.as_ref().unwrap().repo_includes, ["meta-vendor"]);
+    let host = HostEnv {
+        path: Some(kas_path()),
+        ..HostEnv::default()
+    };
+    match BbEnv::probe(&cfg, &ws, &host) {
+        Ok(env) => assert_ne!(env.mode(), "kas", "{env:?}"),
+        Err(e) => assert!(
+            e.contains("include files from repo meta-vendor")
+                && e.contains("still fetches and checks out"),
+            "{e}"
+        ),
+    }
+    // Without the include, the same checkout is kas mode.
+    assert_eq!(kas_env(&p).mode(), "kas");
+}
+
 #[tokio::test]
 async fn the_command_reaches_bitbake_with_its_argv() {
     let p = Project::after();

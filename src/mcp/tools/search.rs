@@ -77,8 +77,10 @@ const MAX_LIMIT: usize = 1000;
 /// Index hits fetched to count what `limit` cut (the marker is a lower bound beyond this).
 const COUNT_CAP: usize = 5000;
 
-/// Statement kinds in the index, plus the aliases `task` (`addtask`) and `def` (`pydef`).
-const KINDS: &[&str] = &[
+/// Every statement kind the scanner writes into `statements.kind` (`index::scan`), the
+/// values of the `kind` filter; the aliases `task` (`addtask`) and `def` (`pydef`) are
+/// accepted too.
+pub const KINDS: &[&str] = &[
     "assign",
     "function",
     "pydef",
@@ -90,6 +92,8 @@ const KINDS: &[&str] = &[
     "export_functions",
     "export",
     "unset",
+    "addfragments",
+    "addpylib",
     "unknown",
 ];
 

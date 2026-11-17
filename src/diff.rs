@@ -5,13 +5,17 @@
 //! Revisions are read with `git ls-tree` and `git cat-file --batch` (the working tree from
 //! disk, with the file list from `git ls-files`) into the real parser; nothing is checked
 //! out, nothing is written into the repository, nothing is fetched. Every git command is
-//! read-only, run with argv only, a timeout, no optional locks and the `GIT_DIR` family
-//! removed. A revision is validated before it reaches git (no leading `-`, no whitespace,
+//! read-only and goes through [`crate::gitcmd`] (argv only, a timeout, no optional locks,
+//! fsmonitor off, the `GIT_DIR` family removed). A revision is validated before it reaches git (no leading `-`, no whitespace,
 //! no `:`, no range) and resolved with `rev-parse --verify --end-of-options <rev>^{commit}`;
 //! only the full commit hash is passed on.
 //!
 //! - **Recipe identity.** A recipe is its `PN` from the file name (`index::scan::pn_pv`);
-//!   the `.bb` files a layer collects are those its current `BBFILES` globs match. Several
+//!   the `.bb` files a layer collects at a revision are those that revision's `BBFILES`
+//!   globs match: read from its `conf/layer.conf` (`${LAYERDIR}` replaced, the words the
+//!   file adds; the current workspace's when the file is unchanged, and also, with a note,
+//!   when the text cannot decide it: `?=`, an include, another variable), plus the
+//!   workspace's active `BBFILES_DYNAMIC` entries for the layer. Several
 //!   versions of one `PN`: equal versions pair first; then each remaining old version,
 //!   highest first (`query::vercmp`), pairs with the new version sharing the longest
 //!   version prefix (the highest on a tie); a pair with different versions is a version
@@ -22,7 +26,8 @@
 //!   from the file name). An include found elsewhere, or needing evaluation, is shown as
 //!   not compared. Classes are not part of a tree: changed classes are listed once.
 //! - **The diff** compares statements as written, never evaluated: assignments grouped by
-//!   variable (override variants and flags each their own key), functions and tasks by
+//!   variable (override variants and flags each their own key; a legacy `_` spelling is
+//!   keyed with its `:` form but never matches it, so a rewrite is a change), functions and tasks by
 //!   name with their bodies, `inherit`, other directives, and the `SRC_URI` entries word by
 //!   word (`parse::words`). Whitespace-only statement changes and files that differ only in
 //!   comments, whitespace or line positions are counted, not listed.
@@ -34,11 +39,9 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -48,7 +51,7 @@ use crate::index::{query, scan};
 use crate::mcp::Ctx;
 use crate::parse::{self, IncludeMode, Lang, ParsedFile, StatementKind, words};
 use crate::render::Table;
-use crate::types::{FileKind, LineSpan, Loc, VarRef};
+use crate::types::{AssignOp, FileKind, LineSpan, Loc, VarRef};
 use crate::workspace::{Layer, Workspace, resolve};
 
 /// The `schema` field of the JSON form; bumped when a field is renamed or removed.
@@ -276,126 +279,26 @@ pub struct FileCount {
 // ---------------------------------------------------------------------------------------
 // git
 
-// TODO: use the shared git helper once merged
+/// The release diff's use of [`crate::gitcmd`]: its timeouts, and the error type of this
+/// module.
 mod git {
     use super::*;
-
-    /// Removed from git's environment so the repository is the one `current_dir` names.
-    const GIT_ENV: &[&str] = &[
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_COMMON_DIR",
-        "GIT_NAMESPACE",
-        "GIT_CEILING_DIRECTORIES",
-        "GIT_CONFIG",
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_EXTERNAL_DIFF",
-        "GIT_PAGER",
-    ];
+    pub use crate::gitcmd::nul_fields;
 
     /// For short commands.
     pub const TIMEOUT: Duration = Duration::from_secs(20);
-    /// For `cat-file --batch` over a whole layer.
+    /// For `cat-file --batch` and `diff` over a whole layer.
     pub const BATCH_TIMEOUT: Duration = Duration::from_secs(120);
 
-    /// Runs a read-only git command in `dir`: argv only, stdin closed unless `input` is
-    /// given, no prompts, no optional locks, no fsmonitor, the `GIT_DIR` family removed,
-    /// killed after `timeout`. Its stdout when it exits 0, else the first line git wrote to
-    /// stderr.
-    pub fn run(
-        dir: &Path,
-        args: &[&str],
-        input: Option<Vec<u8>>,
-        timeout: Duration,
-    ) -> std::result::Result<Vec<u8>, String> {
-        let mut cmd = Command::new("git");
-        cmd.args(["--no-optional-locks", "-c", "core.fsmonitor=false"])
-            .args(args)
-            .current_dir(dir)
-            .stdin(if input.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .env("LC_ALL", "C");
-        for v in GIT_ENV {
-            cmd.env_remove(v);
-        }
-        let what = args.first().copied().unwrap_or("git");
-        let mut child = cmd.spawn().map_err(|e| format!("cannot run git: {e}"))?;
-        let writer = match (input, child.stdin.take()) {
-            (Some(data), Some(mut stdin)) => Some(thread::spawn(move || {
-                let _ = stdin.write_all(&data);
-            })),
-            _ => None,
-        };
-        let mut stdout = child.stdout.take().ok_or("git: no stdout")?;
-        let mut stderr = child.stderr.take().ok_or("git: no stderr")?;
-        let out_reader = thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = stdout.read_to_end(&mut buf);
-            buf
-        });
-        let err_reader = thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = stderr.read_to_end(&mut buf);
-            buf
-        });
-        let start = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break Some(status),
-                Ok(None) if start.elapsed() < timeout => thread::sleep(Duration::from_millis(2)),
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break None;
-                }
-            }
-        };
-        if let Some(w) = writer {
-            let _ = w.join();
-        }
-        let out = out_reader
-            .join()
-            .map_err(|_| "git: reading stdout failed")?;
-        let err = err_reader.join().unwrap_or_default();
-        match status {
-            Some(s) if s.success() => Ok(out),
-            Some(_) => {
-                let msg = String::from_utf8_lossy(&err);
-                let line = msg.lines().map(str::trim).find(|l| !l.is_empty());
-                Err(format!(
-                    "git {what} failed: {}",
-                    line.unwrap_or("no message")
-                ))
-            }
-            None => Err(format!(
-                "git {what} timed out after {} s",
-                timeout.as_secs()
-            )),
-        }
+    /// [`crate::gitcmd::run`] without input; stdout, or why git failed.
+    pub fn run(dir: &Path, args: &[&str], timeout: Duration) -> Result<Vec<u8>> {
+        crate::gitcmd::run(dir, args, None, timeout).map_err(|msg| Error::Invalid { msg })
     }
 
-    /// [`run`] with the short timeout, stdout as text.
+    /// [`crate::gitcmd::run`] with the short timeout, stdout as text, the reason on failure.
     pub fn text(dir: &Path, args: &[&str]) -> std::result::Result<String, String> {
-        run(dir, args, None, TIMEOUT).map(|b| String::from_utf8_lossy(&b).into_owned())
-    }
-
-    /// NUL-separated output split into its fields.
-    pub fn nul_fields(bytes: &[u8]) -> Vec<String> {
-        bytes
-            .split(|b| *b == 0)
-            .filter(|f| !f.is_empty())
-            .map(|f| String::from_utf8_lossy(f).into_owned())
-            .collect()
+        crate::gitcmd::run(dir, args, None, TIMEOUT)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
     }
 }
 
@@ -497,10 +400,8 @@ impl Side {
         let out = git::run(
             dir,
             &["ls-tree", "-r", "-z", "--end-of-options", commit],
-            None,
             git::TIMEOUT,
-        )
-        .map_err(|e| Error::Invalid { msg: e })?;
+        )?;
         let mut files = BTreeMap::new();
         for entry in git::nul_fields(&out) {
             // `<mode> SP <type> SP <object> TAB <path>`
@@ -527,10 +428,8 @@ impl Side {
         let out = git::run(
             dir,
             &["ls-files", "-z", "-c", "-o", "--exclude-standard"],
-            None,
             git::TIMEOUT,
-        )
-        .map_err(|e| Error::Invalid { msg: e })?;
+        )?;
         let mut files = BTreeMap::new();
         for path in git::nul_fields(&out) {
             if dir.join(&path).is_file() {
@@ -581,41 +480,21 @@ impl Side {
             }
             return Ok(());
         }
-        let mut input = Vec::new();
+        let mut oids = Vec::new();
         let mut order = Vec::new();
         for p in wanted {
             if let Some(Some(oid)) = self.files.get(p) {
-                input.extend_from_slice(oid.as_bytes());
-                input.push(b'\n');
+                oids.push(oid.as_str());
                 order.push(p.clone());
             }
         }
-        let out = git::run(
-            &self.dir,
-            &["cat-file", "--batch"],
-            Some(input),
-            git::BATCH_TIMEOUT,
-        )
-        .map_err(|e| Error::Invalid { msg: e })?;
-        let mut pos = 0;
-        for p in order {
-            let Some(nl) = out[pos..].iter().position(|b| *b == b'\n') else {
-                break;
-            };
-            let header = String::from_utf8_lossy(&out[pos..pos + nl]).into_owned();
-            pos += nl + 1;
-            let mut parts = header.split(' ');
-            let (_oid, kind, size) = (parts.next(), parts.next(), parts.next());
-            let Some(size) = size.and_then(|s| s.parse::<usize>().ok()) else {
-                // `<oid> missing`
-                continue;
-            };
-            let end = (pos + size).min(out.len());
-            if kind == Some("blob") {
-                let text: Arc<str> = Arc::from(parse::lexer::decode(&out[pos..end]).as_ref());
+        let blobs = crate::gitcmd::cat_file_batch(&self.dir, &oids, git::BATCH_TIMEOUT)
+            .map_err(|msg| Error::Invalid { msg })?;
+        for (p, blob) in order.into_iter().zip(blobs) {
+            if let Some(bytes) = blob {
+                let text: Arc<str> = Arc::from(parse::lexer::decode(&bytes).as_ref());
                 self.texts.insert(p, text);
             }
-            pos = end + 1;
         }
         Ok(())
     }
@@ -663,17 +542,24 @@ fn parent_dir(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(d, _)| d)
 }
 
-/// Whether the layer's `BBFILES` globs (as the workspace has them now, with the active
-/// `BBFILES_DYNAMIC` entries) collect the `.bb` at `rel`. No glob: every `.bb` counts.
+/// Whether the layer's `BBFILES` globs (as the workspace has them now, or as a revision's
+/// `conf/layer.conf` sets them: [`collector_at`]), with the active `BBFILES_DYNAMIC`
+/// entries of the workspace, collect the `.bb` at `rel`. No glob: every `.bb` counts.
+#[derive(Debug, Clone)]
 struct Collector {
     root: PathBuf,
     globs: Vec<resolve::DynamicEntry>,
 }
 
 impl Collector {
+    /// With the layer's current `BBFILES`.
     fn new(ws: &Workspace, layer: &Layer) -> Collector {
-        let mut globs: Vec<resolve::DynamicEntry> = layer
-            .bbfiles
+        Collector::with_bbfiles(ws, layer, &layer.bbfiles)
+    }
+
+    /// With `bbfiles` (absolute globs) as the layer's `BBFILES`.
+    fn with_bbfiles(ws: &Workspace, layer: &Layer, bbfiles: &[String]) -> Collector {
+        let mut globs: Vec<resolve::DynamicEntry> = bbfiles
             .iter()
             .map(|g| resolve::DynamicEntry {
                 layer: layer.name.clone(),
@@ -698,6 +584,125 @@ impl Collector {
     fn collects(&self, rel: &str) -> bool {
         let abs = self.root.join(rel);
         self.globs.is_empty() || self.globs.iter().any(|g| g.matches(&abs))
+    }
+}
+
+/// The `BBFILES` words a `conf/layer.conf` text adds, with `${LAYERDIR}` replaced by `root`
+/// (as `cookerdata` does once the file is read: `expandVarref('LAYERDIR')`), when that can
+/// be decided from the text alone; otherwise why not. Only what decides membership is kept
+/// (BitBake's `collect_bbfiles` takes every word of `BBFILES`), so `=+` and `:prepend` add
+/// words like `+=` and `:append`; `=` and `:=` replace what this file added before. Not
+/// decided: `?=` / `??=` (they depend on what `bblayers.conf` or an earlier layer set),
+/// `:remove`, any other override or the legacy `_` syntax, `unset BBFILES`, `.=` / `=.`
+/// that glue onto a word, a reference to any variable other than `LAYERDIR`, and an
+/// `include` / `require` (the included file could set `BBFILES`).
+fn static_bbfiles(text: &str, root: &Path) -> std::result::Result<Vec<String>, String> {
+    let parsed = parse::parse(text);
+    let root = root.to_string_lossy();
+    let mut words: Vec<String> = Vec::new();
+    for st in &parsed.statements {
+        match &st.kind {
+            StatementKind::Include { path, .. } => {
+                return Err(format!("conf/layer.conf includes {path}"));
+            }
+            StatementKind::Unset { name, flag: None } if name == "BBFILES" => {
+                return Err("conf/layer.conf unsets BBFILES".into());
+            }
+            StatementKind::Unknown { text } if text.contains("BBFILES") => {
+                return Err(format!(
+                    "conf/layer.conf has a line the parser does not know: {}",
+                    text.trim()
+                ));
+            }
+            StatementKind::Assign { var, op, value, .. }
+                if var.base == "BBFILES" && var.flag.is_none() =>
+            {
+                let op_text = op.as_str();
+                if var.legacy_syntax {
+                    return Err(format!(
+                        "BBFILES is set with the legacy override syntax ({op_text})"
+                    ));
+                }
+                let by_override = match var.overrides.as_slice() {
+                    [] => false,
+                    [o] if o == "append" || o == "prepend" => true,
+                    _ => {
+                        return Err(format!(
+                            "BBFILES:{} {op_text} needs evaluation",
+                            var.overrides.join(":")
+                        ));
+                    }
+                };
+                let expanded = value.replace("${LAYERDIR}", &root);
+                if expanded.contains("${") {
+                    return Err(format!(
+                        "BBFILES {op_text} \"{value}\" refers to a variable other than LAYERDIR"
+                    ));
+                }
+                let new: Vec<String> = expanded.split_whitespace().map(str::to_string).collect();
+                match op {
+                    AssignOp::Default | AssignOp::WeakDefault => {
+                        return Err(format!(
+                            "BBFILES {op_text} depends on what was set before this layer"
+                        ));
+                    }
+                    AssignOp::AppendDot
+                        if !new.is_empty() && !expanded.starts_with(char::is_whitespace) =>
+                    {
+                        return Err(format!(
+                            "BBFILES {op_text} joins onto a word without a space"
+                        ));
+                    }
+                    AssignOp::PrependDot
+                        if !new.is_empty() && !expanded.ends_with(char::is_whitespace) =>
+                    {
+                        return Err(format!(
+                            "BBFILES {op_text} joins onto a word without a space"
+                        ));
+                    }
+                    AssignOp::Set | AssignOp::Immediate if !by_override => words = new,
+                    _ => words.extend(new),
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(words)
+}
+
+/// The collector for a revision's side: the current one when its `conf/layer.conf` is the
+/// one on disk; else one with the `BBFILES` that file sets ([`static_bbfiles`]), or the
+/// current one when that cannot be decided, with a note saying so.
+fn collector_at(
+    side: &mut Side,
+    ws: &Workspace,
+    layer: &Layer,
+    current: &Collector,
+    rev: &str,
+    notes: &mut Vec<String>,
+) -> Result<Collector> {
+    const CONF: &str = "conf/layer.conf";
+    side.read(&[CONF.to_string()])?;
+    let Some(text) = side.texts.get(CONF).cloned() else {
+        notes.push(format!(
+            "the layer has no {CONF} at {rev}; recipes there are collected with the current BBFILES"
+        ));
+        return Ok(current.clone());
+    };
+    let on_disk = fs::read(layer.root.join(CONF))
+        .ok()
+        .map(|b| parse::lexer::decode(&b).into_owned());
+    if on_disk.as_deref() == Some(&*text) {
+        return Ok(current.clone());
+    }
+    match static_bbfiles(&text, &layer.root) {
+        Ok(words) => Ok(Collector::with_bbfiles(ws, layer, &words)),
+        Err(why) => {
+            notes.push(format!(
+                "BBFILES at {rev} cannot be decided statically ({why}); recipes there are collected with the current BBFILES"
+            ));
+            Ok(current.clone())
+        }
     }
 }
 
@@ -1040,12 +1045,30 @@ struct Item {
     /// Set by an `:remove` (for `SRC_URI` entries).
     remove: bool,
     flag: bool,
+    /// Written with the legacy `_` override syntax (`VarRef.legacy_syntax`). `key` is the
+    /// `:` form either way, so the two spellings group together; they never match, so a
+    /// rewrite from one to the other is a change.
+    legacy: bool,
+    /// `key` as written (`DEPENDS_append +=` for a legacy statement).
+    written: String,
 }
 
+/// The name with its overrides in the `:` form, and its flag.
 fn lhs(var: &VarRef) -> String {
+    lhs_with(var, ':')
+}
+
+/// [`lhs`] as written: with `_` between the overrides of a legacy-syntax name (the parser
+/// keeps the overrides, not where the `_` part ended; a name mixing both spellings is
+/// shown all in `_`).
+fn written_lhs(var: &VarRef) -> String {
+    lhs_with(var, if var.legacy_syntax { '_' } else { ':' })
+}
+
+fn lhs_with(var: &VarRef, sep: char) -> String {
     let mut s = var.base.clone();
     for o in &var.overrides {
-        s.push(':');
+        s.push(sep);
         s.push_str(o);
     }
     if let Some(f) = &var.flag {
@@ -1077,6 +1100,7 @@ fn items_of(tree: &Tree, layer: &str) -> Vec<Item> {
             let item = |kind, group: &str, key: String, raw: String| Item {
                 kind,
                 group: group.to_string(),
+                written: key.clone(),
                 key,
                 norm: collapse(&raw),
                 raw,
@@ -1084,6 +1108,7 @@ fn items_of(tree: &Tree, layer: &str) -> Vec<Item> {
                 body: false,
                 remove: false,
                 flag: false,
+                legacy: false,
             };
             match &st.kind {
                 StatementKind::Assign {
@@ -1092,15 +1117,18 @@ fn items_of(tree: &Tree, layer: &str) -> Vec<Item> {
                     value,
                     export,
                 } => {
-                    let key = format!(
-                        "{}{} {}",
-                        if *export { "export " } else { "" },
-                        lhs(var),
-                        op.as_str()
-                    );
-                    let mut it = item(Kind::Var, &var.base, key, value.clone());
+                    let key = |name: String| {
+                        format!(
+                            "{}{name} {}",
+                            if *export { "export " } else { "" },
+                            op.as_str()
+                        )
+                    };
+                    let mut it = item(Kind::Var, &var.base, key(lhs(var)), value.clone());
                     it.remove = var.overrides.iter().any(|o| o == "remove");
                     it.flag = var.flag.is_some();
+                    it.legacy = var.legacy_syntax;
+                    it.written = key(written_lhs(var));
                     out.push(it);
                 }
                 StatementKind::Export { name } => {
@@ -1124,21 +1152,27 @@ fn items_of(tree: &Tree, layer: &str) -> Vec<Item> {
                     fakeroot,
                     ..
                 } => {
-                    let (group, display) = match name {
-                        Some(v) => (v.base.clone(), lhs(v)),
-                        None => ("__anonymous".to_string(), "__anonymous".to_string()),
+                    let (group, display, written) = match name {
+                        Some(v) => (v.base.clone(), lhs(v), written_lhs(v)),
+                        None => (
+                            "__anonymous".to_string(),
+                            "__anonymous".to_string(),
+                            "__anonymous".to_string(),
+                        ),
                     };
-                    let mut key = String::new();
+                    let mut prefix = String::new();
                     if *fakeroot {
-                        key.push_str("fakeroot ");
+                        prefix.push_str("fakeroot ");
                     }
                     if *lang == Lang::Python {
-                        key.push_str("python ");
+                        prefix.push_str("python ");
                     }
-                    key.push_str(&display);
+                    let key = format!("{prefix}{display}");
                     let mut it = item(Kind::Function, &group, key, text.to_string());
                     it.norm = code_lines(text).join("\n");
                     it.body = true;
+                    it.legacy = name.as_ref().is_some_and(|v| v.legacy_syntax);
+                    it.written = format!("{prefix}{written}");
                     out.push(it);
                 }
                 StatementKind::PyDef { name, .. } => {
@@ -1300,22 +1334,36 @@ fn change_of(
     n: Option<&Item>,
 ) -> Change {
     let any = o.or(n);
-    let (old, new, detail) = if any.is_some_and(|i| i.body) {
+    let (old, new, mut detail) = if any.is_some_and(|i| i.body) {
         body_summary(o, n)
     } else {
         let show = |i: &Item| (!i.raw.is_empty()).then(|| short(&i.raw));
         match (o, n) {
-            (Some(a), Some(b)) if !a.raw.is_empty() && !b.raw.is_empty() => {
+            (Some(a), Some(b)) if !a.raw.is_empty() && !b.raw.is_empty() && a.raw != b.raw => {
                 let (x, y) = short_pair(&a.raw, &b.raw);
                 (Some(x), Some(y), None)
             }
             _ => (o.and_then(show), n.and_then(show), None),
         }
     };
+    if let (Some(a), Some(b)) = (o, n)
+        && a.legacy != b.legacy
+    {
+        let what = if a.legacy {
+            "rewritten from the legacy _ override syntax"
+        } else {
+            "rewritten to the legacy _ override syntax"
+        };
+        let note = format!("{what}: {} -> {}", a.written, b.written);
+        detail = Some(match detail {
+            Some(d) => format!("{note}; {d}"),
+            None => note,
+        });
+    }
     Change {
         kind,
         group: any.map(|i| i.group.clone()).unwrap_or_default(),
-        name: any.map(|i| i.key.clone()).unwrap_or_default(),
+        name: n.or(o).map(|i| i.written.clone()).unwrap_or_default(),
         change,
         old,
         new,
@@ -1352,11 +1400,12 @@ fn compare_items(old: &[Item], new: &[Item]) -> (Vec<Change>, usize) {
             let mut i = 0;
             while i < o.len() {
                 let found = n.iter().position(|x| {
-                    if exact {
-                        x.raw == o[i].raw
-                    } else {
-                        x.norm == o[i].norm
-                    }
+                    x.legacy == o[i].legacy
+                        && if exact {
+                            x.raw == o[i].raw
+                        } else {
+                            x.norm == o[i].norm
+                        }
                 });
                 match found {
                     Some(j) => {
@@ -1751,9 +1800,23 @@ pub fn compute(ws: &Workspace, own: &[OwnFile], opts: &Options) -> Result<Diff> 
         None => Some(uncommitted_count(&dir)),
     };
 
-    let collector = Collector::new(ws, layer);
-    let old_recipes = recipes_at(&old, &collector);
-    let new_recipes = recipes_at(&new, &collector);
+    // Which `.bb` files each revision collects: its own `BBFILES` (module docs).
+    let current = Collector::new(ws, layer);
+    let mut bbfiles_notes = Vec::new();
+    let old_collector = collector_at(
+        &mut old,
+        ws,
+        layer,
+        &current,
+        &opts.from,
+        &mut bbfiles_notes,
+    )?;
+    let new_collector = match &opts.to {
+        Some(to) => collector_at(&mut new, ws, layer, &current, to, &mut bbfiles_notes)?,
+        None => current.clone(),
+    };
+    let old_recipes = recipes_at(&old, &old_collector);
+    let new_recipes = recipes_at(&new, &new_collector);
     let pairs = pair_recipes(&old_recipes, &new_recipes);
     let pns: BTreeSet<String> = pairs.iter().map(|p| p.pn.clone()).collect();
 
@@ -1985,6 +2048,7 @@ pub fn compute(ws: &Workspace, own: &[OwnFile], opts: &Options) -> Result<Diff> 
     };
     diff.summary.line = summary_line(&diff);
     diff.notes = notes(&diff);
+    diff.notes.extend(bbfiles_notes);
     Ok(diff)
 }
 
@@ -2495,8 +2559,7 @@ fn changed_files(old: &Side, new: &Side) -> Result<Vec<(String, &'static str)>> 
     if let Some(to) = &new.commit {
         args.push(to.as_str());
     }
-    let out = git::run(&old.dir, &args, None, git::BATCH_TIMEOUT)
-        .map_err(|e| Error::Invalid { msg: e })?;
+    let out = git::run(&old.dir, &args, git::BATCH_TIMEOUT)?;
     let fields = git::nul_fields(&out);
     let mut map: BTreeMap<String, &'static str> = BTreeMap::new();
     let mut it = fields.into_iter();
@@ -2533,7 +2596,6 @@ fn uncommitted_count(dir: &Path) -> usize {
             "-z",
             "HEAD",
         ],
-        None,
         git::TIMEOUT,
     ) {
         paths.extend(git::nul_fields(&out));
@@ -2541,7 +2603,6 @@ fn uncommitted_count(dir: &Path) -> usize {
     if let Ok(out) = git::run(
         dir,
         &["ls-files", "-z", "-o", "--exclude-standard"],
-        None,
         git::TIMEOUT,
     ) {
         paths.extend(git::nul_fields(&out));
@@ -2735,7 +2796,7 @@ fn summary_line(d: &Diff) -> String {
 
 fn notes(d: &Diff) -> Vec<String> {
     let mut n = vec![
-        "statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once".to_string(),
+        "statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (each revision's BBFILES, no BBMASK); classes listed once".to_string(),
         format!(
             "pointers in column from are at {}: read them with `git show {}:<path>`; column to is at {}",
             d.from.label(),
@@ -3103,6 +3164,113 @@ mod tests {
             "a...b",
         ] {
             assert!(validate_revision(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    fn items(text: &str) -> Vec<Item> {
+        let text: Arc<str> = Arc::from(text);
+        let tree = Tree {
+            files: vec![TreeFile {
+                path: "r_1.0.bb".into(),
+                data: Arc::new(FileData {
+                    parsed: Arc::new(parse::parse(&text)),
+                    text,
+                }),
+            }],
+            outside: Vec::new(),
+        };
+        items_of(&tree, "meta-x")
+    }
+
+    #[test]
+    fn a_legacy_to_colon_rewrite_is_a_change() {
+        let old = items(
+            "DEPENDS_append = \" zlib\"\nEXTRA_OECONF_append_qemux86 = \" --x\"\ndo_install_append() {\n    true\n}\nKEEP:append = \" a\"\n",
+        );
+        let new = items(
+            "DEPENDS:append = \" zlib\"\nEXTRA_OECONF:append:qemux86 = \" --y\"\ndo_install:append() {\n    true\n}\nKEEP:append = \" a\"\n",
+        );
+        let (changes, cosmetic) = compare_items(&old, &new);
+        assert_eq!(cosmetic, 0);
+        let show: Vec<(&str, &str, &str, Option<&str>)> = changes
+            .iter()
+            .map(|c| (c.kind, c.name.as_str(), c.change, c.detail.as_deref()))
+            .collect();
+        assert_eq!(
+            show,
+            [
+                (
+                    "var",
+                    "DEPENDS:append =",
+                    "changed",
+                    Some(
+                        "rewritten from the legacy _ override syntax: DEPENDS_append = -> DEPENDS:append ="
+                    )
+                ),
+                (
+                    "var",
+                    "EXTRA_OECONF:append:qemux86 =",
+                    "changed",
+                    Some(
+                        "rewritten from the legacy _ override syntax: EXTRA_OECONF_append_qemux86 = -> EXTRA_OECONF:append:qemux86 ="
+                    )
+                ),
+                (
+                    "function",
+                    "do_install:append",
+                    "changed",
+                    Some(
+                        "rewritten from the legacy _ override syntax: do_install_append -> do_install:append; first difference at code line 1: \"do_install_append() {\" -> \"do_install:append() {\""
+                    )
+                ),
+            ]
+        );
+        // The value change of the second one still shows.
+        assert_eq!(changes[1].old.as_deref(), Some("\"--x\""));
+        assert_eq!(changes[1].new.as_deref(), Some("\"--y\""));
+        // A legacy statement that stays legacy is no change.
+        let (changes, _) = compare_items(&old, &old);
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn bbfiles_from_a_layer_conf_text() {
+        let root = Path::new("/l");
+        assert_eq!(
+            static_bbfiles(
+                "BBPATH .= \":${LAYERDIR}\"\nBBFILES += \"${LAYERDIR}/a/*.bb \\\n ${LAYERDIR}/a/*.bbappend\"\nBBFILES:append = \" ${LAYERDIR}/b/*.bb\"\nBBFILES .= \" ${LAYERDIR}/c/*.bb\"\nBBFILES[doc] = \"x\"\n",
+                root
+            ),
+            Ok(vec![
+                "/l/a/*.bb".to_string(),
+                "/l/a/*.bbappend".to_string(),
+                "/l/b/*.bb".to_string(),
+                "/l/c/*.bb".to_string(),
+            ])
+        );
+        assert_eq!(
+            static_bbfiles(
+                "BBFILES += \"${LAYERDIR}/a/*.bb\"\nBBFILES = \"${LAYERDIR}/z/*.bb\"\n",
+                root
+            ),
+            Ok(vec!["/l/z/*.bb".to_string()])
+        );
+        for (text, why) in [
+            (
+                "BBFILES ?= \"${LAYERDIR}/a/*.bb\"\n",
+                "depends on what was set before",
+            ),
+            ("include conf/x.inc\n", "includes conf/x.inc"),
+            (
+                "BBFILES:remove = \"x\"\n",
+                "BBFILES:remove = needs evaluation",
+            ),
+            ("BBFILES += \"${TOPDIR}/a/*.bb\"\n", "other than LAYERDIR"),
+            ("BBFILES .= \"${LAYERDIR}/a/*.bb\"\n", "without a space"),
+            ("unset BBFILES\n", "unsets BBFILES"),
+        ] {
+            let err = static_bbfiles(text, root).unwrap_err();
+            assert!(err.contains(why), "{text:?}: {err}");
         }
     }
 

@@ -123,9 +123,18 @@ impl Workspace {
                     // BitBake checks relative entries against its working directory.
                     let abs = work_dir.join(l);
                     if !abs.is_dir() {
+                        // kas-container writes `${TOPDIR}/<relative path>` computed inside
+                        // the container (the kas files' repository at `/repo`, the work
+                        // directory at `/work`), which can name nothing on the host
+                        // (docs/bitbake-semantics.md, "kas").
+                        let hint = if kas.as_ref().is_some_and(|k| k.generates(&b)) {
+                            "; if kas-container wrote this bblayers.conf, its paths are the container's (the kas files' repository is /repo there): run kas checkout outside the container to write host paths"
+                        } else {
+                            ""
+                        };
                         return Err(Error::Config {
                             msg: format!(
-                                "BBLAYERS in {} lists {}, which is not a directory",
+                                "BBLAYERS in {} lists {}, which is not a directory{hint}",
                                 b.join("conf/bblayers.conf").display(),
                                 abs.display()
                             ),

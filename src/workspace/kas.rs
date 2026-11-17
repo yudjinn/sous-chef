@@ -50,10 +50,12 @@ use crate::error::{Error, Result};
 /// The file `kas menu` writes in the work directory; kas reads it when given no file.
 pub const MENU_CONFIG: &str = ".config.yaml";
 
-/// kas's defaults (`schema-kas.json`, kas 5.5) for an unset `machine`, `distro`, `target`.
+/// kas's defaults (`schema-kas.json`, kas 5.5) for an unset `machine`, `distro`, `target`,
+/// `task`.
 pub const DEFAULT_MACHINE: &str = "qemux86-64";
 pub const DEFAULT_DISTRO: &str = "nodistro";
 pub const DEFAULT_TARGET: &str = "core-image-minimal";
+pub const DEFAULT_TASK: &str = "build";
 
 /// How deep includes may nest (kas itself has no limit and recurses on a cycle).
 const MAX_INCLUDE_DEPTH: usize = 32;
@@ -210,6 +212,40 @@ pub struct KasProject {
     pub not_in_bblayers: Vec<PathBuf>,
     /// Filled by discovery: workspace layers (names) that no kas file lists.
     pub not_in_kas: Vec<String>,
+    /// `KAS_MACHINE`, `KAS_DISTRO`, `KAS_TARGET`, `KAS_TASK` from the environment
+    /// sous-chef was started in, which kas lets override the files ([`KasOverrides`]).
+    pub env: KasOverrides,
+    /// The repositories a `{repo, file}` include names (ids, sorted), checked out or not.
+    /// kas fetches and checks these out even under `kas shell --keep-config-unchanged`
+    /// (its `repo_setup_loop` is not among the steps `-k` skips; docs/bitbake-semantics.md,
+    /// "kas"), so sous-chef's kas mode is not used for such a project.
+    pub repo_includes: Vec<String>,
+}
+
+/// The environment variables kas lets override the kas files' `machine`, `distro`,
+/// `target` and `task` (kas 5.5 `config.py`: `get_machine` and `get_distro` return
+/// `os.environ.get('KAS_MACHINE' / 'KAS_DISTRO', <file value or default>)`, so a variable
+/// that is set wins even when empty; `get_bitbake_task` does the same with `KAS_TASK` after
+/// a command-line `-c`; `get_bitbake_targets` takes the whitespace-separated words of
+/// `KAS_TARGET` after a command-line `--target`, and only when there is at least one word).
+/// `None`: not set.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct KasOverrides {
+    pub machine: Option<String>,
+    pub distro: Option<String>,
+    /// As set; [`KasOverrides::targets`] splits it.
+    pub target: Option<String>,
+    pub task: Option<String>,
+}
+
+impl KasOverrides {
+    /// The words of `KAS_TARGET`, empty when unset or blank (then kas ignores it).
+    pub fn targets(&self) -> Vec<&str> {
+        self.target
+            .as_deref()
+            .map(|t| t.split_whitespace().collect())
+            .unwrap_or_default()
+    }
 }
 
 /// The process environment kas detection reads. Tests build one directly.
@@ -219,44 +255,139 @@ pub struct KasEnv {
     pub work_dir: Option<PathBuf>,
     /// `KAS_BUILD_DIR`
     pub build_dir: Option<PathBuf>,
+    /// `KAS_MACHINE`, `KAS_DISTRO`, `KAS_TARGET`, `KAS_TASK` (set, even empty, or not).
+    pub overrides: KasOverrides,
 }
 
 impl KasEnv {
-    /// `KAS_WORK_DIR` and `KAS_BUILD_DIR` of this process; empty values count as unset.
+    /// `KAS_WORK_DIR` and `KAS_BUILD_DIR` of this process (empty values count as unset),
+    /// and the `KAS_*` overrides (an empty value counts as set, as in kas; a value that is
+    /// not UTF-8 is converted lossily).
     pub fn from_process() -> KasEnv {
         let var = |k: &str| {
             std::env::var_os(k)
                 .filter(|v| !v.is_empty())
                 .map(PathBuf::from)
         };
+        let text = |k: &str| std::env::var_os(k).map(|v| v.to_string_lossy().into_owned());
         KasEnv {
             work_dir: var("KAS_WORK_DIR"),
             build_dir: var("KAS_BUILD_DIR"),
+            overrides: KasOverrides {
+                machine: text("KAS_MACHINE"),
+                distro: text("KAS_DISTRO"),
+                target: text("KAS_TARGET"),
+                task: text("KAS_TASK"),
+            },
         }
     }
 }
 
+/// One kas setting an environment variable overrides ([`KasProject::env_overrides`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EnvOverride {
+    /// `KAS_MACHINE`, `KAS_DISTRO`, `KAS_TARGET` or `KAS_TASK`.
+    pub var: &'static str,
+    /// The value kas uses (the variable's; targets joined by a space).
+    pub value: String,
+    /// What the kas files say (joined by a space for targets), `None` when they say
+    /// nothing (kas's default would apply).
+    pub file_value: Option<String>,
+    /// Where the files say it (the first target's place).
+    pub loc: Option<KasLoc>,
+}
+
 impl KasProject {
-    /// `machine`, else kas's default.
+    /// The machine kas writes into `local.conf`: `KAS_MACHINE` when set, else `machine`,
+    /// else kas's default.
     pub fn machine_or_default(&self) -> &str {
-        self.machine
-            .as_ref()
-            .map_or(DEFAULT_MACHINE, |s| s.value.as_str())
+        self.env.machine.as_deref().unwrap_or_else(|| {
+            self.machine
+                .as_ref()
+                .map_or(DEFAULT_MACHINE, |s| s.value.as_str())
+        })
     }
 
-    /// `distro`, else kas's default.
+    /// The distro kas writes into `local.conf`: `KAS_DISTRO` when set, else `distro`, else
+    /// kas's default.
     pub fn distro_or_default(&self) -> &str {
-        self.distro
-            .as_ref()
-            .map_or(DEFAULT_DISTRO, |s| s.value.as_str())
+        self.env.distro.as_deref().unwrap_or_else(|| {
+            self.distro
+                .as_ref()
+                .map_or(DEFAULT_DISTRO, |s| s.value.as_str())
+        })
     }
 
-    /// The targets, else kas's default (one).
+    /// The targets `kas build` builds: the words of `KAS_TARGET` when there is one, else the
+    /// targets of the files, else kas's default (one).
     pub fn targets_or_default(&self) -> Vec<&str> {
-        if self.target.is_empty() {
+        let env = self.env.targets();
+        if !env.is_empty() {
+            env
+        } else if self.target.is_empty() {
             vec![DEFAULT_TARGET]
         } else {
             self.target.iter().map(|t| t.value.as_str()).collect()
+        }
+    }
+
+    /// The task `kas build` runs: `KAS_TASK` when set, else `task`, else kas's default.
+    pub fn task_or_default(&self) -> &str {
+        self.env.task.as_deref().unwrap_or_else(|| {
+            self.task
+                .as_ref()
+                .map_or(DEFAULT_TASK, |s| s.value.as_str())
+        })
+    }
+
+    /// The settings an environment variable overrides, in the order `KAS_MACHINE`,
+    /// `KAS_DISTRO`, `KAS_TARGET`, `KAS_TASK` ([`KasOverrides`]). Empty when none is set.
+    pub fn env_overrides(&self) -> Vec<EnvOverride> {
+        let one = |var, value: &Option<String>, file: &Option<KasSetting>| {
+            value.as_ref().map(|v| EnvOverride {
+                var,
+                value: v.clone(),
+                file_value: file.as_ref().map(|s| s.value.clone()),
+                loc: file.as_ref().map(|s| s.loc.clone()),
+            })
+        };
+        let targets = self.env.targets();
+        let target = (!targets.is_empty()).then(|| EnvOverride {
+            var: "KAS_TARGET",
+            value: targets.join(" "),
+            file_value: (!self.target.is_empty()).then(|| {
+                self.target
+                    .iter()
+                    .map(|t| t.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }),
+            loc: self.target.first().map(|t| t.loc.clone()),
+        });
+        [
+            one("KAS_MACHINE", &self.env.machine, &self.machine),
+            one("KAS_DISTRO", &self.env.distro, &self.distro),
+            target,
+            one("KAS_TASK", &self.env.task, &self.task),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    /// Where the value of `machine_or_default` (`machine` true) or `distro_or_default`
+    /// comes from, in words: `the environment variable KAS_MACHINE`, `the kas file
+    /// <file:line>` or `kas's default (no machine in the kas files)`.
+    pub fn setting_source(&self, machine: bool) -> String {
+        let (var, env, file, what) = if machine {
+            ("KAS_MACHINE", &self.env.machine, &self.machine, "machine")
+        } else {
+            ("KAS_DISTRO", &self.env.distro, &self.distro, "distro")
+        };
+        match (env, file) {
+            (Some(_), _) => format!("the environment variable {var}"),
+            (None, Some(s)) => format!("the kas file {}", s.loc.display_in(&self.root)),
+            (None, None) => format!("kas's default (no {what} in the kas files)"),
         }
     }
 
@@ -447,14 +578,20 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
         }
         let work = work_dir(&sc_dir);
         let build = build_dir(&work);
-        return Ok(Some(load(&cfg.kas, KasSource::Config, &work, &build)));
+        return Ok(Some(with_env(
+            load(&cfg.kas, KasSource::Config, &work, &build),
+            env,
+        )));
     }
 
     let work = work_dir(&sc_dir);
     let menu = work.join(MENU_CONFIG);
     if menu.is_file() {
         let build = build_dir(&work);
-        return Ok(Some(load(&[menu], KasSource::MenuConfig, &work, &build)));
+        return Ok(Some(with_env(
+            load(&[menu], KasSource::MenuConfig, &work, &build),
+            env,
+        )));
     }
 
     // A build directory kas generated: the configured one, `KAS_BUILD_DIR`, the one
@@ -480,11 +617,9 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
     let found = candidate_files(&work);
     match found.as_slice() {
         [] => Ok(None),
-        [one] => Ok(Some(load(
-            std::slice::from_ref(one),
-            KasSource::Found,
-            &work,
-            &build,
+        [one] => Ok(Some(with_env(
+            load(std::slice::from_ref(one), KasSource::Found, &work, &build),
+            env,
         ))),
         many => Ok(Some(KasProject {
             files: Vec::new(),
@@ -507,8 +642,17 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
             problems: Vec::new(),
             not_in_bblayers: Vec::new(),
             not_in_kas: Vec::new(),
+            env: env.overrides.clone(),
+            repo_includes: Vec::new(),
         })),
     }
+}
+
+/// `project` with the `KAS_*` overrides of `env`. They are not tied to a directory (kas
+/// reads them wherever it runs), so they count whatever the working directory.
+fn with_env(mut project: KasProject, env: &KasEnv) -> KasProject {
+    project.env = env.overrides.clone();
+    project
 }
 
 /// kas files in `dir` and `dir/kas`: `.yml`, `.yaml` or `.json` files whose top level is a
@@ -603,6 +747,7 @@ pub fn load(files: &[PathBuf], source: KasSource, work_dir: &Path, build_dir: &P
         locks: Vec::new(),
         problems: Vec::new(),
         missing_repos: BTreeSet::new(),
+        repo_includes: BTreeSet::new(),
         order: Vec::new(),
     };
     // kas iterates: repositories found in one pass make their includes readable in the
@@ -614,6 +759,7 @@ pub fn load(files: &[PathBuf], source: KasSource, work_dir: &Path, build_dir: &P
         loader.locks.clear();
         loader.problems.clear();
         loader.missing_repos.clear();
+        loader.repo_includes.clear();
         loader.order.clear();
         let mut configs = Vec::new();
         for f in &files {
@@ -739,6 +885,8 @@ pub fn load(files: &[PathBuf], source: KasSource, work_dir: &Path, build_dir: &P
         problems,
         not_in_bblayers: Vec::new(),
         not_in_kas: Vec::new(),
+        env: KasOverrides::default(),
+        repo_includes: loader.repo_includes.into_iter().collect(),
     }
 }
 
@@ -749,6 +897,8 @@ struct Loader {
     locks: Vec<PathBuf>,
     problems: Vec<String>,
     missing_repos: BTreeSet<String>,
+    /// Every repository a `{repo, file}` include names.
+    repo_includes: BTreeSet<String>,
     /// Indexes into `read`, in merge order.
     order: Vec<usize>,
 }
@@ -853,6 +1003,7 @@ impl Loader {
                         ));
                         continue;
                     };
+                    self.repo_includes.insert(repo.to_string());
                     match repos.iter().find(|(id, _)| id == repo) {
                         Some((_, dir)) => {
                             let dir = canonical_or(dir);
@@ -1007,14 +1158,28 @@ fn build_layers(merged: &Node, repos: &[KasRepo], problems: &mut Vec<String>) ->
             .find(|(k, _)| k.text == repo.id)
             .map(|(_, v)| v);
         let layers = cfg.and_then(|c| c.get("layers"));
+        // kas 5.5 `Repo.factory`: `repo_config.get('layers', {'': None})`, then one layer per
+        // entry (`_create_layers_from_dict`). So a missing key is the repository itself, an
+        // empty mapping adds no layer (the schema's description says otherwise; the code
+        // decides), and null fails the schema (`layers` must be an object) before that.
         let list: Vec<(String, i64)> = match layers.map(|l| &l.value) {
-            None | Some(Value::Null) => vec![(String::new(), 0)],
-            Some(Value::Map(m)) if m.is_empty() => vec![(String::new(), 0)],
+            None => vec![(String::new(), 0)],
+            Some(Value::Null) => {
+                problems.push(format!(
+                    "layers of repo {} is null, which kas refuses (its schema wants a mapping); leave the key out for the repository itself",
+                    repo.id
+                ));
+                Vec::new()
+            }
             Some(Value::Map(m)) => m
                 .iter()
                 .filter_map(|(k, v)| match &v.value {
                     Value::Null => Some((k.text.clone(), 0)),
-                    Value::Str(s) if s == "disabled" || LEGACY_DISABLED.contains(&s.as_str()) => {
+                    Value::Str(s)
+                        if s == "disabled"
+                            || LEGACY_DISABLED.contains(&s.as_str())
+                            || (v.plain && yaml11_false_or_zero(s)) =>
+                    {
                         None
                     }
                     Value::Map(_) => {
@@ -1072,6 +1237,9 @@ pub(crate) struct Node {
     pub col: u32,
     /// For a scalar: written as a literal or folded block (`|`, `>`).
     pub block: bool,
+    /// For a scalar: plain (not quoted, not a block), so YAML 1.1 may read it as a boolean
+    /// or a number ([`yaml11_false_or_zero`]).
+    pub plain: bool,
     /// For a mapping or sequence: written in flow style (`{...}`, `[...]`).
     pub flow: bool,
 }
@@ -1101,6 +1269,7 @@ impl Node {
             line: 1,
             col: 0,
             block: false,
+            plain: false,
             flow: false,
         }
     }
@@ -1224,6 +1393,7 @@ pub(crate) fn parse_yaml(text: &str, file: usize) -> std::result::Result<Node, S
             line: 1,
             col: 0,
             block: false,
+            plain: false,
             flow: false,
         }),
         Ok(Err(e)) => Err(e),
@@ -1252,6 +1422,7 @@ impl Builder<'_> {
             line: u32::try_from(mark.line()).unwrap_or(u32::MAX),
             col: u32::try_from(mark.col()).unwrap_or(u32::MAX),
             block: false,
+            plain: false,
             flow: false,
         }
     }
@@ -1301,6 +1472,7 @@ impl MarkedEventReceiver for Builder<'_> {
                 let mut n = self.start(mark);
                 let plain = style == TScalarStyle::Plain;
                 n.block = matches!(style, TScalarStyle::Literal | TScalarStyle::Folded);
+                n.plain = plain;
                 n.value = if plain && matches!(v.as_str(), "" | "~" | "null" | "Null" | "NULL") {
                     Value::Null
                 } else {
@@ -1324,7 +1496,7 @@ impl MarkedEventReceiver for Builder<'_> {
                     self.push(n, anchor);
                 }
                 Some(Frame::Map(mut n, anchor, entries, _)) => {
-                    n.value = Value::Map(entries);
+                    n.value = Value::Map(flatten_merge_keys(entries));
                     self.push(n, anchor);
                 }
                 None => {}
@@ -1346,6 +1518,75 @@ impl MarkedEventReceiver for Builder<'_> {
             | Event::DocumentEnd => {}
         }
     }
+}
+
+/// YAML 1.1 merge keys, as kas reads them (PyYAML `SafeLoader`, `constructor.py`
+/// `flatten_mapping`, PyYAML 6.0.3 as installed with kas 5.5): each `<<` entry is removed;
+/// its value, a mapping or a sequence of mappings (the later ones first: PyYAML reverses
+/// the list), contributes its entries before the mapping's own; then, as a Python dict is
+/// built from the pairs, a key keeps its first position and takes its last value, so the
+/// mapping's own keys win, and of a sequence the first mapping wins. A `<<` value of any
+/// other kind, which PyYAML refuses, is dropped. Two `<<` keys in one mapping are one (the
+/// last), as for any repeated key here.
+fn flatten_merge_keys(entries: Vec<(Key, Node)>) -> Vec<(Key, Node)> {
+    if !entries.iter().any(|(k, _)| k.text == "<<") {
+        return entries;
+    }
+    let mut merged: Vec<(Key, Node)> = Vec::new();
+    let mut own: Vec<(Key, Node)> = Vec::new();
+    for (k, v) in entries {
+        if k.text != "<<" {
+            own.push((k, v));
+            continue;
+        }
+        match v.value {
+            Value::Map(m) => merged.extend(m),
+            Value::Seq(items) => {
+                let maps: Vec<Vec<(Key, Node)>> = items
+                    .into_iter()
+                    .filter_map(|i| match i.value {
+                        Value::Map(m) => Some(m),
+                        _ => None,
+                    })
+                    .collect();
+                for m in maps.into_iter().rev() {
+                    merged.extend(m);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out: Vec<(Key, Node)> = Vec::new();
+    for (k, v) in merged.into_iter().chain(own) {
+        match out.iter_mut().find(|(ek, _)| ek.text == k.text) {
+            Some(e) => e.1 = v,
+            None => out.push((k, v)),
+        }
+    }
+    out
+}
+
+/// Whether a plain scalar is, in YAML 1.1 as PyYAML resolves it (`resolver.py`), the
+/// boolean false (`no`, `No`, `NO`, `false`, `False`, `FALSE`, `off`, `Off`, `OFF`) or an
+/// integer equal to 0 (`0`, `-0`, `+0`, `00`, `0_0`, `0x0`, `0b0`). kas compares a layer's
+/// value with its deprecated "disabled" tokens by Python equality, where `False == 0`, so
+/// each of these disables the layer.
+pub(crate) fn yaml11_false_or_zero(s: &str) -> bool {
+    const FALSE: [&str; 9] = [
+        "no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF",
+    ];
+    if FALSE.contains(&s) {
+        return true;
+    }
+    let t = s.strip_prefix(['-', '+']).unwrap_or(s);
+    let zeros = |body: &str| {
+        !body.is_empty() && body.chars().all(|c| c == '0' || c == '_') && body.contains('0')
+    };
+    if let Some(body) = t.strip_prefix("0b").or_else(|| t.strip_prefix("0x")) {
+        return zeros(body);
+    }
+    // `0`, and the octal form `0[0-7_]+`.
+    t.starts_with('0') && zeros(t)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1580,6 +1821,84 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn yaml_merge_keys_as_pyyaml() {
+        let text = "base: &b\n  a: 1\n  b: 2\nother: &o\n  b: 20\n  c: 30\none:\n  <<: *b\n  b: own\ntwo:\n  <<: [*b, *o]\n  d: 4\n";
+        let doc = parse_yaml(text, 0).unwrap();
+        let kv = |n: &Node| -> Vec<(String, String)> {
+            let Value::Map(e) = &n.value else { panic!() };
+            e.iter()
+                .map(|(k, v)| (k.text.clone(), v.as_str().unwrap_or("?").to_string()))
+                .collect()
+        };
+        let s = |a: &str, b: &str| (a.to_string(), b.to_string());
+        // The mapping's own key wins; merged keys come first.
+        assert_eq!(kv(doc.get("one").unwrap()), [s("a", "1"), s("b", "own")]);
+        // Of a list, the first mapping wins (PyYAML reverses it before extending).
+        assert_eq!(
+            kv(doc.get("two").unwrap()),
+            [s("b", "2"), s("c", "30"), s("a", "1"), s("d", "4")]
+        );
+    }
+
+    #[test]
+    fn yaml11_false_and_zero() {
+        for t in [
+            "no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF", "0", "-0", "+0",
+            "00", "0_0", "0x0", "0b0",
+        ] {
+            assert!(yaml11_false_or_zero(t), "{t}");
+        }
+        for t in [
+            "yes", "on", "true", "n", "excluded", "1", "10", "0x10", "0b1", "0.0", "", "0b", "nO",
+        ] {
+            assert!(!yaml11_false_or_zero(t), "{t}");
+        }
+    }
+
+    #[test]
+    fn layers_values_as_kas_reads_them() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        let f = root.join("kas.yaml");
+        std::fs::write(
+            &f,
+            "header:\n  version: 11\nrepos:\n  missing:\n    path: r1\n  empty:\n    path: r2\n    layers: {}\n  null:\n    path: r3\n    layers:\n  yaml11:\n    path: r4\n    layers:\n      off-plain: off\n      no-cap: No\n      zero: 00\n      quoted-no: 'No'\n      kept:\n",
+        )
+        .unwrap();
+        let k = load(&[f], KasSource::Config, &root, &root.join("build"));
+        let layers: Vec<(String, String)> = k
+            .layers
+            .iter()
+            .map(|l| (l.repo.clone(), l.name.clone()))
+            .collect();
+        // No `layers`: the repository itself; `{}`: no layer; null: refused by kas; plain
+        // YAML 1.1 false or 0: disabled; a quoted 'No' is a string kas does not accept.
+        assert_eq!(
+            layers,
+            [
+                ("missing".to_string(), String::new()),
+                ("yaml11".to_string(), "kept".to_string())
+            ]
+        );
+        assert!(
+            k.problems
+                .iter()
+                .any(|p| p.starts_with("layers of repo null is null")),
+            "{:?}",
+            k.problems
+        );
+        assert!(
+            k.problems
+                .iter()
+                .any(|p| p
+                    .starts_with("layer quoted-no of repo yaml11 has a value kas does not accept")),
+            "{:?}",
+            k.problems
+        );
+    }
 
     #[test]
     fn yaml_positions() {

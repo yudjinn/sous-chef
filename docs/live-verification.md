@@ -75,19 +75,19 @@ panicked. (BitBake: `Parsing of 1033 .bb files complete (0 cached, 1033 parsed).
 targets, 435 skipped`; the 1034th `.bb` is the template below.)
 
 **Parser diagnostics on real metadata** (every `.bb`, `.bbappend`, `.bbclass`, `.inc` outside
-`files/` and `.conf` under `conf/` except `conf/ccache.conf`; more than 1600 files): nine,
-all correct:
+`files/` and `.conf` under `conf/` except `conf/ccache.conf`; more than 1600 files): six,
+all correct: "whitespace after the trailing `\`" warnings, each a real `\ ` at end of line
+(checked with `grep -E '\\[[:space:]]+$'`: autoconf_2.73.bb:2, perl_5.42.0.bb:321-322,
+mc_4.8.33.bb:50-51, libxml-sax-perl_1.02.bb:4).
 
-- six "whitespace after the trailing `\`" warnings, each a real `\ ` at end of line
-  (checked with `grep -E '\\[[:space:]]+$'`: autoconf_2.73.bb:2, perl_5.42.0.bb:321-322,
-  mc_4.8.33.bb:50-51, libxml-sax-perl_1.02.bb:4);
-- three "not modelled by sous-chef" notes for real directives: `addpylib` in
-  `meta/conf/layer.conf:147` and `meta-arm/conf/layer.conf:21`, `addfragments` in
-  `meta/conf/bitbake.conf:822`. `addpylib` changes no variable. **`addfragments` matters
-  for bitbake-setup builds**: it loads `OE_FRAGMENTS` and the built-in `machine:MACHINE
-  distro:DISTRO` fragments, which is how `bitbake-config-build enable-fragment distro/kiss
-  machine/dogbonedark` sets `DISTRO` and `MACHINE` there. The replay ignores it (a gap, not
-  hit in the kas build, where `OE_FRAGMENTS` is unset).
+When this was first checked there were three more, "not modelled by sous-chef" notes for
+real directives: `addpylib` in `meta/conf/layer.conf:147` and `meta-arm/conf/layer.conf:21`,
+`addfragments` in `meta/conf/bitbake.conf:822`. Both are statement kinds of their own now,
+with no diagnostic: `addfragments` since w5-fix-eval2, and replayed (it loads
+`OE_FRAGMENTS` and the built-in `machine:MACHINE distro:DISTRO` fragments, which is how
+`bitbake-config-build enable-fragment distro/kiss machine/dogbonedark` sets `DISTRO` and
+`MACHINE` in bitbake-setup builds; bitbake-semantics.md, "Configuration fragments"), and
+`addpylib` since w7-fix (it changes no variable).
 
 No parser construct is missing for OE-core or meta-arm. Test:
 `live_parser_has_no_diagnostics_on_real_metadata` (passes).

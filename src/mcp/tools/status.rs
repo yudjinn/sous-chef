@@ -77,10 +77,16 @@ pub struct KasStatus {
     pub source: String,
     pub work_dir: String,
     pub build_dir: String,
-    /// `machine`, `distro` and targets, kas's defaults when the files set none.
+    /// `machine`, `distro` and targets as kas uses them: a `KAS_MACHINE`, `KAS_DISTRO` or
+    /// `KAS_TARGET` environment variable, else the files, else kas's defaults.
     pub machine: String,
     pub distro: String,
     pub target: Vec<String>,
+    /// One line per kas setting an environment variable overrides
+    /// (`KAS_MACHINE=board2 overrides machine "board1" (kas/board.yaml:5)`); left out of the
+    /// JSON when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub env_overrides: Vec<String>,
     /// Layers the kas files name, and those not on disk yet (paths).
     pub layers: usize,
     pub missing: Vec<String>,
@@ -234,6 +240,29 @@ fn kas_status(k: &crate::workspace::kas::KasProject) -> KasStatus {
             .into_iter()
             .map(str::to_string)
             .collect(),
+        env_overrides: k
+            .env_overrides()
+            .iter()
+            .map(|o| {
+                let setting = o
+                    .var
+                    .strip_prefix("KAS_")
+                    .unwrap_or(o.var)
+                    .to_ascii_lowercase();
+                match (&o.file_value, &o.loc) {
+                    (Some(v), Some(l)) => format!(
+                        "{}={} overrides {setting} \"{v}\" ({})",
+                        o.var,
+                        o.value,
+                        l.display_in(&k.root)
+                    ),
+                    _ => format!(
+                        "{}={} overrides kas's default {setting} (the kas files set none)",
+                        o.var, o.value
+                    ),
+                }
+            })
+            .collect(),
         layers: k.layers.len(),
         missing: k
             .layers
@@ -311,6 +340,9 @@ fn table(r: &Report) -> Table {
                     k.target.join(" ")
                 ),
             ));
+            for o in &k.env_overrides {
+                rows.push(("kas_env", o.clone()));
+            }
             let mut layers = format!("{} in the kas files", k.layers);
             if !k.missing.is_empty() {
                 layers.push_str(&format!("; not checked out yet: {}", k.missing.join(", ")));
@@ -610,6 +642,42 @@ mod tests {
             serde_json::from_str(&output(&r, None, &json, 600).unwrap()).unwrap();
         assert_eq!(v["kas"]["machine"], "board1");
         assert_eq!(v["kas"]["files"], "kas/base.yaml:kas/board.yaml");
+        assert!(v["kas"].get("env_overrides").is_none());
+        assert!(!text.lines().any(|l| l.starts_with("kas_env")), "{text}");
+
+        // A KAS_MACHINE in the environment: the machine shown is kas's, and a row says so.
+        let env = crate::workspace::kas::KasEnv {
+            overrides: crate::workspace::kas::KasOverrides {
+                machine: Some("board2".into()),
+                task: Some("fetch".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let ws_env = Workspace::discover_in(&cfg, &env).unwrap();
+        let mut r_env = base(&cfg);
+        fill_workspace(&mut r_env, &ws_env);
+        let text = output(&r_env, None, &args, 600).unwrap();
+        assert!(
+            text.contains("machine board2, distro projdistro, target proj-image"),
+            "{text}"
+        );
+        let env_rows: Vec<&str> = text.lines().filter(|l| l.starts_with("kas_env")).collect();
+        assert_eq!(env_rows.len(), 2, "{text}");
+        assert!(
+            env_rows[0]
+                .contains("KAS_MACHINE=board2 overrides machine \"board1\" (kas/board.yaml:5)"),
+            "{text}"
+        );
+        assert!(
+            env_rows[1]
+                .contains("KAS_TASK=fetch overrides kas's default task (the kas files set none)"),
+            "{text}"
+        );
+        let v: serde_json::Value =
+            serde_json::from_str(&output(&r_env, None, &json, 600).unwrap()).unwrap();
+        assert_eq!(v["kas"]["machine"], "board2");
+        assert_eq!(v["kas"]["env_overrides"].as_array().unwrap().len(), 2);
 
         // Without kas: no rows, no JSON key.
         let mut r = base(&Config::default());

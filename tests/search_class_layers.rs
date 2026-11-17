@@ -218,6 +218,70 @@ async fn search_regex_filters_and_limit() {
 }
 
 #[tokio::test]
+async fn search_kind_filter_knows_every_statement_kind() {
+    // One statement of every kind the scanner stores, each line containing `zq`.
+    let (_tmp, root) = common::temp_ws();
+    let rel = "meta-mine/recipes-app/zq/zq_1.0.bb";
+    let p = root.join(rel);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(
+        &p,
+        "ZQ_A = \"1\"\n\
+         export ZQ_E\n\
+         unset ZQ_U\n\
+         zq_func() {\n    echo zq\n}\n\
+         def zq_def(d):\n    return 'zq'\n\
+         inherit zqclass\n\
+         include zq.inc\n\
+         addtask zq_task\n\
+         deltask zq_del\n\
+         addhandler zq_handler\n\
+         EXPORT_FUNCTIONS zq_x\n\
+         addfragments conf/zq ZQ_FRAGMENTS ZQ_VARS ZQ_BUILTIN\n\
+         addpylib ${LAYERDIR}/zqlib zq\n\
+         zq what is this\n",
+    )
+    .unwrap();
+    let f = fixture_with(common::ws_config(&root));
+    let mut seen = Vec::new();
+    for kind in search::KINDS {
+        let out = search_ok(
+            &f,
+            search::Args {
+                kind: Some(vec![kind.to_string()]),
+                file_kind: Some("bb".into()),
+                ..sargs("(?i)zq", Mode::Regex)
+            },
+        )
+        .await;
+        let kinds: Vec<&str> = out
+            .lines()
+            .skip(1)
+            .filter(|l| l.contains("zq_1.0.bb"))
+            .filter_map(|l| l.split('\t').nth(1))
+            .collect();
+        assert!(!kinds.is_empty(), "{kind}: {out}");
+        assert!(kinds.iter().all(|k| k == kind), "{kind}: {out}");
+        seen.push(*kind);
+    }
+    // Every kind of the file is one of KINDS (nothing the scanner writes is missing).
+    let all = search_ok(
+        &f,
+        search::Args {
+            file_kind: Some("bb".into()),
+            limit: Some(100),
+            ..sargs("(?i)zq", Mode::Regex)
+        },
+    )
+    .await;
+    for l in all.lines().skip(1).filter(|l| l.contains("zq_1.0.bb")) {
+        let k = l.split('\t').nth(1).unwrap();
+        assert!(search::KINDS.contains(&k), "{k} in {l}");
+    }
+    assert_eq!(seen.len(), 14);
+}
+
+#[tokio::test]
 async fn search_errors() {
     let f = fixture();
     let err = |a| async { search::run(&f.ctx, a).await.unwrap_err().to_string() };
@@ -389,6 +453,57 @@ async fn layers_appends_with_bbfiles_dynamic() {
             "meta-mine:dynamic-layers/core/recipes-core/nothing/nothing_1.0.bbappend:1",
             "meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1"
         ]
+    );
+
+    // The typed rows the view (and the audit report) are built from: one per view row,
+    // with the same cells.
+    let (rows, unusable) =
+        layers::append_rows(&*f.ctx.index.lock().await, &f.ctx.workspace).unwrap();
+    assert!(unusable.is_empty());
+    let view_rows: Vec<&str> = out
+        .lines()
+        .skip(1)
+        .filter(|l| !l.starts_with("note:"))
+        .collect();
+    let typed: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            format!(
+                "{}\t{}\t{}\t{}",
+                r.bbappend,
+                r.priority,
+                r.matches.as_deref().unwrap_or("-"),
+                r.status()
+            )
+        })
+        .collect();
+    assert_eq!(typed, view_rows);
+    let state_of = |path: &str| {
+        rows.iter()
+            .find(|r| r.bbappend.ends_with(path))
+            .map(|r| (r.state.clone(), r.via_dynamic))
+            .unwrap()
+    };
+    assert_eq!(
+        state_of("tpm2-tools_5.7.bbappend"),
+        (
+            layers::AppendState::NotCollected(
+                "not collected (dynamic layer `tpm2` not present)".into()
+            ),
+            false
+        )
+    );
+    assert_eq!(
+        state_of("no-tpm2/recipes-core/hello/hello_1.0.bbappend"),
+        (layers::AppendState::Applies, true)
+    );
+    assert_eq!(
+        state_of("nothing_1.0.bbappend"),
+        (layers::AppendState::NoMatch, true)
+    );
+    assert_eq!(
+        state_of("orphan_9.%.bbappend"),
+        (layers::AppendState::NoMatch, false)
     );
 }
 

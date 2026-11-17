@@ -436,10 +436,53 @@ pub fn order_problems(index: &Index, ws: &Workspace) -> Result<Vec<OrderProblem>
     Ok(out)
 }
 
-fn appends(index: &Index, ws: &Workspace) -> Result<Table> {
-    let mut t = Table::new(&["bbappend", "priority", "matches", "status"]);
-    let mut orphans = 0;
-    let mut uncollected = 0;
+/// What a bbappend is to BitBake, as the `appends` view's `status` column says it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppendState {
+    /// Collected, and applies to the row's `matches`.
+    Applies,
+    /// Collected, and matches no recipe (`query::orphan_appends`).
+    NoMatch,
+    /// Not collected: the view's text, `not collected (...)` with the reason.
+    NotCollected(String),
+}
+
+/// One row of the `appends` view ([`append_rows`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppendRow {
+    /// `layer:path` of the bbappend.
+    pub bbappend: String,
+    /// Its layer's priority.
+    pub priority: i32,
+    /// `layer:path` of the recipe it applies to; `None` unless [`AppendState::Applies`].
+    pub matches: Option<String>,
+    pub state: AppendState,
+    /// Collected only through an active `BBFILES_DYNAMIC` glob.
+    pub via_dynamic: bool,
+}
+
+impl AppendRow {
+    /// The view's `status` cell: `applies`, `no-match` (each with ` (BBFILES_DYNAMIC)` when
+    /// [`AppendRow::via_dynamic`]) or the `not collected (...)` text.
+    pub fn status(&self) -> String {
+        let suffix = if self.via_dynamic {
+            " (BBFILES_DYNAMIC)"
+        } else {
+            ""
+        };
+        match &self.state {
+            AppendState::Applies => format!("applies{suffix}"),
+            AppendState::NoMatch => format!("no-match{suffix}"),
+            AppendState::NotCollected(why) => why.clone(),
+        }
+    }
+}
+
+/// The rows of `layers show=appends` (module docs), in the view's order, and the
+/// `BBFILES_DYNAMIC` words that cannot be decided statically (left out). The view and the
+/// audit report's section 3 both read these.
+pub fn append_rows(index: &Index, ws: &Workspace) -> Result<(Vec<AppendRow>, Vec<String>)> {
+    let mut rows = Vec::new();
     // The index says what BitBake collects (`files.not_collected`, `bbappend` edges);
     // `resolve::collect` says which `BBFILES_DYNAMIC` entry was involved.
     let collection = resolve::collect(ws);
@@ -449,10 +492,15 @@ fn appends(index: &Index, ws: &Workspace) -> Result<Table> {
         .collect();
     for a in query::files_by_kind(index, &[FileKind::Append])? {
         let label = file_label(&a);
-        let prio = a.priority.to_string();
         let abs = ws.abs_path(&a.loc(LineSpan::line(1)));
+        let row = |matches: Option<String>, state: AppendState, via_dynamic: bool| AppendRow {
+            bbappend: label.clone(),
+            priority: a.priority,
+            matches,
+            state,
+            via_dynamic,
+        };
         if let Some(reason) = not_collected.get(&a.id) {
-            uncollected += 1;
             let entry = abs.as_deref().and_then(|p| {
                 collection
                     .inactive_dynamic
@@ -472,26 +520,45 @@ fn appends(index: &Index, ws: &Workspace) -> Result<Table> {
                 (NOT_COLLECTED_BBMASK, _) => "not collected (masked by BBMASK)".to_string(),
                 _ => "not collected (no BBFILES glob)".to_string(),
             };
-            t.row(&[&label, &prio, "-", &why]);
+            rows.push(row(None, AppendState::NotCollected(why), false));
             continue;
         }
         let dynamic = abs
             .as_deref()
             .is_some_and(|p| collection.via_dynamic.contains(p));
-        let suffix = if dynamic { " (BBFILES_DYNAMIC)" } else { "" };
         let matched: Vec<FileRow> = query::edges_from(index, a.id)?
             .into_iter()
             .filter(|e| e.kind == "bbappend")
             .filter_map(|e| e.target)
             .collect();
         if matched.is_empty() {
-            orphans += 1;
-            t.row(&[&label, &prio, "-", &format!("no-match{suffix}")]);
+            rows.push(row(None, AppendState::NoMatch, dynamic));
             continue;
         }
         for r in matched {
-            t.row(&[&label, &prio, &file_label(&r), &format!("applies{suffix}")]);
+            rows.push(row(Some(file_label(&r)), AppendState::Applies, dynamic));
         }
+    }
+    Ok((rows, collection.unusable))
+}
+
+fn appends(index: &Index, ws: &Workspace) -> Result<Table> {
+    let mut t = Table::new(&["bbappend", "priority", "matches", "status"]);
+    let (rows, unusable) = append_rows(index, ws)?;
+    let mut orphans = 0;
+    let mut uncollected = 0;
+    for r in &rows {
+        match r.state {
+            AppendState::NoMatch => orphans += 1,
+            AppendState::NotCollected(_) => uncollected += 1,
+            AppendState::Applies => {}
+        }
+        t.row(&[
+            &r.bbappend,
+            &r.priority.to_string(),
+            r.matches.as_deref().unwrap_or("-"),
+            &r.status(),
+        ]);
     }
     if orphans > 0 {
         t.note(&format!(
@@ -504,11 +571,11 @@ fn appends(index: &Index, ws: &Workspace) -> Result<Table> {
             }
         ));
     }
-    if !collection.unusable.is_empty() {
+    if !unusable.is_empty() {
         t.note(&format!(
             "note: BBFILES_DYNAMIC words sous-chef cannot decide statically (python, or a \
              variable set later), left out: {}",
-            collection.unusable.join(" ")
+            unusable.join(" ")
         ));
     }
     if uncollected > 0 {

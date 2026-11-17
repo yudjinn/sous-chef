@@ -449,7 +449,7 @@ fakeroot do_install() {
 |---|---|---|
 | `query` | string | required |
 | `mode` | `"name"` \| `"regex"` \| `"fts"` | default `name`: statement names containing `query`, case-insensitive, exact names first. `fts`: SQLite FTS5 over names and snippets |
-| `kind` | list? | `assign`, `function`, `pydef`, `inherit`, `include`, `addtask`, `deltask`, `addhandler`, `export_functions`, `export`, `unset`, `unknown`; aliases `task` (`addtask`) and `def` (`pydef`) |
+| `kind` | list? | `assign`, `function`, `pydef`, `inherit`, `include`, `addtask`, `deltask`, `addhandler`, `export_functions`, `export`, `unset`, `addfragments`, `addpylib`, `unknown` (every kind the index stores); aliases `task` (`addtask`) and `def` (`pydef`) |
 | `layer`, `file_kind`, `recipe` | filters | `recipe` restricts to that recipe's tree (the `.bb`, its includes and classes, its bbappends) |
 | `limit` | int | default 30, at most 1000 |
 
@@ -1009,7 +1009,9 @@ mode, or `bitbake-setup` when the file is named `init-build-env`); an environmen
 was started in (`BUILDDIR` or `BBPATH` set and `bitbake` on `PATH`: `initialised`, the
 program is run directly); a kas project with `kas` on `PATH` and an existing kas build
 directory (`kas`: every command is `kas shell --keep-config-unchanged <files> -c '<command>'`
-in kas's work directory, so kas does not rewrite `conf/` first); a build directory holding
+in kas's work directory, so kas does not rewrite `conf/` first; not used when a kas file
+has a `{repo, file}` include, because `-k` still fetches and checks out those repositories:
+the modes below are tried instead); a build directory holding
 bitbake-setup's `init-build-env` (`bitbake-setup`); an `oe-init-build-env` in a layer root,
 a layer root's parent or the build directory's parent (`init-script`). The init script is
 sourced and the program run by a wrapper that takes every name as argv; in `kas` mode the
@@ -1025,8 +1027,21 @@ notifications; poll with `op: status`.
 output lines; a finished job that did not fail shows the last 3 and a `slice` hint; a
 failed job is followed by a digest of the console output and, for operations that run
 tasks, a `log job=` hint. JSON: `{job, tail, digest, notes}`. `cancel` terminates the job's
-process group (SIGTERM, then SIGKILL after 2 s) and reports the job. A finished job's output
-becomes a handle the next time the `bitbake` tool, or `log` with `job`, is called.
+process group (SIGTERM, then SIGKILL after 2 s, then up to 5 s until no process is left in
+the group; a process that left the group, such as a daemon that called `setsid`, is not
+reached) and reports the job, which is `cancelled` once that is done; a `bitbake -e` that
+times out is ended the same way. A finished job's output becomes a handle the next time the
+`bitbake` tool, or `log` with `job`, is called.
+
+Jobs live in the server process. `status` of a job, finished or not, is reachable only
+while that server runs; a new server starts with no jobs. When the server exits because the
+client closed the connection, a running job's process group is sent SIGKILL (nothing waits
+for it; checked by `tests/bitbake_jobs.rs`,
+`a_running_job_is_killed_when_the_server_runtime_is_dropped`) and its output is not stored.
+A server killed by a signal kills nothing: the job's group is a group of its own and keeps
+running. The output being written lies in `<cache dir>/jobs/<pid>-<n>.out`; the next
+server's first job removes such files when the pid is not a live process and the file was
+last written more than 24 hours ago (a file of a live pid is never removed).
 
 ### `log`
 | Arg | Notes |
@@ -1078,11 +1093,15 @@ show-layers` prints the collection name instead (`core`, `arm-toolchain`).
 
 In a kas project (and only then) it adds `kas` (the files as kas takes them and how they
 were found, e.g. `kas/kiss.yaml:kas/dogbonedark.yaml (from kas in sous-chef.toml)`),
-`kas_defaults` (`machine dogbonedark, distro kiss, target kiss-image`), `kas_layers` (how
+`kas_defaults` (`machine dogbonedark, distro kiss, target kiss-image`: what kas uses, so a
+`KAS_MACHINE`, `KAS_DISTRO` or `KAS_TARGET` in the environment sous-chef was started in
+wins over the files, as in kas), one `kas_env` row per setting such a variable overrides
+(`KAS_MACHINE=board2 overrides machine "board1" (kas/board.yaml:5)`; `KAS_TASK` too),
+`kas_layers` (how
 many layers the kas files name, and those not checked out yet), `kas_lock` (lock files
 read), `kas_mismatch` (layers in the kas files but not in `bblayers.conf`, and the reverse:
 the kas files changed since the last checkout) and one `kas_problem` row per problem; in
-JSON, a `kas` object with the same fields. The `bitbake` row's mode is `init-script`,
+JSON, a `kas` object with the same fields (`env_overrides` only when there is one). The `bitbake` row's mode is `init-script`,
 `bitbake-setup`, `kas` or `initialised`.
 
 ### `audit`
@@ -1275,7 +1294,7 @@ to another version, or carry patches whose source changed.
 | `to` | the new revision; default **the working tree** (`HEAD` plus uncommitted and untracked files): that is what the workspace builds now and what `item` reads, so the `to` pointers can be opened directly. Give `HEAD` to compare committed states only |
 | `recipe` | one recipe by `PN`; an unknown name is an error listing similar names of the layer |
 | `all` | every recipe of the layer (unchanged ones are counted, not listed) |
-| `budget_tokens`, `format` | as every tool; a diff over the budget is stored whole under a `text` handle |
+| `budget_tokens`, `format` | as every tool; a diff over the budget is stored whole under a `text` handle, in the format asked for: the tab-separated table for `text`, the `sous-chef-diff/1` document (the CLI's JSON, pretty-printed one field per line, so `slice` pages and greps it) for `json` |
 
 Default selection (no `recipe`, no `all`): the recipes of the layer that the writable
 layers (other than `layer`) **append** (a bbappend whose `PN` is the recipe's) or **use**:
@@ -1299,8 +1318,15 @@ layer is not read).
 **What is compared.**
 
 - *Recipe identity*: the `PN` of the file name, as the scanner derives it; the `.bb`
-  files are those the layer's current `BBFILES` (and active `BBFILES_DYNAMIC`) globs match,
-  at both revisions (`BBMASK` is not applied). Several versions of one `PN`: equal versions
+  files at a revision are those **that revision's** `BBFILES` globs match: the words its
+  `conf/layer.conf` adds to `BBFILES` (`+=`, `=+`, `.=` / `=.` with a space, `:append`,
+  `:prepend`; `=` and `:=` replace them), with `${LAYERDIR}` replaced by the layer's
+  directory, read with git from the revision. When that file is the one on disk the
+  workspace's current `BBFILES` is used; when the text cannot decide it (`?=` / `??=`, an
+  `include` / `require`, `:remove` or another override, `unset BBFILES`, a reference to a
+  variable other than `LAYERDIR`, no `conf/layer.conf`), the current `BBFILES` is used and
+  a note says so. The workspace's active `BBFILES_DYNAMIC` globs for the layer are added at
+  both revisions; `BBMASK` is not applied. Several versions of one `PN`: equal versions
   pair first; each remaining old version, highest first, pairs with the new version that
   shares the longest version prefix (`fiptool-native` 2.10.4 with 2.10.30, not 2.14.1);
   a pair with different versions is a version change (`renamed`), the rest are added or
@@ -1313,7 +1339,12 @@ layer is not read).
   a tree.
 - *Statements, as written, never evaluated*: assignments keyed by the left-hand side as
   written (`SRC_URI:append:qemux86 +=`, `SRC_URI[sha256sum] =`), so the operations of one
-  variable and its override and flag variants sort together; functions and tasks by name
+  variable and its override and flag variants sort together. A statement in the legacy
+  `_` override syntax (`DEPENDS_append +=`) is keyed with its `:` form, so it pairs with
+  the same statement in the `:` syntax, but the two never match: a rewrite from one to the
+  other is `changed`, with `rewritten from the legacy _ override syntax: DEPENDS_append +=
+  -> DEPENDS:append +=` (and the value change, if any); the `name` column shows the key as
+  written at `to`. Functions and tasks by name
   (bodies compared; the first differing code line shown); `inherit` per class;
   `require`, `include`, `addhandler`, `EXPORT_FUNCTIONS` and unparsed lines as
   directives; and `SRC_URI` word by word (`parse::words`, so a `${@...}` expression is one
@@ -1359,8 +1390,10 @@ first, then by name, then the own files' includes) a `recipe` row (version, numb
 changes, why it was selected, source changes) and its `file`, `var`, `function`, `task`,
 `inherit`, `directive` and `SRC_URI entry` rows; then `class` rows; notes last. Everything
 is sorted; the output depends only on the two revisions and the workspace. When the whole
-table is over `budget_tokens`, it is stored under a `text` handle, and the answer is the
-table cut to the budget with `full diff h:...: N rows, B bytes` and the `slice` hint.
+table is over `budget_tokens`, it is stored under a `text` handle (as the table for
+`format: text`, as the `sous-chef-diff/1` JSON document for `format: json`), and the
+answer is the table cut to the budget with `full diff h:...: N rows, B bytes (...)` and
+the `slice` hint.
 
 The fixture repository of `tests/release_diff.rs` (two commits, a tag `v1`; the snapshot
 `tests/snapshots/release_diff__release_diff_text.snap`; recipe rows cut here):
@@ -1384,7 +1417,7 @@ hello	SRC_URI entry	file://${@bb.utils.contains(...)}	added	-	-	meta-up:recipes-
 hello	SRC_URI entry	file://fix.patch	added	-	-	meta-up:recipes-core/hello/hello_1.1.bb:9-13
 ...
 -	class	classes/autotools.bbclass	changed	1 statement differs; inherited directly by compared hello; inherited by your meta-mine:recipes-app/app/app_1.0.bb:5	meta-up:classes/autotools.bbclass:1	meta-up:classes/autotools.bbclass:1
-note: statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once
+note: statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (each revision's BBFILES, no BBMASK); classes listed once
 ...
 ```
 
