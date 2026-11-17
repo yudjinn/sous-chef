@@ -51,7 +51,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
-use crate::eval::{self, DataStore, OpStatus, Target, providers};
+use crate::eval::{self, ClassExtend, DataStore, OpStatus, Target, providers};
 use crate::index::Index;
 use crate::index::query::{self, EdgeRow, FileRow, RecipeRow, StatementFilter, StatementRow};
 use crate::mcp::Ctx;
@@ -97,8 +97,8 @@ pub struct Args {
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let mut index = ctx.index.lock().await;
     let report = index.refresh(&ctx.workspace)?;
-    let (recipe, chosen) =
-        resolve_selected(&index, &ctx.workspace, &args.name, args.version.as_deref())?;
+    let (recipe, chosen, variant) =
+        resolve_selected_variant(&index, &ctx.workspace, &args.name, args.version.as_deref())?;
     let mut table = match args.show {
         Show::Summary => summary(
             &index,
@@ -106,12 +106,13 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
             &recipe,
             args.version.as_deref(),
             chosen,
+            variant.as_ref(),
         )?,
         Show::Tree => tree_table(&index, &recipe)?,
         Show::Outline => outline(&index, &recipe)?,
         Show::Sources | Show::Tasks | Show::Packages => {
             let target = Target {
-                recipe: Some(file_label(&recipe.file)),
+                recipe: Some(eval_label(&recipe, variant.as_ref())),
                 ..Target::default()
             };
             let ds = eval::evaluate(&index, &ctx.workspace, &target)?;
@@ -129,6 +130,17 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         table.note(&format!(
             "note: {} is {why}: BitBake does not collect it, so no recipe name or provider resolves to it and no bbappend applies",
             file_label(&recipe.file)
+        ));
+    }
+    if let Some(ext) = &variant
+        && matches!(args.show, Show::Tree | Show::Outline)
+    {
+        table.note(&format!(
+            "note: {} is {} of {}: its files are these, plus the class `{}` BitBake inherits for it at the end (deferred), and whatever that class pulls in",
+            args.name.trim(),
+            ext.describe(),
+            recipe.pn,
+            ext.class()
         ));
     }
     if let Some(line) = render::freshness_line(&report) {
@@ -231,80 +243,97 @@ pub fn resolve_recipe(index: &Index, name: &str, version: Option<&str>) -> Resul
 /// This is the one resolution `recipe`, `item`, `search` and the `bbappend` generator share,
 /// so a bare `pn` names the same file in all of them. Provider selection needs the
 /// configuration pass (cached per process by `eval::global_cache`).
+///
+/// A class-extended variant (`gmp-native`) resolves to its base recipe file, which is the
+/// variant's `FILE` and holds its statements; the second value then says which variant it is.
 pub fn resolve_selected(
     index: &Index,
     ws: &Workspace,
     name: &str,
     version: Option<&str>,
 ) -> Result<(RecipeRow, Option<String>)> {
-    let recipe = resolve_recipe(index, name, version)?;
+    let (recipe, chosen, _) = resolve_selected_variant(index, ws, name, version)?;
+    Ok((recipe, chosen))
+}
+
+/// [`resolve_selected`], also giving the `BBCLASSEXTEND` word when `name` is a
+/// class-extended variant (`eval::providers::Providers::best_version`: the base recipe's
+/// finalised `BBCLASSEXTEND` lists it); the row is then the base recipe file.
+pub fn resolve_selected_variant(
+    index: &Index,
+    ws: &Workspace,
+    name: &str,
+    version: Option<&str>,
+) -> Result<(RecipeRow, Option<String>, Option<ClassExtend>)> {
     let name = name.trim();
+    if !name.contains(':')
+        && query::find_recipes(index, name)?.is_empty()
+        && class_extend_variant(index, name)?.is_some()
+        && let Some(sel) = providers::preferred_recipe(index, ws, name, version, None, None)?
+        && let Some(ext) = sel.variant.clone()
+    {
+        let why = sel.describe();
+        return Ok((sel.recipe, Some(why), Some(ext)));
+    }
+    let recipe = resolve_recipe(index, name, version)?;
     if version.is_none()
         && !name.contains(':')
         && name == recipe.pn
         && let Some(sel) = providers::preferred_recipe(index, ws, name, None, None, None)?
     {
-        return Ok((sel.recipe.clone(), Some(sel.describe())));
+        return Ok((sel.recipe.clone(), Some(sel.describe()), None));
     }
-    Ok((recipe, None))
+    Ok((recipe, None, None))
 }
 
-/// For a name that is no recipe: whether it has the form of a class-extended variant of a
-/// recipe whose `BBCLASSEXTEND` (statically: the words of its assignments in the recipe's
-/// tree and bbappends, without `${...}`, not taken out by a `:remove`) lists that class, and
-/// if so the sentence saying so. Shared by every tool that resolves a bare name (through
-/// [`resolve_recipe`]) and by lint's target resolution.
+/// The evaluation target of a recipe file, or of its class-extended variant
+/// (`virtual:<word>:<layer>:<path>`, see `eval::variant`).
+pub fn eval_label(recipe: &RecipeRow, variant: Option<&ClassExtend>) -> String {
+    match variant {
+        Some(ext) => format!("{}{}", ext.virtual_prefix(), file_label(&recipe.file)),
+        None => file_label(&recipe.file),
+    }
+}
+
+/// For a name that is no recipe: the base recipe and the `BBCLASSEXTEND` word when the name
+/// has the form of a class-extended variant of a recipe whose `BBCLASSEXTEND` (statically:
+/// the words of its assignments in the recipe's tree and bbappends, without `${...}`, not
+/// taken out by a `:remove`) lists that class. A cheap test made before evaluating; the
+/// evaluator confirms it on the finalised value (`eval::providers::Providers::variant`).
 ///
-/// The forms (BitBake 2.18.0 `lib/bb/parse/ast.py` `multi_finalize`: for each word of
-/// `BBCLASSEXTEND`, `ext.split(':', 2)`; a plain word sets `PN = "<pn>-<word>"` and
-/// `inherit_defer`s the class; OE-core Wrynose `classes-recipe/nativesdk.bbclass`
-/// `nativesdk_virtclass_handler` then renames `<pn>-nativesdk` to `nativesdk-<pn>`;
-/// `classes/multilib.bbclass` sets `PN = "<variant>-<pn>"` for `multilib:<variant>`):
-/// `<pn>-native` (word `native`), `nativesdk-<pn>` (word `nativesdk`), `<variant>-<pn>`
-/// (word `multilib:<variant>`). `<pn>` is the recipe's file-name `PN`. Other classes are
-/// not claimed (what their handlers do to `PN` was not checked).
-pub fn class_extend_hint(index: &Index, name: &str) -> Result<Option<String>> {
-    let name = name.trim();
-    let mut cands: Vec<(String, String, String)> = Vec::new(); // (base pn, word, class)
-    if let Some(base) = name.strip_suffix("-native") {
-        cands.push((base.into(), "native".into(), "native".into()));
-    }
-    if let Some(base) = name.strip_prefix("nativesdk-") {
-        cands.push((base.into(), "nativesdk".into(), "nativesdk".into()));
-    }
-    if let Some((variant, base)) = name.split_once('-') {
-        cands.push((
-            base.into(),
-            format!("multilib:{variant}"),
-            "multilib".into(),
-        ));
-    }
-    for (base, word, class) in cands {
-        if base.is_empty() {
-            continue;
-        }
+/// The forms (`eval::variant`): `<pn>-native` (word `native`), `nativesdk-<pn>` (word
+/// `nativesdk`), `<variant>-<pn>` (word `multilib:<variant>`). `<pn>` is the recipe's
+/// file-name `PN`. Other classes are not claimed (what their handlers do to `PN` was not
+/// checked).
+pub fn class_extend_variant(index: &Index, name: &str) -> Result<Option<(RecipeRow, ClassExtend)>> {
+    for (base, ext) in eval::variant::name_forms(name) {
         let Some(recipe) = query::preferred_recipe(index, &base, None)? else {
             continue;
         };
-        if !class_extend_words(index, &recipe)?.contains(&word) {
-            continue;
+        if class_extend_words(index, &recipe)?.contains(&ext.word) {
+            return Ok(Some((recipe, ext)));
         }
-        let what = if class == "multilib" {
-            format!(
-                "the `{}` multilib variant",
-                word.trim_start_matches("multilib:")
-            )
-        } else {
-            format!("the `{class}` variant")
-        };
-        return Ok(Some(format!(
-            "`{name}` is {what} of `{base}`, which `BBCLASSEXTEND` provides (`{word}` in {}); \
-             sous-chef does not evaluate class-extended variants; `recipe {base}` shows the \
-             base recipe",
-            file_label(&recipe.file)
-        )));
     }
     Ok(None)
+}
+
+/// For a name that is no recipe but a class-extended variant ([`class_extend_variant`]),
+/// the sentence saying so, for a caller that works on files (lint's target resolution):
+/// the variant's files are the base recipe's.
+pub fn class_extend_hint(index: &Index, name: &str) -> Result<Option<String>> {
+    let name = name.trim();
+    let Some((recipe, ext)) = class_extend_variant(index, name)? else {
+        return Ok(None);
+    };
+    Ok(Some(format!(
+        "`{name}` is {} of `{}`, which `BBCLASSEXTEND` provides (`{}` in {}); its files are those of `{}`, so give `{}`",
+        ext.describe(),
+        recipe.pn,
+        ext.word,
+        file_label(&recipe.file),
+        recipe.pn,
+        recipe.pn
+    )))
 }
 
 /// The static words of `BBCLASSEXTEND` in a recipe's files (its tree and its bbappends'):
@@ -590,9 +619,25 @@ fn summary(
     recipe: &RecipeRow,
     version: Option<&str>,
     chosen: Option<String>,
+    variant: Option<&ClassExtend>,
 ) -> Result<Table> {
     let walk = walk_recipe(index, recipe)?;
     let mut t = Table::new(&["field", "value", "loc"]);
+    if let Some(ext) = variant {
+        let name = ext
+            .variant_name(&recipe.pn)
+            .unwrap_or_else(|| format!("{}-{}", recipe.pn, ext.word));
+        t.row(&[
+            "variant",
+            &format!(
+                "{name} ({} of {}, BBCLASSEXTEND `{}`)",
+                ext.describe(),
+                recipe.pn,
+                ext.word
+            ),
+            &eval_label(recipe, Some(ext)),
+        ]);
+    }
     t.row(&[
         "recipe",
         &format!("{} {}", recipe.pn, recipe.pv),
@@ -644,7 +689,7 @@ fn summary(
     // Key values, evaluated (configuration, the recipe, its bbappends; default machine and
     // distro).
     let target = Target {
-        recipe: Some(file_label(&recipe.file)),
+        recipe: Some(eval_label(recipe, variant)),
         version: None,
         machine: None,
         distro: None,

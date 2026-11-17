@@ -160,10 +160,18 @@ pub enum Feature {
     RecipeVirtualProviders,
     /// The `addpylib` directive (base configuration only).
     AddPyLib,
+    /// A `BBCLASSEXTEND` variant's class is added to the deferred inherits
+    /// (`ast.multi_finalize` `extendfunc` calls `BBHandler.inherit_defer`), so it is parsed
+    /// after the recipe's own deferred inherits; before, it is inherited at once.
+    ClassExtendDeferred,
+    /// OE-core's `base_eventhandler` sets `CLASSOVERRIDE = "class-<c>"` on
+    /// `RecipePreDeferredInherits` when `native`, `nativesdk`, `crosssdk` or `cross` is among
+    /// the deferred inherits, so their override applies while the deferred classes are parsed.
+    DeferredInheritsClassOverride,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 10] = [
+    pub const ALL: [Feature; 12] = [
         Feature::SplitClassDirs,
         Feature::InheritDefer,
         Feature::IncludeAll,
@@ -174,6 +182,8 @@ impl Feature {
         Feature::BuiltinFragments,
         Feature::RecipeVirtualProviders,
         Feature::AddPyLib,
+        Feature::ClassExtendDeferred,
+        Feature::DeferredInheritsClassOverride,
     ];
 
     /// The first supported release that has the feature.
@@ -185,7 +195,9 @@ impl Feature {
             Feature::IncludeAll | Feature::AddFragments | Feature::RecipeVirtualProviders => {
                 Release::Walnascar
             }
-            Feature::BuiltinFragments => Release::Whinlatter,
+            Feature::BuiltinFragments
+            | Feature::ClassExtendDeferred
+            | Feature::DeferredInheritsClassOverride => Release::Whinlatter,
             Feature::UnpackDir => Release::Styhead,
             Feature::WorkdirAsSourceDir | Feature::PrInWorkdir => Release::FLOOR,
         }
@@ -215,7 +227,9 @@ impl Feature {
             | Feature::AddFragments
             | Feature::BuiltinFragments
             | Feature::RecipeVirtualProviders
-            | Feature::AddPyLib => true,
+            | Feature::AddPyLib
+            | Feature::ClassExtendDeferred
+            | Feature::DeferredInheritsClassOverride => true,
         }
     }
 }
@@ -461,6 +475,8 @@ mod tests {
             (BuiltinFragments, false, false, true),
             (RecipeVirtualProviders, false, false, true),
             (AddPyLib, false, true, true),
+            (ClassExtendDeferred, false, false, true),
+            (DeferredInheritsClassOverride, false, false, true),
         ];
         assert_eq!(table.len(), Feature::ALL.len());
         for (f, k, s, w) in table {
@@ -485,6 +501,10 @@ mod tests {
         assert!(Release::Walnascar.has(RecipeVirtualProviders));
         assert!(!Release::Langdale.has(AddPyLib));
         assert!(Release::Mickledore.has(AddPyLib));
+        assert!(!Release::Walnascar.has(ClassExtendDeferred));
+        assert!(Release::Whinlatter.has(ClassExtendDeferred));
+        assert!(!Release::Walnascar.has(DeferredInheritsClassOverride));
+        assert!(Release::Whinlatter.has(DeferredInheritsClassOverride));
         assert!(Feature::ALL.iter().all(|f| f.verified()));
     }
 

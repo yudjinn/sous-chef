@@ -816,8 +816,8 @@ honoured; a path target is resolved before it.** `query::preferred_recipe` (laye
 and version only, no configuration) was still what `item`, `search` and the `bbappend`
 generator used after wave 4; since wave 5 they use `recipe::resolve_selected` (provider
 selection), and `bitbake::logs` is the remaining user. Not handled by provider selection:
-`BBCLASSEXTEND` variants (`-native` names find no provider; since w6 the error names the
-base recipe), `SKIP_RECIPE`, `COMPATIBLE_*` and `INCOMPATIBLE_LICENSE` (since w6 / w8 only a
+`BBCLASSEXTEND` variants until w10 (`-native` names found no provider; since w10 a variant
+is a provider of its name, see "As implemented after wave 5"), `SKIP_RECIPE`, `COMPATIBLE_*` and `INCOMPATIBLE_LICENSE` (since w6 / w8 only a
 note on the evaluation). A file a static `BBMASK` masks is no candidate since w6 (the
 index's `not_collected` mark).
 
@@ -1155,7 +1155,7 @@ fewer it is `Unknown` with an "unparsed line" diagnostic. The index records it a
 kind `addpylib` (`name` = the directory, `value` = the namespace) and makes **no edge**: it
 adds a python library directory, not a metadata file. `hygiene/parse-error` judges where it
 is (base configuration only) and the release (`Feature::AddPyLib`, BitBake 2.4 on;
-`Feature::ALL` has ten). The `.inc` split treats it as opaque; the release diff compares it
+`Feature::ALL` had ten then, twelve since w10). The `.inc` split treats it as opaque; the release diff compares it
 as a directive. `search`'s `kind` filter knows it (`search::KINDS`, public since w8: every
 kind the scanner stores, tested against a file with each).
 
@@ -1203,10 +1203,32 @@ Result<Vec<OrderProblem>>` (`OrderProblem { layer, severity, message, loc }`): t
 bbappend, priority, matches, state: AppendState { Applies, NoMatch, NotCollected(why) },
 via_dynamic }`, and the notes): the `appends` view as typed rows. The view and the audit
 both use these two; the audit reads no view's JSON.
-`recipe::class_extend_hint(index, name) -> Result<Option<String>>`: for a name that is no
-recipe, whether it is the `<pn>-native`, `nativesdk-<pn>` or `<variant>-<pn>` variant of a
-recipe whose `BBCLASSEXTEND` lists the class; every tool that resolves a recipe name, and
-lint's target, give it as the error.
+`recipe::class_extend_variant(index, name) -> Result<Option<(RecipeRow, ClassExtend)>>`
+(w10): for a name that is no recipe, whether it is the `<pn>-native`, `nativesdk-<pn>` or
+`<variant>-<pn>` variant of a recipe whose `BBCLASSEXTEND` lists the class (static words, a
+cheap test before evaluating); `recipe::class_extend_hint` turns it into lint's error (the
+variant's files are the base recipe's). `recipe::resolve_selected_variant(index, ws, name,
+version) -> Result<(RecipeRow, Option<String>, Option<ClassExtend>)>` (w10; `resolve_selected`
+drops the third value): a variant resolves to its base recipe file plus the word;
+`recipe::eval_label(recipe, variant)` is the evaluation target (`virtual:<word>:<layer>:<path>`
+for a variant). `var::recipe_target` passes a variant name to the evaluator.
+
+Class-extended variants (w10, `eval::variant`, `eval::replay`): `ClassExtend { word }`
+(`class()`, `variant()`, `variant_name(pn)`, `virtual_prefix()`, `describe()`),
+`variant::name_forms(name)`, `variant::split_virtual(target)`. A `Target` names a variant by
+name or by the pointer `virtual:<word>:<recipe>`; `replay::recipe_pass` replays the base and
+its bbappends, finalises a fork to read `BBCLASSEXTEND` and `PN` (`multi_finalize`), then
+applies `extendfunc` to the unfinalised store and finalises (`Replay::finalize`: OE-core's
+`RecipePreDeferredInherits` `CLASSOVERRIDE`, deferred inherits, the class-extension handlers,
+`expand_keys`, the multilib post-key-expansion handler, virtual providers, skip notes).
+`ReplayNotes::variant: Option<ClassExtend>`. `OpKind::ClassExtend` (`class-extend` in a
+history row) and `OpKind::EventHandler` (`handler`) record the values BitBake and the
+emulated handlers set from code (replacing like `VirtualProviderRewrite`). Providers:
+`Selection::variant: Option<ClassExtend>`; `Providers::variant(name, version) ->
+Result<Option<(Selection, DataStore)>>`; `Providers::best_version` and `Providers::providers`
+fall back to it when no indexed recipe has the name; `Providers::evaluate_selection(&Selection)`.
+`Feature::ClassExtendDeferred`, `Feature::DeferredInheritsClassOverride` (`Feature::ALL` has
+twelve). bitbake-semantics.md, "Class-extended variants", has the rules.
 
 kas (w8, `workspace::kas`):
 
