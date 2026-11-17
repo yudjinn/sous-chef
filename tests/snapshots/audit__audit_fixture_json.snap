@@ -1,0 +1,539 @@
+---
+source: tests/audit.rs
+expression: masked_json(&a)
+---
+{
+  "generated": "[masked]",
+  "inventory": {
+    "kas": null,
+    "layers": [
+      {
+        "collections": [
+          "core"
+        ],
+        "compat": [
+          "wrynose"
+        ],
+        "depends": [],
+        "enabled": true,
+        "files": {
+          "bb": 3,
+          "bbappend": 0,
+          "bbclass": 3,
+          "conf": 5,
+          "inc": 1
+        },
+        "name": "meta-core",
+        "note": null,
+        "path": "meta-core",
+        "position": 1,
+        "priority": 5,
+        "repository": null,
+        "role": "upstream"
+      },
+      {
+        "collections": [
+          "vendor"
+        ],
+        "compat": [
+          "scarthgap",
+          "wrynose"
+        ],
+        "depends": [
+          "core"
+        ],
+        "enabled": true,
+        "files": {
+          "bb": 1,
+          "bbappend": 1,
+          "bbclass": 0,
+          "conf": 1,
+          "inc": 0
+        },
+        "name": "meta-vendor",
+        "note": null,
+        "path": "meta-vendor",
+        "position": 2,
+        "priority": 6,
+        "repository": null,
+        "role": "upstream"
+      },
+      {
+        "collections": [
+          "mine"
+        ],
+        "compat": [
+          "kirkstone",
+          "scarthgap",
+          "wrynose"
+        ],
+        "depends": [
+          "core"
+        ],
+        "enabled": true,
+        "files": {
+          "bb": 1,
+          "bbappend": 2,
+          "bbclass": 0,
+          "conf": 1,
+          "inc": 0
+        },
+        "name": "meta-mine",
+        "note": null,
+        "path": "meta-mine",
+        "position": 3,
+        "priority": 10,
+        "repository": null,
+        "role": "own"
+      },
+      {
+        "collections": [
+          "legacy"
+        ],
+        "compat": [
+          "dunfell"
+        ],
+        "depends": [
+          "core"
+        ],
+        "enabled": false,
+        "files": null,
+        "name": "meta-legacy",
+        "note": null,
+        "path": "meta-legacy",
+        "position": null,
+        "priority": 7,
+        "repository": null,
+        "role": "not enabled"
+      }
+    ],
+    "notes": [
+      "git facts are unknown: no git repository was found inside the root (or git is not available); a repository enclosing the root is not reported",
+      "1 layer present but not enabled: not in the index, so their files are not counted, linted or resolved; collection, priority, compat and depends come from their conf/layer.conf alone"
+    ],
+    "repositories": [],
+    "summary": "3 layers enabled (1 own, 2 upstream), 1 present but not enabled; 0 repositories"
+  },
+  "lint": {
+    "command": "sous-chef lint --all",
+    "files": 21,
+    "notes": [],
+    "own": [
+      {
+        "counts": {
+          "error": 0,
+          "info": 1,
+          "warning": 1
+        },
+        "layer": "build",
+        "rules": [
+          {
+            "command": null,
+            "count": 1,
+            "counts": {
+              "error": 0,
+              "info": 0,
+              "warning": 1
+            },
+            "findings": [
+              {
+                "message": "`DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = \" wayland\"`",
+                "pointer": "build:conf/local.conf:13",
+                "rule": "override/plus-equals-on-default",
+                "severity": "warning"
+              }
+            ],
+            "more": 0,
+            "rule": "override/plus-equals-on-default",
+            "severity": "warning"
+          },
+          {
+            "command": null,
+            "count": 1,
+            "counts": {
+              "error": 0,
+              "info": 1,
+              "warning": 0
+            },
+            "findings": [
+              {
+                "message": "`EXTRA_OECONF:append:pn-hello` in local.conf changes only recipe hello, and only in this build directory; move it to a hello_%.bbappend in your layer as `EXTRA_OECONF:append`, or to your distro conf if it is policy",
+                "pointer": "build:conf/local.conf:9",
+                "rule": "org/recipe-change-in-local-conf",
+                "severity": "info"
+              }
+            ],
+            "more": 0,
+            "rule": "org/recipe-change-in-local-conf",
+            "severity": "info"
+          }
+        ]
+      },
+      {
+        "counts": {
+          "error": 0,
+          "info": 0,
+          "warning": 2
+        },
+        "layer": "meta-mine",
+        "rules": [
+          {
+            "command": null,
+            "count": 1,
+            "counts": {
+              "error": 0,
+              "info": 0,
+              "warning": 1
+            },
+            "findings": [
+              {
+                "message": "`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = \"${UNPACKDIR}\")",
+                "pointer": "meta-mine:recipes-app/app/app_0.1.bb:22",
+                "rule": "hygiene/release-syntax",
+                "severity": "warning"
+              }
+            ],
+            "more": 0,
+            "rule": "hygiene/release-syntax",
+            "severity": "warning"
+          },
+          {
+            "command": null,
+            "count": 1,
+            "counts": {
+              "error": 0,
+              "info": 0,
+              "warning": 1
+            },
+            "findings": [
+              {
+                "message": "orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error (\"No recipes available for\"); there is no orphan recipe; remove the append or add its layer",
+                "pointer": "meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1",
+                "rule": "org/append-no-match",
+                "severity": "warning"
+              }
+            ],
+            "more": 0,
+            "rule": "org/append-no-match",
+            "severity": "warning"
+          }
+        ]
+      }
+    ],
+    "own_total": {
+      "error": 0,
+      "info": 1,
+      "warning": 3
+    },
+    "summary": "7 findings in 21 files: own layers and build directory 4 (0 error, 3 warning, 1 info); upstream layers 3 (0 error, 1 warning, 2 info)",
+    "upstream": [
+      {
+        "counts": {
+          "error": 0,
+          "info": 1,
+          "warning": 0
+        },
+        "layer": "meta-core",
+        "rules": [
+          {
+            "command": null,
+            "count": 1,
+            "counts": {
+              "error": 0,
+              "info": 1,
+              "warning": 0
+            },
+            "findings": [
+              {
+                "message": "class base is in classes/, but every release this layer is checked against (wrynose) searches classes-recipe/ and classes-global/ first; move it to classes-global/ (it is used through INHERIT) and keep the name",
+                "pointer": "meta-core:classes/base.bbclass:1",
+                "rule": "org/class-location",
+                "severity": "info"
+              }
+            ],
+            "more": 0,
+            "rule": "org/class-location",
+            "severity": "info"
+          }
+        ]
+      },
+      {
+        "counts": {
+          "error": 0,
+          "info": 1,
+          "warning": 1
+        },
+        "layer": "meta-vendor",
+        "rules": [
+          {
+            "command": null,
+            "count": 1,
+            "counts": {
+              "error": 0,
+              "info": 0,
+              "warning": 1
+            },
+            "findings": [
+              {
+                "message": "override `boradx` in `EXTRA_OECONF:append:boradx` is no machine, distro, class, package or OVERRIDES entry in the workspace, so this never applies; fix the name (`boardx`?) or remove the line",
+                "pointer": "meta-vendor:recipes-core/hello/hello_%.bbappend:9",
+                "rule": "override/dead",
+                "severity": "warning"
+              }
+            ],
+            "more": 0,
+            "rule": "override/dead",
+            "severity": "warning"
+          },
+          {
+            "command": null,
+            "count": 1,
+            "counts": {
+              "error": 0,
+              "info": 1,
+              "warning": 0
+            },
+            "findings": [
+              {
+                "message": "hello_%.bbappend applies to hello 1.0 and 1.1 but pins a patch, which usually fits one version; name the append after that version (hello_1.1.bbappend), or check that it fits every version",
+                "pointer": "meta-vendor:recipes-core/hello/hello_%.bbappend:4",
+                "rule": "org/append-wildcard-broad",
+                "severity": "info"
+              }
+            ],
+            "more": 0,
+            "rule": "org/append-wildcard-broad",
+            "severity": "info"
+          }
+        ]
+      }
+    ],
+    "upstream_total": {
+      "error": 0,
+      "info": 2,
+      "warning": 1
+    }
+  },
+  "not_checked": {
+    "anonymous_python": {
+      "bb": 1
+    },
+    "build_environment": "not found: disabled in sous-chef.toml ([bitbake] enabled = false)",
+    "layers_not_analysed": [
+      "meta-legacy"
+    ],
+    "limits": [
+      "Python is never run: `${@...}` expansions, anonymous python (`python () { ... }`) and `d.setVar` / `d.appendVar` in classes are not evaluated; values that depend on them are marked `depends on python, not evaluated` by `var`, `recipe` and the other evaluated tools, and `var authoritative=true` asks BitBake (needs a build environment).",
+      "How many values depend on python is not counted here: that needs evaluating every recipe (`var` and `recipe` mark them per recipe).",
+      "Recipe-scope lint rules evaluate each recipe for the default MACHINE and DISTRO only; other machines and distros are not checked.",
+      "OVERRIDES entries that come from python are not known, so overrides on them may be reported as dead (`override/dead`).",
+      "Tasks added or deleted by anonymous python, `do_x[deps]` set directly and dependencies on other recipes' tasks are not modelled (`recipe show=tasks`).",
+      "bbappends collected only through BBFILES_DYNAMIC are matched by file name but not applied by the evaluation.",
+      "Nothing was fetched, built or parsed by BitBake: SRC_URI reachability, checksums, licenses and QA checks are BitBake's.",
+      "Layers present but not enabled are not indexed: only their conf/layer.conf was read."
+    ],
+    "summary": "build environment not found; anonymous python, which is not run, in 1 recipe and 0 classes; layers present but not enabled, not analysed: 1"
+  },
+  "parse": {
+    "not_collected": [],
+    "summary": "0 unparsed statements, 4 unresolved include/require, 0 unresolved inherits, 0 indexed files BitBake does not collect",
+    "unparsed": {
+      "by_layer": [],
+      "items": [],
+      "more": 0,
+      "total": 0
+    },
+    "unresolved_includes": {
+      "by_layer": [
+        {
+          "count": 4,
+          "layer": "meta-core"
+        }
+      ],
+      "items": [
+        {
+          "pointer": "meta-core:conf/bitbake.conf:48",
+          "text": "include conf/site.conf: not found; BitBake skips a missing include silently"
+        },
+        {
+          "pointer": "meta-core:conf/bitbake.conf:49",
+          "text": "include conf/auto.conf: not found; BitBake skips a missing include silently"
+        },
+        {
+          "pointer": "meta-core:conf/bitbake.conf:51",
+          "text": "include conf/machine/${MACHINE}.conf: needs evaluation, not followed"
+        },
+        {
+          "pointer": "meta-core:conf/bitbake.conf:52",
+          "text": "include conf/distro/${DISTRO}.conf: needs evaluation, not followed"
+        }
+      ],
+      "more": 0,
+      "total": 4
+    },
+    "unresolved_inherits": {
+      "by_layer": [],
+      "items": [],
+      "more": 0,
+      "total": 0
+    }
+  },
+  "releases": {
+    "columns": [
+      "kirkstone",
+      "scarthgap",
+      "wrynose"
+    ],
+    "floor": "kirkstone",
+    "layers": [
+      {
+        "claims": [
+          "wrynose"
+        ],
+        "claims_workspace": true,
+        "enabled": true,
+        "layer": "meta-core",
+        "older_than_floor": [],
+        "unknown": []
+      },
+      {
+        "claims": [
+          "scarthgap",
+          "wrynose"
+        ],
+        "claims_workspace": true,
+        "enabled": true,
+        "layer": "meta-vendor",
+        "older_than_floor": [],
+        "unknown": []
+      },
+      {
+        "claims": [
+          "kirkstone",
+          "scarthgap",
+          "wrynose"
+        ],
+        "claims_workspace": true,
+        "enabled": true,
+        "layer": "meta-mine",
+        "older_than_floor": [],
+        "unknown": []
+      },
+      {
+        "claims": [],
+        "claims_workspace": false,
+        "enabled": false,
+        "layer": "meta-legacy",
+        "older_than_floor": [
+          "dunfell"
+        ],
+        "unknown": []
+      }
+    ],
+    "note": null,
+    "source": "LAYERSERIES_CORENAMES",
+    "summary": "workspace release wrynose (LAYERSERIES_CORENAMES); every enabled layer claims it; 1 layer present but not enabled does not",
+    "supported": [
+      "kirkstone 4.0 LTS",
+      "langdale 4.1",
+      "mickledore 4.2",
+      "nanbield 4.3",
+      "scarthgap 5.0 LTS",
+      "styhead 5.1",
+      "walnascar 5.2",
+      "whinlatter 5.3",
+      "wrynose 6.0 LTS"
+    ],
+    "workspace": "wrynose"
+  },
+  "schema": "sous-chef-audit/1",
+  "sous_chef_version": "[masked]",
+  "structure": {
+    "appends_not_collected": [],
+    "lint": [
+      {
+        "message": "hello_%.bbappend applies to hello 1.0 and 1.1 but pins a patch, which usually fits one version; name the append after that version (hello_1.1.bbappend), or check that it fits every version",
+        "pointer": "meta-vendor:recipes-core/hello/hello_%.bbappend:4",
+        "rule": "org/append-wildcard-broad",
+        "severity": "info"
+      }
+    ],
+    "notes": [],
+    "order": [],
+    "orphan_appends": [
+      "meta-mine:recipes-app/orphan/orphan_9.%.bbappend"
+    ],
+    "problems": [],
+    "shadowed": [],
+    "summary": "layer.conf and BBLAYERS order: 0 (0 error, 0 warning, 0 info); shadowed recipe or class names: 0; bbappends matching no recipe: 1 (1 in own layers); bbappends not collected: 0; over-broad bbappends and duplicate versions: 1"
+  },
+  "summary": {
+    "attention": [
+      {
+        "count": 1,
+        "layers": [
+          "meta-mine"
+        ],
+        "message": "`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = \"${UNPACKDIR}\")",
+        "pointer": "meta-mine:recipes-app/app/app_0.1.bb:22",
+        "section": "lint",
+        "severity": "warning",
+        "what": "hygiene/release-syntax"
+      },
+      {
+        "count": 1,
+        "layers": [
+          "meta-mine"
+        ],
+        "message": "orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error (\"No recipes available for\"); there is no orphan recipe; remove the append or add its layer",
+        "pointer": "meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1",
+        "section": "lint",
+        "severity": "warning",
+        "what": "org/append-no-match"
+      },
+      {
+        "count": 1,
+        "layers": [
+          "build"
+        ],
+        "message": "`DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = \" wayland\"`",
+        "pointer": "build:conf/local.conf:13",
+        "section": "lint",
+        "severity": "warning",
+        "what": "override/plus-equals-on-default"
+      }
+    ],
+    "attention_rule": "errors in own layers, by rule, most findings first; then layer structure errors (org/layer-conf errors outside own layers, bbappends outside own layers that match no recipe: BitBake stops on these); then warnings in own layers, by rule; while that gives fewer than 3: errors in upstream layers by rule, then layer structure warnings, then infos in own layers by rule; at most 10",
+    "build_dir": "build",
+    "counts": {
+      "files": {
+        "bb": 5,
+        "bbappend": 3,
+        "bbclass": 3,
+        "conf": 9,
+        "inc": 1
+      },
+      "files_total": 21,
+      "findings_own": {
+        "error": 0,
+        "info": 1,
+        "warning": 3
+      },
+      "findings_upstream": {
+        "error": 0,
+        "info": 2,
+        "warning": 1
+      },
+      "layers_enabled": 3,
+      "layers_not_enabled": 1,
+      "layers_own": 1,
+      "layers_upstream": 2
+    },
+    "kas_files": [],
+    "line": "workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled; 21 indexed files; findings in own layers: 0 error, 3 warning, 1 info; in upstream layers: 0 error, 1 warning, 2 info; 3 items worth attention",
+    "release": "wrynose",
+    "release_note": null,
+    "release_source": "LAYERSERIES_CORENAMES",
+    "root": "."
+  }
+}

@@ -5,6 +5,7 @@
 //! - `index` -> `mcp::index_command` (T2.5)
 //! - `lint`  -> `lint::cli`, arguments in `lint::LintCliArgs` (T4.1)
 //! - `hook`  -> `hook::handle` (T7.1)
+//! - `audit` -> `audit::cli`, arguments in `audit::AuditCliArgs` (T8.6)
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -48,6 +49,22 @@ enum Command {
     Lint(sous_chef::lint::LintCliArgs),
     /// Claude Code hook: reads the event JSON on stdin, writes the response on stdout.
     Hook,
+    /// Write one findings report for a whole build repository (every layer under ROOT).
+    Audit(sous_chef::audit::AuditCliArgs),
+}
+
+/// The configuration for `audit`: discovery starts at ROOT, and the global flags are
+/// taken relative to the working directory, as for the other commands.
+fn audit_config(cli: &Cli, args: &sous_chef::audit::AuditCliArgs) -> anyhow::Result<Config> {
+    let cwd = std::env::current_dir().context("reading the working directory")?;
+    let root = cwd.join(args.root.clone().unwrap_or_else(|| PathBuf::from(".")));
+    let overrides = CliOverrides {
+        build_dir: cli.build_dir.as_ref().map(|b| cwd.join(b)),
+        config: cli.config.as_ref().map(|c| cwd.join(c)),
+        layers: cli.layers.iter().map(|l| cwd.join(l)).collect(),
+        work_dir: root,
+    };
+    Ok(Config::load(&overrides)?)
 }
 
 fn load_config(cli: &Cli) -> anyhow::Result<Config> {
@@ -97,6 +114,19 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 Ok(code) => Ok(ExitCode::from(u8::try_from(code).unwrap_or(2))),
                 Err(e) => {
                     eprintln!("sous-chef lint: {e:#}");
+                    Ok(ExitCode::from(2))
+                }
+            }
+        }
+        Command::Audit(args) => {
+            // Exit status: 0 the report was produced (findings never fail it; `lint
+            // --fail-on` is for that), 2 it could not be produced.
+            let result =
+                audit_config(&cli, args).and_then(|cfg| Ok(sous_chef::audit::cli(&cfg, args)?));
+            match result {
+                Ok(_) => Ok(ExitCode::SUCCESS),
+                Err(e) => {
+                    eprintln!("sous-chef audit: {e:#}");
                     Ok(ExitCode::from(2))
                 }
             }

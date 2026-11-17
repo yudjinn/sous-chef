@@ -1064,6 +1064,178 @@ the kas files changed since the last checkout) and one `kas_problem` row per pro
 JSON, a `kas` object with the same fields. The `bitbake` row's mode is `init-script`,
 `bitbake-setup`, `kas` or `initialised`.
 
+### `audit`
+A findings report over a whole build repository (T8.6, `src/audit.rs`): every layer under
+the root, enabled or not, with its releases, structure, lint findings and parse problems,
+for a person to read. It adds no analysis of its own; it runs layer discovery, release
+detection, `org/layer-conf`'s checks, `layers show=compat` and `show=appends`,
+`query::shadowed`, `query::orphan_appends`, every enabled lint rule as `sous-chef lint
+--all`, and the index's parse and resolution results, and assembles them. It is
+read-only: it writes nothing into the repository, runs no BitBake and no kas, fetches
+nothing; it refreshes the index in the cache directory as every tool does. The lint run
+dominates its time: on the 1755-file live workspace a run takes 15 to 30 s (lint alone
+about 15 s; the rest depends on the machine's load).
+
+| Arg | Notes |
+|---|---|
+| `root` | the repository root, relative to the working directory: the working directory (default, when it holds the build directory or an enabled layer; else the workspace span below), or a directory inside the workspace span, the deepest directory holding the build directory, every enabled layer and the kas project root. The filesystem root and anything outside are refused, so a client cannot point the audit at other directories. |
+| `budget_tokens`, `format` | for the digest only; the stored report is never cut |
+
+The tool stores the whole Markdown report under a `text` handle and returns a digest:
+rows `field value`: `summary`, `workspace`, one row per section (`1 inventory` to `6 not
+checked`) with that section's summary line, then `attention N` per item most worth
+attention; then the handle with the report's size and the `slice` hint. Rows are dropped
+from the end to fit the budget (attention items first); the hint always stays. `slice
+handle=... page=N` pages through the report (`tests/audit.rs` reassembles the report from
+the pages). The digest of the fixture workspace (`tests/snapshots/audit__audit_tool_digest.snap`,
+handle masked):
+
+```
+field	value
+summary	workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled; 21 indexed files; findings in own layers: 0 error, 3 warning, 1 info; in upstream layers: 0 error, 1 warning, 2 info; 3 items worth attention
+workspace	root .; release wrynose (LAYERSERIES_CORENAMES); build build
+1 inventory	3 layers enabled (1 own, 2 upstream), 1 present but not enabled; 0 repositories
+2 releases	workspace release wrynose (LAYERSERIES_CORENAMES); every enabled layer claims it; 1 layer present but not enabled does not
+3 structure	layer.conf and BBLAYERS order: 0 (0 error, 0 warning, 0 info); shadowed recipe or class names: 0; bbappends matching no recipe: 1 (1 in own layers); bbappends not collected: 0; over-broad bbappends and duplicate versions: 1
+4 lint	7 findings in 21 files: own layers and build directory 4 (0 error, 3 warning, 1 info); upstream layers 3 (0 error, 1 warning, 2 info)
+5 parse	0 unparsed statements, 4 unresolved include/require, 0 unresolved inherits, 0 indexed files BitBake does not collect
+6 not checked	build environment not found; anonymous python, which is not run, in 1 recipe and 0 classes; layers present but not enabled, not analysed: 1
+attention 1	warning hygiene/release-syntax x1 (meta-mine): meta-mine:recipes-app/app/app_0.1.bb:22 `${WORKDIR}/app.c`: from styhead on, ...
+...
+report h:XXXXXXXXXX: 168 lines, 10083 bytes of Markdown; attention items are chosen by: errors in own layers, then layer structure errors, then warnings in own layers
+slice handle=h:XXXXXXXXXX page=1 | grep=RE | lines=A-B
+```
+
+The CLI writes the report itself: `sous-chef audit [ROOT] [--format md|json] [--output
+FILE]` (ROOT default: the working directory; discovery starts there, and the global
+`--build-dir`, `--config` and `--layer` are taken relative to the working directory as
+for every command). Progress goes to stderr, never into the report. Exit status 0 when the
+report was produced, whatever it finds (`sous-chef lint --fail-on` is the command that
+fails on findings); 2 when it could not be produced.
+
+**What it covers.**
+
+- Layers: the workspace's (`bblayers.conf`, a kas project's, or those found on disk), plus
+  every directory with `conf/layer.conf` at most 5 levels below the root, also below each
+  submodule path a `.gitmodules` declares (`git config -f .gitmodules --get-regexp`) and
+  each kas repository. The walk does not follow symlinks and never enters hidden
+  directories, build directories (`conf/bblayers.conf` or kas's `CACHEDIR.TAG`), `tmp*`,
+  `sstate-cache`, `downloads`, or `lib`, `scripts`, `test`, `tests`, `testdata` (BitBake's
+  own sample layers live there). A layer present but not enabled is listed from its
+  `conf/layer.conf` alone (collection, priority, `LAYERSERIES_COMPAT`, `LAYERDEPENDS`,
+  read only inside the layer); it is not in the index, so it is not counted, linted or
+  resolved, and the report says so. A `LAYERDEPENDS` on a collection no layer under the
+  root adds is noted.
+- Git: per repository holding a layer (or named by the kas files) inside the root:
+  remote (`origin`, else the first; any `user:password@` removed), revision, branch,
+  `git status --porcelain` entries, the submodule that declares it. Read-only commands
+  only (`rev-parse`, `remote`, `status`, `config -f .gitmodules`), argv only, a 5 s
+  timeout, no optional locks, no fsmonitor, the `GIT_DIR` family removed. Any failure is
+  "unknown", never an error. A repository enclosing the root is not reported.
+- kas: each repo's pinned commit and where it comes from (the lock file that sets
+  `overrides: repos: <id>: commit:`, else the kas file), whether the checkout is at it
+  (**not at pin** otherwise), the lock files read and the kas files without one. When the
+  kas files are not known (several candidates, no `kas = [...]`), the report says so and
+  shows no pins.
+
+**The Markdown report.** One `Generated:` line (the time and the version: the only line
+that differs between two runs on the same repository state), then:
+
+- `## Summary`: one line; a table (root, build directory, kas files, release and where
+  it came from, layer counts, file counts, findings by severity for own and for upstream
+  layers); `### Most worth attention`, 3 to 10 items chosen by a stated rule: errors in
+  own layers by rule (most findings first); layer structure errors outside own layers
+  (`org/layer-conf` errors; bbappends that match no recipe); warnings in own layers by
+  rule; and while that gives fewer than 3, errors in upstream layers, layer structure
+  warnings (`BBLAYERS` order), infos in own layers.
+- `## 1. Inventory`: `### Layers` (BBLAYERS position, name, path, role `own` /
+  `upstream` / `not enabled`, collection, priority, `LAYERSERIES_COMPAT`, `LAYERDEPENDS`,
+  indexed file counts), `### Repositories` (with the kas repo and pin columns in a kas
+  project), `### kas project`, notes.
+- `## 2. Releases`: the workspace release and its source, the supported releases and the
+  floor, and a matrix of layer against claimed release (columns: the supported releases
+  some layer claims plus the workspace's; `**missing**` where a layer does not claim the
+  workspace release; names older than the floor or unknown in the last column).
+- `## 3. Layer structure`: `org/layer-conf`'s problems (through `layer_problems`, so they
+  agree with the rule) and the `BBLAYERS` order rows of `layers show=compat` (their shared
+  explanation said once); shadowed recipes and classes; bbappends that match no recipe and
+  those BitBake does not collect (`layers show=appends`); `org/append-wildcard-broad` and
+  `org/duplicate-versions` findings from the lint run.
+- `## 4. Lint findings`: own layers and the build directory first, every finding grouped
+  by layer then rule; then upstream layers: a table of counts per layer with the most
+  frequent rules, and per rule its count by severity and the first 3 findings (worst
+  severity first) followed by the command that lists all of them (`sous-chef lint --all
+  --rule <id>`). Release-dependent findings name the release in their message.
+- `## 5. Parse and resolution problems`: unparsed statements (`addpylib`, which the
+  parser does not model, is marked), unresolved `include` / `require` and `inherit`
+  (whether the argument needs evaluation, or what BitBake does with a missing file), files
+  BitBake does not collect and why. Own layers in full, at most 5 per upstream layer, what
+  BitBake stops on first.
+- `## 6. What was not checked`: whether a build environment was found, files with
+  anonymous python by kind, the layers not analysed, and the limits of static analysis.
+  How many values depend on python is not counted: that needs evaluating every recipe.
+
+Every section starts with a one-line summary. Pointers are `layer:path:line`; every other
+path is relative to the root, and the root's absolute path is removed from messages. The
+fixture workspace's report is `tests/snapshots/audit__audit_fixture_md.snap`.
+
+**JSON** (`--format json`): the same content. Top-level fields: `schema`
+(`"sous-chef-audit/1"`, bumped when a field is renamed or removed), `generated`,
+`sous_chef_version`, and one object per section, each with a `summary` string:
+
+| Field | Content |
+|---|---|
+| `summary` | `line`, `root` (`.`), `build_dir`, `kas_files`, `release`, `release_source`, `release_note`, `counts` (`layers_enabled`, `layers_not_enabled`, `layers_own`, `layers_upstream`, `files` by kind, `files_total`, `findings_own` and `findings_upstream` as `{error, warning, info}`), `attention_rule`, `attention` (`section`, `severity`, `what`, `count`, `layers`, `pointer`, `message`) |
+| `inventory` | `layers` (`name`, `path`, `enabled`, `position`, `role`, `collections`, `priority`, `compat`, `depends`, `repository`, `files` `{bb, bbappend, inc, bbclass, conf}` or null, `note`), `repositories` (`path`, `remote`, `revision`, `branch`, `dirty`, `submodule`, `kas_repo`, `pin`, `pin_from`, `at_pin`, `kas_own`, `checked_out`, `layers`), `kas` (`files`, `source`, `lock_files`, `without_lock`, `not_in_bblayers`, `not_in_kas`, `problems`) or null, `notes` |
+| `releases` | `workspace`, `source`, `note`, `supported`, `floor`, `columns`, `layers` (`layer`, `enabled`, `claims`, `older_than_floor`, `unknown`, `claims_workspace`) |
+| `structure` | `problems` and `order` (`layer`, `check`, `severity`, `pointer`, `message`), `shadowed` (`kind`, `name`, `wins`, `shadowed`), `orphan_appends`, `appends_not_collected` (`append`, `status`), `lint` (findings: `severity`, `rule`, `pointer`, `message`), `notes` |
+| `lint` | `command`, `files`, `own_total`, `upstream_total`, `own` and `upstream` (per layer: `layer`, `counts`, `rules`: `rule`, `severity` (the worst), `count`, `counts`, `findings`, `more`, `command`), `notes` |
+| `parse` | `unparsed`, `unresolved_includes`, `unresolved_inherits` (each `{total, by_layer: [{layer, count}], items: [{pointer, text}], more}`), `not_collected` (`reason`, `files` as the same listing) |
+| `not_checked` | `build_environment`, `anonymous_python` (files by kind), `layers_not_analysed`, `limits` |
+
+Unknown values are `null` (a revision git could not give, a layer that is not indexed).
+The fixture's JSON is `tests/snapshots/audit__audit_fixture_json.snap`.
+
+**On the live workspace** (live-environment.md, the kas build, `--config` a copy of
+`scratch/sous-chef.toml` with the two kas files added, 2026-11-17): 16 to 31 s, 39.3 KB of
+Markdown (385 lines), 76 KB of JSON. The report holds no absolute path; the excerpt
+below is cut, not edited:
+
+```
+## Summary
+
+kas project, release wrynose: 5 layers enabled (2 own), 6 present but not enabled; 1755 indexed files; findings in own layers: 0 error, 0 warning, 1 info; in upstream layers: 3 error, 167 warning, 476 info; 3 items worth attention
+...
+1. **error** `hygiene/parse-error` (3 findings, in meta): `meta:conf/ccache.conf:5` unparsed line; fix the line so BitBake can parse it, or remove it
+2. **warning** `BBLAYERS order` (1 finding, in meta-arm): `build:conf/bblayers.conf:1-6` meta-arm comes before meta in BBLAYERS, though LAYERDEPENDS_meta-arm names `core` (added by meta); BBPATH lists meta-arm first, so its conf/machine/include/arm/arch-armv8-7a.inc, ... are found instead of meta's by include/require, inherit and conf lookups; list meta first if that is not intended
+3. **info** `hygiene/missing-metadata` (1 finding, in meta-kiss): `meta-kiss:recipes-kernel/linux/linux-kiss_7.0.bb:1` recipe has no HOMEPAGE; set HOMEPAGE to the upstream project's web page
+
+## 1. Inventory
+
+5 layers enabled (2 own, 3 upstream), 6 present but not enabled; 4 repositories (1 with uncommitted changes)
+...
+| - | meta-kiss-amd | meta-kiss-amd | not enabled | meta-kiss-amd | 9 | wrynose | core meta-arm meta-kiss meta-python xilinx-microblaze | not indexed |
+...
+| repository | remote | revision | status | submodule | kas repo | kas pin | layers |
+|---|---|---|---|---|---|---|---|
+| . | https://github.com/bootlin/yocto-kiss | cc621c5d5725 (wrynose) | dirty (1) | - | meta-kiss, meta-kiss-ti | own repository (kas does not check it out) | meta-kiss meta-kiss-amd meta-kiss-nxp meta-kiss-st meta-kiss-ti |
+| bitbake | https://git.openembedded.org/bitbake | 6e260eb6ab16 (2.18) | clean | - | bitbake | 6e260eb6ab16 (kas/kiss.lock.yaml): at pin | - |
+| meta-arm | https://git.yoctoproject.org/meta-arm | 673e8d7c5dcd (wrynose) | clean | - | meta-arm | 673e8d7c5dcd (kas/kiss.lock.yaml): at pin | meta-arm meta-arm-bsp meta-arm-toolchain |
+| openembedded-core | https://git.openembedded.org/openembedded-core | 33a6bd6cc8a9 (wrynose) | clean | - | openembedded-core | 33a6bd6cc8a9 (kas/kiss.lock.yaml): at pin | meta meta-selftest meta-skeleton |
+...
+- Note: meta-kiss-amd (not enabled) has LAYERDEPENDS on meta-python, xilinx-microblaze, which no layer under the root adds: it cannot be enabled until a layer providing them is added
+```
+
+Read as its reader would, the report is right about the repository but carries the lint
+rules' known errors: item 1 is `meta:conf/ccache.conf`, ccache's own configuration file,
+which lint takes for metadata (lint-rules.md, "On a real workspace"), and section 5
+lists `inherit sanity` in `meta:classes/sign_*.bbclass` as not found because the index
+resolves an inherit in a `classes/` class as a recipe inherit, while those classes are
+used through `INHERIT`, where `classes-global/sanity.bbclass` is found. The `dirty (1)` of
+yocto-kiss is the lock file `live-env.sh` wrote. With `scratch/sous-chef.toml` unchanged
+(no `kas` key) kas detection finds five candidate kas files, so the report shows no pins
+and says why.
+
 ## MCP resources
 
 - `sous-chef://help`: this document condensed, generated from the tool registry and the
