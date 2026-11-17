@@ -357,6 +357,99 @@ fn the_addfragments_line_is_a_statement_with_an_edge() {
 }
 
 // ---------------------------------------------------------------------------------------
+// Bug 3: BB_RECIPE_VIRTUAL_PROVIDERS rewrites DEPENDS
+// ---------------------------------------------------------------------------------------
+
+fn virtual_providers(root: &Path) {
+    append_to(
+        root,
+        "meta-core/conf/distro/testdistro.conf",
+        "\nBB_RECIPE_VIRTUAL_PROVIDERS = \"virtual/cross-cc virtual/cross-binutils virtual/nothing\"\n\
+         PREFERRED_PROVIDER_virtual/cross-cc = \"gcc-cross-${TARGET_ARCH}\"\n\
+         PREFERRED_PROVIDER_virtual/cross-binutils = \"binutils-cross-${TARGET_ARCH}\"\n",
+    );
+    append_to(
+        root,
+        "meta-mine/recipes-app/app/app_0.1.bb",
+        "\nDEPENDS:append = \" virtual/cross-cc  virtual/cross-binutils\"\n",
+    );
+}
+
+#[test]
+fn virtual_providers_in_depends_are_rewritten() {
+    let fx = modified(virtual_providers);
+    let ds = eval(&fx, &target(Some("app")));
+    let deps = ds.value("DEPENDS").unwrap();
+    assert_eq!(deps.text, "libfoo gcc-cross-i686 binutils-cross-i686");
+    assert!(
+        !deps.unevaluated_python && deps.unresolved.is_empty(),
+        "{deps:?}"
+    );
+    // The history ends with the rewrite, at the provider setting it used first.
+    let (op, status) = ds.history("DEPENDS").pop().unwrap();
+    assert_eq!(status, eval::OpStatus::Applied);
+    assert_eq!(op.loc.layer, "meta-core");
+    assert_eq!(op.loc.path, Path::new("conf/distro/testdistro.conf"));
+    let notes = &ds.replay().var_notes["DEPENDS"];
+    assert!(
+        notes[0].contains("virtual/cross-cc -> gcc-cross-i686")
+            && notes[0].contains("virtual/cross-binutils -> binutils-cross-i686"),
+        "{notes:?}"
+    );
+    // Another machine, another provider: the rewrite follows the configuration.
+    let t = Target {
+        recipe: Some("app".into()),
+        machine: Some("boardx".into()),
+        ..Target::default()
+    };
+    let ds = eval(&fx, &t);
+    assert_eq!(
+        text(&ds, "DEPENDS").as_deref(),
+        Some("libfoo gcc-cross-arm binutils-cross-arm")
+    );
+}
+
+#[test]
+fn virtual_providers_keep_flags_and_report_missing_providers() {
+    let fx = modified(|r| {
+        virtual_providers(r);
+        append_to(
+            r,
+            "meta-mine/recipes-app/app/app_0.1.bb",
+            "DEPENDS += \"virtual/nothing ${@'x'}\"\n",
+        );
+    });
+    let ds = eval(&fx, &target(Some("app")));
+    let deps = ds.value("DEPENDS").unwrap();
+    assert!(deps.text.contains("gcc-cross-i686"), "{deps:?}");
+    // Python in DEPENDS keeps the value flagged after the rewrite.
+    assert!(deps.unevaluated_python, "{deps:?}");
+    // No PREFERRED_PROVIDER_virtual/nothing: BitBake's fatal error, the word stays.
+    assert!(deps.text.contains("virtual/nothing"), "{deps:?}");
+    assert!(
+        ds.replay()
+            .references
+            .iter()
+            .any(|r| r.text == "PREFERRED_PROVIDER_virtual/nothing"
+                && matches!(r.problem, RefProblem::Fatal(_))),
+        "{:?}",
+        ds.replay().references
+    );
+}
+
+#[test]
+fn virtual_providers_are_not_rewritten_before_walnascar() {
+    let fx = modified_release("scarthgap", virtual_providers);
+    let ds = eval(&fx, &target(Some("app")));
+    let deps = ds.value("DEPENDS").unwrap();
+    assert!(
+        deps.text.contains("virtual/cross-cc") && !deps.text.contains("gcc-cross"),
+        "{deps:?}"
+    );
+    assert!(!ds.replay().var_notes.contains_key("DEPENDS"));
+}
+
+// ---------------------------------------------------------------------------------------
 // Bug 2: files matched by one BBFILES glob are sorted as strings
 // ---------------------------------------------------------------------------------------
 

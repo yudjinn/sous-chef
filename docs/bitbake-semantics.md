@@ -672,7 +672,31 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
   `bitbake-layers show-appends` output.
 - **Finalisation** (`ast.finalize`): deferred inherits (`__BBDEFINHERITS`, first in first
   out, including ones added meanwhile), event handler registration, `expandKeys`, then
-  anonymous python (`runAnonFuncs`), then task processing.
+  anonymous python (`runAnonFuncs`), then `handleVirtRecipeProviders` (BitBake 2.12 and
+  later), then task processing (`bb.build.add_tasks`).
+- **Recipe virtual providers** (verified, w5 fix of differential bug 3, BitBake 2.18.0
+  `lib/bb/parse/ast.py` `handleVirtRecipeProviders`, called from `finalize` right after
+  `runAnonFuncs` and before `add_tasks`; present on branches `2.12`, `2.16`, `2.18`, absent
+  on `2.10`; added by `fb119c788`, 2025-01-21): `depends = (getVar("DEPENDS") or
+  "").split()`, `virtprovs = (getVar("BB_RECIPE_VIRTUAL_PROVIDERS") or "").split()`; every
+  word of `depends` that is in `virtprovs` becomes `getVar("PREFERRED_PROVIDER_" + word)`
+  (empty or unset: `bb.fatal("Error, recipe virtual provider PREFERRED_PROVIDER_%s not
+  set")`); then `setVar("DEPENDS", " ".join(newdeps))`, a plain post-parse `setVar`, so the
+  `:append` / `:prepend` / `:remove` lists and the active override variants are dropped
+  and the words are joined with single spaces. The same is done to the recipe part of each
+  `r:t` entry of the `depends` flag of every task in `__BBTASKS`. Only `DEPENDS` and the
+  task `depends` flags change (not `RDEPENDS`, not `PROVIDES`). OE-core (Wrynose) sets
+  `BB_RECIPE_VIRTUAL_PROVIDERS` to the cross toolchain virtuals (`virtual/cross-cc
+  virtual/cross-c++ virtual/cross-binutils` and the `nativesdk-` ones), whose
+  `PREFERRED_PROVIDER_*` are per `TARGET_ARCH`. sous-chef (`replay::virtual_recipe_providers`,
+  `Feature::RecipeVirtualProviders`) does the `DEPENDS` part after `expand_keys` (it does not
+  run anonymous python, so the rewrite sees `DEPENDS` without what python would add, and
+  the value stays flagged when it was): the new value is stored as a plain assignment whose
+  history entry points at the `PREFERRED_PROVIDER_*` assignment used, with a note naming
+  each rewritten word (`ReplayNotes::var_notes`). Not reproduced: the task `depends` flags;
+  the whitespace normalisation when no word is replaced (the value then differs from
+  BitBake's in whitespace only); `DEPENDS` unset becoming `""`. A missing provider is a
+  reference issue (`RefProblem::Fatal`) and the word is kept.
 - **Inherit** (`BBHandler.inherit`): the argument is expanded and split; a word listed in
   `BB_DEFER_BBCLASSES` is deferred (unless already deferred); a class file in
   `__inherit_cache` is not parsed again. Not found is a parse error.

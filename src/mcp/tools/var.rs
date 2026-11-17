@@ -183,6 +183,9 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
     let notes = ds.replay();
     let mut out = notes.target_notes.clone();
     let base = name.split(':').next().unwrap_or(name).to_string();
+    if let Some(v) = notes.var_notes.get(&base) {
+        out.extend(v.iter().cloned());
+    }
     let opaque: Vec<&eval::AnonPython> = notes.anonymous.iter().filter(|a| a.opaque).collect();
     let naming: Vec<&eval::AnonPython> = notes
         .anonymous

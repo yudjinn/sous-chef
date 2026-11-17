@@ -91,6 +91,10 @@ pub struct ReplayNotes {
     /// machine came from when not from the configuration, no `MACHINE` at all.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub target_notes: Vec<String>,
+    /// Notes about one variable's value, by base name (`note: ...` lines): the
+    /// `BB_RECIPE_VIRTUAL_PROVIDERS` rewrite of `DEPENDS`.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub var_notes: BTreeMap<String, Vec<String>>,
     /// Anonymous python functions, in parse order (configuration classes included: BitBake
     /// runs those for every recipe too).
     pub anonymous: Vec<AnonPython>,
@@ -623,7 +627,147 @@ fn recipe_pass(
 
     let incomplete = r.ds.expand_keys();
     Arc::make_mut(&mut r.ds.notes).incomplete_keys = incomplete;
+    // (BitBake runs anonymous python here, which the replay does not.)
+    if ws.release.release.has(Feature::RecipeVirtualProviders) {
+        virtual_recipe_providers(&mut r.ds, &recipe_loc);
+    }
     Ok(r.ds)
+}
+
+/// `ast.handleVirtRecipeProviders` (BitBake 2.12 and later), on `DEPENDS`: each word listed
+/// in `BB_RECIPE_VIRTUAL_PROVIDERS` is replaced with the value of
+/// `PREFERRED_PROVIDER_<word>`, and the result is stored with a plain `setVar` (no more
+/// `:append` / override variants). Done only when a word is replaced (when none is, BitBake
+/// still stores the words joined with single spaces; the replay leaves the value as it is,
+/// so it may differ from BitBake's in whitespace only). The task `depends` flags BitBake
+/// rewrites the same way are not rewritten (the replay does not track `__BBTASKS`).
+///
+/// The new value keeps the flags of the old one: `unevaluated_python` (through
+/// `python_vars`) and `unresolved` (through `unresolved_vars`). A list that needs python or
+/// undefined variables flags `DEPENDS`; a word without a provider is BitBake's fatal "recipe
+/// virtual provider PREFERRED_PROVIDER_x not set" (a reference issue; the word is kept).
+fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
+    const DEPENDS: &str = "DEPENDS";
+    const LIST: &str = "BB_RECIPE_VIRTUAL_PROVIDERS";
+    let Some(list) = ds.value(LIST) else { return };
+    if list.unevaluated_python || !list.unresolved.is_empty() {
+        let notes = Arc::make_mut(&mut ds.notes);
+        if list.unevaluated_python {
+            notes.python_vars.insert(DEPENDS.to_string());
+        }
+        let e = notes
+            .unresolved_vars
+            .entry(DEPENDS.to_string())
+            .or_default();
+        for u in list.unresolved.iter().map(String::as_str).chain([LIST]) {
+            if !e.iter().any(|x| x == u) {
+                e.push(u.to_string());
+            }
+        }
+        ds.ovr_cache = OnceLock::new();
+        return;
+    }
+    let virt: Vec<&str> = list.text.split_whitespace().collect();
+    let Some(deps) = ds.value(DEPENDS) else {
+        return;
+    };
+    let mut words: Vec<String> = Vec::new();
+    let mut rewrites: Vec<(String, String, Option<Loc>)> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+    let mut python = deps.unevaluated_python;
+    let mut unresolved: Vec<String> = deps.unresolved.clone();
+    for w in deps.text.split_whitespace() {
+        if !virt.contains(&w) {
+            words.push(w.to_string());
+            continue;
+        }
+        let pp = format!("PREFERRED_PROVIDER_{w}");
+        match ds.value(&pp).filter(|v| !v.text.is_empty()) {
+            Some(v) => {
+                let loc = ds
+                    .history(&pp)
+                    .into_iter()
+                    .filter(|(_, s)| *s == OpStatus::Applied)
+                    .map(|(op, _)| op.loc)
+                    .next_back();
+                python |= v.unevaluated_python;
+                unresolved.extend(v.unresolved.iter().cloned());
+                words.push(v.text.clone());
+                rewrites.push((w.to_string(), v.text, loc));
+            }
+            None => {
+                missing.push(pp);
+                words.push(w.to_string());
+            }
+        }
+    }
+    for pp in &missing {
+        Arc::make_mut(&mut ds.notes).references.push(RefIssue {
+            loc: Some(recipe.clone()),
+            via: Vec::new(),
+            kind: "virtual_provider".into(),
+            text: pp.clone(),
+            problem: RefProblem::Fatal(format!(
+                "Error, recipe virtual provider {pp} not set (BB_RECIPE_VIRTUAL_PROVIDERS)"
+            )),
+        });
+    }
+    if rewrites.is_empty() {
+        return;
+    }
+    let text = words.join(" ");
+    // setVar(DEPENDS, text) after parsing: the keyword lists and the override variants go.
+    {
+        let v = ds.var_mut(DEPENDS);
+        v.appends.clear();
+        v.prepends.clear();
+        v.removes.clear();
+        v.default = None;
+    }
+    Arc::make_mut(&mut ds.overridedata).remove(DEPENDS);
+    let loc = rewrites
+        .iter()
+        .find_map(|(_, _, l)| l.clone())
+        .unwrap_or_else(|| recipe.clone());
+    ds.apply(VarOp {
+        var: VarRef {
+            base: DEPENDS.to_string(),
+            overrides: Vec::new(),
+            flag: None,
+            legacy_syntax: false,
+        },
+        op: AssignOp::Set,
+        value: text,
+        loc,
+        via: Vec::new(),
+    });
+    let notes = Arc::make_mut(&mut ds.notes);
+    if python {
+        notes.python_vars.insert(DEPENDS.to_string());
+    }
+    if !unresolved.is_empty() {
+        let e = notes
+            .unresolved_vars
+            .entry(DEPENDS.to_string())
+            .or_default();
+        for u in &unresolved {
+            if !e.contains(u) {
+                e.push(u.clone());
+            }
+        }
+    }
+    let line = rewrites
+        .iter()
+        .map(|(w, p, l)| match l {
+            Some(l) => format!("{w} -> {p} (PREFERRED_PROVIDER_{w} at {l})"),
+            None => format!("{w} -> {p} (PREFERRED_PROVIDER_{w})"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    notes.var_notes.entry(DEPENDS.to_string()).or_default().push(format!(
+        "note: DEPENDS rewritten at the end of parsing (BB_RECIPE_VIRTUAL_PROVIDERS, BitBake handleVirtRecipeProviders): {line}"
+    ));
+    ds.ovr_cache = OnceLock::new();
 }
 
 /// `FILE_LAYERNAME` (`CookerCollectFiles.get_layername`): the collection whose
