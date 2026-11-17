@@ -6,6 +6,7 @@ pub mod bitbake;
 pub mod config;
 pub mod error;
 pub mod eval;
+pub mod gitcmd;
 pub mod handles;
 pub mod hook;
 pub mod index;

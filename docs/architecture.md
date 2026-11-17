@@ -1054,6 +1054,13 @@ each. An `inherit` in `classes-recipe/` stays recipe-only, in `classes-global/` 
 global-only; every other edge has no context. The replay is unchanged (it follows
 `__bbclasstype` as BitBake does).
 
+`gitcmd` (new module): `gitcmd::git(dir, args) -> Option<Vec<u8>>`,
+`gitcmd::git_text(dir, args) -> Option<String>`, `gitcmd::TIMEOUT` (5 s). The one way
+sous-chef runs git: argv only, stdin closed, no prompts, `--no-optional-locks`,
+`-c core.fsmonitor=false`, the `GIT_DIR` family and `GIT_CONFIG*` removed, killed after the
+timeout. `org/upstream-edit` and the audit both use it (`audit::git` is gone;
+`org_upstream_edit::TIMEOUT` and `audit::GIT_TIMEOUT` are `gitcmd::TIMEOUT`).
+
 ## Errors
 
 `error::Error` (thiserror) with variants `Io(io::Error)`, `Sqlite(rusqlite::Error)`,

@@ -7,8 +7,8 @@
 //!   directory under the root for `conf/layer.conf` ([`find_layers`]), following
 //!   `.gitmodules` and the kas repositories, so layers on disk that the build does not
 //!   enable are listed too (from their `conf/layer.conf` alone: they are not in the index);
-//! - git facts per repository ([`git`]: read-only commands, argv only, a timeout, the
-//!   `GIT_DIR` family removed; any failure is "unknown");
+//! - git facts per repository ([`crate::gitcmd::git`]: read-only commands, argv only, a
+//!   timeout, the `GIT_DIR` family removed; any failure is "unknown");
 //! - release detection ([`crate::release`]) and each layer's `LAYERSERIES_COMPAT`;
 //! - `org/layer-conf`'s checks ([`org_layer_conf::layer_problems`]), the `layers` tool's
 //!   `compat` and `appends` views (`BBLAYERS` order rows, bbappends `BBFILES` does not
@@ -26,16 +26,15 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
 use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::gitcmd;
 use crate::index::Index;
 use crate::index::query::{self, FileSet};
 use crate::lint::rules::org_layer_conf::{self, LayerProblem};
@@ -64,8 +63,8 @@ pub const UPSTREAM_PARSE_EXAMPLES: usize = 5;
 /// Items in "Most worth attention".
 pub const MAX_ATTENTION: usize = 10;
 
-/// Per git invocation.
-pub const GIT_TIMEOUT: Duration = Duration::from_secs(5);
+/// Per git invocation ([`gitcmd::TIMEOUT`]).
+pub const GIT_TIMEOUT: Duration = crate::gitcmd::TIMEOUT;
 
 /// Shown for a path outside the root, before its last component.
 pub const OUTSIDE_ROOT: &str = "(outside ROOT)";
@@ -842,60 +841,10 @@ fn read_gitmodules(dir: &Path) -> Vec<Submodule> {
 
 // ---- git
 
-const GIT_ENV: &[&str] = &[
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_COMMON_DIR",
-    "GIT_NAMESPACE",
-    "GIT_CEILING_DIRECTORIES",
-    "GIT_CONFIG",
-    "GIT_CONFIG_PARAMETERS",
-];
-
-/// Runs a read-only git command in `dir`: argv only (never a shell), stdin closed, no
-/// prompts, no optional locks, no fsmonitor, the `GIT_DIR` family removed, killed after
-/// [`GIT_TIMEOUT`]. Its stdout when it exits 0; `None` on any failure (git missing, not a
-/// repository, a timeout), which the report shows as unknown.
-pub fn git(dir: &Path, args: &[&str]) -> Option<String> {
-    let mut cmd = Command::new("git");
-    cmd.args(["--no-optional-locks", "-c", "core.fsmonitor=false"])
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("LC_ALL", "C");
-    for v in GIT_ENV {
-        cmd.env_remove(v);
-    }
-    let mut child = cmd.spawn().ok()?;
-    let mut stdout = child.stdout.take()?;
-    let reader = thread::spawn(move || {
-        let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
-        buf
-    });
-    let start = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if start.elapsed() < GIT_TIMEOUT => thread::sleep(Duration::from_millis(5)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
-        }
-    };
-    let out = reader.join().ok()?;
-    status
-        .filter(|s| s.success())
-        .map(|_| String::from_utf8_lossy(&out).into_owned())
+/// [`gitcmd::git_text`]: a read-only git command in `dir`, `None` on any failure (git
+/// missing, not a repository, a timeout), which the report shows as unknown.
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    gitcmd::git_text(dir, args)
 }
 
 /// A remote URL with any userinfo (`user:token@`) removed: `https://user:token@host/x`

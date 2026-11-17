@@ -649,6 +649,66 @@ fn upstream_edit() {
     assert!(nested.lint(&OrgUpstreamEdit, "bad-layer").is_empty());
 }
 
+/// The rule runs git in a checkout that is not the user's: a `core.fsmonitor` hook the
+/// repository configures must not run (`gitcmd`: `-c core.fsmonitor=false`), and the
+/// command must not take the index lock (`--no-optional-locks`, so `index.lock` never
+/// appears and the index file is not rewritten).
+#[cfg(unix)]
+#[test]
+fn upstream_edit_runs_no_fsmonitor_hook_and_leaves_the_index_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    if !Command::new("git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("git is not available; skipping");
+        return;
+    }
+    let marker = tempfile::tempdir().unwrap();
+    let ran = marker.path().join("fsmonitor-ran");
+    let hook = marker.path().join("fsmonitor.sh");
+    fs::write(
+        &hook,
+        format!("#!/bin/sh\ntouch '{}'\nexit 1\n", ran.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut index_before = None;
+    let env = env_with(
+        "upstream-edit",
+        &["bad-layer"],
+        &["bad-layer"],
+        Some("wrynose"),
+        |root| {
+            let l = root.join("bad-layer");
+            assert!(commit_all(&l));
+            assert!(git(
+                &l,
+                &["config", "core.fsmonitor", &hook.to_string_lossy()]
+            ));
+            fs::write(l.join("recipes-app/u/u_1.0.bb"), "SUMMARY = \"edited\"\n").unwrap();
+            index_before = Some(fs::read(l.join(".git/index")).unwrap());
+        },
+    );
+    let _ = fs::remove_file(&ran);
+    let found = env.lint(&OrgUpstreamEdit, "bad-layer");
+    assert_eq!(
+        rows(&found),
+        ["warning bad-layer:recipes-app/u/u_1.0.bb:1"],
+        "{}",
+        messages(&found)
+    );
+    assert!(!ran.exists(), "the repository's fsmonitor hook ran");
+    let l = env.ws.layer("bad-layer").unwrap().root.clone();
+    assert!(!l.join(".git/index.lock").exists());
+    assert_eq!(
+        Some(fs::read(l.join(".git/index")).unwrap()),
+        index_before,
+        "git rewrote the index"
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // File-scope rules on fixture layers (they need the index)
 
