@@ -90,6 +90,10 @@ disable = ["style/variable-order", "hygiene"]
 
 [output]
 budget_tokens = 900
+
+[handles]
+max_total_mb = 100
+max_age_days = 7
 "#;
     fs::write(dir.join("my.toml"), text).unwrap();
     let mut o = cli(tmp.path().to_path_buf());
@@ -119,6 +123,10 @@ budget_tokens = 900
             },
             output: sous_chef::config::OutputConfig { budget_tokens: 900 },
             hooks: HooksConfig::default(),
+            handles: sous_chef::config::HandlesConfig {
+                max_total_mb: 100,
+                max_age_days: 7,
+            },
             work_dir: tmp.path().to_path_buf(),
         }
     );
@@ -321,4 +329,74 @@ fn validate_reports_every_problem_on_one_line() {
         msg.contains("nope") && msg.contains("init_script") && msg.contains("; "),
         "{msg}"
     );
+}
+
+#[test]
+fn handles_table_defaults_match_the_store_and_values_are_read() {
+    use sous_chef::config::HandlesConfig;
+    use sous_chef::handles::Retention;
+    let origin = PathBuf::from("/x/sous-chef.toml");
+    let cfg = Config::from_toml("", &origin).unwrap();
+    assert_eq!(cfg.handles, HandlesConfig::default());
+    assert_eq!(cfg.handles.max_total_mb, 500);
+    assert_eq!(cfg.handles.max_age_days, 14);
+    assert_eq!(cfg.handles.retention(), Retention::default());
+
+    let cfg = Config::from_toml(
+        "[handles]\nmax_total_mb = 2000\nmax_age_days = 3\n",
+        &origin,
+    )
+    .unwrap();
+    assert_eq!(
+        cfg.handles.retention(),
+        Retention {
+            max_age_secs: 3 * 24 * 60 * 60,
+            max_total_bytes: 2_000_000_000,
+        }
+    );
+    // One key alone keeps the other's default.
+    let cfg = Config::from_toml("[handles]\nmax_age_days = 30\n", &origin).unwrap();
+    assert_eq!(cfg.handles.max_total_mb, 500);
+    assert_eq!(cfg.handles.max_age_days, 30);
+}
+
+#[test]
+fn handles_values_out_of_range_and_unknown_keys_are_errors() {
+    let origin = PathBuf::from("/x/sous-chef.toml");
+    let msg = config_err(Config::from_toml("[handles]\nmax_total_mb = 0\n", &origin));
+    assert!(
+        msg.contains("/x/sous-chef.toml")
+            && msg.contains("handles.max_total_mb = 0 is out of range")
+            && msg.contains("1 to 1000000"),
+        "{msg}"
+    );
+    let msg = config_err(Config::from_toml("[handles]\nmax_age_days = 0\n", &origin));
+    assert!(
+        msg.contains("handles.max_age_days = 0 is out of range"),
+        "{msg}"
+    );
+    // Absurd values, both reported on one line.
+    let msg = config_err(Config::from_toml(
+        "[handles]\nmax_total_mb = 99999999\nmax_age_days = 100000\n",
+        &origin,
+    ));
+    assert!(
+        msg.contains("max_total_mb = 99999999") && msg.contains("max_age_days = 100000"),
+        "{msg}"
+    );
+    // A negative value is a type error, with the line.
+    let msg = config_err(Config::from_toml("[handles]\nmax_age_days = -1\n", &origin));
+    assert!(msg.contains(":2:"), "{msg}");
+    // An unknown key, with the line.
+    let msg = config_err(Config::from_toml("[handles]\nmax_bytes = 5\n", &origin));
+    assert!(msg.contains("max_bytes") && msg.contains(":2:"), "{msg}");
+    // Through `Config::load` too.
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("sous-chef.toml"),
+        "[handles]\nmax_total_mb = 0\n",
+    )
+    .unwrap();
+    let msg = config_err(Config::load(&cli(tmp.path().to_path_buf())));
+    assert!(msg.contains("max_total_mb"), "{msg}");
 }

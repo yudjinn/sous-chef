@@ -562,8 +562,11 @@ the text layout keeps and is not itself budget-limited.
 
 Handle store (T5.1): `HandleStore::open(dir)` (uses `<dir>/../index.sqlite`),
 `open_with(dir, db, retention)`, `from_connection(dir, conn, retention)`; `put`, `put_file`,
-`get`, `meta`, `list`, `total_bytes`, `apply_retention`. Retention limits are not read from
-`sous-chef.toml` yet.
+`get`, `meta`, `list`, `total_bytes`, `apply_retention`. Since w10 the retention limits are
+read from `[handles]` in `sous-chef.toml` (`HandlesConfig`, "Configuration"):
+`HandleStore::open_with_retention(dir, retention)`, which `Ctx::open` calls with
+`config.handles.retention()`; `HandleStore::retention()` (the limits the store applied) and
+`count()`; `status` shows the store's size and the limits.
 
 Lint (`src/lint/mod.rs`): `Scope`, `Severity` (ordered `Info < Warning < Error`,
 deserialises lowercase), `Finding`, `Rule` and `all_rules()` as in M0 T0.3, plus:
@@ -1283,15 +1286,23 @@ budget_tokens = 600
 grep_read = true                          # Grep / Read annotation, and grep -n / rg -n through Bash
 bash = true                               # digest of large bitbake output from Bash
 edit = true                               # reindex and lint after Edit / Write / MultiEdit
+
+[handles]                                 # retention of stored output, applied at server start
+max_total_mb = 500                        # oldest handles deleted until at most this (1 MB = 10^6 bytes); 1 to 1000000
+max_age_days = 14                         # handles last stored longer ago are deleted; 1 to 3650
 ```
 
 In code (`src/config.rs`): `Config { build_dir, layers, writable_layers, init_script,
 release, kas, bitbake: BitbakeConfig { enabled, allow_destructive }, lint: LintConfig {
 disable, severity }, output: OutputConfig { budget_tokens }, hooks: HooksConfig { grep_read,
-bash, edit }, work_dir }` (`work_dir` is not read from the file),
+bash, edit }, handles: HandlesConfig { max_total_mb, max_age_days }, work_dir }` (`work_dir`
+is not read from the file),
 `Config::load(&CliOverrides) -> Result<Config>`, `Config::from_toml(text, origin)`,
 `Config::validate(&Workspace)` (also checks that each `kas` file exists),
-`HooksConfig::enabled(key)`. `CliOverrides { build_dir, config, layers, work_dir }` carries
+`HooksConfig::enabled(key)`, `HandlesConfig::{retention, check}` (a `[handles]` value out
+of its range, `HANDLES_MAX_TOTAL_MB` / `HANDLES_MAX_AGE_DAYS`, is an `Error::Config` from
+`Config::from_toml`, so the server serves degraded with the reason; the defaults are
+`handles::Retention::default()`). `CliOverrides { build_dir, config, layers, work_dir }` carries
 the global flags `--build-dir`, `--config`, `--layer` (repeatable).
 
 With no config and no `--build-dir`, discovery walks up from the working directory looking

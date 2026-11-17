@@ -8,7 +8,9 @@
 //! - Retention runs when the store is opened: handles older than [`Retention::max_age_secs`]
 //!   are deleted, then the oldest until the total is at most
 //!   [`Retention::max_total_bytes`]. A handle stored (or re-stored) by the current process is
-//!   never deleted.
+//!   never deleted. The limits come from `[handles]` in `sous-chef.toml`
+//!   (`config::HandlesConfig`, defaults [`Retention::default`]); `mcp::Ctx::open` passes them
+//!   to [`HandleStore::open_with_retention`].
 //! - A deny-list ([`is_denied_path`], [`contains_private_key`]) keeps secrets out: such
 //!   output is neither stored nor returned.
 
@@ -172,6 +174,8 @@ pub struct RetentionReport {
 pub struct HandleStore {
     dir: PathBuf,
     conn: Mutex<Connection>,
+    /// The limits applied when the store was opened ([`HandleStore::retention`]).
+    retention: Retention,
 }
 
 /// sha256 (hex) of every handle stored by this process; retention never deletes them, with
@@ -195,6 +199,11 @@ impl HandleStore {
     ///
     /// Open the [`crate::index::Index`] first: a schema rebuild replaces the database file.
     pub fn open(dir: &Path) -> Result<HandleStore> {
+        HandleStore::open_with_retention(dir, Retention::default())
+    }
+
+    /// As [`HandleStore::open`], applying `retention` (from `[handles]` in `sous-chef.toml`).
+    pub fn open_with_retention(dir: &Path, retention: Retention) -> Result<HandleStore> {
         let db = dir
             .parent()
             .map(|p| p.join("index.sqlite"))
@@ -204,7 +213,7 @@ impl HandleStore {
                     dir.display()
                 ),
             })?;
-        HandleStore::open_with(dir, &db, Retention::default())
+        HandleStore::open_with(dir, &db, retention)
     }
 
     /// Opens the store at `dir` with metadata in the SQLite database `db`.
@@ -229,6 +238,7 @@ impl HandleStore {
         let store = HandleStore {
             dir: dir.to_path_buf(),
             conn: Mutex::new(conn),
+            retention,
         };
         store.apply_retention(retention, now_secs())?;
         Ok(store)
@@ -244,7 +254,14 @@ impl HandleStore {
         Ok(HandleStore {
             dir: dir.to_path_buf(),
             conn: Mutex::new(conn),
+            retention: Retention::default(),
         })
+    }
+
+    /// The retention limits this store was opened with (the defaults for a store opened
+    /// [`HandleStore::without_retention`], which applies none).
+    pub fn retention(&self) -> Retention {
+        self.retention
     }
 
     /// The directory blobs are stored under.
@@ -417,6 +434,14 @@ impl HandleStore {
             });
         }
         Ok(out)
+    }
+
+    /// Number of handles recorded in the table.
+    pub fn count(&self) -> Result<u64> {
+        let n: i64 = self
+            .conn()
+            .query_row("SELECT COUNT(*) FROM handles", [], |r| r.get(0))?;
+        Ok(u64::try_from(n).unwrap_or(0))
     }
 
     /// Total bytes of output recorded in the table.

@@ -1107,11 +1107,20 @@ function, from its `# line:` comment to the closing `}`; for a python function, 
 `python NAME () {` to the closing `}`. Override variants (`T:task-clean`) are blocks of
 their own; names are exact.
 
+A handle lasts until retention removes it, which happens when the server starts: handles
+last stored more than `[handles] max_age_days` ago (default 14) are deleted, then the
+oldest until the store holds at most `[handles] max_total_mb` (default 500 MB); a handle
+stored by the running server is never deleted. An expired handle is a `NotFound` error that
+says to rerun the command. `status` shows the store's size and the limits.
+
 ### `status`
 No arguments. Workspace roots, the release (`release`, e.g. `wrynose (LAYERSERIES_CORENAMES)`),
 layer count, file counts by kind, index path and age, whether a build directory and a usable
 bitbake environment were found, and the running job if any (`job`, e.g.
-`job:1 task hello running 1s`). Layers are named by their directory (`meta`,
+`job:1 task hello running 1s`), and the handle store (`handles`: how many handles it holds,
+their total size, and the retention limits it applied at start, `[handles] max_total_mb` and
+`max_age_days` in `sous-chef.toml`, e.g. `12 stored, 3.4 MB; limits 500.0 MB, 14 days`; JSON
+`handles {count, bytes, max_total_bytes, max_age_days, error}`). Layers are named by their directory (`meta`,
 `meta-arm-toolchain`) in every tool and pointer; BitBake 2.18's `bitbake-layers
 show-layers` prints the collection name instead (`core`, `arm-toolchain`).
 

@@ -89,12 +89,18 @@ kas = ["kas/base.yml", "kas/board.yml"]  # optional; a kas project's files, in k
 
 [hooks]
 bash = false                          # see Hooks
+
+[handles]                             # stored tool output (handles), cleaned at server start
+max_total_mb = 500                    # keep at most this much (default 500)
+max_age_days = 14                     # drop handles older than this (default 14)
 ```
 
 Other keys: `layers` (extra layer roots, for a workspace without a build directory),
 `init_script` (sourced before any bitbake command), `[bitbake] enabled` and
 `allow_destructive`, `[lint] disable`, `[output] budget_tokens`, `[hooks] grep_read` and
-`edit`. See "Configuration" in [docs/architecture.md](docs/architecture.md).
+`edit`. A `[handles]` value of 0 or out of range (`max_total_mb` 1 to 1000000,
+`max_age_days` 1 to 3650) is a configuration error; `status` shows the store's size and
+limits. See "Configuration" in [docs/architecture.md](docs/architecture.md).
 
 **kas projects.** The kas files are found without `kas` when exactly one sits next to the
 kas build directory, and with `writable_layers` empty the project's own layers are

@@ -77,9 +77,13 @@ impl Ctx {
         }
         let index = Index::open(&workspace).map_err(|e| ("opening the index", e))?;
         // After `Index::open`, and in the index's own directory: the store keeps its rows in
-        // the index database, which a schema rebuild replaces.
-        let handles = HandleStore::open(&index.cache_dir().join("handles"))
-            .map_err(|e| ("opening the handle store", e))?;
+        // the index database, which a schema rebuild replaces. The retention limits are
+        // `[handles]` of sous-chef.toml (`Config::from_toml` has checked their range).
+        let handles = HandleStore::open_with_retention(
+            &index.cache_dir().join("handles"),
+            config.handles.retention(),
+        )
+        .map_err(|e| ("opening the handle store", e))?;
         let ctx = Ctx {
             config,
             workspace,

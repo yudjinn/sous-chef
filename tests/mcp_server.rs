@@ -3,10 +3,16 @@
 //! Asserts protocol-level facts only (handshake, the 16 tools, result shapes), so it passes
 //! both while discovery and the index are stubs (the server runs degraded) and once they
 //! are implemented.
+//!
+//! Also (w10) the server against a copy of the fixture workspace with a `sous-chef.toml`
+//! of the test's own ([`configured`]): `[handles]` reaching the store, and progress
+//! notifications, with the fake BitBake in `tests/fixtures/fakebb/`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{Receiver, channel};
 use std::thread;
@@ -53,11 +59,20 @@ impl Session {
     /// As [`Session::start`], with `XDG_CACHE_HOME` = `cache`.
     fn start_in(cache: tempfile::TempDir) -> Session {
         let ws = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ws");
+        Session::spawn(
+            cache,
+            &ws,
+            &["--build-dir", &ws.join("build").to_string_lossy()],
+        )
+    }
+
+    /// `sous-chef serve <flags>` started in `ws` (whose `sous-chef.toml`, if any, is read),
+    /// with `XDG_CACHE_HOME` = `cache`.
+    fn spawn(cache: tempfile::TempDir, ws: &Path, flags: &[&str]) -> Session {
         let mut child = Command::new(env!("CARGO_BIN_EXE_sous-chef"))
             .arg("serve")
-            .arg("--build-dir")
-            .arg(ws.join("build"))
-            .current_dir(&ws)
+            .args(flags)
+            .current_dir(ws)
             .env("XDG_CACHE_HOME", cache.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -316,5 +331,54 @@ fn server_start_removes_output_files_of_a_dead_server() {
         thread::sleep(Duration::from_millis(20));
     }
     assert!(!stale.exists(), "{} is still there", stale.display());
+    s.finish();
+}
+
+/// A server on a writable copy of the fixture workspace whose `sous-chef.toml` is the
+/// fixture's plus `extra` (TOML tables), started without flags so the file is read. Keep
+/// the returned `TempDir` alive while the session runs; the `PathBuf` is the copy's root.
+fn configured(extra: &str) -> (Session, tempfile::TempDir, PathBuf) {
+    let (tmp, root) = common::temp_ws();
+    let root = std::fs::canonicalize(root).unwrap();
+    let toml = root.join("sous-chef.toml");
+    let text = std::fs::read_to_string(&toml).unwrap();
+    std::fs::write(&toml, format!("{text}\n{extra}\n")).unwrap();
+    let mut s = Session::spawn(tempfile::tempdir().unwrap(), &root, &[]);
+    initialize(&mut s);
+    s.notify("notifications/initialized");
+    (s, tmp, root)
+}
+
+#[test]
+fn handles_table_reaches_the_store_and_status_shows_it() {
+    let (mut s, _tmp, _root) = configured("[handles]\nmax_total_mb = 7\nmax_age_days = 2\n");
+    let status = s.call("status", json!({"format": "json"}));
+    let report: Value = serde_json::from_str(text_of(&status)).unwrap();
+    assert_eq!(report["state"], "ready", "{report}");
+    let h = &report["handles"];
+    assert_eq!(h["max_total_bytes"], 7_000_000, "{report}");
+    assert_eq!(h["max_age_days"], 2, "{report}");
+    assert!(h["count"].is_u64() && h["bytes"].is_u64(), "{report}");
+    let text = s.call("status", json!({}));
+    let row = text_of(&text)
+        .lines()
+        .find(|l| l.starts_with("handles\t"))
+        .unwrap_or_else(|| panic!("no handles row: {}", text_of(&text)))
+        .to_string();
+    assert!(row.contains("limits 7.0 MB, 2 days"), "{row}");
+    s.finish();
+}
+
+#[test]
+fn a_bad_handles_value_serves_degraded_with_the_reason() {
+    let (mut s, _tmp, _root) = configured("[handles]\nmax_age_days = 0\n");
+    let status = s.call("status", json!({"format": "json"}));
+    let report: Value = serde_json::from_str(text_of(&status)).unwrap();
+    assert_eq!(report["state"], "degraded", "{report}");
+    let err = report["startup_error"].as_str().unwrap();
+    assert!(
+        err.contains("handles.max_age_days = 0 is out of range"),
+        "{err}"
+    );
     s.finish();
 }
