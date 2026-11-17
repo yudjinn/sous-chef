@@ -546,6 +546,50 @@ Wrynose source in the workspace and the release branches of the BitBake clone:
 Gaps confirmed (known, not bugs): `BBCLASSEXTEND` providers (`curl-native`), skipped
 recipes (`COMPATIBLE_MACHINE`; BitBake skips 435), `addfragments`, `PREFERRED_PROVIDERS`.
 
+## Status after the fix rounds (2026-11-17)
+
+The 18 bugs were assigned to the fix branches `w5-fix-eval`, `w5-fix-lint`, `w5-fix-hooks`
+and `w5-fix-eval2` (merged by `e046d5f`). Checked for this section at `8f66f94`: `SOUS_CHEF_LIVE=... cargo test
+--release --test live_verify -- --ignored` passes all 14 tests, the seven `live_bug_*`
+included, and the lint numbers were re-measured on the kas build without running BitBake
+(lint-rules.md, "On a real workspace").
+
+| | Fixed by | Status |
+|---|---|---|
+| B1 | data files marked in the index (`files.not_collected = 'data'`), left out of search and lint; uncollected recipe files noted | fixed; `hygiene/parse-error` with `--all` 422 -> 3. Left: the 3 are in `meta:conf/ccache.conf` (ccache's own file, but in `conf/`, so taken as metadata), and lint still checks `meta:lib/bblayers/templates/example.bb` (no `BBFILES` glob collects it; 2 `org/recipe-path` findings) |
+| B2 | glob matches sorted as Python strings (`resolve::py_str_cmp`) | fixed; bbappend order agrees for all recipes of the bitbake-setup build (differential.md) |
+| B3 | `layers show=appends` evaluates `BBFILES_DYNAMIC` | fixed for the view; the index still does not fold `BBFILES_DYNAMIC` into `BBFILES` |
+| B4 | one tokeniser for list values (`parse::words`): python entries of `OVERRIDES` kept whole, never override names | fixed |
+| B5 | a reference whose text expands completely but whose value is uncertain is followed and flagged | fixed; flagged values listing `TCOVERRIDE` 156 -> 0 (differential.md) |
+| B6 | the same tokeniser in `deps` and the static `PROVIDES` | fixed |
+| B7 | the wrappers save the argv before sourcing | fixed |
+| B8 | `override/shadowed` does not judge a shared file from one includer | fixed; 338 -> 83 findings. New false positives seen in the re-run: 7 findings on a recipe's `DEPENDS =` "replaced" by `tcmode-default.inc` (the virtual-provider rewrite of `DEPENDS` is recorded as an assignment there) |
+| B9 | `override/filesextrapaths` accepts `=.` / `.=` with the colon | fixed; 12 -> 0 |
+| B10 | `override/missing-package` skips empty values and classes without packages | fixed; 3 -> 0 |
+| B11 | `overrides show=dead` counts variables read by name (`TUNE_FEATURES:tune-*`) in a note instead of listing them | fixed |
+| B12 | images and packagegroups through their static tree (`org/recipe-path`, `hygiene/missing-metadata`) | fixed; the default run on meta-kiss* went from 6 findings to 1 (the true one) |
+| B13 | `hygiene/host-path` treats text, patterns, quoted arguments and link targets as data | fixed; 15 -> 0 |
+| B14 | `override/append-no-space` judges a leading / trailing reference by the file's own value | fixed; 10 -> 6 |
+| B15 | `deps kind=packageconfig` lists only real options | fixed |
+| B16 | `log`: exit status from the console log or job output, the downloader's cause row, the definition from a global class | fixed (not re-run against the real fetch failure: that needs BitBake) |
+| B17 | `scaffold kind=recipe` notes a recipe of the same `PN` in another layer | fixed |
+| B18 | the `OVERRIDES` note only on values with a conditional operation, and worded for what it means | fixed |
+
+Also since this verification: `var authoritative=true` is implemented (T5.5, merged before
+the fix rounds); the Bash hook recognises `kas shell ... -c 'bitbake ...'` (T9.3; the live
+test `live_bash_hook_digests_real_fetch_failure` covers it since `8f66f94`); a bitbake-setup
+build has its MACHINE and DISTRO from the fragments (`addfragments` is replayed; the
+`@default` probe of differential.md went from 12 bugs to 0); a no-change refresh takes
+19 ms instead of 104 ms (performance.md).
+
+Still open from the list above: the Grep context-line format and live Bash and Edit events
+(need a live Claude Code session); how `bitbake-layers add-layer` edits `bblayers.conf`;
+the first release with `python_hatchling`; the second client's failure after a long wait;
+cancel with `BB_SERVER_TIMEOUT` set. The `bitbake -e` format item is settled (T5.5,
+bitbake-semantics.md "Build output"). Known gaps unchanged: `BBCLASSEXTEND` providers,
+skipped recipes (`COMPATIBLE_MACHINE`), `PREFERRED_PROVIDERS`; `addfragments` is no longer
+one.
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,
