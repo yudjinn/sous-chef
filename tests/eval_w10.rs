@@ -405,3 +405,105 @@ fn the_variant_class_is_deferred_and_classoverride_is_set_before_the_deferred_in
     );
     let _ = &fx.root;
 }
+
+// ---------------------------------------------------------------------------------------
+// Item 2: PREFERRED_PROVIDERS
+// ---------------------------------------------------------------------------------------
+
+/// testdistro.conf without its `PREFERRED_PROVIDER_virtual/foo`, plus `extra` in local.conf.
+fn preferred_providers(extra: &'static str, keep_pp: bool) -> impl FnOnce(&Path) {
+    move |root: &Path| {
+        if !keep_pp {
+            let conf = root.join("meta-core/conf/distro/testdistro.conf");
+            let text = fs::read_to_string(&conf)
+                .unwrap()
+                .replace("PREFERRED_PROVIDER_virtual/foo ?= \"libfoo-alt\"\n", "");
+            fs::write(&conf, text).unwrap();
+        }
+        append_to(root, "build/conf/local.conf", extra);
+    }
+}
+
+fn providers_of(fx: &Fx, name: &str) -> sous_chef::eval::providers::ProviderSet {
+    Providers::new(&fx.idx, &fx.ws, None, None)
+        .unwrap()
+        .providers(name)
+        .unwrap()
+}
+
+#[test]
+fn preferred_providers_picks_a_provider() {
+    // Without a preference libfoo-alt is first (its PREFERRED_VERSION matches); the
+    // PREFERRED_PROVIDERS entry moves libfoo to the front.
+    let fx = modified(preferred_providers(
+        "PREFERRED_PROVIDERS = \"virtual/bar:x virtual/foo:libfoo\"\n",
+        false,
+    ));
+    let set = providers_of(&fx, "virtual/foo");
+    assert_eq!(set.reason, ProviderReason::PreferredProviders);
+    assert_eq!(set.providers[0].pn, "libfoo");
+    let pp = set.preferred_provider.unwrap();
+    assert_eq!(
+        (pp.name.as_str(), pp.value.as_str()),
+        ("PREFERRED_PROVIDERS", "libfoo")
+    );
+    assert!(pp.loc.unwrap().path.ends_with("conf/local.conf"));
+}
+
+#[test]
+fn preferred_provider_replaces_a_preferred_providers_entry() {
+    let fx = modified(preferred_providers(
+        "PREFERRED_PROVIDERS = \"virtual/foo:libfoo\"\n",
+        true,
+    ));
+    let set = providers_of(&fx, "virtual/foo");
+    assert_eq!(set.reason, ProviderReason::PreferredProvider);
+    assert_eq!(set.providers[0].pn, "libfoo-alt");
+    assert!(
+        set.notes
+            .iter()
+            .any(|n| n.contains("PREFERRED_PROVIDERS names libfoo") && n.contains("replaces it")),
+        "{:?}",
+        set.notes
+    );
+}
+
+#[test]
+fn preferred_providers_conflicts_and_malformed_words_are_said() {
+    let fx = modified(preferred_providers(
+        "PREFERRED_PROVIDERS = \"virtual/foo:libfoo virtual/foo:a:b virtual/foo:libfoo-alt\"\n",
+        false,
+    ));
+    let set = providers_of(&fx, "virtual/foo");
+    // The last entry wins; the malformed word is ignored.
+    assert_eq!(set.reason, ProviderReason::PreferredProviders);
+    assert_eq!(set.providers[0].pn, "libfoo-alt");
+    assert!(
+        set.notes
+            .iter()
+            .any(|n| n.contains("conflicting preferences")),
+        "{:?}",
+        set.notes
+    );
+    assert!(
+        set.notes
+            .iter()
+            .any(|n| n.contains("malformed word \"virtual/foo:a:b\"")),
+        "{:?}",
+        set.notes
+    );
+    // An entry naming no provider of the item: said, BitBake's order kept.
+    let fx = modified(preferred_providers(
+        "PREFERRED_PROVIDERS = \"virtual/foo:nosuch\"\n",
+        false,
+    ));
+    let set = providers_of(&fx, "virtual/foo");
+    assert_eq!(set.reason, ProviderReason::FirstOfSeveral);
+    assert!(
+        set.notes
+            .iter()
+            .any(|n| n.contains("PREFERRED_PROVIDERS entry virtual/foo:nosuch")),
+        "{:?}",
+        set.notes
+    );
+}

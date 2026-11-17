@@ -248,7 +248,7 @@ edit = false       # the reindex and lint after an edit
   environment the server was started in, or a kas project with `kas` on `PATH` and an
   existing build directory (not when a kas file includes another repository's file, see
   "kas projects") (`status` shows which).
-- **Not modelled.** `PREFERRED_PROVIDERS`. Partly: `BBCLASSEXTEND` variants such as
+- **Partly modelled.** `BBCLASSEXTEND` variants such as
   `gmp-native` are evaluated as BitBake makes them, but what OE-core's class-extension
   handlers and anonymous python filter (`DEPENDS`, `PACKAGES`, `PROVIDES`, ...) is flagged,
   not computed; a static `BBMASK`

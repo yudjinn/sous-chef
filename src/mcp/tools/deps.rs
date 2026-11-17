@@ -415,6 +415,9 @@ fn resolve_dep(
                     ProviderReason::PreferredProvider => {
                         s.push_str(&format!(" (PREFERRED_PROVIDER_{name})"))
                     }
+                    ProviderReason::PreferredProviders => {
+                        s.push_str(&format!(" (PREFERRED_PROVIDERS {name}:{})", sel.pn))
+                    }
                     ProviderReason::FirstOfSeveral => s.push_str(" (first of several providers)"),
                     _ => {}
                 }
@@ -672,6 +675,9 @@ fn providers_table(index: &Index, ws: &Workspace, name: &str) -> Result<Table> {
                 ProviderReason::PreferredProvider => {
                     format!("selected by PREFERRED_PROVIDER_{name}")
                 }
+                ProviderReason::PreferredProviders => {
+                    format!("selected by PREFERRED_PROVIDERS ({name}:{})", prov.pn)
+                }
                 ProviderReason::Only => "selected (only provider)".into(),
                 ProviderReason::SameName => format!("selected (its PN is {name})"),
                 ProviderReason::FirstOfSeveral => format!(
@@ -694,7 +700,10 @@ fn providers_table(index: &Index, ws: &Workspace, name: &str) -> Result<Table> {
         t.row(&[&prov.pn, &version, &status, &loc]);
     }
     if let Some(pp) = &set.preferred_provider {
-        let used = set.reason == ProviderReason::PreferredProvider;
+        let used = matches!(
+            set.reason,
+            ProviderReason::PreferredProvider | ProviderReason::PreferredProviders
+        );
         setting_row(
             &mut t,
             pp,

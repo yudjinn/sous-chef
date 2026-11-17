@@ -1165,11 +1165,20 @@ Checked against BitBake master (2026-11), `lib/bb/providers.py`
   a second; the eligible list is the first list then the second; a `PN` equal to the name
   is moved to the front. `filterProviders` then reads `PREFERRED_PROVIDER_<name>` (e.g.
   `PREFERRED_PROVIDER_virtual/foo`) and, if an eligible file has that `PN`, moves it to the
-  front and marks the choice unique. There is a `PREFERRED_PROVIDERS`
-  variable (BitBake 2.18.0 source): `cooker.handlePrefProviders` reads its words
-  (`providee:provider`, an error for conflicting pairs) from the configuration into
-  `recipecaches.preferred`; `filterProviders` overwrites that entry with
-  `PREFERRED_PROVIDER_<name>` when it is set, then uses it as above. Without a unique
+  front and marks the choice unique. **`PREFERRED_PROVIDERS`** (read for w10: BitBake
+  2.18.0 `lib/bb/cooker.py` `BBCooker.handlePrefProviders`, called once after parsing,
+  and `lib/bb/providers.py` `filterProviders`; the same code on branch `2.0`, so on every
+  supported release): for each multiconfig, a copy of the configuration datastore gets
+  `bb.data.expandKeys`, then `(getVar('PREFERRED_PROVIDERS') or "").split()`; each word is
+  `(providee, provider) = p.split(':')`, and a word that does not split into exactly two
+  parts is logged as critical ("Malformed option in PREFERRED_PROVIDERS variable") and
+  skipped; a providee already in `recipecaches.preferred` with a different provider logs an
+  error ("conflicting preferences for X: both A and B specified") and the later word is
+  stored anyway (the last one wins). `filterProviders` then does `prefervar =
+  getVar('PREFERRED_PROVIDER_<item>')` and, when that is set and not empty, **replaces**
+  the `PREFERRED_PROVIDERS` entry with it (even when it names no eligible provider); the
+  entry left is used as above (move that `PN` to the front, unique). The runtime path
+  (`filterProvidersRunTime`) does not read it. Without a unique
   choice and with several eligible files BitBake fires `MultipleProviders`
   (`taskdata.add_provider_internal`), adds every eligible file as a build target, and the
   runqueue uses `build_targets[name][0]`: **the first one** (settled in
@@ -1187,7 +1196,11 @@ own name when no indexed recipe provides that name: the base recipe's file (chos
 its `PN`), confirmed by evaluating the base (see "Class-extended variants"); it is not
 found through the `PROVIDES` its class rewrites (`native_filter`, `suffix_filter`), and a
 real recipe of the same name hides it.
-`PREFERRED_PROVIDERS` is not read.
+(w10) `PREFERRED_PROVIDERS` is read as above (`Providers::preference`,
+`ProviderReason::PreferredProviders`): from the configuration's value, its static words
+only (a value with python adds a note that an entry may be missing); a malformed word
+naming the item and a conflicting pair for it are notes; `PREFERRED_PROVIDER_<name>` wins,
+with a note when it replaces a different entry.
 
 Confirmed on the live environment (used by `org/policy-in-recipe`; BitBake 2.18.0 `providers.filterProviders(...,
 cfgData, ...)` and `cooker.handlePrefProviders`, and observed: `bitbake -e virtual/kernel`

@@ -804,9 +804,10 @@ Provider selection (T3.7, `eval::providers`): `Providers::new(index, ws, machine
 index, ws, target, config)`, `best_version(pn, version) -> Option<Selection>`,
 `providers(name) -> ProviderSet`, `evaluate(&RecipeRow)`, `target_for(&RecipeRow)`,
 `setting(name) -> Option<Setting>`, `config()`; `Selection { recipe, reason: VersionReason
-{ Requested, Required, Preferred, Latest }, setting, default_preference, notes }` with
-`describe()`; `ProviderSet { name, providers, reason: ProviderReason { None, Only,
-PreferredProvider, SameName, FirstOfSeveral }, preferred_provider, excluded, notes }` with
+{ Requested, Required, Preferred, Latest }, setting, default_preference, notes, variant
+(w10) }` with `describe()`; `ProviderSet { name, providers, reason: ProviderReason { None,
+Only, PreferredProvider, PreferredProviders (w10), SameName, FirstOfSeveral },
+preferred_provider, excluded, notes }` with
 `selected()`; `Provider { pn, selection, provides_loc, python }`; `Setting { name, value, loc,
 python }`; `preferred_recipe(index, ws, pn, version, machine, distro)`;
 `recipes_using(index, &FileRow)` (the recipes a `.bb`, bbappend, include or class is part

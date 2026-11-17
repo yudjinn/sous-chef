@@ -623,7 +623,12 @@ the flags of the selected options, with a note.
 - `providers`: rows `name version status loc`: every recipe that provides the name, the
   selected one first, with the reason for its version and for the choice; then the
   `PREFERRED_PROVIDER` / `PREFERRED_VERSION` assignments that decided it. Candidates are
-  recipes whose `PN` or static `PROVIDES` names it, confirmed by evaluating each.
+  recipes whose `PN` or static `PROVIDES` names it, confirmed by evaluating each, or, when
+  none is, the class-extended variant of that name. A `PREFERRED_PROVIDERS` entry
+  `<name>:<pn>` is used when no `PREFERRED_PROVIDER_<name>` is set (status `selected by
+  PREFERRED_PROVIDERS (<name>:<pn>)`, and a `PREFERRED_PROVIDERS` row whose value is the
+  provider); a malformed word, conflicting entries and an entry `PREFERRED_PROVIDER_<name>`
+  replaces are notes.
 
 ```
 depth	dep	provider	source	loc
