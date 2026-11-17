@@ -50,10 +50,12 @@ use crate::error::{Error, Result};
 /// The file `kas menu` writes in the work directory; kas reads it when given no file.
 pub const MENU_CONFIG: &str = ".config.yaml";
 
-/// kas's defaults (`schema-kas.json`, kas 5.5) for an unset `machine`, `distro`, `target`.
+/// kas's defaults (`schema-kas.json`, kas 5.5) for an unset `machine`, `distro`, `target`,
+/// `task`.
 pub const DEFAULT_MACHINE: &str = "qemux86-64";
 pub const DEFAULT_DISTRO: &str = "nodistro";
 pub const DEFAULT_TARGET: &str = "core-image-minimal";
+pub const DEFAULT_TASK: &str = "build";
 
 /// How deep includes may nest (kas itself has no limit and recurses on a cycle).
 const MAX_INCLUDE_DEPTH: usize = 32;
@@ -210,6 +212,35 @@ pub struct KasProject {
     pub not_in_bblayers: Vec<PathBuf>,
     /// Filled by discovery: workspace layers (names) that no kas file lists.
     pub not_in_kas: Vec<String>,
+    /// `KAS_MACHINE`, `KAS_DISTRO`, `KAS_TARGET`, `KAS_TASK` from the environment
+    /// sous-chef was started in, which kas lets override the files ([`KasOverrides`]).
+    pub env: KasOverrides,
+}
+
+/// The environment variables kas lets override the kas files' `machine`, `distro`,
+/// `target` and `task` (kas 5.5 `config.py`: `get_machine` and `get_distro` return
+/// `os.environ.get('KAS_MACHINE' / 'KAS_DISTRO', <file value or default>)`, so a variable
+/// that is set wins even when empty; `get_bitbake_task` does the same with `KAS_TASK` after
+/// a command-line `-c`; `get_bitbake_targets` takes the whitespace-separated words of
+/// `KAS_TARGET` after a command-line `--target`, and only when there is at least one word).
+/// `None`: not set.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct KasOverrides {
+    pub machine: Option<String>,
+    pub distro: Option<String>,
+    /// As set; [`KasOverrides::targets`] splits it.
+    pub target: Option<String>,
+    pub task: Option<String>,
+}
+
+impl KasOverrides {
+    /// The words of `KAS_TARGET`, empty when unset or blank (then kas ignores it).
+    pub fn targets(&self) -> Vec<&str> {
+        self.target
+            .as_deref()
+            .map(|t| t.split_whitespace().collect())
+            .unwrap_or_default()
+    }
 }
 
 /// The process environment kas detection reads. Tests build one directly.
@@ -219,44 +250,139 @@ pub struct KasEnv {
     pub work_dir: Option<PathBuf>,
     /// `KAS_BUILD_DIR`
     pub build_dir: Option<PathBuf>,
+    /// `KAS_MACHINE`, `KAS_DISTRO`, `KAS_TARGET`, `KAS_TASK` (set, even empty, or not).
+    pub overrides: KasOverrides,
 }
 
 impl KasEnv {
-    /// `KAS_WORK_DIR` and `KAS_BUILD_DIR` of this process; empty values count as unset.
+    /// `KAS_WORK_DIR` and `KAS_BUILD_DIR` of this process (empty values count as unset),
+    /// and the `KAS_*` overrides (an empty value counts as set, as in kas; a value that is
+    /// not UTF-8 is converted lossily).
     pub fn from_process() -> KasEnv {
         let var = |k: &str| {
             std::env::var_os(k)
                 .filter(|v| !v.is_empty())
                 .map(PathBuf::from)
         };
+        let text = |k: &str| std::env::var_os(k).map(|v| v.to_string_lossy().into_owned());
         KasEnv {
             work_dir: var("KAS_WORK_DIR"),
             build_dir: var("KAS_BUILD_DIR"),
+            overrides: KasOverrides {
+                machine: text("KAS_MACHINE"),
+                distro: text("KAS_DISTRO"),
+                target: text("KAS_TARGET"),
+                task: text("KAS_TASK"),
+            },
         }
     }
 }
 
+/// One kas setting an environment variable overrides ([`KasProject::env_overrides`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct EnvOverride {
+    /// `KAS_MACHINE`, `KAS_DISTRO`, `KAS_TARGET` or `KAS_TASK`.
+    pub var: &'static str,
+    /// The value kas uses (the variable's; targets joined by a space).
+    pub value: String,
+    /// What the kas files say (joined by a space for targets), `None` when they say
+    /// nothing (kas's default would apply).
+    pub file_value: Option<String>,
+    /// Where the files say it (the first target's place).
+    pub loc: Option<KasLoc>,
+}
+
 impl KasProject {
-    /// `machine`, else kas's default.
+    /// The machine kas writes into `local.conf`: `KAS_MACHINE` when set, else `machine`,
+    /// else kas's default.
     pub fn machine_or_default(&self) -> &str {
-        self.machine
-            .as_ref()
-            .map_or(DEFAULT_MACHINE, |s| s.value.as_str())
+        self.env.machine.as_deref().unwrap_or_else(|| {
+            self.machine
+                .as_ref()
+                .map_or(DEFAULT_MACHINE, |s| s.value.as_str())
+        })
     }
 
-    /// `distro`, else kas's default.
+    /// The distro kas writes into `local.conf`: `KAS_DISTRO` when set, else `distro`, else
+    /// kas's default.
     pub fn distro_or_default(&self) -> &str {
-        self.distro
-            .as_ref()
-            .map_or(DEFAULT_DISTRO, |s| s.value.as_str())
+        self.env.distro.as_deref().unwrap_or_else(|| {
+            self.distro
+                .as_ref()
+                .map_or(DEFAULT_DISTRO, |s| s.value.as_str())
+        })
     }
 
-    /// The targets, else kas's default (one).
+    /// The targets `kas build` builds: the words of `KAS_TARGET` when there is one, else the
+    /// targets of the files, else kas's default (one).
     pub fn targets_or_default(&self) -> Vec<&str> {
-        if self.target.is_empty() {
+        let env = self.env.targets();
+        if !env.is_empty() {
+            env
+        } else if self.target.is_empty() {
             vec![DEFAULT_TARGET]
         } else {
             self.target.iter().map(|t| t.value.as_str()).collect()
+        }
+    }
+
+    /// The task `kas build` runs: `KAS_TASK` when set, else `task`, else kas's default.
+    pub fn task_or_default(&self) -> &str {
+        self.env.task.as_deref().unwrap_or_else(|| {
+            self.task
+                .as_ref()
+                .map_or(DEFAULT_TASK, |s| s.value.as_str())
+        })
+    }
+
+    /// The settings an environment variable overrides, in the order `KAS_MACHINE`,
+    /// `KAS_DISTRO`, `KAS_TARGET`, `KAS_TASK` ([`KasOverrides`]). Empty when none is set.
+    pub fn env_overrides(&self) -> Vec<EnvOverride> {
+        let one = |var, value: &Option<String>, file: &Option<KasSetting>| {
+            value.as_ref().map(|v| EnvOverride {
+                var,
+                value: v.clone(),
+                file_value: file.as_ref().map(|s| s.value.clone()),
+                loc: file.as_ref().map(|s| s.loc.clone()),
+            })
+        };
+        let targets = self.env.targets();
+        let target = (!targets.is_empty()).then(|| EnvOverride {
+            var: "KAS_TARGET",
+            value: targets.join(" "),
+            file_value: (!self.target.is_empty()).then(|| {
+                self.target
+                    .iter()
+                    .map(|t| t.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }),
+            loc: self.target.first().map(|t| t.loc.clone()),
+        });
+        [
+            one("KAS_MACHINE", &self.env.machine, &self.machine),
+            one("KAS_DISTRO", &self.env.distro, &self.distro),
+            target,
+            one("KAS_TASK", &self.env.task, &self.task),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    /// Where the value of `machine_or_default` (`machine` true) or `distro_or_default`
+    /// comes from, in words: `the environment variable KAS_MACHINE`, `the kas file
+    /// <file:line>` or `kas's default (no machine in the kas files)`.
+    pub fn setting_source(&self, machine: bool) -> String {
+        let (var, env, file, what) = if machine {
+            ("KAS_MACHINE", &self.env.machine, &self.machine, "machine")
+        } else {
+            ("KAS_DISTRO", &self.env.distro, &self.distro, "distro")
+        };
+        match (env, file) {
+            (Some(_), _) => format!("the environment variable {var}"),
+            (None, Some(s)) => format!("the kas file {}", s.loc.display_in(&self.root)),
+            (None, None) => format!("kas's default (no {what} in the kas files)"),
         }
     }
 
@@ -447,14 +573,20 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
         }
         let work = work_dir(&sc_dir);
         let build = build_dir(&work);
-        return Ok(Some(load(&cfg.kas, KasSource::Config, &work, &build)));
+        return Ok(Some(with_env(
+            load(&cfg.kas, KasSource::Config, &work, &build),
+            env,
+        )));
     }
 
     let work = work_dir(&sc_dir);
     let menu = work.join(MENU_CONFIG);
     if menu.is_file() {
         let build = build_dir(&work);
-        return Ok(Some(load(&[menu], KasSource::MenuConfig, &work, &build)));
+        return Ok(Some(with_env(
+            load(&[menu], KasSource::MenuConfig, &work, &build),
+            env,
+        )));
     }
 
     // A build directory kas generated: the configured one, `KAS_BUILD_DIR`, the one
@@ -480,11 +612,9 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
     let found = candidate_files(&work);
     match found.as_slice() {
         [] => Ok(None),
-        [one] => Ok(Some(load(
-            std::slice::from_ref(one),
-            KasSource::Found,
-            &work,
-            &build,
+        [one] => Ok(Some(with_env(
+            load(std::slice::from_ref(one), KasSource::Found, &work, &build),
+            env,
         ))),
         many => Ok(Some(KasProject {
             files: Vec::new(),
@@ -507,8 +637,16 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
             problems: Vec::new(),
             not_in_bblayers: Vec::new(),
             not_in_kas: Vec::new(),
+            env: env.overrides.clone(),
         })),
     }
+}
+
+/// `project` with the `KAS_*` overrides of `env`. They are not tied to a directory (kas
+/// reads them wherever it runs), so they count whatever the working directory.
+fn with_env(mut project: KasProject, env: &KasEnv) -> KasProject {
+    project.env = env.overrides.clone();
+    project
 }
 
 /// kas files in `dir` and `dir/kas`: `.yml`, `.yaml` or `.json` files whose top level is a
@@ -739,6 +877,7 @@ pub fn load(files: &[PathBuf], source: KasSource, work_dir: &Path, build_dir: &P
         problems,
         not_in_bblayers: Vec::new(),
         not_in_kas: Vec::new(),
+        env: KasOverrides::default(),
     }
 }
 

@@ -1091,11 +1091,15 @@ show-layers` prints the collection name instead (`core`, `arm-toolchain`).
 
 In a kas project (and only then) it adds `kas` (the files as kas takes them and how they
 were found, e.g. `kas/kiss.yaml:kas/dogbonedark.yaml (from kas in sous-chef.toml)`),
-`kas_defaults` (`machine dogbonedark, distro kiss, target kiss-image`), `kas_layers` (how
+`kas_defaults` (`machine dogbonedark, distro kiss, target kiss-image`: what kas uses, so a
+`KAS_MACHINE`, `KAS_DISTRO` or `KAS_TARGET` in the environment sous-chef was started in
+wins over the files, as in kas), one `kas_env` row per setting such a variable overrides
+(`KAS_MACHINE=board2 overrides machine "board1" (kas/board.yaml:5)`; `KAS_TASK` too),
+`kas_layers` (how
 many layers the kas files name, and those not checked out yet), `kas_lock` (lock files
 read), `kas_mismatch` (layers in the kas files but not in `bblayers.conf`, and the reverse:
 the kas files changed since the last checkout) and one `kas_problem` row per problem; in
-JSON, a `kas` object with the same fields. The `bitbake` row's mode is `init-script`,
+JSON, a `kas` object with the same fields (`env_overrides` only when there is one). The `bitbake` row's mode is `init-script`,
 `bitbake-setup`, `kas` or `initialised`.
 
 ### `audit`

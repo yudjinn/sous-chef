@@ -334,6 +334,7 @@ fn the_kas_environment_counts_only_for_a_related_directory() {
     let env = KasEnv {
         work_dir: Some(p.root.clone()),
         build_dir: Some(p.path("build")),
+        ..KasEnv::default()
     };
     let ws = Workspace::discover_in(&cfg, &env).unwrap();
     assert_eq!(ws.kas, None);
@@ -345,6 +346,108 @@ fn the_kas_environment_counts_only_for_a_related_directory() {
     };
     let ws = Workspace::discover_in(&cfg, &env).unwrap();
     assert_eq!(ws.kas.as_ref().unwrap().source, KasSource::MenuConfig);
+}
+
+#[test]
+fn kas_environment_variables_override_the_files() {
+    use sous_chef::workspace::kas::KasOverrides;
+    let p = Project::before();
+    let discover = |o: KasOverrides| {
+        let env = KasEnv {
+            overrides: o,
+            ..KasEnv::default()
+        };
+        Workspace::discover_in(&p.config(), &env).unwrap()
+    };
+    // Unset: the files (machine, distro, target) and kas's default (task).
+    let ws = discover(KasOverrides::default());
+    let k = ws.kas.as_ref().unwrap();
+    assert_eq!(
+        (
+            k.machine_or_default(),
+            k.distro_or_default(),
+            k.targets_or_default(),
+            k.task_or_default()
+        ),
+        ("board1", "projdistro", vec!["proj-image"], "build")
+    );
+    assert!(k.env_overrides().is_empty());
+    assert_eq!(k.setting_source(true), "the kas file kas/board.yaml:5");
+
+    // Set: each wins, as kas's `os.environ.get(...)`.
+    let ws = discover(KasOverrides {
+        machine: Some("board2".into()),
+        distro: Some("otherdistro".into()),
+        target: Some("  img-a  img-b ".into()),
+        task: Some("populate_sdk".into()),
+    });
+    let k = ws.kas.as_ref().unwrap();
+    assert_eq!(
+        (
+            k.machine_or_default(),
+            k.distro_or_default(),
+            k.targets_or_default(),
+            k.task_or_default()
+        ),
+        (
+            "board2",
+            "otherdistro",
+            vec!["img-a", "img-b"],
+            "populate_sdk"
+        )
+    );
+    assert_eq!(
+        k.setting_source(true),
+        "the environment variable KAS_MACHINE"
+    );
+    let o: Vec<(&str, String, Option<String>, Option<String>)> = k
+        .env_overrides()
+        .into_iter()
+        .map(|o| {
+            (
+                o.var,
+                o.value,
+                o.file_value,
+                o.loc.map(|l| l.display_in(&p.root)),
+            )
+        })
+        .collect();
+    assert_eq!(
+        o,
+        [
+            (
+                "KAS_MACHINE",
+                "board2".to_string(),
+                Some("board1".to_string()),
+                Some("kas/board.yaml:5".to_string())
+            ),
+            (
+                "KAS_DISTRO",
+                "otherdistro".to_string(),
+                Some("projdistro".to_string()),
+                Some("kas/base.yaml:7".to_string())
+            ),
+            (
+                "KAS_TARGET",
+                "img-a img-b".to_string(),
+                Some("proj-image".to_string()),
+                Some("kas/base.yaml:8".to_string())
+            ),
+            ("KAS_TASK", "populate_sdk".to_string(), None, None),
+        ]
+    );
+
+    // An empty KAS_MACHINE is still set (kas writes `MACHINE ??= ""`); a blank KAS_TARGET
+    // has no word, so kas ignores it.
+    let ws = discover(KasOverrides {
+        machine: Some(String::new()),
+        target: Some("   ".into()),
+        ..KasOverrides::default()
+    });
+    let k = ws.kas.as_ref().unwrap();
+    assert_eq!(k.machine_or_default(), "");
+    assert_eq!(k.targets_or_default(), ["proj-image"]);
+    assert_eq!(k.env_overrides().len(), 1);
 }
 
 #[test]

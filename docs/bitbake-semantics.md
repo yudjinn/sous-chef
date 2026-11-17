@@ -1485,9 +1485,23 @@ file name, the layer order. `src/workspace/kas.rs` implements what follows.
   __lt__`); observed on yocto-kiss (`meta-arm/meta-arm` before
   `meta-arm/meta-arm-toolchain`, though `kiss.yaml` lists them the other way round).
 - `machine`, `distro`, `target`, `task` default to `qemux86-64`, `nodistro`,
-  `core-image-minimal` and `build`; the environment variables `KAS_MACHINE`, `KAS_DISTRO`,
-  `KAS_TARGET`, `KAS_TASK` override them. sous-chef reports the file values and kas's
-  defaults; it does not read the `KAS_*` overrides (*verify* whether it should).
+  `core-image-minimal` and `build` (`schema-kas.json`). The environment variables override
+  the files (kas 5.5 `config.py`, read 2026-11-18 in the installed package):
+  `get_machine` / `get_distro` return `os.environ.get('KAS_MACHINE' / 'KAS_DISTRO', <file
+  value or default>)`, so a set variable wins even when empty; `get_bitbake_task` returns a
+  command-line `-c` first, else `os.environ.get('KAS_TASK', ...)` the same way;
+  `get_bitbake_targets` returns a command-line `--target` first, else the
+  whitespace-separated words of `KAS_TARGET` when there is at least one, else the files'
+  `target` (a string or a list). Where they act: `MACHINE` and `DISTRO` only in the
+  `local.conf` that `write_bbconfig` writes (`MACHINE ??= "<m>"`, `DISTRO ??= "<d>"`); the
+  targets also in `BBMULTICONFIG` there (the `mc:` / `multiconfig:` ones); task and targets
+  in `kas build`'s command (`bitbake -c <task> <targets>`) and in `kas shell`'s log line.
+  So once `local.conf` exists, an override acts only through a kas command that rewrites
+  it (not `kas shell -k`, which sous-chef runs). `kas-container` forwards each of the four
+  into the container when it is set and not empty. sous-chef reads them from the
+  environment it was started in (`KasEnv::from_process`, `KasOverrides`, not tied to a
+  directory): `KasProject::machine_or_default`, `distro_or_default`, `targets_or_default`
+  and `task_or_default` follow them, and `status` shows a `kas_env` row per override.
 
 **Generated files** (`WriteBBConfig`; observed). Both are rewritten by `kas checkout`,
 `kas shell` and `kas build` (unless `-k` / `--keep-config-unchanged`) and carry no
