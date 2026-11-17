@@ -533,6 +533,18 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
     remove_var(&mut r.ds, "LAYERDIR_RE");
     remove_var(&mut r.ds, "LAYERDIR");
 
+    // A kas project without a build directory: kas would write `MACHINE ??=` and
+    // `DISTRO ??=` from its files into the `local.conf` it generates, so they hold unless
+    // the configuration sets the variables.
+    let kas = kas_defaults(ws);
+    for (name, value, _) in &kas {
+        r.ds.var_mut(name).default = Some(Content {
+            text: value.clone(),
+            src: Vec::new(),
+        });
+        r.ds.ovr_cache = OnceLock::new();
+    }
+
     // conf/bitbake.conf on BBPATH (ConfHandler.resolve_file: BBPATH only).
     let bitbake_conf = r
         .bbpath()
@@ -562,7 +574,62 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
         };
         r.inherit(&c, None, &via, false, "INHERIT")?;
     }
+
+    // Where the machine came from, when not from the configuration or the arguments.
+    let mut target_notes = Vec::new();
+    for (name, value, from) in &kas {
+        let ours = r.ds.vars.get(name.as_str()).is_some_and(|v| {
+            v.content.is_none()
+                && v.default
+                    .as_ref()
+                    .is_some_and(|d| d.src.is_empty() && d.text == *value)
+        });
+        if ours {
+            target_notes.push(format!(
+                "note: {name} = \"{value}\" from {from} (kas project without a build directory; kas writes it into local.conf as {name} ??=)"
+            ));
+        }
+    }
+    if target.machine.is_none() && r.ds.value("MACHINE").is_none_or(|v| v.text.is_empty()) {
+        target_notes.push(
+            "note: no MACHINE is set (not in the configuration, its fragments or the arguments), so machine-specific values are not applied (conf/machine/<machine>.conf, machine overrides); pass machine to evaluate for one"
+                .to_string(),
+        );
+    }
+    if !target_notes.is_empty() {
+        Arc::make_mut(&mut r.ds.notes)
+            .target_notes
+            .extend(target_notes);
+    }
     Ok(r.ds)
+}
+
+/// `(variable, value, where it came from)` for `MACHINE` and `DISTRO` of a kas project
+/// whose build directory does not exist yet (`KasProject::machine_or_default`,
+/// `distro_or_default`); empty otherwise.
+fn kas_defaults(ws: &Workspace) -> Vec<(String, String, String)> {
+    let Some(k) = ws.kas.as_ref().filter(|k| !k.files.is_empty()) else {
+        return Vec::new();
+    };
+    if ws.build_dir.is_some() {
+        return Vec::new();
+    }
+    let from = |s: Option<&crate::workspace::kas::KasSetting>, what: &str| match s {
+        Some(s) => format!("the kas file {}", s.loc.display_in(&k.root)),
+        None => format!("kas's default (no {what} in the kas files)"),
+    };
+    vec![
+        (
+            "MACHINE".to_string(),
+            k.machine_or_default().to_string(),
+            from(k.machine.as_ref(), "machine"),
+        ),
+        (
+            "DISTRO".to_string(),
+            k.distro_or_default().to_string(),
+            from(k.distro.as_ref(), "distro"),
+        ),
+    ]
 }
 
 fn recipe_pass(

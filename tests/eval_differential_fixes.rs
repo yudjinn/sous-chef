@@ -4,6 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;
+mod kas_support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -354,6 +355,257 @@ fn the_addfragments_line_is_a_statement_with_an_edge() {
     );
     let stmts = query::statements_in(&fx.idx, conf.id, &Default::default()).unwrap();
     assert!(stmts.iter().any(|s| s.kind == "addfragments"));
+}
+
+// ---------------------------------------------------------------------------------------
+// Item 5: the machine and distro an evaluation uses by default
+// ---------------------------------------------------------------------------------------
+
+fn ctx_for(fx: &Fx) -> sous_chef::mcp::Ctx {
+    let config = ws_config(&fx.root);
+    let workspace = Workspace::discover(&config).unwrap();
+    let mut index = Index::open_in(fx._cache.path(), &workspace).unwrap();
+    index.refresh(&workspace).unwrap();
+    let handles =
+        sous_chef::handles::HandleStore::open(&index.cache_dir().join("handles")).unwrap();
+    sous_chef::mcp::Ctx {
+        config,
+        workspace,
+        index: tokio::sync::Mutex::new(index),
+        handles,
+        jobs: sous_chef::bitbake::JobTable::new(),
+    }
+}
+
+fn boardx_dep(root: &Path) {
+    fragment_build(root, FRAGMENTS_4, TOOLCFG);
+    append_to(
+        root,
+        "meta-mine/recipes-app/app/app_0.1.bb",
+        "\nDEPENDS:append:boardx = \" boardx-only-dep\"\n",
+    );
+}
+
+#[tokio::test]
+async fn deps_without_a_machine_uses_the_fragment_machine() {
+    use sous_chef::mcp::tools::deps;
+    let fx = modified(boardx_dep);
+    let ctx = ctx_for(&fx);
+    let out = deps::run(
+        &ctx,
+        deps::Args {
+            recipe: "app".into(),
+            kind: deps::Kind::Build,
+            depth: None,
+            budget_tokens: Some(4000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(out.contains("boardx-only-dep"), "{out}");
+    assert!(!out.contains("no MACHINE is set"), "{out}");
+}
+
+#[tokio::test]
+async fn var_and_overrides_without_a_machine_use_the_fragment_machine() {
+    use sous_chef::mcp::tools::{overrides, var};
+    let fx = modified(boardx_dep);
+    let ctx = ctx_for(&fx);
+    let out = var::run(
+        &ctx,
+        var::Args {
+            name: "MACHINE".into(),
+            recipe: Some("app".into()),
+            machine: None,
+            distro: None,
+            authoritative: false,
+            flags: false,
+            budget_tokens: Some(4000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(out.contains("final: \"boardx\""), "{out}");
+    assert!(out.contains("build:conf/toolcfg.conf:2"), "{out}");
+    let out = overrides::run(
+        &ctx,
+        overrides::Args {
+            recipe: Some("app".into()),
+            machine: None,
+            distro: None,
+            show: overrides::Show::Chain,
+            budget_tokens: Some(4000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(out.contains("boardx"), "{out}");
+}
+
+/// Records `MACHINE` as seen by a recipe-scope rule.
+struct MachineRule;
+
+impl sous_chef::lint::Rule for MachineRule {
+    fn id(&self) -> &'static str {
+        "test/machine"
+    }
+    fn scope(&self) -> sous_chef::lint::Scope {
+        sous_chef::lint::Scope::Recipe
+    }
+    fn default_severity(&self) -> sous_chef::lint::Severity {
+        sous_chef::lint::Severity::Info
+    }
+    fn check(
+        &self,
+        cx: &sous_chef::lint::LintContext<'_>,
+        out: &mut Vec<sous_chef::lint::Finding>,
+    ) {
+        let m = cx
+            .data
+            .and_then(|d| d.value("MACHINE"))
+            .map(|v| v.text)
+            .unwrap_or_default();
+        out.push(sous_chef::lint::Finding {
+            rule: self.id(),
+            severity: sous_chef::lint::Severity::Info,
+            loc: cx.loc.clone(),
+            message: format!("MACHINE={m}"),
+        });
+    }
+    fn releases(&self) -> std::ops::RangeInclusive<sous_chef::release::Release> {
+        sous_chef::release::Release::FLOOR..=sous_chef::release::Release::NEWEST
+    }
+}
+
+#[test]
+fn lint_recipe_evaluation_uses_the_fragment_machine() {
+    use sous_chef::lint;
+    let fx = modified(boardx_dep);
+    let config = ws_config(&fx.root);
+    let report = lint::run_with(
+        &fx.ws,
+        &fx.idx,
+        &config,
+        &lint::Target::Recipe {
+            name: "app".into(),
+            version: None,
+        },
+        &lint::Options {
+            rules: vec!["test/machine".into()],
+            ..lint::Options::default()
+        },
+        &[&MachineRule],
+        &lint::Replay,
+    )
+    .unwrap();
+    let msgs: Vec<&str> = report.findings.iter().map(|f| f.message.as_str()).collect();
+    assert_eq!(msgs, ["MACHINE=boardx"], "{report:?}");
+}
+
+#[test]
+fn a_kas_project_without_a_build_directory_takes_the_machine_from_the_kas_files() {
+    let p = kas_support::Project::before();
+    let ws = p.ws();
+    assert_eq!(ws.build_dir, None);
+    let cache = tempfile::tempdir().unwrap();
+    let mut idx = Index::open_in(cache.path(), &ws).unwrap();
+    idx.refresh(&ws).unwrap();
+    let ds = eval::evaluate_with(&ConfigCache::new(), &idx, &ws, &target(None)).unwrap();
+    assert_eq!(text(&ds, "MACHINE").as_deref(), Some("board1"));
+    assert_eq!(text(&ds, "DISTRO").as_deref(), Some("projdistro"));
+    let notes = &ds.replay().target_notes;
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("MACHINE = \"board1\" from the kas file kas/board.yaml:5")),
+        "{notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("DISTRO = \"projdistro\" from the kas file kas/base.yaml:7")),
+        "{notes:?}"
+    );
+    // An explicit machine wins and needs no note.
+    let t = Target {
+        machine: Some("other".into()),
+        ..Target::default()
+    };
+    let ds = eval::evaluate_with(&ConfigCache::new(), &idx, &ws, &t).unwrap();
+    assert_eq!(text(&ds, "MACHINE").as_deref(), Some("other"));
+    assert!(
+        !ds.replay()
+            .target_notes
+            .iter()
+            .any(|n| n.starts_with("note: MACHINE")),
+    );
+    // After the checkout kas has written local.conf: no defaults from the kas files.
+    let p = kas_support::Project::after();
+    let ws = p.ws();
+    let cache = tempfile::tempdir().unwrap();
+    let mut idx = Index::open_in(cache.path(), &ws).unwrap();
+    idx.refresh(&ws).unwrap();
+    let ds = eval::evaluate_with(&ConfigCache::new(), &idx, &ws, &target(None)).unwrap();
+    assert!(
+        !ds.replay()
+            .target_notes
+            .iter()
+            .any(|n| n.contains("kas project without a build directory")),
+        "{:?}",
+        ds.replay().target_notes
+    );
+}
+
+#[tokio::test]
+async fn no_machine_at_all_is_said() {
+    use sous_chef::mcp::tools::var;
+    let fx = modified(|r| {
+        replace_in(r, "build/conf/local.conf", "MACHINE ??= \"qemux86\"\n", "");
+    });
+    let ds = eval(&fx, &target(Some("hello")));
+    assert_eq!(ds.value("MACHINE"), None);
+    assert!(
+        ds.replay()
+            .target_notes
+            .iter()
+            .any(|n| n.starts_with("note: no MACHINE is set")),
+        "{:?}",
+        ds.replay().target_notes
+    );
+    let ctx = ctx_for(&fx);
+    let out = var::run(
+        &ctx,
+        var::Args {
+            name: "WORKDIR".into(),
+            recipe: Some("hello".into()),
+            machine: None,
+            distro: None,
+            authoritative: false,
+            flags: false,
+            budget_tokens: Some(4000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(out.contains("note: no MACHINE is set"), "{out}");
+    // The fixture workspace sets MACHINE in local.conf: no note there.
+    let fx = modified(|_| {});
+    let ds = eval(&fx, &target(Some("hello")));
+    assert!(ds.replay().target_notes.is_empty());
+    // Nor when the machine is given.
+    let fx = modified(|r| {
+        replace_in(r, "build/conf/local.conf", "MACHINE ??= \"qemux86\"\n", "");
+    });
+    let t = Target {
+        recipe: Some("hello".into()),
+        machine: Some("qemux86".into()),
+        ..Target::default()
+    };
+    assert!(eval(&fx, &t).replay().target_notes.is_empty());
 }
 
 // ---------------------------------------------------------------------------------------
