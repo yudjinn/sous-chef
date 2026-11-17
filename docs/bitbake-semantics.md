@@ -837,7 +837,18 @@ reproduces it from the indexed statements:
     `mirrors.edge.kernel.org/yocto-sources/`), each with `DEBUG: Mirror fetch failure for
     url <mirror url> (original url: <url>)`. On the console the two ERROR lines carry the
     `<PF> do_fetch: ` prefix, then `Logfile of failure stored in:`, the runqueue line and
-    the summary, as described above; no `Log data follows:`.
+    the summary, as described above; no `Log data follows:`. What the `log` digest takes
+    from this (B16): the `Fetch command ... failed with exit code <n>, <output>` text is
+    `runfetchcmd`'s (`lib/bb/fetch2/__init__.py`, BitBake 2.18 `6e260eb6`: `<output>` is
+    `output:\n<stdout>\n<stderr>`, or `see logfile for output` when the command's output
+    went to the log); the cause a user needs is the downloader's own first error line
+    (`wget: unable to resolve host address '<host>'`, `<date> <time> ERROR 404: Not
+    Found.`), not the command. The task's **exit status is not in the task log**: only
+    `ERROR: Task (<file>:<task>) failed with exit code '<n>'` on the console
+    (`runqueue.py` `TaskFailure`) carries it, so it is read from the build's console log
+    (`BB_CONSOLELOG`) or a job's output. `do_fetch` itself is `base_do_fetch` of the global
+    `base.bbclass` (`EXPORT_FUNCTIONS do_fetch`), which no recipe's inherit tree contains:
+    the task-definition pointer looks in `base` and the static `INHERIT` classes too.
   - Patch: `NOTE: Applying patch '<name>' (<path>)`, then on failure
     `ERROR: Applying patch '<file>' on target directory '<dir>'` followed by the repr of
     the patch tool's `CmdError` (quilt's output with `\n` turned into newlines).

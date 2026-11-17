@@ -43,6 +43,8 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         logs::check_name("recipe", r)?;
     }
     let mut notes = Vec::new();
+    // The console output that reported the task (a job's output), for its exit status.
+    let mut console: Option<String> = None;
     let path = match &args.job {
         Some(job) => {
             match locate_job(
@@ -52,10 +54,19 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
                 task.as_deref(),
                 &mut notes,
             )? {
-                JobLog::Task(p) => p,
+                JobLog::Task(p, out) => {
+                    console = Some(out);
+                    p
+                }
                 JobLog::Console { text, handle } => {
-                    return render_digest(ctx, &args, &text, None, None, handle.as_ref(), notes)
-                        .await;
+                    let digest = Digesting {
+                        text: &text,
+                        log_path: None,
+                        run_script: None,
+                        handle: handle.as_ref(),
+                        exit_code: None,
+                    };
+                    return render_digest(ctx, &args, &digest, notes).await;
                 }
             }
         }
@@ -89,31 +100,41 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
 
     let run_script =
         logs::shell_trace(&text).and_then(|t| read_run_file(ctx, &resolved, &t.run_file));
-    render_digest(
-        ctx,
-        &args,
-        &text,
-        Some(&resolved),
-        run_script.as_deref(),
-        Some(&handle),
-        notes,
-    )
-    .await
+    // A task log does not carry the task's exit status; the console that ran it does.
+    let console = console.or_else(|| newest_console(ctx));
+    let exit_code = console.as_deref().and_then(|out| {
+        logs::exit_from_console(out, &resolved).or_else(|| logs::exit_from_console(out, &path))
+    });
+    let digest = Digesting {
+        text: &text,
+        log_path: Some(&resolved),
+        run_script: run_script.as_deref(),
+        handle: Some(&handle),
+        exit_code,
+    };
+    render_digest(ctx, &args, &digest, notes).await
 }
 
-/// Digests `text` (a task log at `log_path`, or a job's console output) with a pointer to
-/// the task definition, and renders it.
+/// What [`render_digest`] digests.
+struct Digesting<'a> {
+    /// A task log at `log_path`, or a job's console output.
+    text: &'a str,
+    log_path: Option<&'a Path>,
+    run_script: Option<&'a str>,
+    handle: Option<&'a Handle>,
+    /// The task's exit status from the console, when the text does not give it.
+    exit_code: Option<i32>,
+}
+
+/// Digests the text with a pointer to the task definition, and renders it.
 async fn render_digest(
     ctx: &Ctx,
     args: &Args,
-    text: &str,
-    log_path: Option<&Path>,
-    run_script: Option<&str>,
-    handle: Option<&Handle>,
+    input: &Digesting<'_>,
     mut notes: Vec<String>,
 ) -> Result<String> {
-    let text_meta = logs::meta_from_text(text);
-    let meta = match log_path {
+    let text_meta = logs::meta_from_text(input.text);
+    let meta = match input.log_path {
         Some(p) => logs::meta_from_path_in(p, Some(&ctx.workspace)).or(text_meta),
         None => text_meta,
     };
@@ -124,19 +145,30 @@ async fn render_digest(
             if let Err(e) = index.refresh(&ctx.workspace) {
                 notes.push(format!("index refresh failed, no definition pointer: {e}"));
             }
-            logs::task_definition(&index, &ctx.workspace, r, t)
+            let found = logs::task_definition(&index, &ctx.workspace, r, t);
+            let indexed = crate::index::query::find_recipes(&index, r)
+                .map(|v| !v.is_empty())
+                .unwrap_or(true);
+            if found.is_none() && !indexed {
+                notes.push(format!(
+                    "note: no definition pointer: recipe {r} is in no layer of the workspace \
+                     (its layer is not in BBLAYERS)"
+                ));
+            }
+            found
         }
         _ => None,
     };
 
     let mut d = logs::digest(&DigestInput {
-        text,
-        log_path,
-        run_script,
+        text: input.text,
+        log_path: input.log_path,
+        run_script: input.run_script,
         ws: Some(&ctx.workspace),
-        handle,
+        handle: input.handle,
         definition: definition.as_ref(),
     });
+    d.meta.exit_code = d.meta.exit_code.or(input.exit_code);
     d.notes = notes;
     let budget = match args
         .budget_tokens
@@ -148,10 +180,20 @@ async fn render_digest(
     Ok(d.render(args.format.unwrap_or_default(), budget))
 }
 
+/// The newest console log of the build directory (`BB_CONSOLELOG`), read through
+/// `Workspace::confine`; `None` when there is none.
+fn newest_console(ctx: &Ctx) -> Option<String> {
+    let build_dir = ctx.workspace.build_dir.as_ref()?;
+    let log = logs::newest_cooker_log(build_dir)?;
+    let resolved = ctx.workspace.confine(&log).ok()?;
+    let bytes = fs::read(resolved).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// What `log job=...` digests.
 enum JobLog {
-    /// The failing task's log, named in the job's output.
-    Task(PathBuf),
+    /// The failing task's log, named in the job's output (the output comes with it).
+    Task(PathBuf, String),
     /// The job's own output, when it names no readable task log.
     Console {
         text: String,
@@ -204,7 +246,7 @@ fn locate_job(
         .iter()
         .find(|p| ctx.workspace.confine(p).is_ok_and(|r| r.is_file()))
     {
-        return Ok(JobLog::Task(p.clone()));
+        return Ok(JobLog::Task(p.clone(), out));
     }
     match candidates.first() {
         Some(p) => notes.push(format!(

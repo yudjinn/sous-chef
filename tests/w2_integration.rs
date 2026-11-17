@@ -41,6 +41,26 @@ fn task_definition_falls_back_to_the_class_default() {
 }
 
 #[test]
+fn task_definition_falls_back_to_the_global_base_class() {
+    // B16: app keeps the default do_fetch, which only the globally inherited base.bbclass
+    // defines (`base_do_fetch`); it is in no recipe's inherit tree.
+    let ws = fixture_ws();
+    let (_cache, index) = indexed();
+    let loc = task_definition(&index, &ws, "app", "do_fetch").unwrap();
+    assert_eq!(loc.layer, "meta-core");
+    assert!(loc.path.ends_with("classes/base.bbclass"), "{loc:?}");
+    let text = std::fs::read_to_string(fixture_path("ws/meta-core/classes/base.bbclass")).unwrap();
+    let line = text
+        .lines()
+        .position(|l| l.starts_with("python base_do_fetch()"))
+        .unwrap();
+    assert_eq!(loc.lines.start as usize, line + 1);
+    // The recipe's own definition still wins over the base default.
+    let loc = task_definition(&index, &ws, "app", "do_compile").unwrap();
+    assert!(loc.path.ends_with("recipes-app/app/app_0.1.bb"), "{loc:?}");
+}
+
+#[test]
 fn task_definition_is_none_when_the_index_has_no_answer() {
     let ws = fixture_ws();
     let (_cache, index) = indexed();

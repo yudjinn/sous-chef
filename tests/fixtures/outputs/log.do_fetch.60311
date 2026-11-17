@@ -3,19 +3,42 @@ NOTE: Direct dependencies are ['/home/builder/poky/meta/recipes-devtools/quilt/q
 NOTE: Installed into sysroot: []
 NOTE: Skipping as already exists in sysroot: ['quilt-native']
 DEBUG: Python function extend_recipe_sysroot finished
+DEBUG: Executing python function fetcher_hashes_dummyfunc
+DEBUG: Python function fetcher_hashes_dummyfunc finished
 DEBUG: Executing python function do_fetch
 DEBUG: Executing python function base_do_fetch
 DEBUG: Trying PREMIRRORS
+DEBUG: For url ['https', 'downloads.example.org', '/app/app-0.1.tar.gz', '', '', OrderedDict()] comparing ['git', 'sourceware.org', '/git/glibc.git', '', '', OrderedDict()] to ['https', 'downloads.yoctoproject.org', '/mirror/sources/', '', '', OrderedDict()]
 DEBUG: Trying Upstream
-DEBUG: Fetching https://downloads.example.org/app/app-0.1.tar.gz using command '/usr/bin/env wget -t 2 -T 100 -O /home/builder/poky/build/downloads/app-0.1.tar.gz.tmp -P /home/builder/poky/build/downloads 'https://downloads.example.org/app/app-0.1.tar.gz' --progress=dot --verbose'
-DEBUG: Fetcher failure: Fetch command export PSEUDO_DISABLED=1; export ftp_proxy=""; /usr/bin/env wget -t 2 -T 100 -O /home/builder/poky/build/downloads/app-0.1.tar.gz.tmp -P /home/builder/poky/build/downloads 'https://downloads.example.org/app/app-0.1.tar.gz' --progress=dot --verbose failed with exit code 8, output:
+DEBUG: Fetching https://downloads.example.org/app/app-0.1.tar.gz using command '/usr/bin/env wget --tries=2 --timeout=100 --output-document=/home/builder/poky/build/downloads/app-0.1.tar.gz.tmp --continue --directory-prefix=/home/builder/poky/build/downloads 'https://downloads.example.org/app/app-0.1.tar.gz' --progress=dot --verbose'
+DEBUG: Fetcher accessed the network with the command /usr/bin/env wget --tries=2 --timeout=100 --output-document=/home/builder/poky/build/downloads/app-0.1.tar.gz.tmp --continue --directory-prefix=/home/builder/poky/build/downloads 'https://downloads.example.org/app/app-0.1.tar.gz' --progress=dot --verbose
+DEBUG: Running export PSEUDO_DISABLED=1; export PATH="/home/builder/poky/scripts:/home/builder/poky/build/tmp/hosttools"; export HOME="/tmp/tmpq3v9xk2d"; /usr/bin/env wget --tries=2 --timeout=100 --output-document=/home/builder/poky/build/downloads/app-0.1.tar.gz.tmp --continue --directory-prefix=/home/builder/poky/build/downloads 'https://downloads.example.org/app/app-0.1.tar.gz' --progress=dot --verbose
 --2026-11-16 09:14:02--  https://downloads.example.org/app/app-0.1.tar.gz
+Loaded CA certificate '/etc/ssl/certs/ca-certificates.crt'
 Resolving downloads.example.org (downloads.example.org)... 203.0.113.10
 Connecting to downloads.example.org (downloads.example.org)|203.0.113.10|:443... connected.
 HTTP request sent, awaiting response... 404 Not Found
 2026-11-16 09:14:02 ERROR 404: Not Found.
 
 WARNING: Failed to fetch URL https://downloads.example.org/app/app-0.1.tar.gz, attempting MIRRORS if available
+DEBUG: Fetcher failure: Fetch command export PSEUDO_DISABLED=1; export PATH="/home/builder/poky/scripts:/home/builder/poky/build/tmp/hosttools"; export HOME="/tmp/tmpq3v9xk2d"; /usr/bin/env wget --tries=2 --timeout=100 --output-document=/home/builder/poky/build/downloads/app-0.1.tar.gz.tmp --continue --directory-prefix=/home/builder/poky/build/downloads 'https://downloads.example.org/app/app-0.1.tar.gz' --progress=dot --verbose failed with exit code 8, output:
+
 DEBUG: Trying MIRRORS
-DEBUG: Mirror fetch failure for url https://sources.openembedded.org/app-0.1.tar.gz (original url: https://downloads.example.org/app/app-0.1.tar.gz)
+DEBUG: For url ['https', 'downloads.example.org', '/app/app-0.1.tar.gz', '', '', OrderedDict()] comparing ['https?', '.*', '/.*', '', '', OrderedDict()] to ['https', 'downloads.yoctoproject.org', '/mirror/sources/', '', '', OrderedDict()]
+DEBUG: For url https://downloads.example.org/app/app-0.1.tar.gz returning https://downloads.yoctoproject.org/mirror/sources/app-0.1.tar.gz
+DEBUG: Fetching https://downloads.yoctoproject.org/mirror/sources/app-0.1.tar.gz using command '/usr/bin/env wget --tries=2 --timeout=100 --output-document=/home/builder/poky/build/downloads/app-0.1.tar.gz.tmp --continue --directory-prefix=/home/builder/poky/build/downloads 'https://downloads.yoctoproject.org/mirror/sources/app-0.1.tar.gz' --progress=dot --verbose'
+DEBUG: Running export PSEUDO_DISABLED=1; export PATH="/home/builder/poky/scripts:/home/builder/poky/build/tmp/hosttools"; export HOME="/tmp/tmpq3v9xk2d"; /usr/bin/env wget --tries=2 --timeout=100 --output-document=/home/builder/poky/build/downloads/app-0.1.tar.gz.tmp --continue --directory-prefix=/home/builder/poky/build/downloads 'https://downloads.yoctoproject.org/mirror/sources/app-0.1.tar.gz' --progress=dot --verbose
+--2026-11-16 09:14:03--  https://downloads.yoctoproject.org/mirror/sources/app-0.1.tar.gz
+Loaded CA certificate '/etc/ssl/certs/ca-certificates.crt'
+Resolving downloads.yoctoproject.org (downloads.yoctoproject.org)... 37.27.135.249
+Connecting to downloads.yoctoproject.org (downloads.yoctoproject.org)|37.27.135.249|:443... connected.
+HTTP request sent, awaiting response... 404 Not Found
+2026-11-16 09:14:03 ERROR 404: Not Found.
+
+DEBUG: Mirror fetch failure for url https://downloads.yoctoproject.org/mirror/sources/app-0.1.tar.gz (original url: https://downloads.example.org/app/app-0.1.tar.gz)
+DEBUG: Fetcher failure: Fetch command export PSEUDO_DISABLED=1; export PATH="/home/builder/poky/scripts:/home/builder/poky/build/tmp/hosttools"; export HOME="/tmp/tmpq3v9xk2d"; /usr/bin/env wget --tries=2 --timeout=100 --output-document=/home/builder/poky/build/downloads/app-0.1.tar.gz.tmp --continue --directory-prefix=/home/builder/poky/build/downloads 'https://downloads.yoctoproject.org/mirror/sources/app-0.1.tar.gz' --progress=dot --verbose failed with exit code 8, output:
+
+ERROR: Fetcher failure: Fetch command export PSEUDO_DISABLED=1; export PATH="/home/builder/poky/scripts:/home/builder/poky/build/tmp/hosttools"; export HOME="/tmp/tmpq3v9xk2d"; /usr/bin/env wget --tries=2 --timeout=100 --output-document=/home/builder/poky/build/downloads/app-0.1.tar.gz.tmp --continue --directory-prefix=/home/builder/poky/build/downloads 'https://downloads.example.org/app/app-0.1.tar.gz' --progress=dot --verbose failed with exit code 8, see logfile for output
 ERROR: Bitbake Fetcher Error: FetchError('Unable to fetch URL from any source.', 'https://downloads.example.org/app/app-0.1.tar.gz')
+DEBUG: Python function base_do_fetch finished
+DEBUG: Python function do_fetch finished

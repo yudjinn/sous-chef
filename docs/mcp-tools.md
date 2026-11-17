@@ -835,6 +835,17 @@ Digest: failing recipe and task, exit status, the error lines with a few lines o
 the function in `run.do_<task>` that failed if identifiable, a pointer to the task's
 definition in the layers, and a handle to the full log.
 
+The exit status is BitBake's `Task (...) failed with exit code`, which only the console
+prints: it comes from the log itself when the shell exit trap gives it, else from the
+job's output or the newest console log (`tmp/log/cooker/<machine>/`) when that names the
+digested log; otherwise the row is missing. For a fetch failure a `cause` row gives the
+downloader's first error line (`wget: unable to resolve host address ...`, `ERROR 404: Not
+Found.`) and how many more there are (mirrors); the `Fetch command ... failed` line is
+treated as a consequence. The definition pointer is the recipe's own function, else one
+from its included files and classes, else the default of a global class (`base_do_fetch` in
+`base.bbclass`, or an `INHERIT` class); when the recipe is in no layer of the workspace, a
+note says so instead.
+
 With `job`: the log named in the job's output (the first failed task's
 `Logfile of failure stored in:`, then any other log it names), filtered by `recipe` and
 `task`. If none is readable it digests the job's console output, with a note. A running job
