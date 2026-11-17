@@ -6,8 +6,11 @@
 //! (the fixture test pins every message it relies on):
 //!
 //! - **Not reported:** whitespace after a trailing `\` (BitBake right-strips the line and
-//!   still continues it; `hygiene/continuation` owns that finding); `addfragments`, which
-//!   BitBake accepts in every file kind; `addpylib` in a `.conf` file (configuration only).
+//!   still continues it; `hygiene/continuation` owns that finding); `addpylib` in a
+//!   `.conf` file (configuration only). (`addfragments` is a statement kind of its own and
+//!   has no diagnostic; with fewer than three arguments it is an "unparsed line" error.
+//!   `addpylib` is still an `Unknown` statement with a diagnostic: making it a statement kind
+//!   needs an arm in `scaffold/inc_split.rs` `effects_of`, a file this rule does not own.)
 //! - **Warning:** the `addtask` quirk that glues two `before` / `after` groups together.
 //!   BitBake accepts the line, but the resulting task name is almost certainly not meant.
 //! - **Error:** everything else, including `Unknown` statements without a diagnostic.
@@ -35,7 +38,7 @@ pub enum Class {
 /// Classifies a parser diagnostic for a file of `kind` (see the module docs).
 pub fn classify(d: &ParseDiagnostic, kind: Option<FileKind>) -> Class {
     let m = d.message.as_str();
-    if m.starts_with("whitespace after `\\`") || m.starts_with("`addfragments` ") {
+    if m.starts_with("whitespace after `\\`") {
         return Class::Skip;
     }
     if m.starts_with("`addpylib` ") {
@@ -148,4 +151,40 @@ fn recipe_only(k: &StatementKind) -> Option<&'static str> {
         StatementKind::ExportFunctions { .. } => "`EXPORT_FUNCTIONS`",
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::LineSpan;
+
+    fn diag(m: &str) -> ParseDiagnostic {
+        ParseDiagnostic {
+            span: LineSpan::line(1),
+            message: m.into(),
+        }
+    }
+
+    #[test]
+    fn no_addfragments_special_case() {
+        // The parser makes `addfragments` a statement kind; no message about it is skipped.
+        assert_eq!(
+            classify(&diag("`addfragments` x"), Some(FileKind::Conf)),
+            Class::Report(Severity::Error)
+        );
+        assert_eq!(
+            classify(
+                &diag("unparsed line: `addfragments` needs at least three arguments"),
+                Some(FileKind::Conf)
+            ),
+            Class::Report(Severity::Error)
+        );
+        assert_eq!(
+            classify(
+                &diag("`addpylib` is not modelled by sous-chef"),
+                Some(FileKind::Conf)
+            ),
+            Class::Skip
+        );
+    }
 }
