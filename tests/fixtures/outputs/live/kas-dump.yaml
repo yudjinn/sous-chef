@@ -1,0 +1,50 @@
+2026-11-17 16:23:09 - INFO     - kas 5.5 started on EndeavourOS rolling
+2026-11-17 16:23:09 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss
+2026-11-17 16:23:09 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss-ti
+2026-11-17 16:23:09 - INFO     - Repository bitbake already contains 6e260eb6ab1631607ea414d9ff8ede1155faa5d9 as commit
+2026-11-17 16:23:09 - INFO     - Repository openembedded-core already contains 33a6bd6cc8a9a976902081642414bd67adc74879 as commit
+2026-11-17 16:23:09 - INFO     - Repository meta-arm already contains 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735 as commit
+2026-11-17 16:23:09 - INFO     - Repository bitbake checked out to 6e260eb6ab1631607ea414d9ff8ede1155faa5d9
+2026-11-17 16:23:09 - INFO     - Repository openembedded-core checked out to 33a6bd6cc8a9a976902081642414bd67adc74879
+2026-11-17 16:23:09 - INFO     - Repository meta-arm checked out to 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735
+header:
+  version: 14
+overrides:
+  repos:
+    bitbake:
+      commit: 6e260eb6ab1631607ea414d9ff8ede1155faa5d9
+    meta-arm:
+      commit: 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735
+    openembedded-core:
+      commit: 33a6bd6cc8a9a976902081642414bd67adc74879
+distro: kiss
+target: kiss-image
+repos:
+  bitbake:
+    url: https://git.openembedded.org/bitbake
+    branch: '2.18'
+    layers:
+      .: disabled
+  openembedded-core:
+    url: https://git.openembedded.org/openembedded-core
+    branch: wrynose
+    layers:
+      meta:
+  meta-arm:
+    url: https://git.yoctoproject.org/meta-arm
+    branch: wrynose
+    layers:
+      meta-arm-toolchain:
+      meta-arm:
+  meta-kiss:
+    layers:
+      meta-kiss:
+  meta-kiss-ti:
+    layers:
+      meta-kiss-ti:
+local_conf_header:
+  meta-kiss: |
+    # Some useful lines you may want to copy to your local.conf for development
+    # INHERIT += "rm_work"
+    # OE_FRAGMENTS += 'core/yocto/root-login-with-empty-password'
+machine: dogbonedark

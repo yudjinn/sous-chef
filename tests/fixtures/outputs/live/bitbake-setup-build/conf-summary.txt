@@ -1,0 +1,1 @@
+A fictitious product which in reality implements the BeagleBone Black
