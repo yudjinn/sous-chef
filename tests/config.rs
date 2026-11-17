@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use common::*;
 use sous_chef::config::{CliOverrides, Config};
 use sous_chef::error::Error;
+use sous_chef::lint::Severity;
 use sous_chef::workspace::Workspace;
 
 fn cli(work_dir: PathBuf) -> CliOverrides {
@@ -74,6 +75,7 @@ build_dir = "build"
 layers = ["../meta-extra", "/abs/meta-x"]
 writable_layers = ["meta-mycompany"]
 init_script = "poky/oe-init-build-env"
+release = "scarthgap"
 
 [bitbake]
 enabled = false
@@ -81,6 +83,10 @@ allow_destructive = true
 
 [lint]
 disable = ["style/variable-order", "hygiene"]
+
+[lint.severity]
+"style/variable-order" = "error"
+"hygiene/license" = "info"
 
 [output]
 budget_tokens = 900
@@ -96,12 +102,19 @@ budget_tokens = 900
             layers: vec![dir.join("../meta-extra"), PathBuf::from("/abs/meta-x")],
             writable_layers: vec!["meta-mycompany".into()],
             init_script: Some(dir.join("poky/oe-init-build-env")),
+            release: Some("scarthgap".into()),
             bitbake: sous_chef::config::BitbakeConfig {
                 enabled: false,
                 allow_destructive: true,
             },
             lint: sous_chef::config::LintConfig {
                 disable: vec!["style/variable-order".into(), "hygiene".into()],
+                severity: [
+                    ("style/variable-order".to_string(), Severity::Error),
+                    ("hygiene/license".to_string(), Severity::Info),
+                ]
+                .into_iter()
+                .collect(),
             },
             output: sous_chef::config::OutputConfig { budget_tokens: 900 },
             work_dir: tmp.path().to_path_buf(),
@@ -123,6 +136,46 @@ fn bad_toml_and_unknown_keys_are_errors() {
     // Points at the offending line.
     assert!(
         msg.contains("/x/sous-chef.toml:2:") && msg.contains("expected usize"),
+        "{msg}"
+    );
+}
+
+#[test]
+fn lint_severity_values_and_errors() {
+    let origin = PathBuf::from("/x/sous-chef.toml");
+    let cfg = Config::from_toml("[lint.severity]\n\"a/b\" = \"warning\"\n", &origin).unwrap();
+    assert_eq!(cfg.lint.severity.get("a/b"), Some(&Severity::Warning));
+    assert!(cfg.lint.disable.is_empty());
+    assert_eq!(cfg.release, None);
+
+    // Only the three lowercase severities are accepted.
+    for bad in ["fatal", "Error"] {
+        let text = format!("[lint]\n[lint.severity]\n\"a/b\" = \"{bad}\"\n");
+        let msg = config_err(Config::from_toml(&text, &origin));
+        assert!(msg.contains("/x/sous-chef.toml:3:"), "{msg}");
+        assert!(msg.contains(bad) || msg.contains("variant"), "{msg}");
+    }
+    // A value that is not a string, and an unknown key in [lint].
+    let msg = config_err(Config::from_toml("[lint.severity]\n\"a/b\" = 2\n", &origin));
+    assert!(msg.contains("/x/sous-chef.toml:2:"), "{msg}");
+    let msg = config_err(Config::from_toml("[lint]\nseverities = {}\n", &origin));
+    assert!(msg.contains("severities"), "{msg}");
+}
+
+#[test]
+fn release_key_is_read_and_checked_at_discovery() {
+    let origin = PathBuf::from("/x/sous-chef.toml");
+    let cfg = Config::from_toml("release = \"kirkstone\"\n", &origin).unwrap();
+    assert_eq!(cfg.release.as_deref(), Some("kirkstone"));
+    let msg = config_err(Config::from_toml("release = 4\n", &origin));
+    assert!(msg.contains("/x/sous-chef.toml:1:"), "{msg}");
+
+    // A misspelt codename is reported when the workspace is discovered.
+    let mut cfg = fixture_config();
+    cfg.release = Some("scarthgab".into());
+    let msg = config_err(Workspace::discover(&cfg));
+    assert!(
+        msg.contains("scarthgab") && msg.contains("wrynose"),
         "{msg}"
     );
 }

@@ -46,15 +46,27 @@ fn priorities_collections_compat_depends() {
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     assert_eq!(
         row("meta-core"),
-        (s(&["core"]), 5, s(&[]), s(&["scarthgap", "styhead"]), false)
+        (s(&["core"]), 5, s(&[]), s(&["wrynose"]), false)
     );
     assert_eq!(
         row("meta-vendor"),
-        (s(&["vendor"]), 6, s(&["core"]), s(&["scarthgap"]), false)
+        (
+            s(&["vendor"]),
+            6,
+            s(&["core"]),
+            s(&["scarthgap", "wrynose"]),
+            false
+        )
     );
     assert_eq!(
         row("meta-mine"),
-        (s(&["mine"]), 10, s(&["core"]), s(&["scarthgap"]), true)
+        (
+            s(&["mine"]),
+            10,
+            s(&["core"]),
+            s(&["kirkstone", "scarthgap", "wrynose"]),
+            true
+        )
     );
 }
 

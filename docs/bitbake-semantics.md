@@ -534,6 +534,46 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
   *Verify* the exact format against real output before writing the parser.
 
+## Releases
+
+Added by T1.6 (2026-11-17). Wrynose (6.0 LTS) is the primary target, Scarthgap (5.0 LTS) is
+fully supported, Kirkstone (4.0 LTS) is the floor; `src/release.rs` holds the table below as
+`Feature::first()` / `Feature::last()`. A row marked *verify* has `Feature::verified()` false
+and must not be used to report an error. No row is marked *verify* at present.
+
+| `Feature` | Behaviour | First | Last | Source checked |
+|---|---|---|---|---|
+| `SplitClassDirs` | `inherit` searches `classes-<type>/` along `BBPATH` before `classes/` | 4.1 langdale (BitBake 2.2) | (current) | Yocto migration guide 4.1, "Classes now split by usage context"; BitBake `lib/bb/parse/parse_py/BBHandler.py` `inherit` on branches `2.0` and `2.2` |
+| `InheritDefer` | the `inherit_defer` directive | 5.0 scarthgap (BitBake 2.8) | (current) | BitBake release branches, recorded under "Directives" (T1.2) |
+| `IncludeAll` | the `include_all` directive | 5.2 walnascar (BitBake 2.12) | (current) | BitBake release branches, recorded under "Directives" (T1.2) |
+| `UnpackDir` | `do_unpack` unpacks into `UNPACKDIR` (`${WORKDIR}/sources-unpack`), not `WORKDIR` | 5.1 styhead | (current) | Yocto migration guide 5.1 |
+| `WorkdirAsSourceDir` | `S = "${WORKDIR}"` is accepted | 4.0 kirkstone (floor) | 5.0 scarthgap | Yocto migration guide 5.1 ("If a recipe has S set to be WORKDIR, this is no longer supported, and an error will be issued.") |
+| `PrInWorkdir` | `WORKDIR` ends in `${EXTENDPE}${PV}-${PR}` (later: `${PV}`) | 4.0 kirkstone (floor) | 4.2 mickledore | OE-core `meta/conf/bitbake.conf` on branches `kirkstone`, `langdale`, `mickledore` (`.../${PN}/${EXTENDPE}${PV}-${PR}`) and `nanbield`, `scarthgap` (`.../${PN}/${PV}`); Yocto migration guide 4.3, "Versioning changes" ("PE and PR are no longer included in the work directory path") |
+
+Details:
+
+- **Class directories.** BitBake 2.0 (`kirkstone`) `inherit`: a name that is not absolute and
+  does not end in `.bbclass` becomes `classes/<name>.bbclass`, searched with
+  `bb.utils.which(BBPATH, ...)`; nothing refers to `classes-recipe` or `classes-global`.
+  BitBake 2.2 (`langdale`) loops over `["classes-" + __bbclasstype, "classes"]`, each along
+  the whole `BBPATH`, first match wins. The 4.1 migration guide adds that a class used in the
+  wrong context is an error during parsing, and that `classes/` keeps working in every
+  context. `workspace::resolve` (`find_class`, `class_candidates`) follows `ws.release`.
+- **`UNPACKDIR`.** The 5.1 guide: "Files from do_unpack now unpack to WORKDIR/sources-unpack/
+  rather than WORKDIR/", and recipes that reference `SRC_URI` files through `WORKDIR`
+  "likely need changing to UNPACKDIR".
+
+*Verify* (open, not used by any code): whether Wrynose changes how the build environment is
+initialised, which matters to `src/bitbake/env.rs` (it sources `oe-init-build-env` or uses an
+environment that is already set up). Checked 2026-11-17: the 6.0 migration guide only says
+VSCode setup was dropped from `oe-init-build-env` ("Users are advised to use bitbake-setup
+instead") and that the `meta-poky/conf/templates/default` templates moved to OE-core's
+`meta` layer. The 6.0 release notes mention `bitbake-setup init` (it writes
+`build/conf/auto.conf`) and that devtool ide-sdk looks for "bitbake-setup's init-build-env
+first, and oe-init-build-env if not found". So a `bitbake-setup` build directory appears to
+have its own `init-build-env` script; its location and whether `oe-init-build-env` still
+works for such builds were not checked.
+
 ## What the static evaluator cannot do
 
 - `${@python expression}` in values

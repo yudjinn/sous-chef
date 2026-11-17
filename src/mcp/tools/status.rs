@@ -42,6 +42,9 @@ pub struct Report {
     pub build_dir: Option<String>,
     /// `Config::validate` failure, if any.
     pub config_problem: Option<String>,
+    /// The workspace release and where it came from (`ReleaseInfo::describe`), for example
+    /// `wrynose (LAYERSERIES_CORENAMES)`. `None` when the workspace could not be loaded.
+    pub release: Option<String>,
     pub layers: Vec<LayerStatus>,
     /// Files on disk by kind (`bb`, `bbappend`, `inc`, `bbclass`, `conf`), across the layers
     /// and `build/conf`.
@@ -161,6 +164,7 @@ fn fill_workspace(report: &mut Report, ws: &Workspace) {
     if let Some(b) = &ws.build_dir {
         report.build_dir = Some(b.display().to_string());
     }
+    report.release = Some(ws.release.describe());
     report.layers = ws
         .layers
         .iter()
@@ -209,6 +213,7 @@ fn table(r: &Report) -> Table {
         "config",
         r.config_problem.clone().unwrap_or_else(|| "ok".into()),
     ));
+    rows.push(("release", r.release.clone().unwrap_or_else(none)));
     rows.push(("layers", r.layers.len().to_string()));
     for l in &r.layers {
         rows.push((
@@ -368,6 +373,7 @@ mod tests {
                 layer("meta-vendor", 6),
                 layer("meta-mine", 10),
             ],
+            ..Workspace::default()
         }
     }
 
@@ -389,9 +395,12 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["state"], "degraded");
         assert_eq!(v["startup_error"], "no layers");
-        for key in ["layers", "files", "index", "bitbake", "job", "work_dir"] {
+        for key in [
+            "layers", "files", "index", "bitbake", "job", "work_dir", "release",
+        ] {
             assert!(v.get(key).is_some(), "{key}");
         }
+        assert!(v["release"].is_null());
     }
 
     #[test]
@@ -409,8 +418,40 @@ mod tests {
             "refresh",
             "bitbake",
             "job",
+            "release",
+            "wrynose (assumed)",
         ] {
             assert!(text.contains(field), "{field}");
         }
+    }
+
+    #[test]
+    fn release_row_and_json_field() {
+        let mut ws = fixture_ws();
+        ws.release = crate::release::ReleaseInfo {
+            release: crate::release::Release::Scarthgap,
+            source: crate::release::ReleaseSource::CoreNames,
+            note: None,
+        };
+        let mut r = base(&Config::default());
+        fill_workspace(&mut r, &ws);
+        assert_eq!(
+            r.release.as_deref(),
+            Some("scarthgap (LAYERSERIES_CORENAMES)")
+        );
+        let args = Args {
+            budget_tokens: None,
+            format: Some(Format::Json),
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&output(&r, None, &args, 600).unwrap()).unwrap();
+        assert_eq!(v["release"], "scarthgap (LAYERSERIES_CORENAMES)");
+        let args = Args {
+            budget_tokens: None,
+            format: None,
+        };
+        let text = output(&r, None, &args, 600).unwrap();
+        let line = text.lines().find(|l| l.starts_with("release")).unwrap();
+        assert!(line.contains("scarthgap (LAYERSERIES_CORENAMES)"), "{text}");
     }
 }

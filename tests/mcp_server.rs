@@ -211,6 +211,12 @@ fn serve_initialize_list_and_status() {
     assert!(report["bitbake"].is_object(), "{report}");
     assert!(report.get("job").is_some(), "{report}");
     assert!(report.get("build_dir").is_some(), "{report}");
+    if state == "ready" {
+        assert_eq!(
+            report["release"], "wrynose (LAYERSERIES_CORENAMES)",
+            "{report}"
+        );
+    }
 
     // A failing tool is a tool error with a one-line message, not a protocol error.
     let bad = s.call("recipe", json!({}));

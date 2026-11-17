@@ -52,6 +52,7 @@ fn recorded_ws() -> Workspace {
     Workspace {
         build_dir: Some(PathBuf::from(format!("{PREFIX}/build"))),
         layers: vec![layer("meta-core"), layer("meta-mine")],
+        ..Workspace::default()
     }
 }
 
