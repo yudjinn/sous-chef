@@ -392,6 +392,17 @@ BB_DANGLINGAPPENDS_WARNONLY", 2024-11-21); `lib/bb/cooker.py` has it on branch `
 under a `BBFILES_DYNAMIC` entry whose collection is absent is not collected at all, so
 BitBake neither applies nor reports it (live: meta-arm's
 `dynamic-layers/meta-tpm2/.../tpm2-tools_5.7.bbappend` is not in `show-appends`).
+**`BBFILES_DYNAMIC`** (checked for B3 in BitBake 2.18 `6e260eb6` `lib/bb/cookerdata.py`
+`parseConfigurationFiles`, after the layer confs): the value is split on whitespace; each
+word must be `<collection>:<glob>` (split on the first `:`; anything else is fatal,
+"BBFILES_DYNAMIC entries must be of the form {!}<collection name>:<filename pattern>"); a
+leading `!` inverts the test; the glob is appended to `BBFILES` when the collection is in
+`BBFILE_COLLECTIONS` (or, inverted, when it is not). `collect_bbfiles` then treats it as
+any other `BBFILES` glob. The index does not fold these into `BBFILES`, so such files have
+no `bbappend` edge and `query::orphan_appends` (a collected append whose edge has no
+target) never lists them: `org/append-no-match` cannot report them, rightly when the
+collection is absent and as a miss when it is present. `layers show=appends` evaluates
+the entries itself.
 
 Static expansion of reference arguments (`resolve::expand_with`): the scanner resolves
 `${VAR}` in `require` / `include` / `inherit` arguments only for values that follow from the

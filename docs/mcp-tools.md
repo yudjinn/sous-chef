@@ -444,8 +444,15 @@ note: global class: ranked as INHERIT finds it (classes-global/, then classes/)
 - `"shadowed"`: one row per file of every recipe or class file name that more than one layer
   provides (`kind name status layer priority file`), the winner first.
 - `"appends"`: one row per bbappend and recipe it applies to (`bbappend priority matches
-  status`), status `applies`; a bbappend that matches nothing is one row with `matches` `-`
-  and status `no-match`, and a note.
+  status`), status `applies`; a bbappend that `BBFILES` collects and that matches nothing is
+  one row with `matches` `-` and status `no-match`, and a note (BitBake stops on these). A
+  bbappend no `BBFILES` glob collects is looked up in the layers' `BBFILES_DYNAMIC`
+  (`{!}<collection>:<glob>`, added to `BBFILES` when the collection is present, or absent
+  with `!`): when the entry is not active the status is `not collected (dynamic layer
+  `<name>` not present)` (or `(BBFILES_DYNAMIC `!<name>`: layer `<name>` is present)`);
+  when it is active, the append is matched by file name (`applies (BBFILES_DYNAMIC)` or
+  `no-match (BBFILES_DYNAMIC)`; sous-chef's evaluation does not apply it); with no entry,
+  `not collected (no BBFILES glob)`. A note counts the bbappends BitBake never reads.
 - `"compat"`: rows `layer check result detail loc`, per layer in `BBLAYERS` order. First a
   `compat` row: what `LAYERSERIES_COMPAT_<c>` claims against the workspace release and the
   core layer's `LAYERSERIES_CORENAMES` (`result` `ok`, or the worst severity of the

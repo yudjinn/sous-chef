@@ -330,6 +330,65 @@ async fn layers_appends() {
 }
 
 #[tokio::test]
+async fn layers_appends_with_bbfiles_dynamic() {
+    // B3: meta-arm's `tpm2:${LAYERDIR}/dynamic-layers/meta-tpm2/*/*/*.bbappend` with no
+    // layer of collection tpm2: BitBake never collects the append, so it is no dangling
+    // append. A `!tpm2` entry and an entry for a present collection (`core`) are collected.
+    let (_tmp, root) = common::temp_ws();
+    let conf = root.join("meta-mine/conf/layer.conf");
+    let mut text = std::fs::read_to_string(&conf).unwrap();
+    text.push_str(
+        "BBFILES_DYNAMIC += \" \\\n    tpm2:${LAYERDIR}/dynamic-layers/meta-tpm2/*/*/*.bb \\\n    \
+         tpm2:${LAYERDIR}/dynamic-layers/meta-tpm2/*/*/*.bbappend \\\n    \
+         !tpm2:${LAYERDIR}/dynamic-layers/no-tpm2/*/*/*.bbappend \\\n    \
+         core:${LAYERDIR}/dynamic-layers/core/*/*/*.bbappend \\\n\"\n",
+    );
+    std::fs::write(&conf, text).unwrap();
+    let put = |rel: &str| {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, "EXTRA_OECONF:append = \" --x\"\n").unwrap();
+    };
+    put("meta-mine/dynamic-layers/meta-tpm2/recipes-tpm/tpm2-tools/tpm2-tools_5.7.bbappend");
+    put("meta-mine/dynamic-layers/no-tpm2/recipes-core/hello/hello_1.0.bbappend");
+    put("meta-mine/dynamic-layers/core/recipes-core/nothing/nothing_1.0.bbappend");
+    put("meta-mine/stray/x_1.0.bbappend");
+    let f = fixture_with(common::ws_config(&root));
+    let out = layers_ok(&f, layers::Show::Appends).await;
+    for want in [
+        "meta-mine:dynamic-layers/meta-tpm2/recipes-tpm/tpm2-tools/tpm2-tools_5.7.bbappend\t10\t-\tnot collected (dynamic layer `tpm2` not present)",
+        "meta-mine:dynamic-layers/no-tpm2/recipes-core/hello/hello_1.0.bbappend\t10\tmeta-core:recipes-core/hello/hello_1.0.bb\tapplies (BBFILES_DYNAMIC)",
+        "meta-mine:dynamic-layers/core/recipes-core/nothing/nothing_1.0.bbappend\t10\t-\tno-match (BBFILES_DYNAMIC)",
+        "meta-mine:stray/x_1.0.bbappend\t10\t-\tnot collected (no BBFILES glob)",
+        "meta-mine:recipes-app/orphan/orphan_9.%.bbappend\t10\t-\tno-match",
+        "note: 2 bbappends match no recipe; BitBake stops",
+        "note: 2 bbappends are not collected by BBFILES or BBFILES_DYNAMIC",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+    assert!(
+        !out.contains("tpm2-tools_5.7.bbappend\t10\t-\tno-match"),
+        "{out}"
+    );
+    // The lint rule agrees: only bbappends that BBFILES collects count.
+    let report = sous_chef::lint::run_with(
+        &f.ctx.workspace,
+        &*f.ctx.index.lock().await,
+        &f.ctx.config,
+        &sous_chef::lint::Target::Workspace,
+        &sous_chef::lint::Options::default(),
+        &[&sous_chef::lint::rules::org_append_no_match::OrgAppendNoMatch],
+        &sous_chef::lint::Replay,
+    )
+    .unwrap();
+    let found: Vec<String> = report.findings.iter().map(|f| f.loc.to_string()).collect();
+    assert_eq!(
+        found,
+        ["meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1"]
+    );
+}
+
+#[tokio::test]
 async fn layers_shadowed() {
     let f = fixture();
     let out = layers_ok(&f, layers::Show::Shadowed).await;
