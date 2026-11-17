@@ -86,20 +86,8 @@ pub struct Args {
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let mut index = ctx.index.lock().await;
     let report = index.refresh(&ctx.workspace)?;
-    let mut recipe = resolve_recipe(&index, &args.name, args.version.as_deref())?;
-    // A bare `pn` without a version: the file BitBake uses (PREFERRED_VERSION,
-    // DEFAULT_PREFERENCE, layer priority, version), not layer priority and version alone.
-    let mut chosen: Option<String> = None;
-    let name = args.name.trim();
-    if args.version.is_none()
-        && !name.contains(':')
-        && name == recipe.pn
-        && let Some(sel) =
-            providers::preferred_recipe(&index, &ctx.workspace, name, None, None, None)?
-    {
-        chosen = Some(sel.describe());
-        recipe = sel.recipe;
-    }
+    let (recipe, chosen) =
+        resolve_selected(&index, &ctx.workspace, &args.name, args.version.as_deref())?;
     let mut table = match args.show {
         Show::Summary => summary(
             &index,
@@ -194,6 +182,34 @@ pub fn resolve_recipe(index: &Index, name: &str, version: Option<&str>) -> Resul
         what: format!("recipe name {name:?} (no recipe has exactly this name)"),
         candidates,
     })
+}
+
+/// Resolves a recipe argument to the file BitBake would use: [`resolve_recipe`], then, for
+/// a bare `pn` without a version, provider selection for the default machine and distro
+/// (`eval::providers`: `REQUIRED_VERSION`, `PREFERRED_VERSION`, `DEFAULT_PREFERENCE`, layer
+/// priority, version) instead of layer priority and version alone. The second value says
+/// why that version was chosen (`Selection::describe`); `None` when provider selection was
+/// not used (a `pn_pv`, a pointer, an explicit version) or found nothing.
+///
+/// This is the one resolution `recipe`, `item`, `search` and the `bbappend` generator share,
+/// so a bare `pn` names the same file in all of them. Provider selection needs the
+/// configuration pass (cached per process by `eval::global_cache`).
+pub fn resolve_selected(
+    index: &Index,
+    ws: &Workspace,
+    name: &str,
+    version: Option<&str>,
+) -> Result<(RecipeRow, Option<String>)> {
+    let recipe = resolve_recipe(index, name, version)?;
+    let name = name.trim();
+    if version.is_none()
+        && !name.contains(':')
+        && name == recipe.pn
+        && let Some(sel) = providers::preferred_recipe(index, ws, name, None, None, None)?
+    {
+        return Ok((sel.recipe.clone(), Some(sel.describe())));
+    }
+    Ok((recipe, None))
 }
 
 fn versions(rows: &[RecipeRow]) -> String {

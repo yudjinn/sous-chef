@@ -1,8 +1,10 @@
 //! Scaffold generator: `bbappend` (T6.2).
 //!
 //! Appends to a recipe from the target layer. The recipe is the `recipe` option or the
-//! tool's `name`; the tool's `version` picks a version of it (`%` allowed), else the
-//! preferred one ([`query::preferred_recipe`]). Options: [`OPTIONS`].
+//! tool's `name`; the tool's `version` picks a version of it (`%` allowed), else the one
+//! BitBake uses, resolved as the `recipe` tool does
+//! ([`crate::mcp::tools::recipe::resolve_selected`]: provider selection). Options:
+//! [`OPTIONS`].
 //!
 //! - `version`: `exact` (`<pn>_<pv>.bbappend`), `wildcard` (`<pn>_%.bbappend`) or a prefix
 //!   ending in `%` such as `1.%`. Default: the layer's existing bbappend for the recipe if
@@ -29,6 +31,7 @@ use super::{FileAction, GenContext, Generator, Kind, Plan, PlannedFile, file_sha
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, RecipeRow};
 use crate::lint::helpers::{KnownOverrides, ListKind, is_package_only, list_kind_of};
+use crate::mcp::tools::recipe::resolve_selected;
 use crate::parse::{StatementKind, parse};
 use crate::types::{AssignOp, VarRef};
 use crate::workspace::Layer;
@@ -259,7 +262,15 @@ fn find_recipe(
 ) -> Result<RecipeRow> {
     let prefix = mode.filter(|m| m.ends_with('%'));
     let pick = version.map(str::trim).filter(|v| !v.is_empty()).or(prefix);
-    match query::preferred_recipe(cx.index, name, pick)? {
+    // No version asked for: the file BitBake uses, resolved as `recipe` does (provider
+    // selection: PREFERRED_VERSION, DEFAULT_PREFERENCE, layer priority, version).
+    let found = match pick {
+        None if !query::find_recipes(cx.index, name)?.is_empty() => {
+            Some(resolve_selected(cx.index, cx.ws, name, None)?.0)
+        }
+        _ => query::preferred_recipe(cx.index, name, pick)?,
+    };
+    match found {
         Some(r) => {
             if let Some(p) = prefix
                 && !query::version_matches(&r.pv, p)

@@ -10,10 +10,10 @@ Common to every tool:
   something changed.
 - Recipe arguments accept `pn`, `pn_pv` or a pointer. A name that is no recipe's exact `pn`
   is an error listing up to 20 recipe names that contain it. In `recipe`, `var`,
-  `overrides` and `deps` a bare `pn` names the file BitBake would use, through provider
-  selection (`PREFERRED_VERSION`, `DEFAULT_PREFERENCE`, layer priority, version; see
-  "Providers and versions" in bitbake-semantics.md); `item` and `search` pick by layer
-  priority and version only.
+  `overrides`, `deps`, `item`, `search` and the `scaffold` `bbappend` kind a bare `pn`
+  names the file BitBake would use, through provider selection (`PREFERRED_VERSION`,
+  `DEFAULT_PREFERENCE`, layer priority, version; see "Providers and versions" in
+  bitbake-semantics.md).
 - `machine` and `distro`, where a tool takes them, default to the values in `local.conf`
   when a build directory exists.
 

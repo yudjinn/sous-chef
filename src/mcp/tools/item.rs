@@ -87,7 +87,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let loc: Loc = match (&args.loc, &args.recipe, &args.file, name) {
         (Some(l), None, None, None) => l.trim().parse()?,
         (None, Some(r), None, Some(n)) => {
-            let rec = recipe::resolve_recipe(&index, r, None)?;
+            let (rec, _) = recipe::resolve_selected(&index, &ctx.workspace, r, None)?;
             let walk = recipe::walk_recipe(&index, &rec)?;
             let hits = matching(&walk.statements, n);
             let what = format!("item {n} in the tree of recipe {}_{}", rec.pn, rec.pv);
