@@ -70,6 +70,11 @@ Notes:
   against the format in `bitbake-semantics.md`, leaves the *verify* marker in place, and says
   so.
 - T8.4 (release diff) is optional and not scheduled.
+- M9 (kas support and live verification on bootlin/yocto-kiss, `docs/milestones/M9-kas-live.md`)
+  was added after wave 4. T9.1 and T9.2 should run before or beside wave 5, because T5.5
+  and T8.1 need real BitBake output; T9.3 can be a sixth stream. Live runs follow the
+  limits in that file: parse-only commands and fetch, unpack or patch of one small recipe;
+  nothing that compiles without asking the user.
 - T8.6 (workspace audit report: one large findings report over a whole build repository
   and its submodule layers) is not scheduled; it goes after wave 5, since it needs all of
   M4 and T8.3.

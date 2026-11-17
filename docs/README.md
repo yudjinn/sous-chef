@@ -30,6 +30,7 @@ include/inherit chain, bbappends and the override chain correctly.
 | M6 | [Scaffold](milestones/M6-scaffold.md) | `scaffold` tool |
 | M7 | [Hooks and plugin](milestones/M7-hooks-plugin.md) | Claude Code hooks and packaging |
 | M8 | [Verification and extras](milestones/M8-verification-extras.md) | Differential test, scale check, extra views |
+| M9 | [kas and live verification](milestones/M9-kas-live.md) | kas project support; checks against a real build environment |
 
 ## Parallel work plan
 
