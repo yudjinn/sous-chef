@@ -1,0 +1,14 @@
+---
+source: tests/recipe_views.rs
+expression: out
+---
+package	var	value	loc
+-	PACKAGES	libfoo-dbg libfoo-dev libfoo-doc libfoo	meta-core:conf/bitbake.conf:26
+libfoo-dbg	FILES	(not set)	-
+libfoo-dev	FILES	/usr/include /usr/lib/lib*.so	meta-core:conf/bitbake.conf:28
+libfoo-dev	RDEPENDS	libfoo	meta-core:recipes-core/libfoo/libfoo_2.0.bb:18
+libfoo-doc	FILES	/usr/share/doc	meta-core:conf/bitbake.conf:29
+libfoo	FILES	/usr/bin/* /usr/sbin/* /usr/lib/lib*.so.*	meta-core:conf/bitbake.conf:27
+note: values of the evaluated datastore (PACKAGES and FILES defaults come from bitbake.conf); RDEPENDS and RPROVIDES rows only where set
+note: not included: what OE-Core adds while packaging (do_package: shared-library and pkg-config dependencies, packages split by python such as do_split_packages) and the RDEPENDS:${PN} that base.bbclass adds for PACKAGECONFIG with anonymous python (see deps kind=runtime)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)

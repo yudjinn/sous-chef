@@ -1,0 +1,16 @@
+---
+source: tests/recipe_views.rs
+expression: out
+---
+task	state	after	pieces	loc
+do_fetch	-	-	meta-core:classes/base.bbclass:54 -> base_do_fetch (meta-core:classes/base.bbclass:15-20)	meta-core:classes/base.bbclass:13
+do_unpack	-	do_fetch	meta-core:classes/base.bbclass:54 -> base_do_unpack (meta-core:classes/base.bbclass:23-26)	meta-core:classes/base.bbclass:22
+do_patch	-	do_unpack	meta-core:classes/base.bbclass:54 -> base_do_patch (meta-core:classes/base.bbclass:29-31)	meta-core:classes/base.bbclass:28
+do_autoreconf	-	do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_autoreconf (meta-core:classes-recipe/autotoolsish.bbclass:13-15)	meta-core:classes-recipe/autotoolsish.bbclass:16
+do_configure	-	do_autoreconf do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_configure (meta-core:classes-recipe/autotoolsish.bbclass:18-20)	meta-core:classes/base.bbclass:33
+do_compile	-	do_configure	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_compile (meta-core:classes-recipe/autotoolsish.bbclass:22-24)	meta-core:classes/base.bbclass:38
+do_install	-	do_compile	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_install (meta-core:classes-recipe/autotoolsish.bbclass:26-28), meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	meta-core:classes/base.bbclass:45
+do_build	noexec	do_install	-	meta-core:classes/base.bbclass:51
+note: order from the addtask / deltask statements in parse order (the index: configuration classes, recipe, includes and classes, bbappends, deferred inherits; the replay does not run them); dependencies first
+note: not accounted for: tasks added or deleted by anonymous python (bb.build.addtask / deltask), do_x[deps] set directly, and dependencies on other recipes' tasks ([depends], [deptask], [rdeptask], [recrdeptask])
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)

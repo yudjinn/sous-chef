@@ -458,6 +458,33 @@ and `lib/bb/cooker.py` `handleCollections`, master and branches `2.0` and `2.8`,
 The replay does not reproduce these checks (it never stops on them); `org/layer-conf`
 reports them.
 
+**What the `BBLAYERS` order decides** (verified, T8.3, against BitBake master `5495a54`
+`lib/bb/cookerdata.py` `parseConfigurationFiles` and `lib/bb/cooker.py`
+`handleCollections`):
+
+- Dependencies need not be listed first. `LAYERDEPENDS_<c>` (and `LAYERRECOMMENDS_<c>`) are
+  checked in `handleCollections` against the whole `BBFILE_COLLECTIONS` list (`dep in
+  collection_list`), after every `layer.conf` was read; a version constraint is compared with
+  `LAYERVERSION_<dep>`. Priorities come from `BBFILE_PRIORITY_<c>` or, when unset, from the
+  dependencies' priorities (`calc_layer_priority`), never from the position.
+- The layer confs are parsed in `BBLAYERS` order into one datastore, so the order is the
+  order of `BBPATH .= ":${LAYERDIR}"`, and `BBPATH` decides which file an `include` /
+  `require`, an `inherit` and a conf lookup (`conf/machine/...`, `conf/distro/...`) find
+  first (see "Finding files"). That is the only effect sous-chef reports
+  (`layers show=compat`, `order` rows).
+- `LAYERSERIES_CORENAMES` is taken from the first `layer.conf` (in `BBLAYERS` order) after
+  which it is set, then deleted; `LAYERSERIES_COMPAT_<c>` of each collection the layer adds
+  is read and deleted right after that layer's `layer.conf`, and every compat check runs
+  after the last layer.
+- **A copied `LAYERSERIES_COMPAT`** (`LAYERSERIES_COMPAT_x = "${LAYERSERIES_COMPAT_core}"`):
+  the referenced variable has been deleted (or not set yet), and an undefined reference is
+  left as written by expansion (`data_smart.py` `VariableParse.var_sub`), so the layer
+  claims the literal text `${LAYERSERIES_COMPAT_core}`, which names no release: BitBake
+  stops with "Layer x is not compatible with the core layer" when a core layer sets
+  `LAYERSERIES_CORENAMES`. (`org/layer-conf` reports this case as a warning saying the
+  value expands to nothing; the severity is lower than BitBake's behaviour. Not changed in
+  T8.3, which only made the rule's checks callable.)
+
 ## Parse order
 
 Configuration, once:
@@ -631,6 +658,59 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 ```
 
 (immediate expansion and the trailing colon both matter).
+
+Verified (T8.3) against OE-Core `9518ce9` and BitBake `5495a54`; this is what `recipe
+show=sources` reproduces:
+
+- **`FILESPATH`** is set in `meta/classes-global/base.bbclass`:
+  `FILESPATH = "${@oe.utils.base_set_filespath(["${FILE_DIRNAME}/${BP}",
+  "${FILE_DIRNAME}/${BPN}", "${FILE_DIRNAME}/files"], d)}"`, with `FILESEXTRAPATHS ?=
+  "__default:"` and `FILESOVERRIDES = "${TRANSLATED_TARGET_ARCH}:${MACHINEOVERRIDES}:${DISTROOVERRIDES}"`
+  in `bitbake.conf`. `base_set_filespath(path, d)` (`meta/lib/oe/utils.py`): removes
+  `__default:` from `FILESEXTRAPATHS`; when the rest is not empty, its `:`-split entries go
+  before `path`; the overrides are `(":" + FILESOVERRIDES).split(":")` **reversed** (so the
+  last override first and the empty override last; an empty `FILESOVERRIDES` gives two empty
+  overrides and every directory twice); the result is, **override by override, every path**
+  `os.path.join(p, o)` (empty `p` skipped), joined with `:`. So an override directory of the
+  recipe's `files/` is searched before a plain `FILESEXTRAPATHS` directory. `FILE_DIRNAME` is
+  the recipe's directory (`FILE` is the `.bb` when the fetcher expands it). sous-chef takes
+  the path list from the arguments as expanded in the store and the other values evaluated;
+  it says the order is reconstructed.
+- **Lookup** (`lib/bb/fetch/local.py` `localfile_searchpaths`): a `file://` path starting
+  with `/` is used as it is; otherwise `bb.utils.which(FILESPATH, path)`: the first
+  `<entry>/<path>` that exists (`os.path.exists`, so a directory matches). The path is the
+  URL's location before the first `;` (`file://a/b.patch;striplevel=2` is `a/b.patch`).
+- **Patches** (`meta/lib/oe/patch.py` `patch_path`, `src_patches`): any `SRC_URI` entry is
+  a patch when its `apply` parameter is true (`oe.types.boolean`: `yes y true t 1`), or,
+  without `apply`, when its extension after stripping `.gz` / `.bz2` / `.xz` / `.Z` is
+  `.patch` or `.diff`; a local directory never is. (`mindate` / `maxrev` / `maxver`-style
+  parameters can skip a patch at `do_patch` time: `should_apply`; sous-chef does not apply
+  them.)
+- **`Upstream-Status`** (`meta/lib/oe/qa.py` `check_upstream_status`, used by the
+  `patch-status` QA check): a line matching
+  `^Upstream-Status: (Pending|Submitted|Denied|Inappropriate|Backport|Inactive-Upstream)( .+)?$`
+  (multiline, case-sensitive) is valid; else a line matching `upstream.*status`
+  case-insensitively is "Malformed"; else "Missing".
+
+## Tasks (verified, T8.3)
+
+Checked against BitBake `5495a54` (`lib/bb/parse/ast.py` `AddTaskNode`, `DelTaskNode`,
+`finalize`; `lib/bb/build.py` `addtask`, `deltask`, `add_tasks`); `recipe show=tasks`
+reproduces it from the indexed statements:
+
+- `addtask a b after x before y`: for each name, `ensure_task_prefix` (`do_` added), the
+  `task` flag set, appended to `__BBTASKS` if not there; each `after` name (prefixed) is
+  appended to the task's `deps` flag if missing; for each `before` name, the task is
+  **prepended** to that task's `deps` if missing (even when that task does not exist yet).
+  The names are not expanded (`add_tasks` expands them later); a repeated `addtask` only adds
+  dependencies.
+- `deltask a`: the argument is expanded and split; each task is removed from `__BBTASKS`
+  (with its `task` flag), its `deps` flag deleted, and it is removed from every remaining
+  task's `deps`.
+- The statements run where they are in parse order (a class's `addtask` at its `inherit`),
+  so the configuration classes (`base`) come first. Anonymous python runs before
+  `add_tasks` and can call `bb.build.addtask` / `deltask`; `do_x[deps]` can also be set as a
+  flag directly; neither is seen statically.
 
 ## Build output (for M5)
 

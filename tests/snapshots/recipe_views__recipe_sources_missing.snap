@@ -1,0 +1,39 @@
+---
+source: tests/recipe_views.rs
+expression: out
+---
+entry	type	state	file	status	loc
+https://example.org/releases/hello-1.1.tar.gz	https	active	-	-	meta-core:recipes-core/hello/hello.inc:9
+file://hello.patch	file (patch)	active	meta-core:recipes-core/hello/files/hello.patch	Upstream-Status: Pending	meta-core:recipes-core/hello/hello_1.1.bb:5
+file://bad.patch	file (patch)	active	meta-mine:recipes-core/hello/hello/bad.patch	malformed: upstream status: maybe	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+file://none.diff	file (patch)	active	meta-mine:recipes-core/hello/hello/none.diff	missing Upstream-Status	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+file://cfgdir	file	active	meta-mine:recipes-core/hello/hello/cfgdir (directory)	-	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+file://nowhere.cfg	file	active	not found (10 paths searched, below)	-	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+file://keep.patch;apply=no	file	active	not found (10 paths searched, below)	-	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+git://example.org/x.git;branch=main	git	active	-	-	meta-mine:recipes-core/hello/hello_1.1.bbappend:11
+file://mine.patch	file (patch)	active	meta-mine:recipes-core/hello/hello/mine.patch	Upstream-Status: Submitted [https://example.org/hello/pull/1]	meta-mine:recipes-core/hello/hello_1.1.bbappend:4
+file://vendor.patch	file (patch)	removed by :remove	meta-vendor:recipes-core/hello/hello/vendor.patch	Upstream-Status: Inappropriate [vendor specific]	meta-vendor:recipes-core/hello/hello_%.bbappend:4
+file://boardx.cfg	file	inactive (override boardx not active)	meta-vendor:recipes-core/hello/hello/boardx.cfg	-	meta-vendor:recipes-core/hello/hello_%.bbappend:5
+file://nowhere.cfg	searched	#1	meta-mine:recipes-core/hello/hello/	missing	-
+file://nowhere.cfg	searched	#2	meta-vendor:recipes-core/hello/hello/	missing	-
+file://nowhere.cfg	searched	#3	meta-core:recipes-core/hello/hello-1.1/	missing	-
+file://nowhere.cfg	searched	#4	meta-core:recipes-core/hello/hello/	missing	-
+file://nowhere.cfg	searched	#5	meta-core:recipes-core/hello/files/	missing	-
+file://nowhere.cfg	searched	#6	meta-mine:recipes-core/hello/hello/	missing	-
+file://nowhere.cfg	searched	#7	meta-vendor:recipes-core/hello/hello/	missing	-
+file://nowhere.cfg	searched	#8	meta-core:recipes-core/hello/hello-1.1/	missing	-
+file://nowhere.cfg	searched	#9	meta-core:recipes-core/hello/hello/	missing	-
+file://nowhere.cfg	searched	#10	meta-core:recipes-core/hello/files/	missing	-
+file://keep.patch	searched	#1	meta-mine:recipes-core/hello/hello/	missing	-
+file://keep.patch	searched	#2	meta-vendor:recipes-core/hello/hello/	missing	-
+file://keep.patch	searched	#3	meta-core:recipes-core/hello/hello-1.1/	missing	-
+file://keep.patch	searched	#4	meta-core:recipes-core/hello/hello/	missing	-
+file://keep.patch	searched	#5	meta-core:recipes-core/hello/files/	missing	-
+file://keep.patch	searched	#6	meta-mine:recipes-core/hello/hello/	missing	-
+file://keep.patch	searched	#7	meta-vendor:recipes-core/hello/hello/	missing	-
+file://keep.patch	searched	#8	meta-core:recipes-core/hello/hello-1.1/	missing	-
+file://keep.patch	searched	#9	meta-core:recipes-core/hello/hello/	missing	-
+file://keep.patch	searched	#10	meta-core:recipes-core/hello/files/	missing	-
+note: FILESPATH is built by OE-Core's base_set_filespath (python), which is not run; the search order is reconstructed: FILESEXTRAPATHS, then the recipe's ${BP}, ${BPN} and files directories, each tried with every FILESOVERRIDES entry (last first; 0 entries) and then without
+note: FILESOVERRIDES is empty or not set, so no override subdirectory is searched; ":" + "" splits into two empty overrides, so each directory is searched twice, as in OE-Core
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)

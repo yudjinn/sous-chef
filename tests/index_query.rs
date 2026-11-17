@@ -1043,3 +1043,59 @@ fn unresolved_include_edges_and_file_for_loc() {
     let none: sous_chef::types::Loc = "meta-mine:nope.bb:1".parse().unwrap();
     assert!(query::file_for_loc(&fx.idx, &none).unwrap().is_none());
 }
+
+#[test]
+fn tasks_in_a_file() {
+    let fx = fixture();
+    let base = id(&fx, "meta-core", "classes/base.bbclass");
+    let rows: Vec<String> = query::tasks_in(&fx.idx, base)
+        .unwrap()
+        .iter()
+        .map(|t| {
+            format!(
+                "{} {} after=[{}] before=[{}]",
+                t.line,
+                t.name,
+                t.after.join(" "),
+                t.before.join(" ")
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            "13 fetch after=[] before=[]",
+            "22 unpack after=[do_fetch] before=[]",
+            "28 patch after=[do_unpack] before=[]",
+            "33 configure after=[do_patch] before=[]",
+            "38 compile after=[do_configure] before=[]",
+            "45 install after=[do_compile] before=[]",
+            "51 build after=[do_install] before=[]",
+        ]
+    );
+    let app = id(&fx, "meta-mine", "recipes-app/app/app_0.1.bb");
+    let t = query::tasks_in(&fx.idx, app).unwrap();
+    assert_eq!(t.len(), 1);
+    assert_eq!(
+        (t[0].name.as_str(), t[0].line, t[0].file_id),
+        ("report", 34, app)
+    );
+    assert_eq!(t[0].after, ["do_compile"]);
+    assert_eq!(t[0].before, ["do_build"]);
+    // Several names in one statement are one row each, in the order written.
+    let fx = modified(|root| {
+        write(
+            &root.join("meta-mine/recipes-app/t/t_1.0.bb"),
+            "addtask a b after do_x\n",
+        );
+    });
+    let t = id(&fx, "meta-mine", "recipes-app/t/t_1.0.bb");
+    let names: Vec<String> = query::tasks_in(&fx.idx, t)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.name)
+        .collect();
+    assert_eq!(names, ["a", "b"]);
+    let inc = id(&fx, "meta-core", "recipes-core/hello/hello.inc");
+    assert!(query::tasks_in(&fx.idx, inc).unwrap().is_empty());
+}

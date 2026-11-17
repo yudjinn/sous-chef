@@ -26,6 +26,7 @@ use crate::index::query::{self, StatementFilter, StatementRow};
 use crate::mcp::Ctx;
 use crate::render::{self, Format, Table};
 use crate::types::{FileKind, LineSpan, Loc};
+use crate::workspace::Workspace;
 
 /// Search mode.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -98,7 +99,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let limit = args.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
     let mut index = ctx.index.lock().await;
     let report = index.refresh(&ctx.workspace)?;
-    let filter = build_filter(&index, &args)?;
+    let filter = build_filter(&index, &ctx.workspace, &args)?;
 
     let mut t = Table::new(&["loc", "kind", "item", "snippet"]);
     match args.mode {
@@ -138,7 +139,7 @@ pub fn item_label(s: &StatementRow) -> String {
     }
 }
 
-fn build_filter(index: &Index, args: &Args) -> Result<StatementFilter> {
+fn build_filter(index: &Index, ws: &Workspace, args: &Args) -> Result<StatementFilter> {
     let mut f = StatementFilter::default();
     for k in args.kind.iter().flatten() {
         let k = match k.trim() {
@@ -170,7 +171,8 @@ fn build_filter(index: &Index, args: &Args) -> Result<StatementFilter> {
         f.file_kind = Some(k.trim().parse::<FileKind>()?);
     }
     if let Some(r) = &args.recipe {
-        let rec = recipe::resolve_recipe(index, r, None)?;
+        // The file BitBake uses for a bare `pn`, as in `recipe` (provider selection).
+        let (rec, _) = recipe::resolve_selected(index, ws, r, None)?;
         f.files = Some(recipe::walk_recipe(index, &rec)?.files);
     }
     Ok(f)
