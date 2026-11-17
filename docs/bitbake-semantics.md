@@ -627,16 +627,28 @@ in the layer's `conf/` tree, is a class under a `classes*/` directory, is the ta
 resolved `include` / `require` / `include_all` / `inherit` edge, or could be the target of
 an unresolved one (the reference's path, `${...}` standing for any text within a component,
 ends the file's path; a bare name only next to the including file or at a layer root; a
-reference that is all `${...}` matches nothing); otherwise it is **data** when it is under a
+reference that is all `${...}` matches nothing); a `.conf` in `conf/` is metadata unless
+it is none of the files BitBake and OE-core read by convention **and** it has a line
+BitBake's configuration parser rejects (w6, `scan.rs` `conventional_conf`: BitBake 2.18.0
+`cookerdata.py` `parseConfigurationFiles` reads `conf/bblayers.conf`, every
+`conf/layer.conf` and `conf/bitbake.conf`; OE-core's `bitbake.conf`, Wrynose lines
+813-833, includes `conf/site.conf`, `auto.conf`, `toolcfg.conf`, `local.conf`, and by
+pattern `conf/multiconfig/`, `conf/machine/`, `conf/machine-sdk/`, `conf/distro/`, and
+`conf/fragments/` through `addfragments`; `conf/templates/` holds build templates; "rejects":
+an unparsed line, a function, `inherit`, `addtask`, `deltask`, `addhandler` or
+`EXPORT_FUNCTIONS`, which `ConfHandler.feeder` does not accept), in which case it is data
+(a `.conf` that parses cleanly stays metadata: it may be included in a way the index cannot
+see); otherwise it is **data** when it is under a
 directory a recipe takes files from (`files/`, `<pn>/` or `<pn>-<pv>/` next to a `.bb` /
 `.bbappend` of that name, `FILESPATH`'s defaults) or under `files/`, `lib/`, `scripts/` or
 `wic/`; anything else stays metadata. A data file is indexed and marked
 (`files.not_collected = 'data'`): `item` shows it with a note, `search` (every mode) and the
 file listings (`all_files`, `files_by_kind`, `files_in_layer`; lint's file list) leave it out
 unless `FileSet::ALL` is asked for, and the replay still reads it if an evaluation reaches it.
-The marks are recomputed with the edges, and with one file's edges on `refresh_file`. Known
-residual: `conf/ccache.conf` is in `conf/` and stays metadata (3 `hygiene/parse-error`
-findings on OE-core, from 422).
+The marks are recomputed with the edges, and with one file's edges on `refresh_file`.
+`conf/ccache.conf` (ccache's `key = value` syntax, unparsed lines for BitBake, referenced only
+through `CCACHE_CONFIGPATH`) is data since w6: `hygiene/parse-error` with `--all` on the
+live workspace went from 3 to 0 (422 before the data-file rule).
 
 ## Layers
 

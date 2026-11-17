@@ -383,3 +383,51 @@ async fn layers_appends_reads_bbfiles_dynamic_from_the_index() {
         assert!(out.contains(want), "{want:?} in\n{out}");
     }
 }
+
+// ---------------------------------------------------------------------------------------
+// Item 4: data files under conf/
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn an_unreferenced_unparsable_conf_under_conf_is_data() {
+    const CCACHE: &str =
+        "# ccache's own configuration\nsloppiness = include_file_ctime\nhash_dir = false\n";
+    let fx = modified(|r| {
+        write(r, "meta-mine/conf/ccache.conf", CCACHE);
+        write(r, "meta-mine/conf/extra.conf", "EXTRA_SETTING = \"1\"\n");
+        write(r, "meta-mine/conf/included.conf", CCACHE);
+        write(r, "meta-mine/conf/machine/odd.conf", CCACHE);
+        append_to(
+            r,
+            "meta-mine/conf/layer.conf",
+            "include conf/included.conf\n",
+        );
+    });
+    let reason = |p: &str| {
+        let f = query::file_by_path(&fx.idx, "meta-mine", Path::new(p))
+            .unwrap()
+            .unwrap();
+        query::not_collected(&fx.idx, f.id).unwrap()
+    };
+    assert!(
+        reason("conf/ccache.conf").is_some_and(|r| r.contains("data file")),
+        "{:?}",
+        reason("conf/ccache.conf")
+    );
+    // Parses cleanly: may be included in a way the index cannot see.
+    assert_eq!(reason("conf/extra.conf"), None);
+    // Included: metadata, its errors are real.
+    assert_eq!(reason("conf/included.conf"), None);
+    // A machine conf is read by convention.
+    assert_eq!(reason("conf/machine/odd.conf"), None);
+
+    let found = lint_all(&fx, &["hygiene/parse-error"]);
+    let files: std::collections::BTreeSet<String> = found
+        .iter()
+        .filter(|f| f.loc.layer == "meta-mine")
+        .map(|f| f.loc.path.display().to_string())
+        .collect();
+    assert!(!files.contains("conf/ccache.conf"), "{found:#?}");
+    assert!(files.contains("conf/included.conf"), "{found:#?}");
+    assert!(files.contains("conf/machine/odd.conf"), "{found:#?}");
+}

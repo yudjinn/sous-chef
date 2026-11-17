@@ -388,8 +388,10 @@ Per rule with `--all` (rules with no finding either time left out):
 
 What the rules still get wrong there, as far as it was checked:
 
-- `hygiene/parse-error`: the 3 errors are in `meta:conf/ccache.conf`, ccache's own
-  configuration file. A `.conf` under a layer's `conf/` counts as metadata, so it is linted.
+- `hygiene/parse-error`: fixed in w6 (3 -> 0 with `--all`): the 3 errors were in
+  `meta:conf/ccache.conf`, ccache's own configuration file, which is now a data file (an
+  unreferenced `.conf` in `conf/` that BitBake does not read by convention and that does not
+  parse; bitbake-semantics.md "Data files").
 - `org/recipe-path`: fixed in w6 (102 -> 101 with `--all`): `meta:lib/bblayers/templates/example.bb`
   (a template no `BBFILES` glob collects) had 2 layout and naming findings; it now has one
   info finding saying BitBake does not collect it, and no other rule runs on it.

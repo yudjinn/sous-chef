@@ -428,9 +428,11 @@ pub fn not_collected(index: &Index, id: i64) -> Result<Option<String>> {
     Ok(reason.flatten().map(|r| match r.as_str() {
         super::schema::NOT_COLLECTED_BBFILES => "not matched by any layer's BBFILES".to_string(),
         super::schema::NOT_COLLECTED_DATA => {
-            "not BitBake metadata: a data file (in a directory a recipe takes files from, or \
-             under lib/, scripts/ or wic/, and nothing includes it); BitBake never parses it"
-                .to_string()
+            "not BitBake metadata: a data file (in a directory a recipe takes files from, under \
+             lib/, scripts/ or wic/, or a conf/ file that is not BitBake syntax and that \
+             BitBake does not read by convention; nothing includes it); BitBake never parses \
+             it"
+            .to_string()
         }
         super::schema::NOT_COLLECTED_DYNAMIC => {
             "matched only by a BBFILES_DYNAMIC glob whose layer condition does not hold".to_string()

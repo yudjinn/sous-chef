@@ -1483,6 +1483,17 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
             names.insert(pn);
         }
     }
+    // Files with a line BitBake's configuration parser rejects ("unparsed line": anything
+    // but assignments, `include` / `require` / `include_all`, `export`, `unset`,
+    // `addfragments`, `addpylib`, comments; so also functions, `inherit`, `addtask`).
+    let unparsable: HashSet<i64> = {
+        let mut st = tx.prepare_cached(
+            "SELECT DISTINCT file_id FROM statements WHERE kind IN ('unknown', 'function', \
+             'pydef', 'inherit', 'addtask', 'deltask', 'addhandler', 'export_functions')",
+        )?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
     let mut up = tx.prepare_cached("UPDATE files SET not_collected = ?1 WHERE id = ?2")?;
     for f in &files {
         if !matches!(f.kind.as_str(), "conf" | "inc" | "bbclass") {
@@ -1490,7 +1501,13 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
         }
         let comps: Vec<&str> = f.path.split('/').collect();
         let dirs = &comps[..comps.len().saturating_sub(1)];
-        let metadata_place = comps.first() == Some(&"conf")
+        let in_conf = comps.first() == Some(&"conf");
+        // In `conf/`, a `.conf` is metadata when BitBake or OE-core reads it by convention, or
+        // when it parses as configuration (it may be included in a way the index cannot see);
+        // one nothing references that does not parse is data (`conf/ccache.conf`).
+        let conf_data =
+            in_conf && f.kind == "conf" && !conventional_conf(&comps) && unparsable.contains(&f.id);
+        let metadata_place = (in_conf && !conf_data)
             || (f.kind == "bbclass" && dirs.first().is_some_and(|d| d.starts_with("classes")));
         let dir = dirs.join("/");
         let maybe_target = patterns.iter().any(|(p, layer, src_dir)| {
@@ -1512,11 +1529,45 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
                 .get(&(f.layer, parent))
                 .is_some_and(|names| names.contains(dirs[i]) || dirs[i] == "files")
         });
-        if in_recipe_dir || dirs.iter().any(|d| DATA_DIRS.contains(d)) {
+        if conf_data || in_recipe_dir || dirs.iter().any(|d| DATA_DIRS.contains(d)) {
             up.execute(params![super::schema::NOT_COLLECTED_DATA, f.id])?;
         }
     }
     Ok(())
+}
+
+/// A `.conf` under a layer's (or the build directory's) `conf/` that BitBake or OE-core reads
+/// by convention, whatever includes it: BitBake 2.18.0 `cookerdata.py`
+/// `parseConfigurationFiles` reads `conf/bblayers.conf`, each layer's `conf/layer.conf` and
+/// `conf/bitbake.conf`; OE-core's `bitbake.conf` (Wrynose, lines 813-833) includes
+/// `conf/site.conf`, `conf/auto.conf`, `conf/toolcfg.conf`, `conf/local.conf`,
+/// `conf/multiconfig/${BB_CURRENT_MC}.conf`, `conf/machine/${MACHINE}.conf`,
+/// `conf/machine-sdk/${SDKMACHINE}.conf`, `conf/distro/${DISTRO}.conf` and, through
+/// `addfragments`, `conf/fragments/...`; `conf/templates/` holds the build configuration
+/// templates (`bitbake-setup`, `oe-setup-builddir`).
+fn conventional_conf(comps: &[&str]) -> bool {
+    const NAMES: &[&str] = &[
+        "layer.conf",
+        "bitbake.conf",
+        "local.conf",
+        "site.conf",
+        "auto.conf",
+        "toolcfg.conf",
+        "bblayers.conf",
+    ];
+    const DIRS: &[&str] = &[
+        "machine",
+        "machine-sdk",
+        "distro",
+        "multiconfig",
+        "fragments",
+        "templates",
+    ];
+    match comps {
+        ["conf", name] => NAMES.contains(name),
+        ["conf", dir, _, ..] => DIRS.contains(dir),
+        _ => false,
+    }
 }
 
 /// The path components of an unresolved reference's text, each a glob where `${...}` stands

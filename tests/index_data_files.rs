@@ -54,7 +54,8 @@ fn data_ws(root: &Path) {
         "meta-core/lib/templates/example.bb",
         "SUMMARY = \"An example\"\nLICENSE = \"MIT\"\n",
     );
-    // In the layer's conf/ tree: kept as metadata (conf/ccache.conf on OE-core).
+    // In the layer's conf/ tree, not read by convention, referenced by nothing, not BitBake
+    // syntax: data since w6 (conf/ccache.conf on OE-core).
     write(root, "meta-core/conf/ccache.conf", CCACHE);
     // An .inc in the recipe's <pn>/ directory that the recipe requires: metadata.
     write(
@@ -121,6 +122,7 @@ fn data_files_are_marked_and_metadata_is_kept() {
         "recipes-core/hello/files/defaults.conf",
         "recipes-core/hello/hello-1.1/logrotate.conf",
         "files/wic/common.wks.inc",
+        "conf/ccache.conf",
     ] {
         let r = reason(&fx, data).unwrap_or_else(|| panic!("{data} not marked"));
         assert!(r.starts_with("not BitBake metadata"), "{data}: {r}");
@@ -131,7 +133,6 @@ fn data_files_are_marked_and_metadata_is_kept() {
             .contains("BBFILES")
     );
     for meta in [
-        "conf/ccache.conf",
         "recipes-core/hello/hello/shared.inc",
         "recipes-core/hello/hello/dyn-1.1.inc",
         "recipes-core/hello/orphan.inc",
@@ -215,10 +216,9 @@ fn lint_all_reports_no_parse_error_in_data_files() {
         })
         .collect();
     assert!(in_data.is_empty(), "{in_data:?}");
-    // conf/ccache.conf stays metadata, so the rule still reports it (a known residual:
-    // the rule of where metadata lives keeps every file in conf/).
+    // conf/ccache.conf is data since w6 (it does not parse and nothing includes it).
     assert!(
-        report
+        !report
             .findings
             .iter()
             .any(|f| f.loc.to_string().contains("conf/ccache.conf")),

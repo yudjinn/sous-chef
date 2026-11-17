@@ -185,8 +185,8 @@ pub const META_EDGES: &str = "edges";
 /// Bumped when what the edge step computes changes (it also sets `files.not_collected`).
 /// `data-files-1`: data files are marked (w5-fix-eval2).
 /// `dynamic-1`: `BBFILES_DYNAMIC` folded into the collection, `not_collected = 'dynamic'`
-/// (w6).
-pub const EDGES_VERSION: &str = "dynamic-1";
+/// (w6). `conf-data-1`: an unreferenced `.conf` under `conf/` that does not parse is data.
+pub const EDGES_VERSION: &str = "conf-data-1";
 
 /// The `meta` key holding the codename of the release the edges were resolved for.
 pub const META_RELEASE: &str = "release";
