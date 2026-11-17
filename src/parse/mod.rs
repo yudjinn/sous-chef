@@ -4,7 +4,9 @@ pub mod ast;
 pub mod lexer;
 pub mod parser;
 
-pub use ast::{IncludeMode, Lang, ParseDiagnostic, ParsedFile, Statement, StatementKind};
+pub use ast::{
+    AddFragments, IncludeMode, Lang, ParseDiagnostic, ParsedFile, Statement, StatementKind,
+};
 pub use parser::split_var;
 
 /// Parses BitBake source. Never fails and never panics.

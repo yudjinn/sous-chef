@@ -38,6 +38,10 @@
 //!   for includes; `inherit` / `inherit_defer` for inherits; `shell` / `python`, prefixed
 //!   with `fakeroot ` when so declared, for functions; `python` for `def`.
 //! - `statements.value` is the raw value for assignments and the text of `unknown` lines.
+//! - `statements.kind` `addfragments`: an `addfragments` line (the parser's unknown statement
+//!   that `Statement::add_fragments` reads); `name` is its argument text, `value` the line.
+//!   Its edge (kind `addfragments`, `target_text` the argument text) is never resolved: the
+//!   files it includes follow from the evaluated fragments variable.
 //! - `edges.target_text` is the argument as written when it resolves to one target, else the
 //!   expanded word; for `bbappend` edges it is the recipe file name the append stands for
 //!   (`hello_%.bb`), and `line` is NULL.
@@ -841,7 +845,13 @@ fn file_rows(text: &str, kind: FileKind, file_name: &str) -> FileRows {
                 row.name = Some(names.join(" "));
             }
             StatementKind::Unknown { text } => {
-                row.kind = "unknown";
+                match st.add_fragments() {
+                    Some(af) => {
+                        row.kind = "addfragments";
+                        row.name = Some(af.rest.trim_start_matches(lexer::py_space).to_string());
+                    }
+                    None => row.kind = "unknown",
+                }
                 row.value = Some(text.clone());
             }
         }
@@ -1199,7 +1209,7 @@ fn insert_ref_edges(
     let refs: Vec<(i64, String, String, String, u32)> = {
         let mut st = tx.prepare(
             "SELECT file_id, kind, name, op, start_line FROM statements \
-             WHERE kind IN ('include', 'inherit') AND name IS NOT NULL \
+             WHERE kind IN ('include', 'inherit', 'addfragments') AND name IS NOT NULL \
              AND (?1 IS NULL OR file_id = ?1) ORDER BY file_id, ord",
         )?;
         st.query_map([only], |r| {
@@ -1221,6 +1231,19 @@ fn insert_ref_edges(
         let Some(info) = files.get(&file_id) else {
             continue;
         };
+        if kind == "addfragments" {
+            // Which files it includes follows from the evaluated fragments variable
+            // (`OE_FRAGMENTS`), never from the file alone: always unresolved here, the replay
+            // resolves it.
+            ins.execute(params![
+                file_id,
+                "addfragments",
+                text,
+                Option::<i64>::None,
+                line
+            ])?;
+            continue;
+        }
         let (edge_kind, ref_kind) = if kind == "inherit" {
             // A class in `classes-global/` inherits in global context, but only on a release
             // that has that directory (`resolve::class_dir`, as the resolver searches).

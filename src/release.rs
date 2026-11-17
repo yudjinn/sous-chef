@@ -148,16 +148,29 @@ pub enum Feature {
     WorkdirAsSourceDir,
     /// `WORKDIR` ends in `${PV}-${PR}`; later releases end it in `${PV}`.
     PrInWorkdir,
+    /// The `addfragments` directive (OE configuration fragments), three-argument form.
+    AddFragments,
+    /// `addfragments` takes a fourth argument, the built-in fragments variable
+    /// (`OE_FRAGMENTS_BUILTIN`: `machine/<name>` sets `MACHINE`); the three-argument form is
+    /// an unparsed line from here on.
+    BuiltinFragments,
+    /// `DEPENDS` words listed in `BB_RECIPE_VIRTUAL_PROVIDERS` are replaced with their
+    /// `PREFERRED_PROVIDER_<word>` when a recipe is finalised
+    /// (`ast.handleVirtRecipeProviders`).
+    RecipeVirtualProviders,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 6] = [
+    pub const ALL: [Feature; 9] = [
         Feature::SplitClassDirs,
         Feature::InheritDefer,
         Feature::IncludeAll,
         Feature::UnpackDir,
         Feature::WorkdirAsSourceDir,
         Feature::PrInWorkdir,
+        Feature::AddFragments,
+        Feature::BuiltinFragments,
+        Feature::RecipeVirtualProviders,
     ];
 
     /// The first supported release that has the feature.
@@ -165,7 +178,10 @@ impl Feature {
         match self {
             Feature::SplitClassDirs => Release::Langdale,
             Feature::InheritDefer => Release::Scarthgap,
-            Feature::IncludeAll => Release::Walnascar,
+            Feature::IncludeAll | Feature::AddFragments | Feature::RecipeVirtualProviders => {
+                Release::Walnascar
+            }
+            Feature::BuiltinFragments => Release::Whinlatter,
             Feature::UnpackDir => Release::Styhead,
             Feature::WorkdirAsSourceDir | Feature::PrInWorkdir => Release::FLOOR,
         }
@@ -191,7 +207,10 @@ impl Feature {
             | Feature::IncludeAll
             | Feature::UnpackDir
             | Feature::WorkdirAsSourceDir
-            | Feature::PrInWorkdir => true,
+            | Feature::PrInWorkdir
+            | Feature::AddFragments
+            | Feature::BuiltinFragments
+            | Feature::RecipeVirtualProviders => true,
         }
     }
 }
@@ -433,6 +452,9 @@ mod tests {
             (UnpackDir, false, false, true),
             (WorkdirAsSourceDir, true, true, false),
             (PrInWorkdir, true, false, false),
+            (AddFragments, false, false, true),
+            (BuiltinFragments, false, false, true),
+            (RecipeVirtualProviders, false, false, true),
         ];
         assert_eq!(table.len(), Feature::ALL.len());
         for (f, k, s, w) in table {
@@ -449,6 +471,12 @@ mod tests {
         assert!(!Release::Styhead.has(WorkdirAsSourceDir));
         assert!(Release::Mickledore.has(PrInWorkdir));
         assert!(!Release::Nanbield.has(PrInWorkdir));
+        assert!(!Release::Styhead.has(AddFragments));
+        assert!(Release::Walnascar.has(AddFragments));
+        assert!(!Release::Walnascar.has(BuiltinFragments));
+        assert!(Release::Whinlatter.has(BuiltinFragments));
+        assert!(!Release::Styhead.has(RecipeVirtualProviders));
+        assert!(Release::Walnascar.has(RecipeVirtualProviders));
         assert!(Feature::ALL.iter().all(|f| f.verified()));
     }
 

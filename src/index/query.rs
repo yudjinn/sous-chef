@@ -82,7 +82,7 @@ pub struct StatementRow {
     /// 0-based position in the file.
     pub ord: u32,
     /// `assign`, `function`, `pydef`, `inherit`, `include`, `addtask`, `deltask`,
-    /// `addhandler`, `export_functions`, `export`, `unset`, `unknown`.
+    /// `addhandler`, `export_functions`, `export`, `unset`, `addfragments`, `unknown`.
     pub kind: String,
     pub name: Option<String>,
     pub base: Option<String>,
@@ -97,7 +97,7 @@ pub struct StatementRow {
 /// What [`enclosing_item`] returns.
 pub type ItemRow = StatementRow;
 
-/// One edge (`require`, `include`, `include_all`, `inherit`, `bbappend`).
+/// One edge (`require`, `include`, `include_all`, `inherit`, `addfragments`, `bbappend`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EdgeRow {
     pub id: i64,

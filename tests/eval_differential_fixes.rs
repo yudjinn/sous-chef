@@ -9,9 +9,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::*;
-use sous_chef::eval::{self, ConfigCache, DataStore, Target};
+use sous_chef::eval::{self, ConfigCache, DataStore, RefProblem, Target};
 use sous_chef::index::Index;
 use sous_chef::index::query;
+use sous_chef::release::Feature;
 use sous_chef::workspace::Workspace;
 use sous_chef::workspace::resolve;
 
@@ -45,6 +46,12 @@ fn modified(edit: impl FnOnce(&Path)) -> Fx {
     index(ws, tmp, root)
 }
 
+/// As [`modified`], with `release = "<codename>"` in `sous-chef.toml`.
+fn modified_release(codename: &str, edit: impl FnOnce(&Path)) -> Fx {
+    let (tmp, root, _cfg, ws) = temp_ws_release(codename, edit);
+    index(ws, tmp, root)
+}
+
 fn write(root: &Path, rel: &str, text: &str) {
     let p = root.join(rel);
     fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -71,6 +78,282 @@ fn eval(fx: &Fx, t: &Target) -> DataStore {
 
 fn text(ds: &DataStore, name: &str) -> Option<String> {
     ds.value(name).map(|v| v.text)
+}
+
+fn replace_in(root: &Path, rel: &str, from: &str, to: &str) {
+    let p = root.join(rel);
+    let s = fs::read_to_string(&p).unwrap();
+    assert!(s.contains(from), "{rel} has no {from:?}");
+    fs::write(p, s.replace(from, to)).unwrap();
+}
+
+// ---------------------------------------------------------------------------------------
+// Bug 1: configuration fragments (addfragments)
+// ---------------------------------------------------------------------------------------
+
+/// OE-core's Wrynose `bitbake.conf` lines 813-822, in the fixture's stand-in.
+const FRAGMENTS_4: &str = "include conf/toolcfg.conf\ninclude conf/local.conf\n\n\
+OE_FRAGMENTS_PREFIX ?= \"conf/fragments\"\n\
+OE_FRAGMENTS_METADATA_VARS ?= \"BB_CONF_FRAGMENT_SUMMARY BB_CONF_FRAGMENT_DESCRIPTION\"\n\
+OE_FRAGMENTS_BUILTIN ?= \"machine:MACHINE distro:DISTRO\"\n\
+addfragments ${OE_FRAGMENTS_PREFIX} OE_FRAGMENTS OE_FRAGMENTS_METADATA_VARS OE_FRAGMENTS_BUILTIN\n";
+
+/// Walnascar's form (BitBake 2.12): no built-in fragments.
+const FRAGMENTS_3: &str = "include conf/toolcfg.conf\ninclude conf/local.conf\n\n\
+OE_FRAGMENTS_PREFIX ?= \"conf/fragments\"\n\
+OE_FRAGMENTS_METADATA_VARS ?= \"BB_CONF_FRAGMENT_SUMMARY BB_CONF_FRAGMENT_DESCRIPTION\"\n\
+addfragments ${OE_FRAGMENTS_PREFIX} OE_FRAGMENTS OE_FRAGMENTS_METADATA_VARS\n";
+
+/// A build configured the way `bitbake-setup` configures it: no `MACHINE` / `DISTRO` in
+/// `local.conf`, fragments in `conf/toolcfg.conf`, one named fragment in meta-core.
+fn fragment_build(root: &Path, directive: &str, toolcfg: &str) {
+    replace_in(
+        root,
+        "meta-core/conf/bitbake.conf",
+        "include conf/local.conf\n",
+        directive,
+    );
+    replace_in(
+        root,
+        "build/conf/local.conf",
+        "MACHINE ??= \"qemux86\"\nDISTRO ?= \"testdistro\"\n",
+        "",
+    );
+    write(root, "build/conf/toolcfg.conf", toolcfg);
+    write(
+        root,
+        "meta-core/conf/fragments/test/extra.conf",
+        "BB_CONF_FRAGMENT_SUMMARY = \"An extra setting\"\nEXTRA_FROM_FRAGMENT = \"yes\"\n",
+    );
+}
+
+const TOOLCFG: &str = "# Automated config file controlled by tools\n\
+OE_FRAGMENTS += \"distro/testdistro machine/boardx core/test/extra\"\n";
+
+#[test]
+fn machine_and_distro_come_from_builtin_fragments() {
+    let fx = modified(|r| fragment_build(r, FRAGMENTS_4, TOOLCFG));
+    let ds = eval(&fx, &target(None));
+    let machine = ds.value("MACHINE").unwrap();
+    assert_eq!(machine.text, "boardx");
+    assert!(!machine.unevaluated_python && machine.unresolved.is_empty());
+    assert_eq!(text(&ds, "DISTRO").as_deref(), Some("testdistro"));
+    // The machine conf is read: MACHINEOVERRIDES =. "socx:" and TARGET_ARCH = "arm".
+    let ovr = ds.value("OVERRIDES").unwrap().text;
+    assert!(ovr.starts_with("linux:arm:"), "{ovr}");
+    assert!(ovr.contains(":socx:boardx:testdistro:"), "{ovr}");
+    // The history names the toolcfg.conf line, reached through the addfragments line.
+    let hist = ds.history("MACHINE");
+    let (op, _) = hist.last().unwrap();
+    assert_eq!(op.loc.to_string(), "build:conf/toolcfg.conf:2");
+    assert_eq!(
+        op.via.last().unwrap().to_string(),
+        "meta-core:conf/bitbake.conf:56"
+    );
+    // The named fragment is included, and its metadata variables become flags.
+    assert_eq!(text(&ds, "EXTRA_FROM_FRAGMENT").as_deref(), Some("yes"));
+    assert_eq!(ds.value("BB_CONF_FRAGMENT_SUMMARY"), None);
+    assert_eq!(
+        ds.raw_flag("BB_CONF_FRAGMENT_SUMMARY", "core/test/extra")
+            .as_deref(),
+        Some("An extra setting")
+    );
+    assert!(
+        ds.files()
+            .iter()
+            .any(|v| v.loc.path == Path::new("conf/fragments/test/extra.conf")),
+    );
+    assert!(
+        ds.replay().references.is_empty(),
+        "{:?}",
+        ds.replay().references
+    );
+    // An explicit target still wins.
+    let t = Target {
+        machine: Some("qemux86".into()),
+        ..Target::default()
+    };
+    let ds = eval(&fx, &t);
+    assert_eq!(text(&ds, "MACHINE").as_deref(), Some("qemux86"));
+    assert!(
+        ds.replay().references.is_empty(),
+        "{:?}",
+        ds.replay().references
+    );
+}
+
+#[test]
+fn a_recipe_is_evaluated_for_the_fragment_machine() {
+    let fx = modified(|r| fragment_build(r, FRAGMENTS_4, TOOLCFG));
+    let ds = eval(&fx, &target(Some("hello")));
+    assert_eq!(text(&ds, "MACHINE").as_deref(), Some("boardx"));
+    let ovr = ds.value("OVERRIDES").unwrap().text;
+    assert!(ovr.contains(":pn-hello:"), "{ovr}");
+    assert!(ovr.contains(":socx:boardx:testdistro:"), "{ovr}");
+}
+
+#[test]
+fn an_unknown_fragment_is_reported() {
+    let fx = modified(|r| {
+        fragment_build(
+            r,
+            FRAGMENTS_4,
+            "OE_FRAGMENTS += \"machine/boardx core/test/nosuch\"\n",
+        )
+    });
+    let ds = eval(&fx, &target(None));
+    // (No distro fragment here: `include conf/distro/${DISTRO}.conf` is reported too.)
+    let refs: Vec<_> = ds
+        .replay()
+        .references
+        .iter()
+        .filter(|r| r.kind == "addfragments")
+        .collect();
+    assert_eq!(refs.len(), 1, "{refs:?}");
+    assert_eq!(refs[0].text, "core/test/nosuch");
+    assert!(
+        matches!(&refs[0].problem, RefProblem::NotFound(w) if w.contains("conf/fragments/test/nosuch.conf")),
+        "{refs:?}"
+    );
+    assert_eq!(
+        refs[0].loc.as_ref().unwrap().to_string(),
+        "meta-core:conf/bitbake.conf:56"
+    );
+    assert_eq!(text(&ds, "MACHINE").as_deref(), Some("boardx"));
+}
+
+#[test]
+fn a_fragment_list_that_needs_python_flags_the_builtin_variables() {
+    let fx = modified(|r| {
+        fragment_build(r, FRAGMENTS_4, "OE_FRAGMENTS = \"${@'machine/boardx'}\"\n");
+        // A weak default is allowed next to a built-in fragment.
+        append_to(r, "build/conf/local.conf", "MACHINE ??= \"qemux86\"\n");
+    });
+    let ds = eval(&fx, &target(None));
+    let refs = &ds.replay().references;
+    assert!(
+        refs.iter()
+            .any(|r| r.kind == "addfragments" && r.problem == RefProblem::Python),
+        "{refs:?}"
+    );
+    let m = ds.value("MACHINE").unwrap();
+    assert_eq!(m.text, "qemux86");
+    assert_eq!(m.unresolved, ["OE_FRAGMENTS"]);
+    assert!(ds.value("DISTRO").is_none_or(|d| !d.unresolved.is_empty()));
+}
+
+#[test]
+fn a_builtin_fragment_next_to_an_assignment_is_fatal() {
+    let fx = modified(|r| {
+        fragment_build(r, FRAGMENTS_4, TOOLCFG);
+        append_to(r, "build/conf/local.conf", "MACHINE = \"qemux86\"\n");
+    });
+    let ds = eval(&fx, &target(None));
+    let refs = &ds.replay().references;
+    assert!(
+        refs.iter().any(|r| r.text == "machine/boardx"
+            && matches!(&r.problem, RefProblem::Fatal(m) if m.contains("already got an assignment"))),
+        "{refs:?}"
+    );
+}
+
+#[test]
+fn fragments_on_older_releases() {
+    // Scarthgap (BitBake 2.8): no such directive; BitBake fails with "unparsed line".
+    let fx = modified_release("scarthgap", |r| fragment_build(r, FRAGMENTS_4, TOOLCFG));
+    let ds = eval(&fx, &target(None));
+    let refs = &ds.replay().references;
+    assert!(
+        refs.iter().any(|r| r.kind == "addfragments"
+            && r.problem == RefProblem::NotInRelease(Feature::AddFragments)),
+        "{refs:?}"
+    );
+    assert_eq!(ds.value("MACHINE"), None);
+    assert_eq!(text(&ds, "EXTRA_FROM_FRAGMENT"), None);
+
+    // Walnascar (BitBake 2.12): three arguments, no built-in fragments; `machine/boardx`
+    // is a named fragment of a layer `machine`, which does not exist.
+    let fx = modified_release("walnascar", |r| fragment_build(r, FRAGMENTS_3, TOOLCFG));
+    let ds = eval(&fx, &target(None));
+    assert_eq!(text(&ds, "EXTRA_FROM_FRAGMENT").as_deref(), Some("yes"));
+    assert_eq!(ds.value("MACHINE"), None);
+    let refs = &ds.replay().references;
+    let words: Vec<&str> = refs
+        .iter()
+        .filter(|r| r.kind == "addfragments")
+        .map(|r| r.text.as_str())
+        .collect();
+    assert_eq!(words, ["distro/testdistro", "machine/boardx"], "{refs:?}");
+
+    // The four-argument form on Walnascar: the first group takes two words (greedy), so
+    // the fragments variable is OE_FRAGMENTS_METADATA_VARS, whose words have no `/`.
+    let fx = modified_release("walnascar", |r| fragment_build(r, FRAGMENTS_4, TOOLCFG));
+    let ds = eval(&fx, &target(None));
+    assert!(
+        ds.replay()
+            .references
+            .iter()
+            .any(|r| matches!(&r.problem, RefProblem::Fatal(m) if m.contains("no `/`"))),
+        "{:?}",
+        ds.replay().references
+    );
+
+    // The three-argument form on Wrynose is an unparsed line.
+    let fx = modified(|r| fragment_build(r, FRAGMENTS_3, TOOLCFG));
+    let ds = eval(&fx, &target(None));
+    assert!(
+        ds.replay()
+            .references
+            .iter()
+            .any(|r| matches!(&r.problem, RefProblem::Fatal(m) if m.contains("unparsed line"))),
+        "{:?}",
+        ds.replay().references
+    );
+}
+
+#[test]
+fn the_addfragments_line_is_a_statement_with_an_edge() {
+    let src = "addfragments ${OE_FRAGMENTS_PREFIX} OE_FRAGMENTS OE_FRAGMENTS_METADATA_VARS OE_FRAGMENTS_BUILTIN\n";
+    let parsed = sous_chef::parse::parse(src);
+    let st = &parsed.statements[0];
+    assert_eq!(st.span.start, 1);
+    let af = st.add_fragments().unwrap();
+    assert_eq!(
+        af.groups(4).unwrap(),
+        [
+            "${OE_FRAGMENTS_PREFIX}",
+            "OE_FRAGMENTS",
+            "OE_FRAGMENTS_METADATA_VARS",
+            "OE_FRAGMENTS_BUILTIN"
+        ]
+    );
+    assert_eq!(
+        af.groups(3).unwrap(),
+        [
+            "${OE_FRAGMENTS_PREFIX} OE_FRAGMENTS",
+            "OE_FRAGMENTS_METADATA_VARS",
+            "OE_FRAGMENTS_BUILTIN"
+        ]
+    );
+    assert_eq!(af.groups(5), None);
+    // Fewer than three arguments never parse.
+    let bad = sous_chef::parse::parse("addfragments a b\n");
+    assert!(bad.diagnostics[0].message.starts_with("unparsed line"));
+
+    let fx = modified(|r| fragment_build(r, FRAGMENTS_4, TOOLCFG));
+    let conf = query::file_by_path(&fx.idx, "meta-core", Path::new("conf/bitbake.conf"))
+        .unwrap()
+        .unwrap();
+    let edges = query::edges_from(&fx.idx, conf.id).unwrap();
+    let e = edges.iter().find(|e| e.kind == "addfragments").unwrap();
+    assert_eq!(e.line, Some(56));
+    assert!(e.target.is_none());
+    assert_eq!(
+        e.target_text,
+        "${OE_FRAGMENTS_PREFIX} OE_FRAGMENTS OE_FRAGMENTS_METADATA_VARS OE_FRAGMENTS_BUILTIN"
+    );
+    let stmts = query::statements_in(&fx.idx, conf.id, &Default::default()).unwrap();
+    assert!(stmts.iter().any(|s| s.kind == "addfragments"));
 }
 
 // ---------------------------------------------------------------------------------------

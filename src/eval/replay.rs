@@ -11,7 +11,10 @@
 //! `conf/bblayers.conf`; every layer's `conf/layer.conf` in `BBLAYERS` order with `LAYERDIR`
 //! and `LAYERDIR_RE` set, each `${LAYERDIR}` / `${LAYERDIR_RE}` reference replaced in place
 //! afterwards (`expandVarref`) and both deleted after the last layer; `conf/bitbake.conf`
-//! found on `BBPATH`, following its includes as written; then `base` and every `INHERIT`
+//! found on `BBPATH`, following its includes and its `addfragments` directive (OE
+//! configuration fragments, [`Feature::AddFragments`]: built-in fragments set `MACHINE` /
+//! `DISTRO`, named ones are included; see `Replay::add_fragments`) as written; then `base`
+//! and every `INHERIT`
 //! class, in that order, as global classes. `MACHINE` / `DISTRO` from the [`Target`] are set
 //! first and set again after every configuration assignment to them, so they win over the
 //! configured values (as an environment setting would win over `??=`, and more).
@@ -49,7 +52,7 @@
 //! variable, is not found or closes a cycle is recorded in [`ReplayNotes::references`] and
 //! skipped.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -94,6 +97,11 @@ pub struct ReplayNotes {
     /// Base names of variables that anonymous python changes by a literal name; their
     /// values carry `unevaluated_python`.
     pub python_vars: BTreeSet<String>,
+    /// Base names of variables a statement the replay could not apply would have set
+    /// (`MACHINE` and `DISTRO` when the `addfragments` list cannot be expanded), with the
+    /// names that stood in the way; their values carry those names in `unresolved`.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub unresolved_vars: BTreeMap<String, Vec<String>>,
     /// References (`include`, `require`, `include_all`, `inherit`, `inherit_defer`,
     /// `INHERIT`) that were not followed, and why.
     pub references: Vec<RefIssue>,
@@ -163,6 +171,10 @@ pub enum RefProblem {
     /// Scarthgap): BitBake fails to parse the file there ("unparsed line"). The replay skips
     /// the statement and goes on.
     NotInRelease(Feature),
+    /// BitBake stops with this error at the statement (an `addfragments` line whose form
+    /// the release does not accept, a built-in fragment for a variable that already has a
+    /// value, a fragment name without `/`). The replay skips what failed and goes on.
+    Fatal(String),
 }
 
 /// One piece of a function's value (see [`DataStore::function`]).
@@ -1011,6 +1023,7 @@ impl<'a> Replay<'a> {
                 }
             }
             "include" => self.include(st, via, file)?,
+            "addfragments" => self.add_fragments(st, via)?,
             "export_functions" => self.export_functions(st, via, classname),
             // addtask, deltask, addhandler: task and handler bookkeeping, not values.
             _ => {}
@@ -1350,6 +1363,290 @@ impl<'a> Replay<'a> {
             }
         }
         Ok(())
+    }
+
+    /// `AddFragmentsNode.eval` (BitBake 2.18 `lib/bb/parse/ast.py`; 2.12 without the
+    /// built-in fragments). See docs/bitbake-semantics.md, "Configuration fragments".
+    fn add_fragments(&mut self, st: &StatementRow, via: &[Loc]) -> Result<()> {
+        const KIND: &str = "addfragments";
+        let line = st.value.clone().unwrap_or_default();
+        let Some(af) = crate::parse::ast::add_fragments_line(&line) else {
+            return Ok(());
+        };
+        let release = self.ws.release.release;
+        if !release.has(Feature::AddFragments) {
+            // Before BitBake 2.12 the line is an unparsed line: the file fails to parse.
+            self.issue(
+                Some(&st.loc),
+                via,
+                KIND,
+                &line,
+                RefProblem::NotInRelease(Feature::AddFragments),
+            );
+            return Ok(());
+        }
+        let builtin_form = release.has(Feature::BuiltinFragments);
+        let Some(groups) = af.groups(if builtin_form { 4 } else { 3 }) else {
+            self.issue(
+                Some(&st.loc),
+                via,
+                KIND,
+                &line,
+                RefProblem::Fatal(format!(
+                    "unparsed line: `addfragments` takes {} arguments on {release}",
+                    if builtin_form { 4 } else { 3 }
+                )),
+            );
+            return Ok(());
+        };
+        let (prefix, frag_var, flagged_var) = (&groups[0], &groups[1], &groups[2]);
+        let builtin_var = groups.get(3);
+        if builtin_form
+            && self
+                .ds
+                .value("_BB_SKIP_FRAGMENTS")
+                .is_some_and(|v| v.text == "1")
+        {
+            return Ok(());
+        }
+
+        // BitBake reads the lists before it looks at the fragments; an unset list variable
+        // is a python exception (`None.split()`).
+        let list = |r: &mut Self, var: &str| -> Option<Vec<String>> {
+            match r.ds.value(var) {
+                Some(v) => Some(v.text.split_whitespace().map(str::to_string).collect()),
+                None => {
+                    r.issue(
+                        Some(&st.loc),
+                        via,
+                        KIND,
+                        &line,
+                        RefProblem::Fatal(format!("{var} is not set (`None.split()`)")),
+                    );
+                    None
+                }
+            }
+        };
+        let Some(flagged) = list(self, flagged_var) else {
+            return Ok(());
+        };
+        let mut builtin: Vec<(String, String)> = Vec::new();
+        if let Some(bv) = builtin_var {
+            let Some(words) = list(self, bv) else {
+                return Ok(());
+            };
+            for w in words {
+                // `{f[0]: f[1] for f in [f.split(':') ...]}`: a word without `:` raises.
+                let parts: Vec<&str> = w.split(':').collect();
+                if parts.len() < 2 {
+                    self.issue(
+                        Some(&st.loc),
+                        via,
+                        KIND,
+                        &line,
+                        RefProblem::Fatal(format!("{bv} word {w:?} has no `:` (IndexError)")),
+                    );
+                    return Ok(());
+                }
+                let (k, v) = (parts[0].to_string(), parts[1].to_string());
+                match builtin.iter_mut().find(|(bk, _)| *bk == k) {
+                    Some(e) => e.1 = v,
+                    None => builtin.push((k, v)),
+                }
+            }
+        }
+
+        let Some(fragments) = self.ds.value(frag_var) else {
+            return Ok(());
+        };
+        if fragments.unevaluated_python || !fragments.unresolved.is_empty() {
+            let problem = if fragments.unevaluated_python {
+                RefProblem::Python
+            } else {
+                RefProblem::Undefined(fragments.unresolved.clone())
+            };
+            self.issue(Some(&st.loc), via, KIND, frag_var, problem);
+            // What the built-in fragments would set is not known.
+            let notes = Arc::make_mut(&mut self.ds.notes);
+            for (_, var) in &builtin {
+                let e = notes.unresolved_vars.entry(var.clone()).or_default();
+                if !e.contains(frag_var) {
+                    e.push(frag_var.clone());
+                }
+            }
+            self.ds.ovr_cache = OnceLock::new();
+            return Ok(());
+        }
+        let words: Vec<String> = fragments
+            .text
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        let mut child_via = via.to_vec();
+        child_via.push(st.loc.clone());
+        for f in words {
+            let Some((layerid, name)) = f.split_once('/') else {
+                self.issue(
+                    Some(&st.loc),
+                    via,
+                    KIND,
+                    &f,
+                    RefProblem::Fatal(format!(
+                        "fragment {f:?} has no `/` (ValueError in `f.split('/', 1)`)"
+                    )),
+                );
+                continue;
+            };
+            if let Some((_, var)) = builtin.iter().find(|(k, _)| k == layerid) {
+                self.builtin_fragment(st, via, frag_var, &f, var, name);
+                continue;
+            }
+            let Some(rel) =
+                self.expand_ref(&format!("{prefix}/{name}.conf"), Some(&st.loc), via, KIND)
+            else {
+                continue;
+            };
+            match self.find_fragment(layerid, &rel) {
+                Some(path) => {
+                    if self.cycle(&path, &st.loc, via, KIND, &f) {
+                        continue;
+                    }
+                    self.visit(&path, FileKind::Conf, child_via.clone(), true)?;
+                    for v in &flagged {
+                        // setVarFlag(v, f, getVar(v)); setVar(v, None)
+                        if let Some(val) = self.ds.value(v) {
+                            put_flag(&mut self.ds, v, &f, &val.text);
+                        }
+                        if let Some(var) = Arc::make_mut(&mut self.ds.vars).get_mut(v.as_str()) {
+                            let var = Arc::make_mut(var);
+                            var.content = None;
+                            var.default = None;
+                        }
+                        self.ds.ovr_cache = OnceLock::new();
+                    }
+                }
+                None => self.issue(
+                    Some(&st.loc),
+                    via,
+                    KIND,
+                    &f,
+                    RefProblem::NotFound(format!("fragment {f} ({rel} in layer {layerid})")),
+                ),
+            }
+        }
+        Ok(())
+    }
+
+    /// `check_and_set_builtin_fragment`: `<prefix>/<value>` sets the variable the prefix
+    /// names, as a plain assignment made where the fragments variable got the word.
+    fn builtin_fragment(
+        &mut self,
+        st: &StatementRow,
+        via: &[Loc],
+        frag_var: &str,
+        fragment: &str,
+        var: &str,
+        value: &str,
+    ) {
+        let pinned = self.pins.iter().any(|(n, _)| *n == var);
+        // getVar(var, noweakdefault=True) != None: a value other than a `??=` default.
+        let assigned = self.ds.vars.get(var).is_some_and(|v| {
+            v.content.is_some() || !v.appends.is_empty() || !v.prepends.is_empty()
+        });
+        if assigned && !pinned {
+            self.issue(
+                Some(&st.loc),
+                via,
+                "addfragments",
+                fragment,
+                RefProblem::Fatal(format!(
+                    "a builtin fragment '{fragment}' is used while {var} has already got an assignment"
+                )),
+            );
+            return;
+        }
+        // The history entry names the last `=` / `+=` of the fragments variable that holds
+        // the word (BitBake: `fh['op'] in ("set", "append") and fragment in fh["detail"]`).
+        let origin = self
+            .ds
+            .history(frag_var)
+            .into_iter()
+            .map(|(op, _)| op)
+            .rfind(|op| {
+                op.var.overrides.is_empty()
+                    && op.var.flag.is_none()
+                    && matches!(op.op, AssignOp::Set | AssignOp::Append)
+                    && op.value.contains(fragment)
+            });
+        let (loc, mut op_via) = match origin {
+            Some(op) => (op.loc, op.via),
+            None => (st.loc.clone(), via.to_vec()),
+        };
+        op_via.push(st.loc.clone());
+        self.ds.apply(VarOp {
+            var: VarRef {
+                base: var.to_string(),
+                overrides: Vec::new(),
+                flag: None,
+                legacy_syntax: false,
+            },
+            op: AssignOp::Set,
+            value: value.to_string(),
+            loc,
+            via: op_via,
+        });
+        self.after_write(var, &[], None, true);
+    }
+
+    /// `find_fragment`: the first `BBLAYERS` entry holding `<entry>/<rel>` whose collection
+    /// (`bb.utils.get_file_layer`) is `layerid`.
+    fn find_fragment(&self, layerid: &str, rel: &str) -> Option<PathBuf> {
+        for layer in &self.ws.layers {
+            let cand = normalize(&layer.root.join(rel));
+            let exists = self.files.by_abs.contains_key(&cand) || cand.is_file();
+            if exists && self.file_collection(&cand, &layer.collections).as_deref() == Some(layerid)
+            {
+                return Some(cand);
+            }
+        }
+        None
+    }
+
+    /// `get_file_layer` for a file that no `BBFILES` entry matches (a `.conf`): the
+    /// collection with the longest `BBFILE_PATTERN` that matches the path (`re.match`).
+    /// Falls back to the first of `own` (the collections of the layer the file is in) when
+    /// no pattern can be evaluated.
+    fn file_collection(&self, path: &Path, own: &[String]) -> Option<String> {
+        let text = path.to_string_lossy();
+        let mut best: Option<(usize, String)> = None;
+        let mut any = false;
+        let mut seen = HashSet::new();
+        for l in &self.ws.layers {
+            for c in &l.collections {
+                if !seen.insert(c.clone()) {
+                    continue;
+                }
+                let Some(v) = self.ds.value(&format!("BBFILE_PATTERN_{c}")) else {
+                    continue;
+                };
+                if v.unevaluated_python || !v.unresolved.is_empty() {
+                    continue;
+                }
+                any = true;
+                let longer = best.as_ref().is_none_or(|(n, _)| v.text.len() > *n);
+                if longer
+                    && let Ok(re) = Regex::new(&format!("^(?:{})", v.text))
+                    && re.is_match(&text)
+                {
+                    best = Some((v.text.len(), c.clone()));
+                }
+            }
+        }
+        match best {
+            Some((_, c)) => Some(c),
+            None if !any => own.first().cloned(),
+            None => None,
+        }
     }
 
     /// True (and an issue) if `t` is already being parsed.
