@@ -411,10 +411,15 @@ same time):
 
 Open items and gaps (not resolved in wave 3):
 
-- **Decision for the user: non-writable layers and multi-release lint.** A layer that is
-  not writable is checked against the workspace release alone, even when it is named
-  explicitly or when no layer is writable. The decision recorded in overview.md says
-  "every supported release it claims".
+- **Non-writable layers and multi-release lint: decided, not yet implemented.** The user
+  decided (2026-11-17, recorded in overview.md) that a layer named as the lint target, and
+  every layer when none is writable, is checked against every release it claims; only an
+  upstream layer swept in by `--all` gets the workspace release alone. The code still gives
+  every non-writable layer the workspace release alone (`release::lint_releases`, used by
+  the `ReleaseCache` in `src/lint/mod.rs`). Scheduled as an agent task at wave 4
+  integration, after the three rule streams are merged, so that one agent can adjust the
+  rule tests the change affects. The same task stores the release in the index so that
+  changing `release` in `sous-chef.toml` rebuilds the edges.
 - **Stale index after a release change.** Changing only `release` in `sous-chef.toml` does
   not rebuild edges; the index keeps edges resolved for the old release until a file
   changes. Fixing it needs the release stored in the index (a schema change).
