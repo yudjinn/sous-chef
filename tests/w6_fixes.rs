@@ -431,3 +431,71 @@ fn an_unreferenced_unparsable_conf_under_conf_is_data() {
     assert!(files.contains("conf/included.conf"), "{found:#?}");
     assert!(files.contains("conf/machine/odd.conf"), "{found:#?}");
 }
+
+// ---------------------------------------------------------------------------------------
+// Item 5: one tokeniser for values (parse::words)
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn override_dead_does_not_take_python_code_for_override_names() {
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-core/conf/machine/qemux86.conf",
+            "MACHINEOVERRIDES =. \"${@bb.utils.contains('TUNE_FEATURES', 'armv7a', 'armv7a:', '', d)}\"\n",
+        );
+        append_to(
+            r,
+            "meta-mine/recipes-app/app/app_0.1.bb",
+            "EXTRA_X:armv7a = \"1\"\nEXTRA_X:utils = \"1\"\n",
+        );
+    });
+    let found = lint_all(&fx, &["override/dead"]);
+    let msgs: Vec<&str> = found
+        .iter()
+        .filter(|f| f.loc.path.ends_with("app_0.1.bb"))
+        .map(|f| f.message.as_str())
+        .collect();
+    // `armv7a` is a value the python may add: known. `utils` is python code: not a name.
+    assert!(!msgs.iter().any(|m| m.contains("`armv7a`")), "{msgs:#?}");
+    assert!(msgs.iter().any(|m| m.contains("`utils`")), "{msgs:#?}");
+}
+
+/// Values with a `${@...}` expression (spaces, quotes, `file://` and `:` inside) in every
+/// place a rule splits one: no finding may be about a fragment of the expression.
+#[test]
+fn rules_do_not_split_python_expressions() {
+    const PY: &str = "${@' file://fix.patch' if d.getVar('X') else 'a:b'}";
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-mine/recipes-app/app/app_0.1.bb",
+            &format!("SRC_URI += \"{PY}\"\ninherit {PY}\nSRC_URI[sha256sum] = \"0\"\n"),
+        );
+        append_to(
+            r,
+            "meta-mine/recipes-core/hello/hello_1.1.bbappend",
+            &format!("SRC_URI += \"{PY}\"\n"),
+        );
+        append_to(
+            r,
+            "meta-mine/conf/layer.conf",
+            &format!("INHERIT += \"{PY}\"\nBBCLASSEXTEND += \"{PY}\"\n"),
+        );
+        append_to(
+            r,
+            "meta-core/conf/machine/qemux86.conf",
+            &format!("MACHINEOVERRIDES =. \"{PY}:\"\n"),
+        );
+    });
+    let found = lint_all(&fx, &[]);
+    for f in &found {
+        assert!(
+            !f.message.contains("fix.patch'")
+                && !f.message.contains("'a")
+                && !f.message.contains("b'}")
+                && !f.message.contains("file://fix.patch"),
+            "{f:#?}"
+        );
+    }
+}

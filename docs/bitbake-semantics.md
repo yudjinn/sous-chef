@@ -203,7 +203,13 @@ for the python OE-core writes the two agree.) Used by `eval/overrides.rs`,
 `eval/providers.rs`, `eval/replay.rs` (`INHERIT`, `BB_DEFER_BBCLASSES`, the
 `BB_RECIPE_VIRTUAL_PROVIDERS` rewrite, which keeps an expression whole when it joins the
 words again), `index/scan.rs` (`provides` and `depends` rows, the `PACKAGECONFIG` build
-field) and the `overrides` and `deps` tools. Lint rules still split values with their own code.
+field), the `overrides` and `deps` tools, and (w6) every lint rule that splits a value
+(`SRC_URI` entries, `inherit` / `INHERIT` class lists, `BBCLASSEXTEND`, the `*OVERRIDES`
+values `KnownOverrides` reads, task names, the words of `bblayers.conf` lines). The known
+set of `override/dead` (and the `overrides` tool's dead view) takes candidate names from
+`words::visible_text`: the text outside `${...}` and, inside `${@...}`, only its quoted
+strings (the values python may add, `'armv7a:'`), never the python code (`bb`, `utils`,
+`d`).
 
 ### Datastore
 

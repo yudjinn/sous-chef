@@ -23,14 +23,15 @@ use crate::index::scan::written_name;
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
+use crate::parse::words;
 use crate::types::{FileKind, LineSpan};
 
 pub struct OrgAppendMissingFilesextrapaths;
 
 /// The `file://` names in a `SRC_URI` value that need no expansion.
 fn file_names(value: &str) -> Vec<String> {
-    value
-        .split_whitespace()
+    words::words(value)
+        .into_iter()
         .filter_map(|w| w.strip_prefix("file://"))
         .map(|w| w.split(';').next().unwrap_or(w).to_string())
         .filter(|n| !n.is_empty() && !n.contains("${"))

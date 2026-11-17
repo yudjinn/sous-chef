@@ -205,13 +205,9 @@ impl Known {
     }
 }
 
-/// Words of an `OVERRIDES`-like value: runs of `[a-z0-9_+.-]`, `${...}` names excluded.
+/// Words of an `OVERRIDES`-like value ([`helpers::override_words`]).
 fn tokens(value: &str) -> Vec<String> {
-    value
-        .split(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || "-_+.".contains(c)))
-        .filter(|w| !w.is_empty())
-        .map(str::to_string)
-        .collect()
+    helpers::override_words(value)
 }
 
 /// The first override element of `var` that is dead, if any.
@@ -267,5 +263,11 @@ mod tests {
         let t = tokens("${@bb.utils.contains('TUNE_FEATURES', 'armv7a', 'armv7a:', '', d)}");
         assert!(t.contains(&"armv7a".to_string()), "{t:?}");
         assert!(!t.contains(&"TUNE_FEATURES".to_string()));
+        // The python code is not read as override names.
+        for code in ["bb", "utils", "contains", "d"] {
+            assert!(!t.contains(&code.to_string()), "{t:?}");
+        }
+        let t = tokens("${@'x' if d.getVar('A') else 'y'}:pn-${PN}:linux${@'gnu'}eabi");
+        assert_eq!(t, ["x", "y", "pn-", "linux", "gnu", "eabi"], "{t:?}");
     }
 }

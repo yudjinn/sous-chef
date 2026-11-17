@@ -20,6 +20,7 @@ use std::collections::HashSet;
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
+use crate::parse::words;
 use crate::types::FileKind;
 
 pub struct OrgClassExportFunctions;
@@ -62,7 +63,7 @@ impl Rule for OrgClassExportFunctions {
                     exported.extend(names.iter().cloned());
                 }
                 StatementKind::AddTask { name, .. } => {
-                    added.extend(name.split_whitespace().map(task_name));
+                    added.extend(words::words(name).into_iter().map(task_name));
                 }
                 _ => {}
             }

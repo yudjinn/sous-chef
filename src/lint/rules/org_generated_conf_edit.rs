@@ -30,6 +30,7 @@ use crate::index::scan::written_name;
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
+use crate::parse::words;
 use crate::types::{AssignOp, FileKind, LineSpan};
 use crate::workspace::BUILD_LAYER;
 use crate::workspace::kas::{self, KasProject};
@@ -144,8 +145,8 @@ impl OrgGeneratedConfEdit {
     ) {
         let topdir = build.display().to_string();
         for (i, line) in text.lines().enumerate() {
-            for word in line
-                .split_whitespace()
+            for word in words::words(line)
+                .into_iter()
                 .map(|w| w.trim_matches(|c| c == '"' || c == '\\'))
                 .filter(|w| !w.is_empty() && !w.starts_with("BBLAYERS") && *w != "?=")
             {

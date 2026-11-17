@@ -18,6 +18,7 @@
 use crate::index::query;
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
+use crate::parse::words;
 use crate::release::Feature;
 use crate::types::{FileKind, LineSpan};
 use crate::workspace::resolve::{ClassDir, class_dir};
@@ -39,7 +40,7 @@ fn global_names(cx: &LintContext<'_>) -> Vec<String> {
     let mut out = vec!["base".to_string()];
     for base in GLOBAL_LISTS {
         for s in query::statements_by_base(cx.index, base, &scope).unwrap_or_default() {
-            for w in s.value.unwrap_or_default().split_whitespace() {
+            for w in words::words(&s.value.unwrap_or_default()) {
                 if !w.contains("${") && !out.iter().any(|o| o == w) {
                     out.push(w.to_string());
                 }

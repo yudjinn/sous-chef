@@ -34,6 +34,7 @@ use crate::eval::{DataStore, OpStatus};
 use crate::index::query;
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
+use crate::parse::words;
 use crate::types::{FileKind, LineSpan};
 
 pub struct HygieneMissingMetadata;
@@ -93,10 +94,8 @@ fn has_upstream(cx: &LintContext<'_>, data: &DataStore) -> bool {
                 .unwrap_or_default()
                 .iter()
                 .any(|s| {
-                    s.name
-                        .as_deref()
-                        .unwrap_or("")
-                        .split_whitespace()
+                    words::words(s.name.as_deref().unwrap_or(""))
+                        .into_iter()
                         .any(kind_class)
                 })
         })
@@ -109,7 +108,7 @@ fn has_upstream(cx: &LintContext<'_>, data: &DataStore) -> bool {
     };
     // A remote URL written out in the value is an upstream whatever the python pieces add;
     // without one, a value with python cannot be judged (and says nothing).
-    src_uri.text.split_whitespace().any(|w| {
+    words::words(&src_uri.text).into_iter().any(|w| {
         w.split_once("://").is_some_and(|(scheme, _)| {
             scheme != "file"
                 && !scheme.is_empty()

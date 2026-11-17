@@ -30,6 +30,7 @@ use std::collections::BTreeSet;
 use crate::index::query;
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
+use crate::parse::words;
 use crate::parse::{IncludeMode, StatementKind};
 use crate::release::{Feature, Release};
 use crate::types::{FileKind, LineSpan};
@@ -71,8 +72,8 @@ fn mentions_unpackdir(text: &str) -> bool {
 /// The `file://` entries of a `SRC_URI` value that land directly in the unpack directory
 /// (no `subdir=`), as written after `file://`.
 fn local_files(value: &str) -> Vec<String> {
-    value
-        .split_whitespace()
+    words::words(value)
+        .into_iter()
         .filter_map(|w| w.strip_prefix("file://"))
         .filter(|w| !w.split(';').skip(1).any(|p| p.starts_with("subdir=")))
         .map(|w| w.split(';').next().unwrap_or(w).to_string())

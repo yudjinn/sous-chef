@@ -19,6 +19,7 @@ use crate::index::scan::written_name;
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
+use crate::parse::words;
 use crate::types::FileKind;
 
 pub struct OrgPolicyInRecipe;
@@ -75,7 +76,7 @@ fn image_from_text(cx: &LintContext<'_>) -> Image {
             if classes.contains("${") {
                 unknown = true;
             }
-            if classes.split_whitespace().any(helpers::image_class) {
+            if words::words(classes).into_iter().any(helpers::image_class) {
                 return Image::Yes;
             }
         }

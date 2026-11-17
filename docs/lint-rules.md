@@ -113,7 +113,9 @@ Notes:
   or `pn-*` form, the target OS or architecture, or a class name; or any word in the value
   of an `OVERRIDES`, `MACHINEOVERRIDES`, `MACHINEOVERRIDES_EXTENDER`, `DISTROOVERRIDES`,
   `CLASSOVERRIDE`, `LIBCOVERRIDE`, `TCOVERRIDE`, `TUNEOVERRIDES` or `FILESOVERRIDES`
-  assignment of the workspace, python included. The override list counts as partly known
+  assignment of the workspace, python included (only the quoted strings of a `${@...}`
+  expression, the values it may add, not its code: `bb`, `utils`, `d` are no override
+  names). The override list counts as partly known
   when `OVERRIDES` needs python or has unresolved references, when anonymous python is
   opaque, or when it changes one of those variables; this is the usual case on real
   OE-core, so findings there are mostly info. The suggestion is a known machine, distro,

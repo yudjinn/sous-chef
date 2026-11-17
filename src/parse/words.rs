@@ -152,6 +152,58 @@ pub fn abbreviate(word: &str) -> String {
     out
 }
 
+/// The text of `s` that names something statically: the pieces outside `${...}` groups, and
+/// the contents of the quoted strings inside each `${@...}` group (the values python may
+/// add, never its code), in order. A `${VAR}` group gives nothing.
+/// `pn-${PN}` -> `["pn-"]`; `linux${@['', 'eabi'][x]}` -> `["linux", "", "eabi"]`.
+pub fn visible_text(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i < s.len() {
+        let rest = &s[i..];
+        if rest.starts_with("${") {
+            if start < i {
+                out.push(&s[start..i]);
+            }
+            let n = group_len(rest);
+            if rest.as_bytes().get(2) == Some(&b'@') {
+                quoted_strings(&rest[..n], &mut out);
+            }
+            i += n;
+            start = i;
+            continue;
+        }
+        let Some(c) = rest.chars().next() else { break };
+        i += c.len_utf8();
+    }
+    if start < s.len() {
+        out.push(&s[start..]);
+    }
+    out
+}
+
+/// The contents of the `'...'` / `"..."` strings in python text, `\` escapes skipped.
+fn quoted_strings<'a>(py: &'a str, out: &mut Vec<&'a str>) {
+    let b = py.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        let q = b[i];
+        if q == b'\'' || q == b'"' {
+            let start = i + 1;
+            i += 1;
+            while i < b.len() && b[i] != q {
+                if b[i] == b'\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            out.push(&py[start..i.min(py.len())]);
+        }
+        i += 1;
+    }
+}
+
 /// A word that holds an unevaluated `${...}` group: not a known name.
 pub fn is_unevaluated(word: &str) -> bool {
     word.contains("${")
@@ -234,6 +286,21 @@ mod tests {
             "${@...}dogbonedark"
         );
         assert_eq!(abbreviate("pn-${PN}"), "pn-${PN}");
+    }
+
+    #[test]
+    fn visible_text_keeps_literals_and_python_strings() {
+        assert_eq!(visible_text("pn-${PN}"), ["pn-"]);
+        assert_eq!(
+            visible_text("linux${@['', 'eabi'][d.getVar('X') != '']}x"),
+            ["linux", "", "eabi", "X", "", "x"]
+        );
+        assert_eq!(
+            visible_text("${@bb.utils.contains('TUNE_FEATURES', 'armv7a', 'armv7a:', '', d)}"),
+            ["TUNE_FEATURES", "armv7a", "armv7a:", ""]
+        );
+        assert_eq!(visible_text("a:b"), ["a:b"]);
+        assert!(visible_text("${A}").is_empty());
     }
 
     #[test]
