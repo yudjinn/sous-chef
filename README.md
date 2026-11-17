@@ -192,7 +192,8 @@ means no output and the tool result unchanged.
   stored under a handle and replaced by a digest and a `slice` hint.
 - **Edit, Write**: the edited file is reindexed and linted, and up to five findings at
   warning level or above are added; an edit in a layer that is not writable gets a line
-  suggesting a bbappend, with the `scaffold kind=where` call to run.
+  suggesting a bbappend, with the `scaffold kind=where name=<recipe>` call to run when the
+  file belongs to one recipe.
 
 Each can be switched off in `sous-chef.toml` (all default `true`); a switched-off hook
 exits 0 with no output:
