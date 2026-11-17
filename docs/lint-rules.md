@@ -388,6 +388,22 @@ Per rule with `--all` (rules with no finding either time left out):
 | hygiene/autorev, org/duplicate-versions, org/repeated-logic | 4 each | 4 each | |
 | override/missing-package | 3 | 0 | empty values and classes without packages (B10) |
 
+After branch `w6-fix` (measured 2026-11-17 with the same command, kas build, no BitBake run;
+"before" is `ba8902b`):
+
+| Run | Before | After |
+|---|---|---|
+| Default (13 files) | 1 finding (info, `hygiene/missing-metadata`) | the same |
+| With --all | 647 findings in 1719 files (3 E, 167 W, 477 I) | 625 findings in 1718 files (0 E, 166 W, 459 I) |
+
+| Rule (with --all) | Before | After | Cause |
+|---|---|---|---|
+| override/shadowed | 83 | 65 | the virtual-provider rewrite of `DEPENDS` is no assignment (18 false positives) |
+| org/recipe-path | 102 | 101 | an uncollected `.bb` gets one finding (`example.bb`: 2 -> 1) |
+| hygiene/parse-error | 3 | 0 | `conf/ccache.conf` is a data file |
+
+Every other rule's count is unchanged, and so is every other finding.
+
 What the rules still get wrong there, as far as it was checked:
 
 - `hygiene/parse-error`: fixed in w6 (3 -> 0 with `--all`): the 3 errors were in

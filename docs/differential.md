@@ -88,6 +88,27 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After w6-fix
+
+Re-run on 2026-11-17 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/w6-fix/`), at the end of branch `w6-fix`:
+
+| | Compared | Equal | Flagged (of which literal differs) | Known gap | Bug |
+|---|---|---|---|---|---|
+| Sample, explicit machine and distro: before | 1019 | 656 | 336 (20) | 27 | 0 |
+| Sample, explicit machine and distro: after | 1019 | 656 | 336 (20) | 27 | 0 |
+
+- **No class moved** (`classes.tsv` and `summary.txt` unchanged).
+- **Files in the history: same set for 830 of 832 names (was 828).** The rewrite of virtual
+  providers in `DEPENDS` is recorded as its own kind of operation
+  (`OpKind::VirtualProviderRewrite`) and, like BitBake's `[handleVirtRecipeProviders]`
+  python operation, left out of the comparison, so `tcmode-default.inc` no longer appears
+  only in the static history of `linux-kiss` and `virtual/kernel` `DEPENDS`. Left:
+  `kiss-image` `DEPENDS` and `B` (classes behind `${IMGCLASSES}` / `${SDK_CLASSES}`).
+- `gmp-native` and `nativesdk-zlib` are still not evaluated (the evaluator is called
+  directly); asked for through a tool they are now an error naming the base recipe
+  (bitbake-semantics.md, "What the static evaluator cannot do").
+
 ## After w5-fix-eval2
 
 Re-run on 2026-11-17 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,

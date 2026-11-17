@@ -1,11 +1,10 @@
 
-## Files in the history (832 variables without overrides; same set of files: 828)
+## Files in the history (832 variables without overrides; same set of files: 830)
 
 ### Files only in BitBake's history (file, count, first uses)
 {{LIVE}}/yocto-kiss/openembedded-core/meta/classes-recipe/image_types_wic.bbclass	1	kiss-image:DEPENDS
 {{LIVE}}/yocto-kiss/openembedded-core/meta/classes-recipe/populate_sdk_ext.bbclass	1	kiss-image:B
 ### Files only in the static history (file, count, first uses)
-{{LIVE}}/yocto-kiss/openembedded-core/meta/conf/distro/include/tcmode-default.inc	2	linux-kiss:DEPENDS virtual/kernel:DEPENDS
 
 ## Layers (bitbake-layers show-layers vs Workspace::discover)
 bitbake: 7 layers, static: 7 layers
