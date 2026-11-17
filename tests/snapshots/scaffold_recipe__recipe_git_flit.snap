@@ -1,0 +1,15 @@
+---
+source: tests/scaffold_recipe.rs
+expression: text
+---
+--- create meta-mine:recipes-app/widget/widget_1.2.bb
+SUMMARY = "A widget"
+LICENSE = "MIT"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=0835ade698e0bcf8506ecda2f7b4f302"
+
+SRC_URI = "git://github.com/example/widget.git;protocol=https;branch=main;destsuffix=${BP}"
+SRCREV = "89abcdef0123456789abcdef0123456789abcdef"
+
+inherit python_flit_core
+note: the git source unpacks into ${BP} (destsuffix=${BP}), so the default S works on every release from kirkstone to wrynose; from whinlatter that is the git fetcher's default and the parameter can be dropped
+note: class python_flit_core was not found in the indexed layers; it is the OE-core name, so the layer needs OE-core (or the layer that provides it) in BBLAYERS

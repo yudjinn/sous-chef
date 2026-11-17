@@ -1,0 +1,14 @@
+---
+source: tests/scaffold_append.rs
+expression: text
+---
+--- create meta-mine:recipes-core/libfoo/libfoo_%.bbappend
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+
+SRC_URI:append:boardx = " file://board.cfg"
+
+EXTRA_OECONF:append:boardx = " --board"
+FOO:boardx = "1"
+BAR:append:boardx = " x"
+BAZ:prepend:boardx = "y "
+note: copy board.cfg to meta-mine:recipes-core/libfoo/libfoo/board.cfg

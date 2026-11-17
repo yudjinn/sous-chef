@@ -1,0 +1,22 @@
+---
+source: tests/scaffold_append.rs
+expression: text
+---
+--- modify meta-mine:recipes-core/hello/hello_1.1.bbappend
+# Local changes to hello 1.1 only.
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+
+SRC_URI:append = " file://mine.patch"
+
+EXTRA_OECONF:append = " --with-mine"
+
+do_install:append() {
+	install -m 0644 ${S}/README ${D}${sysconfdir}/hello.readme
+}
+
+SRC_URI:append = " file://extra.patch"
+
+EXTRA_OECONF:append = " --more"
+note: file://mine.patch is already in the bbappend; not added again
+note: copy extra.patch to meta-mine:recipes-core/hello/hello/extra.patch
+note: meta-mine:recipes-core/hello/hello_1.1.bbappend already appends to meta-core:recipes-core/hello/hello_1.1.bb; the changes are added to it

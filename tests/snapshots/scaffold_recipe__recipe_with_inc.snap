@@ -1,0 +1,12 @@
+---
+source: tests/scaffold_recipe.rs
+expression: text
+---
+--- create meta-mine:recipes-core/hello/hello_1.2.bb
+require recipes-core/hello/hello.inc
+
+LIC_FILES_CHKSUM = "file://COPYING;md5=0835ade698e0bcf8506ecda2f7b4f302"
+
+SRC_URI[sha256sum] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+note: other versions share meta-core:recipes-core/hello/hello.inc; this file requires it and sets only version data
+note: ignored because meta-core:recipes-core/hello/hello.inc sets them: build

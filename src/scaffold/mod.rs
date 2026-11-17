@@ -152,7 +152,7 @@ pub struct Request {
 pub struct GenContext<'a> {
     pub ws: &'a Workspace,
     pub config: &'a Config,
-    /// May be stale or empty while `Index::refresh` is a stub.
+    /// Refreshed by [`execute`] just before [`Generator::plan`] is called.
     pub index: &'a Index,
     pub request: &'a Request,
 }
@@ -190,12 +190,12 @@ pub trait Generator: Sync {
 /// change to this file a generator task needs).
 pub fn generator(kind: Kind) -> Option<&'static dyn Generator> {
     match kind {
-        Kind::Recipe => None,   // T6.2: recipe.rs
-        Kind::Bbappend => None, // T6.2: append.rs
-        Kind::Layer => None,    // T6.3: layer.rs
-        Kind::Class => None,    // T6.3: class.rs
-        Kind::IncSplit => None, // T6.4: inc_split.rs
-        Kind::Where => None,    // T6.5: placement.rs
+        Kind::Recipe => Some(&recipe::RecipeGen), // T6.2: recipe.rs
+        Kind::Bbappend => Some(&append::AppendGen), // T6.2: append.rs
+        Kind::Layer => None,                      // T6.3: layer.rs
+        Kind::Class => None,                      // T6.3: class.rs
+        Kind::IncSplit => None,                   // T6.4: inc_split.rs
+        Kind::Where => None,                      // T6.5: placement.rs
     }
 }
 
@@ -638,7 +638,8 @@ pub trait PostWriteLint: Sync {
 /// rules on each, recipe-scope rules on each `.bb`, and layer-scope rules for their layers,
 /// keeping only findings located in the written files. `[lint] disable`, `[lint.severity]`
 /// and inline suppression apply. Files of a new layer are not in the workspace until
-/// `bblayers.conf` lists it, so they are not linted.
+/// `bblayers.conf` lists it, so they are not linted; neither are files that are not BitBake
+/// metadata (patches and other files a bbappend adds).
 pub struct RuleLint;
 
 impl PostWriteLint for RuleLint {
@@ -647,6 +648,8 @@ impl PostWriteLint for RuleLint {
             .files
             .iter()
             .filter(|p| t.ws.loc_for(p, LineSpan::line(1)).is_some())
+            // Patches and other files a scaffold adds are not BitBake metadata.
+            .filter(|p| crate::types::FileKind::from_path(p).is_some())
             .cloned()
             .collect();
         if files.is_empty() {
@@ -700,6 +703,9 @@ pub fn execute(
     };
     check_options(generator, &request.options)?;
     check_target_layer(ws, request.kind, request.layer.as_deref())?;
+    // Generators read the index (the recipe a bbappend extends, existing versions and
+    // `.inc` files) and cannot refresh it themselves (`GenContext.index` is shared).
+    index.refresh(ws)?;
     let plan = generator.plan(&GenContext {
         ws,
         config,
