@@ -88,6 +88,22 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After w9-final
+
+Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/w9-final/`, release build) at the end of the code part of
+branch `w9-final` (the `.inc` inherit contexts in the index, one statement-row conversion,
+stale job outputs at start), which also covers w7 (`addpylib`, inherit contexts in
+`classes/`, `BBFILES_DYNAMIC` through includes) and the end of w8:
+
+| | Compared | Equal | Flagged (of which literal differs) | Known gap | Bug |
+|---|---|---|---|---|---|
+| Sample, explicit machine and distro | 1019 | 656 | 336 (20) | 27 | 0 |
+
+- **No class moved**; `tests/fixtures/outputs/live/differential/summary.txt` and
+  `classes.tsv`, which the test rewrites, are unchanged. Files in the history: same set
+  for 830 of 832 names, as after w6-fix.
+
 ## After w8-eval
 
 Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
@@ -173,9 +189,10 @@ documented cause**. Since w5-fix-eval2 no flagged value lists `TCOVERRIDE` (156 
 
 Open, as documented gaps rather than bugs: `BBCLASSEXTEND` variants (`gmp-native`,
 `nativesdk-zlib` are refused, not evaluated); `LAYERDIR` is the canonical path, not the
-`BBLAYERS` text; anonymous python and python in `OVERRIDES` (behind most flags); the task
-`depends` flags and the whitespace of an unchanged `DEPENDS` in the virtual-provider rewrite.
-Not measured: other machines, distros and releases; functions and flags.
+`BBLAYERS` text; anonymous python and python in `OVERRIDES` (behind most flags). (The task
+`depends` flags and the whitespace of an unchanged `DEPENDS` in the virtual-provider
+rewrite, open here at first, were done in w8: "After w8-eval".) Not measured: other
+machines, distros and releases; functions and flags.
 
 **The test fails only on what the milestone names:** a value classified **bug** on a tracked
 variable (`SRC_URI`, `DEPENDS`, `RDEPENDS:*`, `FILES:*`, `PACKAGECONFIG`, `EXTRA_OECONF`,
