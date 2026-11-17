@@ -287,6 +287,20 @@ Verified (T1.2) against BitBake `master` 2026-11 and the release branches on Git
   `${VAR}` / `${@...}` see the final values; an empty expansion is a no-op. Classes listed in
   `BB_DEFER_BBCLASSES` are deferred even when written with plain `inherit`. The argument is
   everything after the keyword, `#` included (no comment stripping), for both `inherit` forms.
+- `inherit_defer` **before bitbake 2.8** (verified, w3 cleanup, against
+  `lib/bb/parse/parse_py/BBHandler.py` and `ConfHandler.py` on branch `2.0` (Kirkstone,
+  head `a9f09b9e`) and branch `2.6`): there is no such directive. `BBHandler.feeder` tries
+  `__inherit_regexp__ = inherit\s+(.+)` with `re.match`, which needs whitespace right after
+  `inherit` and so does not match `inherit_defer x`; no other BBHandler pattern matches, and
+  the line goes to `ConfHandler.feeder`, where it is not an assignment, `include`, `require`,
+  `export` or `unset`, so it raises `ParseError("unparsed line: 'inherit_defer x'")`. The file
+  fails to parse. The replay records such a line as a reference issue
+  (`RefProblem::NotInRelease(InheritDefer)`), inherits nothing for it and goes on with the
+  rest of the file. Reporting the directive to the user is lint's job (M4, syntax a
+  layer's releases lack); no rule does it yet.
+- `BB_DEFER_BBCLASSES` is newer still: absent from `BBHandler.py` on branches `2.8`, `2.10`
+  and `2.12`, present on `master` (2026-11). The first release that has it is not yet
+  recorded (*verify* 2.14 / 2.16); the replay currently honours it on every release.
 - `include_all` (`include_all\s+(.+)`, ConfHandler): present in bitbake 2.12 (Yocto 5.2
   walnascar), absent in 2.10. It includes `<entry>/<path>` for every distinct `BBPATH` entry,
   left to right; the including file's directory is **not** searched; missing files are not an
@@ -516,7 +530,8 @@ them. A function's stored value is a pointer per piece instead of the body. A re
 that needs python or an undefined variable is not followed (BitBake would expand the
 python, or look for a file with `${X}` in its name) and is recorded; `include` of a missing
 file is silent, as in BitBake; a missing `require` / class and an include cycle are recorded
-instead of failing the parse. `addtask`, `deltask` and `addhandler` do not change values and
+instead of failing the parse; so is an `inherit_defer` on a release without it (see
+"Directives"), which BitBake rejects as an unparsed line. `addtask`, `deltask` and `addhandler` do not change values and
 are not replayed. Anonymous python and event handlers are never run; the variables an
 anonymous function changes by a literal name are flagged `unevaluated_python`.
 

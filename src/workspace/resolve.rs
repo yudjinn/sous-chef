@@ -272,6 +272,45 @@ fn split_class_dirs(ws: &Workspace) -> bool {
     ws.release.release.has(Feature::SplitClassDirs)
 }
 
+/// The class directory a `.bbclass` file is in, as the class search of `ws.release` sees
+/// it. `rel` is the path relative to the layer root (a `BBPATH` entry).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassDir {
+    /// `classes/`: searched for `inherit` and `INHERIT` on every release.
+    Shared,
+    /// `classes-recipe/`, on a release with [`Feature::SplitClassDirs`]: searched for
+    /// `inherit` in recipe context.
+    Recipe,
+    /// `classes-global/`, on a release with [`Feature::SplitClassDirs`]: searched for
+    /// `INHERIT` (global context).
+    Global,
+    /// `classes-recipe/` or `classes-global/` on a release without
+    /// [`Feature::SplitClassDirs`] (Kirkstone): BitBake never finds a class there by name.
+    Unsearched,
+    /// Any other directory: found only by an `inherit` that names the path
+    /// (`inherit dir/x.bbclass`).
+    Other,
+}
+
+/// Classifies a class file by its directory for the workspace release (see [`ClassDir`]).
+/// Only the first component of `rel` counts, as the scanner and query layer have always
+/// read it.
+pub fn class_dir(ws: &Workspace, rel: &Path) -> ClassDir {
+    let split = split_class_dirs(ws);
+    let mut parts = rel.components();
+    let first = match (parts.next(), parts.next()) {
+        (Some(Component::Normal(d)), Some(_)) => d.to_string_lossy(),
+        _ => return ClassDir::Other,
+    };
+    match first.as_ref() {
+        "classes" => ClassDir::Shared,
+        "classes-recipe" if split => ClassDir::Recipe,
+        "classes-global" if split => ClassDir::Global,
+        "classes-recipe" | "classes-global" => ClassDir::Unsearched,
+        _ => ClassDir::Other,
+    }
+}
+
 /// The search groups of `BBHandler.inherit`, in order. With `split` (BitBake 2.2 / Langdale
 /// and later) `classes-<type>/` is searched through `BBPATH`, then `classes/`; without it
 /// (BitBake 2.0 / Kirkstone) only `classes/`. See "Releases" in bitbake-semantics.md.

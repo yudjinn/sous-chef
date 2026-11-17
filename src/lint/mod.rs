@@ -10,8 +10,10 @@
 //!    id runs even when it is disabled or off by default, a group does not override either.
 //!    `style/variable-order` (and the group `style`) is an alias of `hygiene/variable-order`.
 //! 3. **Units.** File scope: every file of the target. Recipe scope: every `.bb` of the
-//!    target, with the [`DataStore`] from the evaluator ([`Evaluate`]); when the evaluator is
-//!    not available the recipe-scope rules are skipped with a note. Layer scope: every layer
+//!    target, with the [`DataStore`] the evaluator ([`Evaluate`]) returns for exactly that
+//!    file (target `layer:path`); a recipe that cannot be evaluated gets a note and its
+//!    recipe-scope rules are skipped. A test seam may report no evaluator at all, which skips
+//!    every recipe-scope rule with one note. Layer scope: every layer
 //!    of the target (for a recipe or file target, the layers the files are in, and only the
 //!    findings located in those files are kept).
 //! 4. **Releases.** Each unit is checked against the releases of its layer
@@ -347,25 +349,10 @@ fn target_layers_all(ws: &Workspace) -> Vec<String> {
 
 /// Absolute paths of the indexed files of a layer, by path.
 fn layer_files(ws: &Workspace, index: &Index, layer: &str) -> Result<Vec<PathBuf>> {
-    // query.rs has no "files of a layer" reader yet; this is the one read the engine makes
-    // itself.
-    let mut st = index.conn().prepare(
-        "SELECT f.path FROM files f JOIN layers l ON l.id = f.layer_id \
-         WHERE l.name = ?1 ORDER BY f.path",
-    )?;
-    let rows = st.query_map([layer], |r| r.get::<_, String>(0))?;
-    let mut out = Vec::new();
-    for rel in rows {
-        let loc = Loc {
-            layer: layer.to_string(),
-            path: PathBuf::from(rel?),
-            lines: LineSpan::line(1),
-        };
-        if let Some(abs) = ws.abs_path(&loc) {
-            out.push(abs);
-        }
-    }
-    Ok(out)
+    Ok(query::files_in_layer(index, layer)?
+        .iter()
+        .filter_map(|f| ws.abs_path(&f.loc(LineSpan::line(1))))
+        .collect())
 }
 
 /// The files of a recipe target: the `.bb`, the files its `require` / `include` /
@@ -430,9 +417,9 @@ pub trait Evaluate: Sync {
     ) -> Result<Option<DataStore>>;
 }
 
-/// The real evaluator, [`crate::eval::evaluate`]. While that is the M0 stub (it returns
-/// `Error::not_implemented()`) this reports "not available", so recipe-scope rules start
-/// running as soon as T3.4 is merged, with no change here.
+/// The real evaluator, [`crate::eval::evaluate`] (the static replay). It is always
+/// available; a recipe it cannot evaluate is an error, which the engine reports as a note
+/// for that recipe.
 pub struct Replay;
 
 impl Evaluate for Replay {
@@ -442,11 +429,7 @@ impl Evaluate for Replay {
         ws: &Workspace,
         target: &crate::eval::Target,
     ) -> Result<Option<DataStore>> {
-        match crate::eval::evaluate(index, ws, target) {
-            Ok(d) => Ok(Some(d)),
-            Err(Error::Invalid { msg }) if msg == "not implemented" => Ok(None),
-            Err(e) => Err(e),
-        }
+        crate::eval::evaluate(index, ws, target).map(Some)
     }
 }
 
@@ -553,10 +536,12 @@ pub fn run_with(
             continue;
         }
         let file_name = abs.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let (pn, pv) = crate::index::scan::pn_pv(FileKind::Recipe, file_name);
+        let (pn, _) = crate::index::scan::pn_pv(FileKind::Recipe, file_name);
+        // `layer:path` evaluates exactly this file, not the preferred recipe of its PN and
+        // PV (another layer may have a `.bb` of the same name with a higher priority).
         let target = crate::eval::Target {
-            recipe: pn.clone(),
-            version: pv,
+            recipe: Some(format!("{}:{}", loc.layer, loc.path.display())),
+            version: None,
             machine: None,
             distro: None,
         };

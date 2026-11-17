@@ -9,8 +9,6 @@
 //!   each recipe); a bbappend that matches nothing is a row with `matches` = `-` and status
 //!   `no-match`.
 
-use std::path::PathBuf;
-
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -132,7 +130,7 @@ fn shadowed(index: &Index, ctx: &Ctx) -> Result<Table> {
 fn appends(index: &Index) -> Result<Table> {
     let mut t = Table::new(&["bbappend", "priority", "matches", "status"]);
     let mut orphans = 0;
-    for a in append_files(index)? {
+    for a in query::files_by_kind(index, &[FileKind::Append])? {
         let edges: Vec<_> = query::edges_from(index, a.id)?
             .into_iter()
             .filter(|e| e.kind == "bbappend")
@@ -164,27 +162,4 @@ fn appends(index: &Index) -> Result<Table> {
         ));
     }
     Ok(t)
-}
-
-/// Private query (candidate for `index::query`): every bbappend, by layer row id then path.
-fn append_files(index: &Index) -> Result<Vec<FileRow>> {
-    let mut st = index.conn().prepare(
-        "SELECT f.id, l.name, f.layer_id, f.path, f.sha256, f.pn, f.pv, l.priority \
-         FROM files f JOIN layers l ON l.id = f.layer_id WHERE f.kind = 'bbappend' \
-         ORDER BY l.id, f.path",
-    )?;
-    let rows = st.query_map([], |r| {
-        Ok(FileRow {
-            id: r.get(0)?,
-            layer: r.get(1)?,
-            layer_id: r.get(2)?,
-            path: PathBuf::from(r.get::<_, String>(3)?),
-            kind: FileKind::Append,
-            sha256: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
-            pn: r.get(5)?,
-            pv: r.get(6)?,
-            priority: r.get::<_, Option<i32>>(7)?.unwrap_or(0),
-        })
-    })?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }

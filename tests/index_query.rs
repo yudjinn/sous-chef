@@ -813,3 +813,191 @@ fn rows_serialize() {
     assert_eq!(json[0]["pv"], "1.1");
     let _: PathBuf = rows[0].file.path.clone();
 }
+
+#[test]
+fn all_files_by_layer_then_path() {
+    let fx = fixture();
+    let rows = query::all_files(&fx.idx).unwrap();
+    assert!(rows.iter().all(|f| f.sha256.len() == 64));
+    let all: Vec<String> = rows.iter().map(lp).collect();
+    assert_eq!(all.len(), 21);
+    // Layer row order (BBLAYERS order, build directory last), then path.
+    assert_eq!(all[0], "meta-core:classes-global/sanityish.bbclass");
+    assert_eq!(all.last().unwrap(), "build:conf/local.conf");
+    let mut layers: Vec<&str> = all.iter().map(|s| s.split(':').next().unwrap()).collect();
+    layers.dedup();
+    assert_eq!(layers, ["meta-core", "meta-vendor", "meta-mine", "build"]);
+}
+
+#[test]
+fn files_by_kind_and_in_layer() {
+    let fx = fixture();
+    let appends: Vec<String> = query::files_by_kind(&fx.idx, &[FileKind::Append])
+        .unwrap()
+        .iter()
+        .map(lp)
+        .collect();
+    assert_eq!(
+        appends,
+        [
+            "meta-vendor:recipes-core/hello/hello_%.bbappend",
+            "meta-mine:recipes-app/orphan/orphan_9.%.bbappend",
+            "meta-mine:recipes-core/hello/hello_1.1.bbappend",
+        ]
+    );
+    let some = query::files_by_kind(&fx.idx, &[FileKind::Class, FileKind::Conf]).unwrap();
+    assert_eq!(some.len(), 3 + 9);
+    assert!(
+        some.iter()
+            .all(|f| matches!(f.kind, FileKind::Class | FileKind::Conf))
+    );
+    assert!(query::files_by_kind(&fx.idx, &[]).unwrap().is_empty());
+
+    let mine: Vec<String> = query::files_in_layer(&fx.idx, "meta-mine")
+        .unwrap()
+        .iter()
+        .map(lp)
+        .collect();
+    assert_eq!(
+        mine,
+        [
+            "meta-mine:conf/layer.conf",
+            "meta-mine:recipes-app/app/app_0.1.bb",
+            "meta-mine:recipes-app/orphan/orphan_9.%.bbappend",
+            "meta-mine:recipes-core/hello/hello_1.1.bbappend",
+        ]
+    );
+    assert_eq!(query::files_in_layer(&fx.idx, "build").unwrap().len(), 2);
+    assert!(query::files_in_layer(&fx.idx, "nope").unwrap().is_empty());
+}
+
+#[test]
+fn recipe_and_class_names_like() {
+    let fx = fixture();
+    assert_eq!(
+        query::recipe_names_like(&fx.idx, "LIB", 20).unwrap(),
+        ["libfoo", "libfoo-alt"]
+    );
+    assert_eq!(
+        query::recipe_names_like(&fx.idx, "l", 1).unwrap(),
+        ["hello"]
+    );
+    // `_` and `%` are literal, not wildcards.
+    assert!(
+        query::recipe_names_like(&fx.idx, "_", 20)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        query::recipe_names_like(&fx.idx, "%", 20)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        query::class_names_like(&fx.idx, "ISH", 20).unwrap(),
+        ["autotoolsish", "sanityish"]
+    );
+    assert_eq!(
+        query::class_names_like(&fx.idx, "", 2).unwrap(),
+        ["autotoolsish", "base"]
+    );
+    assert!(
+        query::class_names_like(&fx.idx, "zzz", 20)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// The fixture copy configured as Kirkstone (no `classes-recipe/` / `classes-global/`
+/// search), with a second `autotoolsish` and `base` in meta-vendor.
+fn kirkstone_with_duplicates() -> Fx {
+    let (tmp, _root, _cfg, ws) = temp_ws_release("kirkstone", |root| {
+        write(
+            &root.join("meta-vendor/classes-recipe/autotoolsish.bbclass"),
+            "X = \"1\"\n",
+        );
+        write(
+            &root.join("meta-vendor/classes/base.bbclass"),
+            "Y = \"1\"\n",
+        );
+    });
+    indexed(ws, Some(tmp))
+}
+
+#[test]
+fn kirkstone_split_class_dirs_are_indexed_but_never_candidates() {
+    let fx = kirkstone_with_duplicates();
+    // Still indexed.
+    let auto = id(&fx, "meta-core", "classes-recipe/autotoolsish.bbclass");
+    id(&fx, "meta-core", "classes-global/sanityish.bbclass");
+    // Listed by class_files, but never ranked, for inherit or INHERIT.
+    for global in [false, true] {
+        for name in ["autotoolsish", "sanityish"] {
+            let files = query::class_files(&fx.idx, &fx.ws, name, global).unwrap();
+            assert!(!files.is_empty(), "{name}");
+            assert!(files.iter().all(|c| c.rank.is_none()), "{name}: {files:?}");
+        }
+        let base = query::class_files(&fx.idx, &fx.ws, "base", global).unwrap();
+        assert_eq!(base.iter().filter(|c| c.rank.is_some()).count(), 2);
+    }
+    // `inherit autotoolsish` in hello.inc does not resolve; nothing points at the class.
+    let inc = id(&fx, "meta-core", "recipes-core/hello/hello.inc");
+    let edge = query::edges_from(&fx.idx, inc)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.kind == "inherit")
+        .unwrap();
+    assert_eq!(edge.target_text, "autotoolsish");
+    assert_eq!(edge.target, None);
+    assert!(query::edges_to(&fx.idx, auto).unwrap().is_empty());
+    assert!(
+        query::inheritors(&fx.idx, "autotoolsish", true)
+            .unwrap()
+            .is_empty()
+    );
+    // Shadowing: base (classes/) is reported, autotoolsish (classes-recipe/) is not.
+    let got: Vec<(String, Vec<String>)> = query::shadowed(&fx.idx, &fx.ws)
+        .unwrap()
+        .iter()
+        .map(|s| (s.name.clone(), s.files.iter().map(lp).collect()))
+        .collect();
+    assert_eq!(
+        got,
+        [(
+            "base.bbclass".to_string(),
+            vec![
+                "meta-core:classes/base.bbclass".to_string(),
+                "meta-vendor:classes/base.bbclass".to_string(),
+            ]
+        )]
+    );
+}
+
+#[test]
+fn split_class_dirs_are_candidates_from_langdale() {
+    // The same files on the default release: both duplicates are shadowing groups and the
+    // inherit resolves.
+    let (tmp, _root, _cfg, ws) = temp_ws_release("scarthgap", |root| {
+        write(
+            &root.join("meta-vendor/classes-recipe/autotoolsish.bbclass"),
+            "X = \"1\"\n",
+        );
+    });
+    let fx = indexed(ws, Some(tmp));
+    let names: Vec<String> = query::shadowed(&fx.idx, &fx.ws)
+        .unwrap()
+        .iter()
+        .map(|s| s.name.clone())
+        .collect();
+    assert_eq!(names, ["autotoolsish.bbclass"]);
+    let inc = id(&fx, "meta-core", "recipes-core/hello/hello.inc");
+    let edge = query::edges_from(&fx.idx, inc)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.kind == "inherit")
+        .unwrap();
+    assert_eq!(
+        edge.target.map(|t| lp(&t)).as_deref(),
+        Some("meta-core:classes-recipe/autotoolsish.bbclass")
+    );
+}

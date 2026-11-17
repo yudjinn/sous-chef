@@ -20,7 +20,10 @@
 //! statement, following `require` / `include` / `include_all` / `inherit` where they appear
 //! (targets resolved with the store as it is at that point, along the current `BBPATH`; a
 //! class is parsed once, `__inherit_cache`); each bbappend in application order; deferred
-//! inherits; `expand_keys`. Anonymous python is stored, never run.
+//! inherits; `expand_keys`. Anonymous python is stored, never run. On a release without
+//! `Feature::InheritDefer` an `inherit_defer` line is not a directive (BitBake fails with
+//! "unparsed line"): it is recorded in [`ReplayNotes::references`] as
+//! [`RefProblem::NotInRelease`] and nothing is inherited.
 //!
 //! **`FILE` and the values computed from it.** BitBake sets `FILE` to every `.conf`, `.bb`,
 //! `.inc` and `.bbappend` while it is parsed and restores it afterwards (not for classes).
@@ -62,6 +65,7 @@ use super::{DataStore, FileVisit, OpStatus, Target, VarOp};
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
 use crate::index::{self, Index};
+use crate::release::Feature;
 use crate::types::{AssignOp, FileKind, LineSpan, Loc, VarRef};
 use crate::workspace::Workspace;
 use crate::workspace::resolve::{self, Resolver};
@@ -145,6 +149,10 @@ pub enum RefProblem {
     NotFound(String),
     /// The file is already being parsed further up (BitBake would recurse until it fails).
     Cycle(Loc),
+    /// The directive does not exist on the workspace release (`inherit_defer` before
+    /// Scarthgap): BitBake fails to parse the file there ("unparsed line"). The replay skips
+    /// the statement and goes on.
+    NotInRelease(Feature),
 }
 
 /// One piece of a function's value (see [`DataStore::function`]).
@@ -348,25 +356,30 @@ struct Files {
 
 impl Files {
     fn load(index: &Index, ws: &Workspace) -> Result<Files> {
-        let mut st = index.conn().prepare(
-            "SELECT f.id, l.name, f.path, f.kind, f.sha256 FROM files f \
-             JOIN layers l ON l.id = f.layer_id ORDER BY l.name, f.path",
-        )?;
-        let rows = st.query_map([], |r| {
-            let kind: String = r.get(3)?;
-            Ok(FileInfo {
-                id: r.get(0)?,
-                layer: r.get(1)?,
-                path: PathBuf::from(r.get::<_, String>(2)?),
-                kind: kind.parse().unwrap_or(FileKind::Conf),
-                sha256: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
+        // By layer name then path, compared as bytes (SQLite's text order): the order the
+        // cache fingerprint is computed in.
+        let mut rows: Vec<FileInfo> = query::all_files(index)?
+            .into_iter()
+            .map(|f| FileInfo {
+                id: f.id,
+                layer: f.layer,
+                path: f.path,
+                kind: f.kind,
+                sha256: f.sha256,
             })
-        })?;
+            .collect();
+        rows.sort_by(|a, b| {
+            a.layer.cmp(&b.layer).then_with(|| {
+                a.path
+                    .as_os_str()
+                    .as_encoded_bytes()
+                    .cmp(b.path.as_os_str().as_encoded_bytes())
+            })
+        });
         let mut by_abs = HashMap::new();
         let mut by_loc = HashMap::new();
         let mut h = Sha256::new();
-        for row in rows {
-            let f = row?;
+        for f in rows {
             match f.kind {
                 FileKind::Conf => {
                     h.update(format!("c {} {} {}\n", f.layer, f.path.display(), f.sha256))
@@ -935,7 +948,19 @@ impl<'a> Replay<'a> {
             }
             "inherit" => {
                 let text = st.name.clone().unwrap_or_default();
-                if st.op.as_deref() == Some("inherit_defer") {
+                let deferred = st.op.as_deref() == Some("inherit_defer");
+                if deferred && !self.ws.release.release.has(Feature::InheritDefer) {
+                    // BitBake before 2.8 has no such directive: the line falls through to
+                    // ConfHandler.feeder and fails with "unparsed line" (bitbake-semantics.md,
+                    // "Directives"). Recorded, and the class is not inherited.
+                    self.issue(
+                        Some(&st.loc),
+                        via,
+                        "inherit_defer",
+                        &text,
+                        RefProblem::NotInRelease(Feature::InheritDefer),
+                    );
+                } else if deferred {
                     Arc::make_mut(&mut self.ds.notes).deferred.push(Deferred {
                         text,
                         loc: Some(st.loc.clone()),

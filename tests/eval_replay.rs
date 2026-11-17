@@ -11,6 +11,7 @@ use common::*;
 use sous_chef::error::Error;
 use sous_chef::eval::{self, ConfigCache, DataStore, OpStatus, RefProblem, Target};
 use sous_chef::index::Index;
+use sous_chef::release::Feature;
 use sous_chef::types::{AssignOp, FileKind};
 use sous_chef::workspace::Workspace;
 
@@ -708,4 +709,213 @@ fn unfollowed_references_are_recorded() {
         .count();
     assert_eq!(classes, 1);
     assert_eq!(ds.value("X").unwrap().text, "1");
+}
+
+// ---------------------------------------------------------------------------------------
+// The two recipe walkers: `tools::recipe::walk_recipe` (static, from the index edges) and
+// the replay's visit list. They are kept apart on purpose (see the module docs of
+// `mcp/tools/recipe.rs`); on the fixture recipes they must agree.
+
+/// The files the static walk parses, in order (one entry per parse, repeats included).
+fn static_walk(fx: &Fx, layer: &str, path: &str) -> Vec<(String, FileKind)> {
+    let file = sous_chef::index::query::file_by_path(&fx.idx, layer, Path::new(path))
+        .unwrap()
+        .unwrap();
+    let recipe = sous_chef::index::query::RecipeRow {
+        pn: file.pn.clone().unwrap(),
+        pv: file.pv.clone().unwrap(),
+        file,
+    };
+    let walk = sous_chef::mcp::tools::recipe::walk_recipe(&fx.idx, &recipe).unwrap();
+    walk.nodes
+        .iter()
+        .filter(|n| n.state == sous_chef::mcp::tools::recipe::NodeState::Parsed)
+        .map(|n| {
+            let f = n.file.as_ref().unwrap();
+            (format!("{}:{}", f.layer, f.path.display()), f.kind)
+        })
+        .collect()
+}
+
+/// The files the replay's recipe pass visits, in order (the configuration pass dropped).
+fn replay_walk(fx: &Fx, layer: &str, path: &str) -> Vec<(String, FileKind)> {
+    let ds = eval(fx, &target(Some(&format!("{layer}:{path}")), None));
+    let visits = ds.files();
+    let start = visits
+        .iter()
+        .position(|v| v.kind == FileKind::Recipe)
+        .unwrap();
+    visits[start..]
+        .iter()
+        .map(|v| (format!("{}:{}", v.loc.layer, v.loc.path.display()), v.kind))
+        .collect()
+}
+
+#[test]
+fn static_walk_and_replay_agree_on_the_fixture_recipes() {
+    let fx = fixture();
+    for (layer, path) in [
+        ("meta-core", "recipes-core/hello/hello_1.0.bb"),
+        ("meta-core", "recipes-core/hello/hello_1.1.bb"),
+        ("meta-mine", "recipes-app/app/app_0.1.bb"),
+        ("meta-core", "recipes-core/libfoo/libfoo_2.0.bb"),
+    ] {
+        let a = static_walk(&fx, layer, path);
+        let b = replay_walk(&fx, layer, path);
+        assert!(a.len() > 1 || path.contains("app_"), "{path}: {a:?}");
+        assert_eq!(a, b, "{layer}:{path}");
+    }
+}
+
+#[test]
+fn static_walk_and_replay_differ_where_documented() {
+    // A documented difference: the static walk expands only the variables that follow from
+    // the file's own path (`PN`, `BPN`, `THISDIR`, ...); the replay uses the live store.
+    let (fx, _root) = modified(|root| {
+        let dir = root.join("meta-mine/recipes-app/varinc");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("varinc_1.0.bb"),
+            "INCNAME = \"varinc\"\nrequire ${INCNAME}.inc\n",
+        )
+        .unwrap();
+        fs::write(dir.join("varinc.inc"), "X = \"1\"\n").unwrap();
+    });
+    let (layer, path) = ("meta-mine", "recipes-app/varinc/varinc_1.0.bb");
+    let (fx2, _root2) = modified(|root| {
+        let dir = root.join("meta-mine/recipes-app/cls");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("cls_1.0.bb"),
+            "inherit base\ninherit_defer deferone\ninherit autotoolsish\n",
+        )
+        .unwrap();
+        fs::write(dir.join("cls_%.bbappend"), "inherit autotoolsish\n").unwrap();
+        let c = root.join("meta-mine/classes-recipe");
+        fs::create_dir_all(&c).unwrap();
+        fs::write(c.join("deferone.bbclass"), "inherit_defer defertwo\n").unwrap();
+        fs::write(c.join("defertwo.bbclass"), "Y = \"2\"\n").unwrap();
+    });
+    // Two more: a class the configuration already inherited (`base`) is parsed again by the
+    // static walk (it does not see the configuration's `__inherit_cache`), and an
+    // `inherit_defer` inside a deferred class is dropped by the static walk (the replay runs
+    // it, as `ast.finalize` does). A class inherited by both the recipe and its bbappend is
+    // parsed once by both.
+    let cls = |p: &str| (p.to_string(), FileKind::Class);
+    let (recipe, append) = (
+        (
+            "meta-mine:recipes-app/cls/cls_1.0.bb".to_string(),
+            FileKind::Recipe,
+        ),
+        (
+            "meta-mine:recipes-app/cls/cls_%.bbappend".to_string(),
+            FileKind::Append,
+        ),
+    );
+    assert_eq!(
+        static_walk(&fx2, "meta-mine", "recipes-app/cls/cls_1.0.bb"),
+        [
+            recipe.clone(),
+            cls("meta-core:classes/base.bbclass"),
+            cls("meta-core:classes-recipe/autotoolsish.bbclass"),
+            append.clone(),
+            cls("meta-mine:classes-recipe/deferone.bbclass"),
+        ]
+    );
+    assert_eq!(
+        replay_walk(&fx2, "meta-mine", "recipes-app/cls/cls_1.0.bb"),
+        [
+            recipe,
+            cls("meta-core:classes-recipe/autotoolsish.bbclass"),
+            append,
+            cls("meta-mine:classes-recipe/deferone.bbclass"),
+            cls("meta-mine:classes-recipe/defertwo.bbclass"),
+        ]
+    );
+    assert_eq!(
+        static_walk(&fx, layer, path),
+        [(format!("{layer}:{path}"), FileKind::Recipe)]
+    );
+    assert_eq!(
+        replay_walk(&fx, layer, path),
+        [
+            (format!("{layer}:{path}"), FileKind::Recipe),
+            (
+                "meta-mine:recipes-app/varinc/varinc.inc".to_string(),
+                FileKind::Include
+            ),
+        ]
+    );
+}
+
+/// The fixture copy on `codename` with a recipe that uses `inherit_defer` on a class in
+/// `classes/` (found on every release).
+fn deferring(codename: &str) -> Fx {
+    let (tmp, _root, _cfg, ws) = temp_ws_release(codename, |root| {
+        let dir = root.join("meta-mine/recipes-app/later");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("later_1.0.bb"),
+            "inherit_defer deferme\nX = \"1\"\n",
+        )
+        .unwrap();
+        let c = root.join("meta-mine/classes");
+        fs::create_dir_all(&c).unwrap();
+        fs::write(c.join("deferme.bbclass"), "DEFERRED = \"yes\"\n").unwrap();
+    });
+    indexed(ws, Some(tmp))
+}
+
+#[test]
+fn inherit_defer_before_scarthgap_is_a_problem_and_inherits_nothing() {
+    let fx = deferring("kirkstone");
+    let ds = eval(&fx, &target(Some("later"), None));
+    let issues: Vec<(String, String, String, RefProblem)> = ds
+        .replay()
+        .references
+        .iter()
+        .filter(|r| r.kind == "inherit_defer")
+        .map(|r| {
+            (
+                r.loc.as_ref().map(|l| l.to_string()).unwrap_or_default(),
+                r.kind.clone(),
+                r.text.clone(),
+                r.problem.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        issues,
+        [(
+            "meta-mine:recipes-app/later/later_1.0.bb:1".to_string(),
+            "inherit_defer".to_string(),
+            "deferme".to_string(),
+            RefProblem::NotInRelease(Feature::InheritDefer),
+        )]
+    );
+    assert!(ds.value("DEFERRED").is_none());
+    assert!(
+        !ds.files()
+            .iter()
+            .any(|v| v.loc.path.ends_with("deferme.bbclass"))
+    );
+    // The rest of the recipe is still replayed.
+    assert_eq!(ds.value("X").unwrap().text, "1");
+}
+
+#[test]
+fn inherit_defer_from_scarthgap_inherits_at_the_end() {
+    let fx = deferring("scarthgap");
+    let ds = eval(&fx, &target(Some("later"), None));
+    assert!(
+        ds.replay()
+            .references
+            .iter()
+            .all(|r| r.kind != "inherit_defer"),
+        "{:?}",
+        ds.replay().references
+    );
+    assert_eq!(ds.value("DEFERRED").unwrap().text, "yes");
+    let last = ds.files().last().unwrap();
+    assert_eq!(last.loc.to_string(), "meta-mine:classes/deferme.bbclass:1");
 }

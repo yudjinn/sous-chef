@@ -108,11 +108,13 @@ impl Evaluate for NoEval {
 }
 
 /// An evaluator that returns an empty datastore for every recipe except `app`, which fails.
+/// The engine names each recipe by its `layer:path`.
 struct FakeEval;
 
 impl Evaluate for FakeEval {
     fn evaluate(&self, _: &Index, _: &Workspace, t: &eval::Target) -> Result<Option<DataStore>> {
-        if t.recipe.as_deref() == Some("app") {
+        assert!(t.version.is_none(), "{t:?}");
+        if t.recipe.as_deref() == Some("meta-mine:recipes-app/app/app_0.1.bb") {
             return Err(Error::Invalid {
                 msg: "replay exploded".into(),
             });
@@ -820,17 +822,112 @@ fn recipe_scope_uses_the_evaluator_seam() {
 }
 
 #[test]
-fn the_real_evaluator_seam_reports_not_available_while_evaluate_is_a_stub() {
+fn the_real_evaluator_seam_runs_recipe_rules_with_data() {
     let env = Env::new();
     let target = eval::Target {
         recipe: Some("hello".into()),
         ..eval::Target::default()
     };
-    match Replay.evaluate(&env.index, &env.ws, &target) {
-        Ok(None) => {}    // T3.4 not merged
-        Ok(Some(_)) => {} // T3.4 merged
-        Err(e) => panic!("{e}"),
+    assert!(
+        Replay
+            .evaluate(&env.index, &env.ws, &target)
+            .unwrap()
+            .is_some()
+    );
+
+    fn with_data(r: &TestRule, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
+        let data = cx.data.expect("recipe scope gets a datastore");
+        assert!(data.value("PN").is_some(), "{}", cx.loc);
+        line_one(r, cx, out);
     }
+    let rule = TestRule {
+        scope: Scope::Recipe,
+        ..TestRule::file("hygiene/test-recipe", with_data)
+    };
+    let all = Options {
+        all: true,
+        ..Options::default()
+    };
+    let report = lint::run_with(
+        &env.ws,
+        &env.index,
+        &env.config,
+        &Target::Workspace,
+        &all,
+        &[&rule],
+        &Replay,
+    )
+    .unwrap();
+    assert!(report.notes.is_empty(), "{:?}", report.notes);
+    let mut files: Vec<String> = report.findings.iter().map(|f| f.loc.to_string()).collect();
+    files.sort();
+    assert_eq!(
+        files,
+        [
+            "meta-core:recipes-core/hello/hello_1.0.bb:1",
+            "meta-core:recipes-core/hello/hello_1.1.bb:1",
+            "meta-core:recipes-core/libfoo/libfoo_2.0.bb:1",
+            "meta-mine:recipes-app/app/app_0.1.bb:1",
+            "meta-vendor:recipes-vendor/libfoo-alt/libfoo-alt_1.0.bb:1",
+        ]
+    );
+}
+
+#[test]
+fn recipe_scope_evaluates_the_linted_file_not_the_preferred_one() {
+    let mut env = Env::new();
+    // The same PN_PV in a higher-priority layer (meta-vendor 6 > meta-core 5).
+    env.add(
+        "meta-vendor/recipes-core/libfoo/libfoo_2.0.bb",
+        "SUMMARY = \"vendor copy\"\nLICENSE = \"MIT\"\n",
+    );
+    fn summary(r: &TestRule, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
+        let data = cx.data.expect("recipe scope gets a datastore");
+        let recipe = data
+            .files()
+            .iter()
+            .find(|v| v.kind == FileKind::Recipe)
+            .expect("the recipe is visited");
+        assert_eq!(recipe.loc.layer, cx.loc.layer);
+        assert_eq!(recipe.loc.path, cx.loc.path);
+        out.push(Finding {
+            rule: r.id,
+            severity: r.severity,
+            loc: cx.loc.clone(),
+            message: data.value("SUMMARY").map(|v| v.text).unwrap_or_default(),
+        });
+    }
+    let rule = TestRule {
+        scope: Scope::Recipe,
+        ..TestRule::file("hygiene/test-recipe", summary)
+    };
+    let lint_one = |target: &str| -> Vec<(String, String)> {
+        let report = lint::run_with(
+            &env.ws,
+            &env.index,
+            &env.config,
+            &env.resolve(target).unwrap(),
+            &Options::default(),
+            &[&rule],
+            &Replay,
+        )
+        .unwrap();
+        assert!(report.notes.is_empty(), "{:?}", report.notes);
+        report
+            .findings
+            .iter()
+            .map(|f| (f.loc.layer.clone(), f.message.clone()))
+            .collect()
+    };
+    // The lower-priority copy is evaluated as itself.
+    assert_eq!(
+        lint_one("meta-core:recipes-core/libfoo/libfoo_2.0.bb"),
+        [("meta-core".to_string(), "The foo library".to_string())]
+    );
+    assert_eq!(
+        lint_one("meta-vendor:recipes-core/libfoo/libfoo_2.0.bb"),
+        [("meta-vendor".to_string(), "vendor copy".to_string())]
+    );
 }
 
 #[test]
