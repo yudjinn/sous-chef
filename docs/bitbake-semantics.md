@@ -735,6 +735,149 @@ Checked 2026-11-17 against bitbake `master` (`lib/bb/main.py`, `lib/bb/cooker.py
   fails on the lock while a build runs. The tool avoids the second question by running
   one job at a time.
 
+## kas (T9.3)
+
+Checked 2026-11-17 against kas **5.5** (`kas/__version__.py` on `master` that day): the
+documentation pages https://kas.readthedocs.io/en/latest/userguide/project-configuration.html,
+https://kas.readthedocs.io/en/latest/userguide/env-vars.html,
+https://kas.readthedocs.io/en/latest/userguide/kas-container.html and the command pages
+(`kas shell`, `build`, `checkout`, `dump`, `lock`), read from their sources in the kas
+repository (`docs/userguide/*.rst`, `environment-variables.inc`, `docs/_man/*`), and where
+the documentation is silent the code of the same revision: `kas/includehandler.py`,
+`kas/config.py`, `kas/repos.py`, `kas/libcmds.py`, `kas/libkas.py`, `kas/context.py`,
+`kas/plugins/shell.py`, `kas/plugins/build.py`, `kas/schema-kas.json` and the
+`kas-container` script. Observed on a real kas 5.5 checkout of yocto-kiss (`wrynose`) by
+T9.1 (reported to T9.3) and read-only by T9.3: the generated files, `CACHEDIR.TAG`, the lock
+file name, the layer order. `src/workspace/kas.rs` implements what follows.
+
+**Files and merging.**
+
+- Formats: YAML (`.yml`, `.yaml`) and JSON (`.json`), chosen by extension; one document
+  (`yaml.safe_load`, PyYAML, YAML 1.1). Every file needs `header.version`.
+- `a.yml:b.yml` on the command line is the same as a file including both, in order. The
+  files must all be in one repository or all outside version control.
+- Merge order of one file (`IncludeHandler._internal_include_handler`): its lock file
+  `<stem>.lock<.ext>` next to it, if present; then each entry of `header.includes`, depth
+  first, in order; then the file itself. All collected configs are merged left to right
+  (`_internal_dict_merge`): mappings recursively, keys keep their first position and new
+  keys go last; any other value is replaced. So later files win, and the including file
+  wins over its includes. `header.version` becomes the highest one.
+- A string include is relative to the repository root of the including file; if that file
+  does not exist kas falls back to the including file's directory (with a warning). A
+  `{repo, file}` include is relative to that repository and is only followed once the
+  repository is known (kas iterates checkout and parsing until every repository is
+  resolved). Both must resolve inside the repository (`sanitize_include_path`), else kas
+  fails. sous-chef never checks out, so a `{repo, file}` include of a repository not on disk
+  is listed as a problem, and anything outside is reported and not read.
+- The repository root ("top repo path") is `git rev-parse --show-toplevel
+  --show-superproject-working-tree` (the superproject of a submodule), else `hg root`, else
+  the first file's directory. sous-chef finds it without running git: the nearest ancestor
+  with a `.git` directory, `.hg`, or a `.git` file whose `gitdir` is not under `modules/`
+  (a worktree); a submodule's `.git` file continues to the superproject.
+- `.config.yaml` in `KAS_WORK_DIR` is read when no file is given; only `kas menu` writes it
+  (kas writes none on checkout, shell or build: observed).
+- Lock files: `kas lock` / `kas dump --lock` write `<stem>.lock.yaml` next to the kas file
+  (observed: `kas/kiss.lock.yaml`); it pins with `overrides.repos.<id>.commit`.
+
+**Repositories and layers** (`Repo.factory`, `_create_layers_from_dict`, schema).
+
+- `repos.<id>`: null or a mapping with `name` (default the id), `url`, `type`, `commit`,
+  `branch`, `tag`, `refspec` (deprecated, exclusive with the other three), `path`,
+  `layers`, `patches`, `signed`, `allowed_signers`. `defaults.repos.{branch,tag,refspec}`
+  apply when the repo does not set the key (a key set to null removes the default).
+  `overrides.repos.<id>.{commit,branch,url}` replace those of repositories that exist.
+- Path: no `url` and no `path`: the top repo path (the project itself; kas performs no
+  version control operation). `url` without `path`: `<kas work dir>/<name>`. A relative
+  `path` is under the kas work dir. kas therefore clones next to the kas files'
+  repository root when kas is started there (observed: `yocto-kiss/openembedded-core`).
+- `layers`: missing (or empty / null, per the schema; *verify* null, which the code would
+  not accept) means the repository itself; `.` is the repository itself; a value null or
+  `{prio: n}` adds the layer, `disabled` (and the deprecated `excluded`, `n`, `no`, `0`,
+  `false`) removes it.
+- `BBLAYERS` order: `prio` descending, then repository name, then layer name (`RepoLayer.
+  __lt__`); observed on yocto-kiss (`meta-arm/meta-arm` before
+  `meta-arm/meta-arm-toolchain`, though `kiss.yaml` lists them the other way round).
+- `machine`, `distro`, `target`, `task` default to `qemux86-64`, `nodistro`,
+  `core-image-minimal` and `build`; the environment variables `KAS_MACHINE`, `KAS_DISTRO`,
+  `KAS_TARGET`, `KAS_TASK` override them. sous-chef reports the file values and kas's
+  defaults; it does not read the `KAS_*` overrides (*verify* whether it should).
+
+**Generated files** (`WriteBBConfig`; observed). Both are rewritten by `kas checkout`,
+`kas shell` and `kas build` (unless `-k` / `--keep-config-unchanged`) and carry no
+"generated" header:
+
+- `bblayers.conf`: every `bblayers_conf_header` entry as `# <id>` then its text, in id order
+  (sorted keys), then `BBLAYERS ?= " \` with one `${TOPDIR}/<relative path> \` line per
+  layer, the closing `"`, `BBPATH ?= "${TOPDIR}"`, `BBFILES ??= ""`.
+- `local.conf`: every `local_conf_header` entry the same way, then `MACHINE ??= "<m>"`,
+  `DISTRO ??= "<d>"`, `BBMULTICONFIG ?= "<mc names of mc: targets>"`, and for
+  `isar-rootless` `ISAR_ROOTLESS ?= "1"`.
+- The build directory gets `CACHEDIR.TAG`, whose last line is `# kas build directory`
+  (observed; the other lines are the cache-directory-tag signature and comments).
+
+**Directories and environment** (environment-variables page; `context.py`).
+
+- `KAS_WORK_DIR` (default: the current directory) and `KAS_BUILD_DIR` (default
+  `${KAS_WORK_DIR}/build`) are read by kas and **not exported** into the build environment
+  (observed: no `KAS_*` variable inside `kas shell`). Inside `kas shell` kas sets
+  `BUILDDIR` and `BBPATH` (the build directory), a minimal `PATH`, `PYTHONPATH`,
+  `OE_ADDED_PATHS`, `BB_ENV_PASSTHROUGH_ADDITIONS`, and `HOME` to a temporary directory
+  (observed). So sous-chef can only use `KAS_*` from the environment it was started in, and
+  only when that names a directory containing, or inside, its working directory.
+- kas refuses to start when `NETRC_FILE` names a file that does not exist (observed).
+
+**Running a command** (`plugins/shell.py`). `kas shell <files> -c <cmd>` runs
+`[$SHELL, "-c", cmd]` with kas's environment in the build directory, where `$SHELL` is the
+caller's (observed: `/usr/bin/zsh -c 'bitbake -p'`), so the command string is shell text
+for whatever shell the user has. `-k` / `--keep-config-unchanged` skips the steps
+`setup_dir`, `finish_setup_repos`, `repos_checkout`, `repos_apply_patches` and
+`write_bbconfig`, so nothing is checked out and the configuration files are not rewritten;
+the environment is still set up. sous-chef's kas mode always passes it. *Verify:* what `-k`
+does before the first checkout (expected: it fails, since the repositories are missing;
+sous-chef does not offer kas mode until the build directory exists).
+
+**Subcommands** (`kas --help`, `kas-container` usage). `build` checks out and runs BitBake
+(`-c` there is the task, `--target` the target); `checkout` only checks out and writes the
+configuration; `dump` checks out and prints the flat configuration; `lock` writes lock
+files; `shell` runs a shell or `-c` command; `for-all-repos`, `clean`, `cleansstate`,
+`cleanall`, `purge`, `diff`, `menu`. Global options before the subcommand: kas `-l` /
+`--log-level <level>`, `--no-color`, `--version`; `kas-container` adds its own (those with a
+value: `--runtime-args`, `--docker-args`, `--ssh-dir`, `--aws-dir`, `--git-credential-store`,
+`--git-credential-socket`, `-l` / `--log-level`) and takes the same subcommands.
+
+Not reproduced, *verify* if ever needed: YAML 1.1 specifics (sous-chef parses with a YAML
+1.2 parser, `yaml-rust2`; `yes` / `no` / `on` / `off` are strings there, which only matters
+for the legacy layer values, all of which are handled as strings; `<<` merge keys are not
+supported); `kas-container` path rewriting; `env`, `patches`, `signers`, `buildtools`,
+`artifacts`, `menu_configuration`; JSON comments.
+
+### bitbake-setup builds (T9.3)
+
+Checked 2026-11-17 in BitBake's `bin/bitbake-setup` on branches `2.18` and `master`
+(`_make_init_build_env`) and `doc/bitbake-user-manual/bitbake-user-manual-environment-setup.rst`
+(master); confirmed on bitbake-setup 2.19.0 by T9.1. Each setup's build directory gets
+`init-build-env`:
+
+```
+# init-build-env wrapper created by bitbake-setup
+cd <directory holding oe-init-build-env>
+set <build directory>
+. ./oe-init-build-env
+set --
+```
+
+(plus an `export BB_ENV_PASSTHROUGH_ADDITIONS=...` block when the configuration has
+`bb-env-passthrough-additions`). It is sourced with no arguments and leaves the shell in the
+build directory with `BUILDDIR`, `BBPATH`, `BB_ENV_PASSTHROUGH_ADDITIONS`, `OE_ADDED_PATHS`,
+`PYTHONPATH` set and `PATH` extended. Bash keeps positional parameters that a sourced file
+changes even when `source` was given arguments (checked with bash 5.3: after
+`source s.sh x` where `s.sh` runs `set --`, `$#` is 0), so the `init-script` wrapper
+(`source "$1" "$2" && shift 2 && exec "$@"`) loses the program with this script; the
+`bitbake-setup` mode saves the argv in an array before sourcing. The setup directory is
+`bitbake-builds/<config>-<machine>` (T9.1); `conf/` holds `bblayers.conf` with absolute
+paths, a `local.conf` with only a comment, `site.conf` as a symlink, and fragments in
+`conf/toolcfg.conf` (T9.1).
+
 ## Releases
 
 Added by T1.6 (2026-11-17). Wrynose (6.0 LTS) is the primary target, Scarthgap (5.0 LTS) is

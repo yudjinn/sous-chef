@@ -270,3 +270,27 @@ BitBake unless its name starts with `malformed-`.
 | `malformed-unterminated-function.bb` | `do_broken() {` (line 2) never closed: the `}` on line 4 is indented, so the body runs to end of file and swallows line 5 |
 | `malformed-bad-continuation.bb` | line 2 ends in `\` followed by three spaces (does not continue; diagnostic); line 4 ends in `\` at end of file |
 | `malformed-garbage.bb` | valid line 1; garbage line 2; assignment with no name (line 3); unterminated quote (line 4); stray `}` (line 5); valid line 6 the parser must recover to |
+
+---
+
+## `kas/`: a kas project (T9.3)
+
+Modelled on bootlin/yocto-kiss (`wrynose`). Tests copy it with `tests/kas_support` and
+create `.git` in the copy, so `project/` is the repository root kas uses.
+
+- `project/`: the project repository. `kas/base.yaml` (like `kiss.yaml`: `distro`,
+  `target`, repos `bitbake` (layer disabled), `openembedded-core` (`branch`),
+  `meta-vendor` (`commit`, the repository itself as layer), `proj` (no `url`: the project,
+  layer `meta-proj`), a `local_conf_header`), `kas/common.yaml` (included by `base.yaml`;
+  `local_conf_header` and `bblayers_conf_header` entries `common`), `kas/board.yaml` (the
+  machine file: `machine: board1`, repo `proj-bsp` with layer `meta-proj-bsp`),
+  `kas/base.lock.yaml` (pins `openembedded-core`). Own layers `meta-proj` (distro
+  `projdistro`, one recipe) and `meta-proj-bsp` (machine `board1`).
+- `checkout/`: what `kas checkout kas/base.yaml:kas/board.yaml` adds, copied over the
+  project: `openembedded-core/meta` (collection `core`, `LAYERSERIES_CORENAMES = "wrynose"`),
+  `meta-vendor`, and `build/` with `CACHEDIR.TAG` and `conf/bblayers.conf` /
+  `conf/local.conf` written exactly as kas writes them for these files.
+
+`fakebb/kasbin/kas` is the fake kas (see its header); `lint/org/generated-conf-edit/` holds
+the rule's `good` (the generated files) and `bad` fixtures; `hooks/bash_kas_build.json` is a
+hand-written `kas build` event.
