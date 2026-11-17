@@ -45,8 +45,12 @@ Common to every tool:
 - `machine` and `distro`, where a tool takes them, default to what the evaluated
   configuration sets (`local.conf`, and OE configuration fragments such as bitbake-setup's
   `OE_FRAGMENTS` in `conf/toolcfg.conf`). In a kas project whose build directory does not
-  exist yet, the kas files' `machine` / `distro` (else kas's defaults) are used, with a note
-  naming where they came from. When nothing sets `MACHINE`, every evaluated view ends with
+  exist yet, the kas files' `machine` / `distro` (else kas's defaults; a `KAS_MACHINE` /
+  `KAS_DISTRO` in the environment sous-chef was started in wins, as in kas) are used as
+  `MACHINE ??=` / `DISTRO ??=` where `bitbake.conf` includes `conf/local.conf`, as kas
+  writes them, with a note naming where they came from (`note: MACHINE = "board1" from the
+  kas file kas/board.yaml:5 (kas project without a build directory; ...)`, from
+  `tests/eval_w8.rs`). When nothing sets `MACHINE`, every evaluated view ends with
   `note: no MACHINE is set (...)`: machine-specific values are not applied.
 
 The first six are always loaded. The rest are deferred (short descriptions, loaded on demand).
@@ -1057,9 +1061,11 @@ client closed the connection, a running job's process group is sent SIGKILL (not
 for it; checked by `tests/bitbake_jobs.rs`,
 `a_running_job_is_killed_when_the_server_runtime_is_dropped`) and its output is not stored.
 A server killed by a signal kills nothing: the job's group is a group of its own and keeps
-running. The output being written lies in `<cache dir>/jobs/<pid>-<n>.out`; the next
-server's first job removes such files when the pid is not a live process and the file was
-last written more than 24 hours ago (a file of a live pid is never removed).
+running. The output being written lies in `<cache dir>/jobs/<pid>-<n>.out`; the next server
+removes such files when it starts (on a thread of its own, so start-up does not wait) when
+the pid is not a live process and the file was last written more than 24 hours ago (a file
+of a live pid is never removed; checked by `tests/mcp_server.rs`,
+`server_start_removes_output_files_of_a_dead_server`).
 
 ### `log`
 | Arg | Notes |
@@ -1257,18 +1263,18 @@ Unknown values are `null` (a revision git could not give, a layer that is not in
 The fixture's JSON is `tests/snapshots/audit__audit_fixture_json.snap`.
 
 **On the live workspace** (live-environment.md, the kas build, `--config` a copy of
-`scratch/sous-chef.toml` with the two kas files added, 2026-11-17): 16 to 31 s, 39.3 KB of
-Markdown (385 lines), 76 KB of JSON. The report holds no absolute path; the excerpt
-below is cut, not edited:
+`scratch/sous-chef.toml` with the two kas files added): 16 to 31 s, 39.3 KB of Markdown
+(385 lines), 76 KB of JSON on 2026-11-17; re-run for branch `w9-final` (2026-11-18, release
+binary): 15.4 s, 38.5 KB of Markdown (379 lines). The report holds no absolute path; the
+excerpt below, from the w9-final run, is cut, not edited:
 
 ```
 ## Summary
 
-kas project, release wrynose: 5 layers enabled (2 own), 6 present but not enabled; 1755 indexed files; findings in own layers: 0 error, 0 warning, 1 info; in upstream layers: 3 error, 167 warning, 476 info; 3 items worth attention
+kas project, release wrynose: 5 layers enabled (2 own), 6 present but not enabled; 1755 indexed files; findings in own layers: 0 error, 0 warning, 1 info; in upstream layers: 0 error, 166 warning, 458 info; 2 items worth attention
 ...
-1. **error** `hygiene/parse-error` (3 findings, in meta): `meta:conf/ccache.conf:5` unparsed line; fix the line so BitBake can parse it, or remove it
-2. **warning** `BBLAYERS order` (1 finding, in meta-arm): `build:conf/bblayers.conf:1-6` meta-arm comes before meta in BBLAYERS, though LAYERDEPENDS_meta-arm names `core` (added by meta); BBPATH lists meta-arm first, so its conf/machine/include/arm/arch-armv8-7a.inc, ... are found instead of meta's by include/require, inherit and conf lookups; list meta first if that is not intended
-3. **info** `hygiene/missing-metadata` (1 finding, in meta-kiss): `meta-kiss:recipes-kernel/linux/linux-kiss_7.0.bb:1` recipe has no HOMEPAGE; set HOMEPAGE to the upstream project's web page
+1. **warning** `BBLAYERS order` (1 finding, in meta-arm): `build:conf/bblayers.conf:1-6` meta-arm comes before meta in BBLAYERS, though LAYERDEPENDS_meta-arm names `core` (added by meta); BBPATH lists meta-arm first, so its conf/machine/include/arm/arch-armv8-7a.inc, conf/machine/include/arm/arch-armv8-8a.inc, conf/machine/include/arm/arch-armv9-1a.inc, conf/machine/include/arm/arch-armv9-2a.inc, conf/machine/include/arm/arch-armv9-3a.inc are found instead of meta's by include/require, inherit and conf lookups; list meta first if that is not intended
+2. **info** `hygiene/missing-metadata` (1 finding, in meta-kiss): `meta-kiss:recipes-kernel/linux/linux-kiss_7.0.bb:1` recipe has no HOMEPAGE; set HOMEPAGE to the upstream project's web page
 
 ## 1. Inventory
 
@@ -1286,17 +1292,17 @@ kas project, release wrynose: 5 layers enabled (2 own), 6 present but not enable
 - Note: meta-kiss-amd (not enabled) has LAYERDEPENDS on meta-python, xilinx-microblaze, which no layer under the root adds: it cannot be enabled until a layer providing them is added
 ```
 
-Read as its reader would, the report is right about the repository but carries the lint
-rules' known errors: item 1 is `meta:conf/ccache.conf`, ccache's own configuration file,
-which lint takes for metadata (lint-rules.md, "On a real workspace"), and section 5
-listed `inherit sanity` in `meta:classes/sign_*.bbclass` as not found because the index
-resolved an inherit in a `classes/` class as a recipe inherit, while those classes are
-used through `INHERIT`, where `classes-global/sanity.bbclass` is found (fixed in w7: such
-an inherit is resolved in both contexts; the live count of unresolved inherits went from
-24 to 21). The `dirty (1)` of
-yocto-kiss is the lock file `live-env.sh` wrote. With `scratch/sous-chef.toml` unchanged
-(no `kas` key) kas detection finds five candidate kas files, so the report shows no pins
-and says why.
+Read as its reader would, the first run (2026-11-17) was right about the repository but
+carried two errors of the rules it calls, both fixed since: its first attention item was 3
+`hygiene/parse-error` errors in `meta:conf/ccache.conf`, ccache's own configuration file,
+which lint then took for metadata (a data file since w6), and section 5 listed `inherit
+sanity` in `meta:classes/sign_*.bbclass` as not found, because the index resolved an
+inherit in a `classes/` class as a recipe inherit while those classes are used through
+`INHERIT`, where `classes-global/sanity.bbclass` is found (w7: resolved in both contexts;
+unresolved inherits 24 -> 21, still 21 in the w9-final run: 20 in `meta`, 1 in
+`meta-arm`, each an argument that needs evaluation). The `dirty (1)` of yocto-kiss is the
+lock file `live-env.sh` wrote. With `scratch/sous-chef.toml` unchanged (no `kas` key) kas
+detection finds five candidate kas files, so the report shows no pins and says why.
 
 ### `diff`
 A statement-level diff of a layer's recipes between two git revisions, and what it means
