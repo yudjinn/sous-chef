@@ -1,7 +1,8 @@
 # sous-chef Claude Code plugin
 
 This directory is a Claude Code plugin (T7.5) and a one-plugin marketplace that serves it.
-It bundles the MCP server, the three `PostToolUse` hooks and a skill. Installation is in the
+It bundles the MCP server, three `PostToolUse` hook entries (served by four handlers) and a
+skill. Installation is in the
 top-level [README](../README.md#install). This file records what the packaging rests on, the
 hook wire format `sous-chef hook` is built against (T7.1 to T7.4), and what was checked
 against a real Claude Code.
@@ -15,6 +16,19 @@ against a real Claude Code.
 | `.mcp.json` | The MCP server `sous-chef` (`plugin:sous-chef:sous-chef` in `/mcp`): `sh -c 'cd "$CLAUDE_PROJECT_DIR" 2>/dev/null; exec sous-chef serve'` |
 | `hooks/hooks.json` | `PostToolUse` hooks on `Grep\|Read`, `Bash` and `Edit\|Write\|MultiEdit`, each `command -v sous-chef >/dev/null 2>&1 \|\| exit 0; exec sous-chef hook`, timeout 10 s |
 | `skills/yocto-layers/SKILL.md` | The skill `sous-chef:yocto-layers`: which tool to use instead of Grep and Read, pointers and handles, static values, writing, releases, hooks, kas |
+
+### Handlers and switches
+
+| Handler (`hook.log` name) | Matcher | What it does | `[hooks]` switch | Live |
+|---|---|---|---|---|
+| `grep_read` | `Grep\|Read` | adds the enclosing item and the recipe's contributing files as `additionalContext` | `grep_read` | confirmed (Grep content mode, Read) |
+| `bash` | `Bash` | replaces the output of a large `bitbake`, `devtool` or `bitbake-layers` command (also through `kas build` / `kas shell -c`) with a digest and a handle | `bash` | not captured live |
+| `bash_grep` | `Bash` | annotates a plain `grep -n` / `rg -n` like Grep, as `additionalContext` | `grep_read` | not captured live |
+| `edit` | `Edit\|Write\|MultiEdit` | reindexes the file, adds up to five lint findings; a line when the layer is not writable | `edit` | not captured live |
+
+All switches default to `true`. Live means checked in a real Claude Code session (below);
+the others are tested against hand-written events in the documented shape and, for the
+Bash digest, against real BitBake output (docs/live-verification.md, item 7).
 
 `tests/plugin_packaging.rs` keeps this honest without Claude Code: the JSON files parse and
 agree with each other and with `Cargo.toml`; every command they run is a real subcommand
@@ -288,7 +302,8 @@ milliseconds (measured below), so a process per event fits the budget.
   `PostToolUse` on `Grep`, `Read` (T7.2), `Bash` (T7.3: the digest, then the grep
   annotation) and `Edit` / `Write` / `MultiEdit` (T7.4) have handlers; everything else is
   a no-op. Several handlers may take one tool: the switched-on ones are tried in order
-  until one returns a response or an error.
+  until one returns a response or an error (one with nothing to add passes to the next).
+  The switches are read from `sous-chef.toml` before any handler opens the index.
 - Grep `content` lines: a line is a hit only when exactly one of its
   `<prefix>:<n>:` / `<prefix>-<n>-` splits names an existing Yocto file (a relative path
   tried against `cwd` and the search directory) and that split is a match (`:`). Context
