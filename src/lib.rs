@@ -1,6 +1,7 @@
 //! sous-chef: an MCP server for Yocto / BitBake layers. Module declarations only; see
 //! `docs/architecture.md` for the layout and the contracts.
 
+pub mod audit;
 pub mod bitbake;
 pub mod config;
 pub mod error;

@@ -1064,6 +1064,9 @@ the kas files changed since the last checkout) and one `kas_problem` row per pro
 JSON, a `kas` object with the same fields. The `bitbake` row's mode is `init-script`,
 `bitbake-setup`, `kas` or `initialised`.
 
+### `audit`
+AUDIT-SECTION
+
 ## MCP resources
 
 - `sous-chef://help`: this document condensed, generated from the tool registry and the

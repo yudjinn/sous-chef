@@ -1298,6 +1298,44 @@ fn explode_version(s: &str) -> Vec<(i32, Part)> {
     out
 }
 
+// ---- whole-workspace problem lists (added by T8.6, the audit report) ----
+
+/// Every `unknown` statement (a line the parser could not read as any statement, or a
+/// directive it does not model such as `addpylib`), by layer row id, path and position;
+/// data files left out ([`FileSet::DEFAULT`]).
+pub fn unknown_statements(index: &Index) -> Result<Vec<StatementRow>> {
+    let sql = format!(
+        "SELECT {STMT_COLS} FROM {STMT_FROM} WHERE s.kind = 'unknown' AND {} \
+         ORDER BY l.id, f.path, s.ord",
+        FileSet::DEFAULT.sql()
+    );
+    collect(index, &sql, &[], stmt_row)
+}
+
+/// Every `inherit` edge (from `inherit` and `inherit_defer` statements; `INHERIT +=` makes
+/// no edge) whose target is not resolved (no such class on the search path, or an argument
+/// that needs evaluation), by source layer, path and line.
+pub fn unresolved_inherit_edges(index: &Index) -> Result<Vec<EdgeRow>> {
+    let sql = format!(
+        "{EDGE_SELECT} WHERE e.kind = 'inherit' AND e.target_file IS NULL \
+         ORDER BY ls.id, fs.path, e.line, e.id"
+    );
+    collect(index, &sql, &[], edge_row)
+}
+
+/// Files with at least one anonymous python function (`python () { ... }` or
+/// `python __anonymous () { ... }`), by layer row id then path; data files left out
+/// ([`FileSet::DEFAULT`]).
+pub fn anonymous_python_files(index: &Index) -> Result<Vec<FileRow>> {
+    let sql = format!(
+        "SELECT {FILE_COLS} FROM {FILE_FROM} WHERE {} AND EXISTS (SELECT 1 FROM statements s \
+         WHERE s.file_id = f.id AND s.kind = 'function' AND s.name = '__anonymous') \
+         ORDER BY l.id, f.path",
+        FileSet::DEFAULT.sql()
+    );
+    collect(index, &sql, &[], |r| file_row(r, 0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

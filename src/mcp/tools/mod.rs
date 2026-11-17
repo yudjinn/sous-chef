@@ -3,6 +3,7 @@
 //!
 //! Tool tasks fill in their own file only. The registry table is `mcp::TOOLS`.
 
+pub mod audit;
 pub mod bitbake;
 pub mod class;
 pub mod deps;

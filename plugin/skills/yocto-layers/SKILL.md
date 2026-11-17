@@ -27,6 +27,7 @@ BitBake's parse order, layer priority and override chain, which a grep does not.
 | Why a task failed | `log` |
 | Read stored output | `slice` |
 | Workspace roots, release, index, build environment | `status` |
+| One findings report over the whole repository (every layer, releases, structure, lint, parse problems), when asked to review or audit it; slow (lint of every layer) | `audit`, then `slice` the handle |
 
 ## Pointers and handles
 

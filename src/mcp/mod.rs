@@ -276,6 +276,11 @@ pub static TOOLS: &[ToolEntry] = &[
         Deferred,
         "Workspace, index and bitbake environment status."
     ),
+    tool!(
+        audit,
+        Deferred,
+        "Whole-repository audit report (layers, releases, structure, lint, parse problems) stored under a handle; returns a digest."
+    ),
 ];
 
 /// Looks up a registry entry by tool name.
