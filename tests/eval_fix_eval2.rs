@@ -9,8 +9,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::*;
+use sous_chef::bitbake::JobTable;
 use sous_chef::eval::{self, ConfigCache, DataStore, RefProblem, Target};
-use sous_chef::index::Index;
+use sous_chef::handles::HandleStore;
+use sous_chef::index::{Index, query};
+use sous_chef::mcp::Ctx;
+use sous_chef::mcp::tools::{deps, overrides};
 use sous_chef::workspace::Workspace;
 
 struct Fx {
@@ -190,4 +194,236 @@ fn deferred_inherit_without_uncertainty_is_exact() {
     assert_eq!(tc.text, "toolchain-gcc");
     assert!(!tc.unevaluated_python, "{tc:?}");
     assert!(ds.replay().uncertain_references.is_empty());
+}
+
+// ---------------------------------------------------------------------------------------
+// Tools on a modified workspace
+// ---------------------------------------------------------------------------------------
+
+struct ToolFx {
+    fx: Fx,
+    ctx: Ctx,
+}
+
+fn tools(release: &str, edit: impl FnOnce(&Path)) -> ToolFx {
+    let (tmp, root, cfg, ws) = temp_ws_release(release, edit);
+    let cache = tempfile::tempdir().unwrap();
+    let mut idx = Index::open_in(cache.path(), &ws).unwrap();
+    idx.refresh(&ws).unwrap();
+    let mut tool_idx = Index::open_in(cache.path(), &ws).unwrap();
+    tool_idx.refresh(&ws).unwrap();
+    let handles = HandleStore::open(&tool_idx.cache_dir().join("handles")).unwrap();
+    let ctx = Ctx {
+        config: cfg,
+        workspace: ws.clone(),
+        index: tokio::sync::Mutex::new(tool_idx),
+        handles,
+        jobs: JobTable::new(),
+    };
+    ToolFx {
+        fx: Fx {
+            _cache: cache,
+            _tmp: tmp,
+            root,
+            ws,
+            idx,
+        },
+        ctx,
+    }
+}
+
+/// Table rows (header and note lines left out), split on tabs.
+fn rows(text: &str) -> Vec<Vec<String>> {
+    text.lines()
+        .skip(1)
+        .filter(|l| l.contains('\t') && !l.starts_with("note:") && !l.starts_with("warning:"))
+        .map(|l| l.split('\t').map(str::to_string).collect())
+        .collect()
+}
+
+async fn overrides_out(f: &ToolFx, recipe: Option<&str>, show: overrides::Show) -> String {
+    overrides::run(
+        &f.ctx,
+        overrides::Args {
+            recipe: recipe.map(str::to_string),
+            machine: None,
+            distro: None,
+            show,
+            budget_tokens: Some(20000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap()
+}
+
+async fn deps_out(f: &ToolFx, recipe: &str, kind: deps::Kind) -> String {
+    deps::run(
+        &f.ctx,
+        deps::Args {
+            recipe: recipe.into(),
+            kind,
+            depth: None,
+            budget_tokens: Some(20000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap()
+}
+
+/// The python shapes the live verification met on OE-core (B4, B6, B15): python in
+/// `MACHINEOVERRIDES` with `:` inside it (the ti33x machine include), a `DEPENDS` /
+/// `PACKAGES` / `PACKAGECONFIG` word that is python with spaces and commas (curl_8.19.0.bb),
+/// a `PROVIDES` that is python only (libglvnd), and BitBake's own flags on `PACKAGECONFIG`
+/// (bitbake.conf:942, documentation.conf:311).
+fn python_lists(root: &Path) {
+    replace_in(
+        root,
+        "meta-core/conf/bitbake.conf",
+        "MACHINEOVERRIDES ?= \"${MACHINE}\"",
+        "MACHINEOVERRIDES ?= \"${@['', 'ti-soc:ti33x:'][d.getVar('SOC_FAMILY') != '']}${MACHINE}\"",
+    );
+    append_to(
+        root,
+        "meta-core/conf/bitbake.conf",
+        "\nPACKAGECONFIG[vardepvalue] = \"${PACKAGECONFIG}\"\n\
+         PACKAGECONFIG[doc] = \"This variable provides a means of enabling or disabling features of a recipe on a per-recipe basis.\"\n",
+    );
+    append_to(
+        root,
+        "meta-core/recipes-core/hello/hello_1.1.bb",
+        "\nDEPENDS = \"zlib\"\n\
+         DEPENDS:append = \" ${@bb.utils.contains('PTEST_ENABLED', '1', ' openssl-native', '', d)}\"\n\
+         PACKAGES =+ \"${@bb.utils.contains('PTEST_ENABLED', '1', '${PN}-ptest', '', d)}\"\n\
+         RDEPENDS:${PN}-ptest = \"bash\"\n\
+         RDEPENDS:hello-ptest:append = \" sed\"\n\
+         PACKAGECONFIG:append = \" ${@bb.utils.filter('DISTRO_FEATURES', 'ipv6', d)}\"\n",
+    );
+    append_to(
+        root,
+        "meta-core/recipes-core/libfoo/libfoo_2.0.bb",
+        "\nPROVIDES += \"${@bb.utils.contains('PACKAGECONFIG', 'egl', 'virtual/egl', '', d)}\"\n",
+    );
+}
+
+#[tokio::test]
+async fn overrides_chain_keeps_python_entries_whole() {
+    let f = tools("wrynose", python_lists);
+    let ds = eval(&f.fx, Some("hello"));
+    // Not override names: the fragments and the accidental `ti33x` of a naive split.
+    assert!(
+        !ds.overrides()
+            .iter()
+            .any(|o| o.contains('\'') || o == "ti33x"),
+        "{:?}",
+        ds.overrides()
+    );
+    let out = overrides_out(&f, Some("hello"), overrides::Show::Chain).await;
+    let table = rows(&out);
+    assert!(
+        table
+            .iter()
+            .all(|r| r[1].matches("${").count() == r[1].matches('}').count()),
+        "{out}"
+    );
+    let py: Vec<&Vec<String>> = table.iter().filter(|r| r[1].contains("${@")).collect();
+    assert_eq!(py.len(), 1, "{out}");
+    assert_eq!(py[0][1], "${@...}qemux86");
+    assert!(py[0][2].contains("python, not evaluated"), "{out}");
+}
+
+#[tokio::test]
+async fn deps_build_shows_python_as_one_unknown_word() {
+    let f = tools("wrynose", python_lists);
+    let out = deps_out(&f, "hello", deps::Kind::Build).await;
+    let table = rows(&out);
+    assert!(
+        !table
+            .iter()
+            .any(|r| r[1].contains('\'') || r[1].contains(',')),
+        "python fragments as dependencies: {out}"
+    );
+    let py: Vec<&Vec<String>> = table.iter().filter(|r| r[1].contains("${@")).collect();
+    assert_eq!(py.len(), 1, "{out}");
+    assert_eq!(py[0][1], "${@bb.utils.contains(...)}");
+    assert!(py[0][2].starts_with("unknown"), "{out}");
+    // The index has no fragment as a provided name either (libglvnd's `'',`).
+    for frag in ["'',", "'virtual/egl',", "'egl',"] {
+        assert!(
+            query::files_providing(&f.fx.idx, frag).unwrap().is_empty(),
+            "{frag}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn packageconfig_lists_options_only() {
+    let f = tools("wrynose", python_lists);
+    let out = deps_out(&f, "hello", deps::Kind::Packageconfig).await;
+    let opts: Vec<String> = rows(&out).into_iter().map(|r| r[0].clone()).collect();
+    assert!(opts.contains(&"greeting".to_string()), "{out}");
+    assert!(
+        !opts.iter().any(|o| o == "doc" || o == "vardepvalue"),
+        "{out}"
+    );
+    assert!(
+        !opts.iter().any(|o| o.contains('\'') || o.ends_with(',')),
+        "{out}"
+    );
+    assert!(
+        opts.iter().any(|o| o == "${@bb.utils.filter(...)}"),
+        "{out}"
+    );
+    assert!(
+        out.contains("not options: PACKAGECONFIG[doc], [vardepvalue]"),
+        "{out}"
+    );
+}
+
+#[tokio::test]
+async fn package_added_by_python_is_not_a_dead_override() {
+    let f = tools("wrynose", python_lists);
+    let out = overrides_out(&f, Some("hello"), overrides::Show::Dead).await;
+    assert!(!rows(&out).iter().any(|r| r[0].contains("ptest")), "{out}");
+}
+
+// ---------------------------------------------------------------------------------------
+// B11: `overrides show=dead`, variables read by name and inactive overrides
+// ---------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn dead_leaves_out_variables_read_by_name_and_inactive_overrides() {
+    let f = tools("wrynose", |root| {
+        // OE-core's bitbake.conf:162 and a tune include of another architecture.
+        append_to(
+            root,
+            "meta-core/conf/bitbake.conf",
+            "\nDEFAULTTUNE ??= \"core2-32\"\n\
+             TUNE_FEATURES ??= \"${TUNE_FEATURES:tune-${DEFAULTTUNE}}\"\n\
+             include conf/machine/include/tune-cortexa8.inc\n",
+        );
+        write(
+            root,
+            "meta-core/conf/machine/include/tune-cortexa8.inc",
+            "TUNE_FEATURES:tune-cortexa8 = \"arm vfp cortexa8\"\n\
+             EXTRA_OECONF:append:boardx = \" --board\"\n\
+             EXTRA_OECONF:append:nosuchboard = \" --typo\"\n",
+        );
+    });
+    let out = overrides_out(&f, None, overrides::Show::Dead).await;
+    let dead: Vec<String> = rows(&out).into_iter().map(|r| r[0].clone()).collect();
+    // A typo is dead; a variable read by name is not; a machine override that is only
+    // inactive for this machine is not.
+    assert!(dead.contains(&"nosuchboard".to_string()), "{out}");
+    assert!(!dead.iter().any(|d| d.starts_with("tune-")), "{out}");
+    assert!(!dead.contains(&"boardx".to_string()), "{out}");
+    assert!(out.contains("variables read by name"), "{out}");
+    assert!(
+        out.contains("inactive for this machine and distro, not dead"),
+        "{out}"
+    );
+    // For a recipe, an `.inc` the configuration includes is not one of the recipe's files.
+    let out = overrides_out(&f, Some("hello"), overrides::Show::Conditional).await;
+    assert!(!out.contains("tune-cortexa8.inc"), "{out}");
 }

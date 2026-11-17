@@ -165,6 +165,37 @@ what `src/eval/overrides.rs` and `src/eval/datastore.rs` reproduce:
   before `VAR = "a"` still gives `"a x"`. `VAR:foo:append` with `foo` inactive is ignored;
   `VAR:append:foo` with `foo` inactive too.
 
+### Splitting list values (verified, w5-fix-eval2 B4/B6)
+
+BitBake splits a value only **after** expanding it, python included: `need_overrides`
+(`lib/bb/data_smart.py`, BitBake 2.18.0) does `self.overrides = (self.getVar("OVERRIDES")
+or "").split(":")`; list consumers do `(d.getVar("DEPENDS") or "").split()`
+(`ast.handleVirtRecipeProviders`, `taskdata`, OE-core's `base.bbclass` for `PACKAGECONFIG`,
+whose flags it splits with `flagval.split(",")` after `getVarFlags` expanded them). The
+`${@...}` has been run by then, so no python text is ever split. A static value can still
+hold `${@...}` (or an undefined `${VAR}`): OE-core's `MACHINEOVERRIDES` for ti33x is
+`${@['', 'ti-soc:ti33x:'][...]}dogbonedark`, curl's `DEPENDS:append:class-target` is
+`${@bb.utils.contains('PTEST_ENABLED', '1', ' openssl-native', '', d)}`, libglvnd's
+`PROVIDES` is four such expressions. Splitting that text gives fragments (`'',`, `']['ti-soc`)
+that are not words of the real value.
+
+sous-chef splits every value with one tokeniser, `src/parse/words.rs`: a `${...}` group is
+opaque (braces nest; inside `${@...}` a quoted string is skipped, so a brace in a string
+does not end it; unterminated, it runs to the end), so whitespace, `:` and `,` inside it do
+not split. A word or entry that holds a group is **unevaluated**: it stands for text that is
+not known (any number of real words, possibly none), it is shown as what it is (abbreviated
+`${@name(...)}` in tables), and it is never an override name (`DataStore::overrides` leaves
+it out; `override_entries` lists it), a dependency, a provider, a package or a
+`PACKAGECONFIG` option. `:remove` matching uses the same split, so a remove word is never
+matched against a fragment. (BitBake's own regex for the end of `${@...}`,
+`\$\{@(?:\{.*?\}|.)+?\}`, stops at the first `}` that does not close a one-level `{...}`;
+for the python OE-core writes the two agree.) Used by `eval/overrides.rs`,
+`eval/providers.rs`, `eval/replay.rs` (`INHERIT`, `BB_DEFER_BBCLASSES`, the
+`BB_RECIPE_VIRTUAL_PROVIDERS` rewrite, which keeps an expression whole when it joins the
+words again), `index/scan.rs` (`provides` and `depends` rows, the `PACKAGECONFIG` build
+field) and the `overrides` and `deps` tools. Lint rules split values themselves (outside this
+change).
+
 ### Datastore (parse-time operators)
 
 Verified (T3.1) against `ast.py` `DataNode.eval` and `data_smart.py`, `master` 2026-11:
@@ -864,6 +895,23 @@ recommendations (`RRECOMMENDS:${PN}`), 6 conflicting options (an enabled conflic
 Flags are iterated in sorted order; a word of `PACKAGECONFIG` with no flag is ignored; no
 flag name is special. The additions are made by anonymous python, which sous-chef does not
 run: `deps` lists them from the flags and says so.
+
+**BitBake's own flags on `PACKAGECONFIG`** (verified, w5-fix-eval2 B15, OE-core Wrynose
+`meta/classes-global/base.bbclass` anonymous python lines 471-549, BitBake 2.18.0
+`lib/bb/data_smart.py` `getVarFlags`, `lib/bb/data.py` `build_dependencies`,
+`lib/bb/cooker.py` `getAllKeysWithFlags`): `pkgconfigflags = d.getVarFlags("PACKAGECONFIG")`
+returns every flag except the internal ones (names starting with `_` or `:`), and the loop
+skips none, so OE-core's own `PACKAGECONFIG[vardepvalue] = "${PACKAGECONFIG}"`
+(`bitbake.conf:942`) and `PACKAGECONFIG[doc] = "..."` (`documentation.conf:311`) go through
+it like options. Each adds nothing unless its name is a word of `PACKAGECONFIG` (then field 1,
+3, 4, 5) or its text has a non-empty second comma field (then that field goes to
+`PACKAGECONFIG_CONFARGS`). Those flag names are BitBake's: `doc` (documentation; the
+`getAllKeysWithFlags(["doc", "func"])` dump), `vardeps`, `vardepvalue`, `vardepsexclude`,
+`vardepvalueexclude`, `exports`, `prefuncs`, `postfuncs`, `lineno`, `filename`
+(`build_dependencies`, the task signature), `export`, `unexport`, `func`, `python`. The `deps`
+tool (`kind=packageconfig`) lists such a flag as an option only when it would add something
+by the rule above, and names the others in a note; a `${@...}` word of `PACKAGECONFIG` is
+one row, "unknown", never an option (see "Splitting list values").
 
 ## Files and patches
 

@@ -704,6 +704,16 @@ pub fn statements_by_base(
     )
 }
 
+/// The distinct statement values (as written) that contain `needle`, a literal substring.
+pub fn values_containing(index: &Index, needle: &str) -> Result<Vec<String>> {
+    collect(
+        index,
+        "SELECT DISTINCT value FROM statements WHERE value IS NOT NULL AND instr(value, ?1) > 0",
+        &[&needle],
+        |r| r.get(0),
+    )
+}
+
 /// The statement covering `line` of `file` (a function body counts), if any.
 pub fn enclosing_item(index: &Index, file: i64, line: u32) -> Result<Option<ItemRow>> {
     let sql = format!(

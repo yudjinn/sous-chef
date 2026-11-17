@@ -3,6 +3,7 @@
 pub mod ast;
 pub mod lexer;
 pub mod parser;
+pub mod words;
 
 pub use ast::{
     AddFragments, IncludeMode, Lang, ParseDiagnostic, ParsedFile, Statement, StatementKind,

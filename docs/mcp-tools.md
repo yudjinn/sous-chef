@@ -293,19 +293,30 @@ final: function do_install, 3 pieces in order: meta-core:classes-recipe/autotool
   lowest priority first, each with the variables it came through
   (`OVERRIDES <- MACHINEOVERRIDES <- MACHINE`) and the deepest assignment that contributes
   it. Entries are attributed by expanding the applied assignments piece by piece; a piece
-  that is python is unknown and said so.
+  that is python is unknown and said so. `OVERRIDES` is split on `:` with `${...}` kept
+  whole (bitbake-semantics.md, "Splitting list values"): an entry that holds python is one
+  row, abbreviated (`${@...}dogbonedark`, `linux${@...}eabi`), from `${@...} (python, not
+  evaluated): stands for entries that are not known`; it is never split into fragments and
+  never counted as an override name.
 - `conditional`: rows `state condition name loc snippet`: every operation whose name
   carries an override condition, in parse order, `active` or `inactive` for this machine
   and distro. With a recipe: the operations from the recipe's own files (recipe, includes,
-  classes, bbappends) and `.conf` operations conditional on `pn-<pn>`; without, the
+  classes, bbappends: the files read in the recipe pass, not an `.inc` the configuration
+  includes) and `.conf` operations conditional on `pn-<pn>`; without, the
   configuration's operations. Package-name overrides (`FILES:${PN}-dev`,
   `RDEPENDS:libfoo-dev`) are not conditions and are left out.
 - `dead`: rows `override closest name loc snippet`: the conditional operations with an
-  override element known nowhere: not in `OVERRIDES` for any machine or distro conf of the
-  workspace, not a machine, distro or declared override, not a class, `pn-` or `layer-`
-  form, not a package of the recipe. `closest` is the nearest known name by edit distance.
-  It evaluates the configuration once per machine conf (with the default distro) and once
-  per distro conf (with the default machine); the passes are cached.
+  override element that **matches no known override**, by the lint rule `override/dead`'s
+  definition: not in the evaluated `OVERRIDES`, not a name `KnownOverrides` accepts
+  (machine and distro conf names, declared and built-in overrides, `class-` / `pn-` /
+  `layer-` / ... forms), not a class name, not a word of any `*OVERRIDES` assignment in the
+  workspace (python included), not a package of the recipe. Not listed, and counted in
+  notes instead: operations whose overrides are known but inactive for this machine and
+  distro; operations on a variable that BitBake reads by name (some value holds
+  `${VAR:<prefix>${...}}`, `'VAR:<prefix>' +` or `"VAR:<prefix>%s"`: OE-core's
+  `TUNE_FEATURES:tune-<tune>`, read as `${TUNE_FEATURES:tune-${DEFAULTTUNE}}`); a name in
+  the package position of a package variable, or of any variable while `PACKAGES` holds
+  python (a package python adds). `closest` is the nearest known name by edit distance.
 
 A warning follows when `OVERRIDES` contains python or unresolved references (active and
 inactive may then be wrong), and one for each opaque anonymous python function. `chain` of
@@ -340,7 +351,8 @@ note: 1 active, 3 inactive; scope: the recipe's files, and .conf statements cond
 ```
 override	closest	name	loc	snippet
 boradx	boardx (distance 2)	EXTRA_OECONF:append:boradx	meta-vendor:recipes-core/hello/hello_%.bbappend:9	EXTRA_OECONF:append:boradx = " --enable-typo"
-note: known overrides: OVERRIDES of 3 machine/distro configurations, machine and distro names, declared MACHINEOVERRIDES/DISTROOVERRIDES words, class-/pn-/layer- forms, and the recipe's packages
+note: dead = an override element that matches no known override: not in OVERRIDES, not a machine, distro or class name, not a declared or built-in override, not a word of any *OVERRIDES assignment in the workspace (python included), not a package of the recipe; the same definition as the lint rule override/dead
+note: 2 inactive conditional operations use known overrides: inactive for this machine and distro, not dead (show=conditional lists them)
 ```
 
 ### `item`
@@ -511,7 +523,15 @@ the flags of the selected options, with a note.
   options (on `${PN}`).
 - `packageconfig`: rows `option selected enable disable build runtime loc`, one per
   `PACKAGECONFIG[option]` flag (fields 1 to 4), and a note with the value of
-  `PACKAGECONFIG` and where it is set. Fields 5 and 6 are not shown.
+  `PACKAGECONFIG` and where it is set. Fields 5 and 6 are not shown. BitBake's own flags
+  (`doc`, `vardepvalue`, `vardeps`, ...; OE-core sets `PACKAGECONFIG[doc]` and
+  `PACKAGECONFIG[vardepvalue]`) are not options and are named in a note, unless
+  `base.bbclass` would really use one (bitbake-semantics.md, `PACKAGECONFIG`).
+- Lists are split with `${...}` kept whole (bitbake-semantics.md, "Splitting list
+  values"): a word of `DEPENDS`, `RDEPENDS:<pkg>` or `PACKAGECONFIG` that holds python is
+  one row, abbreviated (`${@bb.utils.contains(...)}`), with provider / selection
+  `unknown: not evaluated ...`; it is never resolved as a name. A python word of `PACKAGES`
+  is named in a note (its packages are not listed).
 - `reverse`: rows `depth recipe kind target loc status`: recipes whose `DEPENDS`,
   `RDEPENDS:<pkg>` or `PACKAGECONFIG` build field names the recipe (`by name`) or
   something it provides (`via <name>`, with the selected provider of that name). Static:

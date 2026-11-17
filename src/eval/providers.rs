@@ -37,6 +37,7 @@ use super::{DataStore, OpStatus, Target};
 use crate::error::{Error, Result};
 use crate::index::Index;
 use crate::index::query::{self, FileRow, RecipeRow, StatementFilter};
+use crate::parse::words;
 use crate::types::{FileKind, Loc};
 use crate::workspace::Workspace;
 use crate::workspace::resolve;
@@ -651,19 +652,14 @@ fn provides_name(ds: &DataStore, pn: &str, name: &str) -> (bool, Option<Loc>, bo
     let Some(v) = ds.value("PROVIDES") else {
         return (false, None, false);
     };
-    if !v.text.split_whitespace().any(|w| w == name) {
+    if !words::known_words(&v.text).contains(&name) {
         return (v.unevaluated_python, None, v.unevaluated_python);
     }
     let loc = ds
         .history("PROVIDES")
         .into_iter()
         .filter(|(_, st)| *st == OpStatus::Applied)
-        .find(|(op, _)| {
-            ds.expand(&op.value)
-                .text
-                .split_whitespace()
-                .any(|w| w == name)
-        })
+        .find(|(op, _)| words::known_words(&ds.expand(&op.value).text).contains(&name))
         .map(|(op, _)| op.loc);
     (true, loc, v.unevaluated_python)
 }

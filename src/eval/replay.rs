@@ -72,6 +72,7 @@ use super::{DataStore, FileVisit, OpStatus, Target, VarOp};
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
 use crate::index::{self, Index};
+use crate::parse::words as pwords;
 use crate::release::Feature;
 use crate::types::{AssignOp, FileKind, LineSpan, Loc, VarRef};
 use crate::workspace::Workspace;
@@ -621,7 +622,7 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
     // ["base"] + INHERIT, as global classes.
     let inherit = r.ds.value("INHERIT").map(|v| v.text).unwrap_or_default();
     let mut classes = vec!["base".to_string()];
-    classes.extend(inherit.split_whitespace().map(str::to_string));
+    classes.extend(pwords::words(&inherit).into_iter().map(str::to_string));
     for c in classes {
         let via = if c == "base" {
             Vec::new()
@@ -790,7 +791,7 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
         ds.ovr_cache = OnceLock::new();
         return;
     }
-    let virt: Vec<&str> = list.text.split_whitespace().collect();
+    let virt: Vec<&str> = pwords::words(&list.text);
     let Some(deps) = ds.value(DEPENDS) else {
         return;
     };
@@ -799,7 +800,9 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
     let mut missing: Vec<String> = Vec::new();
     let mut python = deps.unevaluated_python;
     let mut unresolved: Vec<String> = deps.unresolved.clone();
-    for w in deps.text.split_whitespace() {
+    // A `${@...}` in DEPENDS is one word, kept as written (BitBake splits the value after
+    // running the python; the replay cannot, and must not cut the expression apart).
+    for w in pwords::words(&deps.text) {
         if !virt.contains(&w) {
             words.push(w.to_string());
             continue;
@@ -2086,7 +2089,7 @@ impl<'a> Replay<'a> {
             let defer = self
                 .ds
                 .value("BB_DEFER_BBCLASSES")
-                .map(|v| v.text.split_whitespace().any(|w| w == word))
+                .map(|v| pwords::words(&v.text).contains(&word))
                 .unwrap_or(false);
             if !deferred && defer {
                 Arc::make_mut(&mut self.ds.notes).deferred.push(Deferred {
@@ -2126,13 +2129,9 @@ impl<'a> Replay<'a> {
             .map(|(op, _)| op);
         let op = match word {
             None => applied.next_back(),
-            Some(w) => applied.into_iter().find(|op| {
-                self.ds
-                    .expand(&op.value)
-                    .text
-                    .split_whitespace()
-                    .any(|x| x == w)
-            }),
+            Some(w) => applied
+                .into_iter()
+                .find(|op| pwords::words(&self.ds.expand(&op.value).text).contains(&w)),
         };
         match op {
             Some(op) => {

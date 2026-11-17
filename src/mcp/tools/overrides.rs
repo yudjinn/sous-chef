@@ -11,11 +11,17 @@
 //!   `.conf` operations conditional on `pn-<pn>`; without: the configuration's operations.
 //!   Package-name overrides (`FILES:${PN}-dev`, `RDEPENDS:libfoo-dev`) are not conditions
 //!   and are left out.
-//! - `dead`: the conditional operations with an override element that is known nowhere:
-//!   not in `OVERRIDES` for any machine or distro conf in the workspace (each evaluated), not
-//!   a machine, distro or declared override (`lint::helpers::KnownOverrides`), not a class,
-//!   `pn-` or `layer-` form, not a package of the recipe. Each is reported with the closest
-//!   known name by edit distance.
+//! - `dead`: the conditional operations with an override element that matches no known
+//!   override, by the definition of the lint rule `override/dead` (`Known` here mirrors the
+//!   rule's: the evaluated `OVERRIDES`, `lint::helpers::KnownOverrides`, class stems, words of
+//!   every `*OVERRIDES` assignment, python included), and not a package of the recipe. Each is
+//!   reported with the closest known name by edit distance. Operations that are only
+//!   inactive for this machine, on variables BitBake reads by name (`TUNE_FEATURES:tune-*`,
+//!   [`ReadByName`]) or with a possible package in the package position are counted in
+//!   notes, not listed.
+//!
+//! `OVERRIDES` and `PACKAGES` are split with `parse::words`: an entry that holds `${@...}` is
+//! one opaque entry, never an override name or a package.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -25,12 +31,12 @@ use serde::Deserialize;
 use super::var::{op_snippet, recipe_target, replay_notes};
 use crate::error::Result;
 use crate::eval::{self, DataStore, OpStatus, Target, VarOp};
-use crate::index::Index;
-use crate::lint::helpers::KnownOverrides;
+use crate::index::{Index, query};
+use crate::lint::helpers::{self, KnownOverrides};
 use crate::mcp::Ctx;
+use crate::parse::words;
 use crate::render::{self, Format, Table};
 use crate::types::{FileKind, Loc};
-use crate::workspace::Workspace;
 
 /// What to show.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -75,7 +81,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let mut t = match args.show {
         Show::Chain => chain(&ds, &target),
         Show::Conditional => conditional(&ds, &target),
-        Show::Dead => dead(&index, &ctx.workspace, &ds, &target)?,
+        Show::Dead => dead(&index, &ds, &target)?,
     };
     drop(index);
     if let Some(v) = ds.overrides_value()
@@ -122,7 +128,20 @@ fn chain(ds: &DataStore, target: &Target) -> Table {
     let mut map: HashMap<String, Chain> = HashMap::new();
     let mut python = false;
     attribute_var(ds, "OVERRIDES", &mut Vec::new(), &mut map, &mut python);
-    for (i, e) in ds.overrides().iter().enumerate() {
+    let mut unevaluated = 0;
+    for (i, (e, opaque)) in ds.override_entries().iter().enumerate() {
+        if *opaque {
+            // One entry holding python (or an undefined variable): shown once, as what it
+            // is, never split into fragments and never an override name.
+            unevaluated += 1;
+            let what = if eval::expand::has_python(e) {
+                "${@...} (python, not evaluated): stands for entries that are not known"
+            } else {
+                "${...} (undefined variable, left as written)"
+            };
+            t.row(&[&i.to_string(), &words::abbreviate(e), what, "-"]);
+            continue;
+        }
         let (from, loc) = match map.get(e) {
             Some(c) => {
                 let names: Vec<&str> = c.iter().map(|(n, _)| n.as_str()).collect();
@@ -141,8 +160,15 @@ fn chain(ds: &DataStore, target: &Target) -> Table {
         };
         t.row(&[&i.to_string(), e, &from, &loc]);
     }
-    if python {
-        t.note("note: part of OVERRIDES comes from python, which is not evaluated; those entries are missing");
+    if python || unevaluated > 0 {
+        t.note(&format!(
+            "note: part of OVERRIDES comes from python, which is not evaluated; {unevaluated} {} it, and the override names it stands for are not known",
+            if unevaluated == 1 {
+                "entry holds"
+            } else {
+                "entries hold"
+            }
+        ));
     }
     t.note("note: entries to the right (higher priority) win; loc is the deepest assignment that contributes the entry");
     t
@@ -180,7 +206,10 @@ fn attribute_var(
         // Set without an assignment of its own (target machine, PN from the file name).
         if let Some(v) = ds.value(var) {
             stack.push((var.to_string(), None));
-            for e in v.text.split(':').filter(|e| !e.is_empty()) {
+            for e in words::colon_parts(&v.text)
+                .into_iter()
+                .filter(|e| !e.is_empty() && !words::is_unevaluated(e))
+            {
                 map.entry(e.to_string()).or_insert_with(|| stack.clone());
             }
             stack.pop();
@@ -220,19 +249,18 @@ fn attribute_text(
                 (v.text, Some(n.clone()))
             }
         };
-        for _ in out.chars() {
+        for _ in out.bytes() {
             origin.push(from.clone());
         }
         expanded.push_str(&out);
     }
-    let chars: Vec<char> = expanded.chars().collect();
-    let mut start = 0;
-    for i in 0..=chars.len() {
-        if i < chars.len() && chars[i] != ':' {
-            continue;
-        }
-        if i > start {
-            let entry: String = chars[start..i].iter().collect();
+    // Entries split as OVERRIDES is split, a `${...}` group kept whole; an entry holding
+    // one is not an override name and is not attributed.
+    let base = expanded.as_ptr() as usize;
+    for part in words::colon_parts(&expanded) {
+        let start = part.as_ptr() as usize - base;
+        if !part.is_empty() && !words::is_unevaluated(part) {
+            let entry = part.to_string();
             match origin.get(start).cloned().flatten() {
                 Some(var) if !map.contains_key(&entry) => {
                     let mut sub = HashMap::new();
@@ -260,7 +288,6 @@ fn attribute_text(
                 }
             }
         }
-        start = i + 1;
     }
 }
 
@@ -314,6 +341,9 @@ struct Cond {
     /// The condition elements (overrides minus `append` / `prepend` / `remove` and a
     /// leading package name), expanded.
     elements: Vec<String>,
+    /// The first element stands where a package name would (`RDEPENDS:<x>`), and
+    /// `PACKAGES` holds python, so it may be a package python adds.
+    maybe_package: Option<String>,
 }
 
 const KEYWORDS: [&str; 3] = ["append", "prepend", "remove"];
@@ -322,11 +352,21 @@ const KEYWORDS: [&str; 3] = ["append", "prepend", "remove"];
 fn conditionals(ds: &DataStore, target: &Target) -> Vec<Cond> {
     let pn = ds.value("PN").map(|v| v.text);
     let packages: BTreeSet<String> = packages(ds);
+    let pkgs_uncertain = packages_uncertain(ds);
+    // The recipe's own tree: the files read from the recipe file on (the recipe pass runs
+    // on a fork of the configuration, so the configuration's visits come first; an `.inc`
+    // the configuration includes, such as a tune file, is not the recipe's).
+    let first_recipe = ds
+        .files()
+        .iter()
+        .position(|v| v.kind == FileKind::Recipe)
+        .unwrap_or(usize::MAX);
     let recipe_files: BTreeSet<(String, std::path::PathBuf)> = ds
         .files()
         .iter()
-        .filter(|v| v.kind != FileKind::Conf)
-        .map(|v| (v.loc.layer.clone(), v.loc.path.clone()))
+        .enumerate()
+        .filter(|(i, v)| *i >= first_recipe && v.kind != FileKind::Conf)
+        .map(|(_, v)| (v.loc.layer.clone(), v.loc.path.clone()))
         .collect();
     let mut bases: BTreeSet<String> = BTreeSet::new();
     for n in ds.names() {
@@ -341,13 +381,23 @@ fn conditionals(ds: &DataStore, target: &Target) -> Vec<Cond> {
             let full = ds.expanded_name(&op);
             let mut parts: Vec<String> = full.split(':').skip(1).map(str::to_string).collect();
             // A leading package name is not a condition (`FILES:hello-dev`).
-            if parts
+            let lead_removed = parts
                 .first()
                 .is_some_and(|p| packages.contains(p) || p.contains("${"))
-                && !KEYWORDS.contains(&parts[0].as_str())
-            {
+                && !KEYWORDS.contains(&parts[0].as_str());
+            if lead_removed {
                 parts.remove(0);
             }
+            // Still in the package position: a package python adds to PACKAGES (or one at
+            // build time, for a package-scoped variable) cannot be ruled out.
+            let maybe_package = parts
+                .first()
+                .filter(|p| {
+                    !lead_removed
+                        && !KEYWORDS.contains(&p.as_str())
+                        && (pkgs_uncertain || helpers::is_package_var(&op.var.base))
+                })
+                .cloned();
             let elements: Vec<String> = parts
                 .into_iter()
                 .filter(|p| !p.is_empty() && !KEYWORDS.contains(&p.as_str()))
@@ -373,6 +423,7 @@ fn conditionals(ds: &DataStore, target: &Target) -> Vec<Cond> {
                     op,
                     status,
                     elements,
+                    maybe_package,
                 },
             ));
         }
@@ -390,11 +441,26 @@ fn position(ds: &DataStore, loc: &Loc) -> (usize, u32) {
     (file, loc.lines.start)
 }
 
-/// Package names of the recipe: the words of `PACKAGES` plus `PN`.
+/// Whether `PACKAGES` holds an unevaluated word (`${@bb.utils.contains('PTEST_ENABLED', '1',
+/// '${PN}-ptest', '', d)}`): then some package names are not known.
+fn packages_uncertain(ds: &DataStore) -> bool {
+    ds.value("PACKAGES").is_some_and(|v| {
+        words::words(&v.text)
+            .iter()
+            .any(|w| words::is_unevaluated(w))
+    })
+}
+
+/// Package names of the recipe: the known words of `PACKAGES` plus `PN`.
 fn packages(ds: &DataStore) -> BTreeSet<String> {
     let mut out: BTreeSet<String> = ds
         .value("PACKAGES")
-        .map(|v| v.text.split_whitespace().map(str::to_string).collect())
+        .map(|v| {
+            words::known_words(&v.text)
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default();
     if let Some(pn) = ds.value("PN") {
         out.insert(pn.text);
@@ -449,49 +515,180 @@ fn conditional(ds: &DataStore, target: &Target) -> Table {
     t
 }
 
-fn dead(index: &Index, ws: &Workspace, ds: &DataStore, target: &Target) -> Result<Table> {
-    let known = KnownOverrides::from_index(index)?;
-    let mut names: BTreeSet<String> = BTreeSet::new();
-    names.extend(known.machines.iter().cloned());
-    names.extend(known.distros.iter().cloned());
-    names.extend(known.declared.iter().cloned());
-    // OVERRIDES for every machine conf (default distro) and every distro conf (default
-    // machine), each one a configuration pass (cached).
-    let mut evaluated = 0;
-    for (machine, distro) in known
-        .machines
-        .iter()
-        .map(|m| (Some(m.clone()), target.distro.clone()))
-        .chain(
-            known
-                .distros
-                .iter()
-                .map(|d| (target.machine.clone(), Some(d.clone()))),
-        )
-    {
-        let cfg = eval::evaluate(
-            index,
-            ws,
-            &Target {
-                recipe: None,
-                version: None,
-                machine,
-                distro,
-            },
-        )?;
-        evaluated += 1;
-        names.extend(cfg.overrides());
+/// Variables whose values feed `OVERRIDES` in OE-core: the same list as the lint rule
+/// `override/dead` (`src/lint/rules/override_dead.rs`, `OVERRIDE_VARS`).
+const OVERRIDE_VARS: &[&str] = &[
+    "OVERRIDES",
+    "MACHINEOVERRIDES",
+    "MACHINEOVERRIDES_EXTENDER",
+    "DISTROOVERRIDES",
+    "CLASSOVERRIDE",
+    "LIBCOVERRIDE",
+    "TCOVERRIDE",
+    "TUNEOVERRIDES",
+    "FILESOVERRIDES",
+];
+
+/// Words of an `OVERRIDES`-like value, python included: runs of `[a-z0-9_+.-]` (the lint
+/// rule's `tokens`; OE-core's tune files add `armv7a` to `MACHINEOVERRIDES` from python).
+fn override_tokens(value: &str) -> impl Iterator<Item = String> + '_ {
+    value
+        .split(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || "-_+.".contains(c)))
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+}
+
+/// What an override element may legitimately be: the definition of the lint rule
+/// `override/dead` (its `Known`): an entry of the evaluated `OVERRIDES`, a name
+/// [`KnownOverrides::contains`] accepts, a class stem, or a word of any `*OVERRIDES`
+/// assignment in the workspace (python included).
+struct Known {
+    index: KnownOverrides,
+    active: BTreeSet<String>,
+    words: BTreeSet<String>,
+}
+
+impl Known {
+    fn load(index: &Index, ds: &DataStore) -> Result<Known> {
+        let known = KnownOverrides::from_index(index)?;
+        let active: BTreeSet<String> = ds.overrides().into_iter().collect();
+        let mut words = BTreeSet::new();
+        let filter = query::StatementFilter {
+            kinds: vec!["assign".into()],
+            ..query::StatementFilter::default()
+        };
+        for base in OVERRIDE_VARS {
+            for s in query::statements_by_base(index, base, &filter)? {
+                words.extend(override_tokens(s.value.as_deref().unwrap_or("")));
+            }
+            for (op, _) in ds.history(base) {
+                words.extend(override_tokens(&op.value));
+            }
+        }
+        Ok(Known {
+            index: known,
+            active,
+            words,
+        })
     }
-    names.extend(ds.overrides());
+
+    fn contains(&self, o: &str) -> bool {
+        self.active.contains(o)
+            || self.index.contains(o)
+            || self.index.classes.contains(o)
+            || self.words.contains(o)
+    }
+
+    fn names(&self) -> BTreeSet<String> {
+        let mut n: BTreeSet<String> = BTreeSet::new();
+        n.extend(self.index.machines.iter().cloned());
+        n.extend(self.index.distros.iter().cloned());
+        n.extend(self.index.declared.iter().cloned());
+        n.extend(self.active.iter().cloned());
+        n
+    }
+}
+
+/// How BitBake reads `VAR:<o>` by name rather than as a condition: a value somewhere that
+/// holds `VAR:` followed by literal text and then `${`, a quote, `%`, `)` or `+` (`${TUNE_FEATURES:tune-${DEFAULTTUNE}}`,
+/// `d.getVar('BASE_LIB:tune-' + ...)`, `"QEMU_EXTRAOPTIONS:tune-%s"`): every name starting
+/// with that text is a variable of its own (`getVar` finalises the variant's name; it is
+/// never active through `OVERRIDES`). `${VAR:x}` reads exactly `VAR:x`.
+#[derive(Default)]
+struct ReadByName {
+    /// `(base, prefix, exact)`.
+    patterns: Vec<(String, String, bool)>,
+}
+
+impl ReadByName {
+    fn load(index: &Index, bases: &BTreeSet<String>) -> Result<ReadByName> {
+        let mut out = ReadByName::default();
+        for base in bases {
+            let needle = format!("{base}:");
+            for v in query::values_containing(index, &needle)? {
+                let mut rest = v.as_str();
+                while let Some(i) = rest.find(&needle) {
+                    let before = rest[..i].chars().next_back();
+                    let after = &rest[i + needle.len()..];
+                    rest = after;
+                    // `FOO_BASE:` is not `BASE:`.
+                    if before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
+                        continue;
+                    }
+                    let lit: String = after
+                        .chars()
+                        .take_while(|c| c.is_ascii_alphanumeric() || "-_+.".contains(*c))
+                        .collect();
+                    if lit.is_empty() {
+                        continue;
+                    }
+                    let next = after[lit.len()..].chars().next();
+                    match next {
+                        Some('}') => out.patterns.push((base.clone(), lit, true)),
+                        Some('$' | '\'' | '"' | '%' | ')') => {
+                            out.patterns.push((base.clone(), lit, false))
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// The text that reads `base:<first override>` by name, if any.
+    fn reads(&self, base: &str, first: &str) -> Option<String> {
+        self.patterns
+            .iter()
+            .find(|(b, p, exact)| {
+                b == base
+                    && if *exact {
+                        first == p
+                    } else {
+                        first.starts_with(p.as_str())
+                    }
+            })
+            .map(|(b, p, exact)| {
+                if *exact {
+                    format!("{b}:{p}")
+                } else {
+                    format!("{b}:{p}*")
+                }
+            })
+    }
+}
+
+fn dead(index: &Index, ds: &DataStore, target: &Target) -> Result<Table> {
+    let known = Known::load(index, ds)?;
+    let names = known.names();
     let pkgs = packages(ds);
-    names.extend(pkgs.iter().cloned());
+    let conds = conditionals(ds, target);
+    let bases: BTreeSet<String> = conds.iter().map(|c| c.op.var.base.clone()).collect();
+    let by_name = ReadByName::load(index, &bases)?;
 
     let mut t = Table::new(&["override", "closest", "name", "loc", "snippet"]);
-    for c in conditionals(ds, target) {
+    let (mut inactive_known, mut read_by_name, mut maybe_pkg) = (0usize, 0usize, 0usize);
+    for c in &conds {
+        let first = c.op.var.overrides.first().map(String::as_str).unwrap_or("");
+        if by_name.reads(&c.op.var.base, first).is_some() {
+            read_by_name += 1;
+            continue;
+        }
+        let mut is_dead = false;
         for e in &c.elements {
-            if names.contains(e) || pkgs.contains(e) || known.contains(e) {
+            if pkgs.contains(e) || known.contains(e) {
                 continue;
             }
+            // BitBake does not treat a word that does not start with [a-z0-9] as an
+            // override (the lint rule's test too).
+            if !e.starts_with(|ch: char| ch.is_ascii_lowercase() || ch.is_ascii_digit()) {
+                continue;
+            }
+            if c.maybe_package.as_deref() == Some(e.as_str()) {
+                maybe_pkg += 1;
+                continue;
+            }
+            is_dead = true;
             let closest = closest(e, &names).unwrap_or_else(|| "-".into());
             t.row(&[
                 e,
@@ -501,10 +698,29 @@ fn dead(index: &Index, ws: &Workspace, ds: &DataStore, target: &Target) -> Resul
                 &op_snippet(ds, &c.op),
             ]);
         }
+        if !is_dead && c.status == OpStatus::InactiveOverride {
+            inactive_known += 1;
+        }
     }
-    t.note(&format!(
-        "note: known overrides: OVERRIDES of {evaluated} machine/distro configurations, machine and distro names, declared MACHINEOVERRIDES/DISTROOVERRIDES words, class-/pn-/layer- forms, and the recipe's packages"
-    ));
+    t.note("note: dead = an override element that matches no known override: not in OVERRIDES, not a machine, distro or class name, not a declared or built-in override, not a word of any *OVERRIDES assignment in the workspace (python included), not a package of the recipe; the same definition as the lint rule override/dead");
+    if inactive_known > 0 {
+        t.note(&format!(
+            "note: {inactive_known} inactive conditional {} known overrides: inactive for this machine and distro, not dead (show=conditional lists them)",
+            if inactive_known == 1 { "operation uses" } else { "operations use" }
+        ));
+    }
+    if read_by_name > 0 {
+        t.note(&format!(
+            "note: {read_by_name} {} variables read by name (such as ${{TUNE_FEATURES:tune-${{DEFAULTTUNE}}}}), not override conditions; not listed",
+            if read_by_name == 1 { "operation is on" } else { "operations are on" }
+        ));
+    }
+    if maybe_pkg > 0 {
+        t.note(&format!(
+            "note: {maybe_pkg} unknown {} in the package position of a package variable, or PACKAGES holds python: may be a package; not listed",
+            if maybe_pkg == 1 { "name stands" } else { "names stand" }
+        ));
+    }
     Ok(t)
 }
 

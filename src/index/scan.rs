@@ -933,10 +933,13 @@ fn unconditional(overrides: &[String]) -> bool {
     overrides.iter().all(|o| o == "append" || o == "prepend")
 }
 
+/// The literal words of a list value: `${...}` groups are one word each
+/// (`parse::words`) and left out with everything else that needs expansion, as are version
+/// constraints.
 fn static_words(value: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut depth = 0usize;
-    for w in value.split_whitespace() {
+    for w in crate::parse::words::words(value) {
         // Version constraints: `foo (>= 1.0)`.
         if w.starts_with('(') {
             depth += 1;
@@ -983,7 +986,7 @@ fn collect_depends(
             }
         }
         ("PACKAGECONFIG", Some(flag)) if var.overrides.is_empty() => {
-            if let Some(field) = value.split(',').nth(2) {
+            if let Some(field) = crate::parse::words::comma_fields(value).get(2) {
                 for w in static_words(field) {
                     out.push(("PACKAGECONFIG", Some(flag.clone()), w, line));
                 }
@@ -1443,6 +1446,21 @@ mod tests {
         assert_eq!(
             static_words("a (>= 1.0) ${PN}-b c (= 2) d"),
             ["a", "c", "d"]
+        );
+        // B6: OE-core's curl_8.19.0.bb:175 and libglvnd's PROVIDES; no python fragment
+        // (`'1',`, `'',`) is a word.
+        assert_eq!(
+            static_words(
+                "${@bb.utils.contains('PTEST_ENABLED', '1', ' openssl-native', '', d)} zlib"
+            ),
+            ["zlib"]
+        );
+        assert!(
+            static_words(
+                "${@bb.utils.contains('PACKAGECONFIG', 'egl', 'virtual/egl', '', d)} \
+                 ${@bb.utils.contains('PACKAGECONFIG', 'gles1', 'virtual/libgles1', '', d)}"
+            )
+            .is_empty()
         );
     }
 

@@ -31,6 +31,7 @@ use crate::eval::{self, DataStore, OpStatus};
 use crate::index::Index;
 use crate::index::query::{self, RecipeRow};
 use crate::mcp::Ctx;
+use crate::parse::words;
 use crate::render::{self, Format, Table};
 use crate::types::Loc;
 use crate::workspace::Workspace;
@@ -129,12 +130,7 @@ fn word_source(ds: &DataStore, name: &str, word: &str) -> Option<Loc> {
     ds.history(name)
         .into_iter()
         .filter(|(op, st)| *st == OpStatus::Applied && op.var.flag.is_none())
-        .find(|(op, _)| {
-            ds.expand(&op.value)
-                .text
-                .split_whitespace()
-                .any(|w| w == word)
-        })
+        .find(|(op, _)| words::words(&ds.expand(&op.value).text).contains(&word))
         .map(|(op, _)| op.loc)
 }
 
@@ -151,11 +147,22 @@ fn loc_str(l: Option<Loc>) -> String {
     l.map_or("-".into(), |l| l.to_string())
 }
 
-/// Dependency words with version constraints (`foo (>= 1.0)`) dropped.
+/// Dependency words with version constraints (`foo (>= 1.0)`) dropped. An unevaluated
+/// `${@...}` (or undefined `${VAR}`) is one word, kept whole (`parse::words`); the caller
+/// shows it as what it is and never resolves it.
 fn dep_words(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut depth = 0usize;
-    for w in text.split_whitespace() {
+    for w in words::words(text) {
+        if words::is_unevaluated(w) {
+            if depth == 0 {
+                out.push(w.to_string());
+            } else if w.ends_with(')') {
+                // `(>= ${PV})`
+                depth -= 1;
+            }
+            continue;
+        }
         if w.starts_with('(') {
             depth += 1;
         }
@@ -179,22 +186,74 @@ struct PkgOption {
     python: bool,
 }
 
+/// Flags BitBake itself gives a meaning on any variable (BitBake 2.18.0: `doc`, read by
+/// `cooker.py` `getAllKeysWithFlags(["doc", "func"])` and set by OE-core's
+/// `documentation.conf`; `vardeps`, `vardepvalue`, `vardepsexclude`, `vardepvalueexclude`,
+/// `exports`, `prefuncs`, `postfuncs`, `lineno`, `filename`, read by `data.py`
+/// `build_dependencies`; `export`, `unexport`, `func`, `python`, read by `data.py` /
+/// `data_smart.py`). OE-core's `bitbake.conf:942` sets `PACKAGECONFIG[vardepvalue] =
+/// "${PACKAGECONFIG}"` and `documentation.conf:311` sets `PACKAGECONFIG[doc]`.
+const BITBAKE_FLAGS: &[&str] = &[
+    "doc",
+    "vardeps",
+    "vardepvalue",
+    "vardepsexclude",
+    "vardepvalueexclude",
+    "exports",
+    "prefuncs",
+    "postfuncs",
+    "lineno",
+    "filename",
+    "export",
+    "unexport",
+    "func",
+    "python",
+];
+
 /// The `PACKAGECONFIG[option]` flags in sorted order (`base.bbclass` iterates
-/// `sorted(pkgconfigflags.items())`), each split on `,`.
-fn pkg_options(ds: &DataStore) -> (Vec<PkgOption>, Vec<String>, bool) {
+/// `sorted(pkgconfigflags.items())`), each split on `,` (a `${@...}` kept whole). Returns
+/// the options, the selected words with no flag, the unevaluated words of `PACKAGECONFIG`,
+/// the BitBake flags left out, and whether `PACKAGECONFIG` holds python.
+///
+/// `base.bbclass` iterates every flag `getVarFlags` returns (internal `_`/`:` flags only are
+/// left out), so a BitBake flag such as `vardepvalue` goes through the same loop; it adds
+/// nothing unless its name is a word of `PACKAGECONFIG` (fields 1, 3, 4, 5) or its value has
+/// a non-empty second comma field (added to `PACKAGECONFIG_CONFARGS` when not selected). Only
+/// then is it listed as an option.
+fn pkg_options(ds: &DataStore) -> PkgOptions {
     let value = ds.value("PACKAGECONFIG");
     let python = value.as_ref().is_some_and(|v| v.unevaluated_python);
-    let selected: Vec<String> = value
-        .map(|v| v.text.split_whitespace().map(str::to_string).collect())
+    let all: Vec<String> = value
+        .map(|v| {
+            words::words(&v.text)
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default();
+    let (unevaluated, selected): (Vec<String>, Vec<String>) =
+        all.into_iter().partition(|w| words::is_unevaluated(w));
     let mut out = Vec::new();
+    let mut bitbake_flags = Vec::new();
     for flag in ds.flag_names("PACKAGECONFIG") {
         let Some(v) = ds.flag("PACKAGECONFIG", &flag) else {
             continue;
         };
+        let fields: Vec<String> = words::comma_fields(&v.text)
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .collect();
+        let is_selected = selected.contains(&flag);
+        if BITBAKE_FLAGS.contains(&flag.as_str())
+            && !is_selected
+            && fields.get(1).is_none_or(|f| f.is_empty())
+        {
+            bitbake_flags.push(flag);
+            continue;
+        }
         out.push(PkgOption {
-            selected: selected.contains(&flag),
-            fields: v.text.split(',').map(|s| s.trim().to_string()).collect(),
+            selected: is_selected,
+            fields,
             loc: flag_source(ds, "PACKAGECONFIG", &flag),
             python: v.unevaluated_python,
             name: flag,
@@ -204,7 +263,21 @@ fn pkg_options(ds: &DataStore) -> (Vec<PkgOption>, Vec<String>, bool) {
         .into_iter()
         .filter(|s| !out.iter().any(|o| o.name == *s))
         .collect();
-    (out, unknown, python)
+    PkgOptions {
+        options: out,
+        unknown,
+        unevaluated,
+        bitbake_flags,
+        python,
+    }
+}
+
+struct PkgOptions {
+    options: Vec<PkgOption>,
+    unknown: Vec<String>,
+    unevaluated: Vec<String>,
+    bitbake_flags: Vec<String>,
+    python: bool,
 }
 
 impl PkgOption {
@@ -213,13 +286,22 @@ impl PkgOption {
     }
 }
 
+/// The provider column of a word that holds unevaluated python or an undefined variable.
+const UNEVALUATED: &str = "unknown: not evaluated (python or an undefined variable); stands for dependencies that are not known";
+
 const PACKAGECONFIG_NOTE: &str = "note: PACKAGECONFIG rows: OE-Core's base.bbclass adds the build (field 3) and runtime (field 4) dependencies of the selected options with anonymous python, which is not run; they are listed from the flags";
 
 fn packageconfig(ds: &DataStore) -> Table {
     let mut t = Table::new(&[
         "option", "selected", "enable", "disable", "build", "runtime", "loc",
     ]);
-    let (opts, unknown, python) = pkg_options(ds);
+    let PkgOptions {
+        options: opts,
+        unknown,
+        unevaluated,
+        bitbake_flags,
+        python,
+    } = pkg_options(ds);
     let dash = |s: &str| {
         if s.is_empty() {
             "-".to_string()
@@ -256,6 +338,27 @@ fn packageconfig(ds: &DataStore) -> Table {
             "-",
             "-",
         ]);
+    }
+    for u in &unevaluated {
+        t.row(&[
+            &words::abbreviate(u),
+            "unknown (python in PACKAGECONFIG, not evaluated: it may select options)",
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
+        ]);
+    }
+    if !bitbake_flags.is_empty() {
+        t.note(&format!(
+            "note: not options: PACKAGECONFIG[{}] {} BitBake's own variable {} (documentation / signature); base.bbclass loops over {} too, but {} adds nothing",
+            bitbake_flags.join("], ["),
+            if bitbake_flags.len() == 1 { "is" } else { "are" },
+            if bitbake_flags.len() == 1 { "flag" } else { "flags" },
+            if bitbake_flags.len() == 1 { "it" } else { "them" },
+            if bitbake_flags.len() == 1 { "it" } else { "each" },
+        ));
     }
     let value_loc = ds
         .history("PACKAGECONFIG")
@@ -346,7 +449,7 @@ fn build(index: &Index, ws: &Workspace, ds: &DataStore, depth: u32) -> Result<Ta
                 )
             })
             .collect();
-        let (opts, _, _) = pkg_options(&data);
+        let opts = pkg_options(&data).options;
         for o in opts.iter().filter(|o| o.selected) {
             for w in dep_words(o.field(2)) {
                 if !rows.iter().any(|(x, _, _)| *x == w) {
@@ -356,6 +459,17 @@ fn build(index: &Index, ws: &Workspace, ds: &DataStore, depth: u32) -> Result<Ta
             }
         }
         for (w, source, loc) in rows {
+            if words::is_unevaluated(&w) {
+                // Not a dependency name: stands for words that are not known.
+                t.row(&[
+                    &d.to_string(),
+                    &words::abbreviate(&w),
+                    UNEVALUATED,
+                    &source,
+                    &loc_str(loc),
+                ]);
+                continue;
+            }
             let provider = resolve_dep(&p, &mut cache, &w)?;
             if provider == "-" {
                 missing += 1;
@@ -388,10 +502,27 @@ fn build(index: &Index, ws: &Workspace, ds: &DataStore, depth: u32) -> Result<Ta
 
 fn runtime(ds: &DataStore) -> Table {
     let mut t = Table::new(&["package", "dep", "source", "loc"]);
-    let packages: Vec<String> = ds
+    let all: Vec<String> = ds
         .value("PACKAGES")
-        .map(|v| v.text.split_whitespace().map(str::to_string).collect())
+        .map(|v| {
+            words::words(&v.text)
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default();
+    let (unknown_pkgs, packages): (Vec<String>, Vec<String>) =
+        all.into_iter().partition(|w| words::is_unevaluated(w));
+    if !unknown_pkgs.is_empty() {
+        t.note(&format!(
+            "note: PACKAGES holds python that is not evaluated ({}); the packages it adds, and their RDEPENDS, are not listed",
+            unknown_pkgs
+                .iter()
+                .map(|u| words::abbreviate(u))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     let pn = ds.value("PN").map(|v| v.text).unwrap_or_default();
     let mut python = 0;
     for pkg in &packages {
@@ -402,11 +533,16 @@ fn runtime(ds: &DataStore) -> Table {
             }
             for w in dep_words(&v.text) {
                 let loc = word_source(ds, &name, &w);
-                t.row(&[pkg, &w, &name, &loc_str(loc)]);
+                if words::is_unevaluated(&w) {
+                    let shown = format!("{} ({UNEVALUATED})", words::abbreviate(&w));
+                    t.row(&[pkg, &shown, &name, &loc_str(loc)]);
+                } else {
+                    t.row(&[pkg, &w, &name, &loc_str(loc)]);
+                }
             }
         }
     }
-    let (opts, _, _) = pkg_options(ds);
+    let opts = pkg_options(ds).options;
     let mut pkgconfig = false;
     for o in opts.iter().filter(|o| o.selected) {
         for w in dep_words(o.field(3)) {
@@ -501,7 +637,7 @@ fn reverse(index: &Index, ws: &Workspace, ds: &DataStore, depth: u32) -> Result<
 fn provided_names(ds: &DataStore, pn: &str) -> Vec<String> {
     let mut out = vec![pn.to_string()];
     if let Some(v) = ds.value("PROVIDES") {
-        for w in v.text.split_whitespace() {
+        for w in words::known_words(&v.text) {
             if !out.iter().any(|o| o == w) {
                 out.push(w.to_string());
             }
