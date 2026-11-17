@@ -1,0 +1,439 @@
+---
+source: tests/release_diff.rs
+expression: "diff::render_json(&d)"
+---
+{
+  "schema": "sous-chef-diff/1",
+  "layer": "meta-up",
+  "layer_path": "meta-up",
+  "from": {
+    "given": "v1",
+    "commit": "cdcd020d327c9ab84250a28fca086dd21ab95db0",
+    "uncommitted": null
+  },
+  "to": {
+    "given": "HEAD",
+    "commit": "3e56cf071d6c1c706a20a999b13d08b151ec10eb",
+    "uncommitted": null
+  },
+  "selection": "recipes your layers (meta-mine) append or use",
+  "summary": {
+    "line": "meta-up: 4 recipes compared (recipes your layers (meta-mine) append or use): 3 changed (1 renamed or moved), 0 added, 0 removed, 1 unchanged; your files requiring files of the layer: 1, 1 with changes; bbappends affected: 3 (1 no longer applies, 1 applies to a different version, 1 source changed under a patch); 1 more: 0 recipe changed, 0 now applies, 1 unchanged; 1 class changed",
+    "compared": 4,
+    "changed": 3,
+    "unchanged": 1,
+    "added": 0,
+    "removed": 0,
+    "renamed": 1,
+    "included_files": 1,
+    "appends": {
+      "no_longer_applies": 1,
+      "different_version": 1,
+      "source_changed": 1,
+      "recipe_changed": 0,
+      "now_applies": 0,
+      "unchanged": 1
+    },
+    "classes_changed": 1
+  },
+  "appends": [
+    {
+      "append": "meta-mine:recipes-core/hello/hello_1.0.bbappend:1",
+      "recipe": "hello",
+      "severity": "no_longer_applies",
+      "detail": "applied to hello_1.0.bb (version 1.0) at v1; at HEAD the recipe is hello_1.1.bb (version 1.1); it is pinned to version 1.0: rename it (or use hello_%.bbappend) if it should still apply; BitBake stops on a bbappend that matches no recipe (a warning only with BB_DANGLINGAPPENDS_WARNONLY, before Walnascar)",
+      "from_recipe": "meta-up:recipes-core/hello/hello_1.0.bb:1",
+      "to_recipe": null,
+      "patches": [],
+      "touches": [],
+      "source_changes": [
+        "SRC_URI[sha256sum] = \"aaaa\" -> \"bbbb\"",
+        "version 1.0 -> 1.1 (file name)"
+      ]
+    },
+    {
+      "append": "meta-mine:recipes-core/hello/hello_%.bbappend:1",
+      "recipe": "hello",
+      "severity": "different_version",
+      "detail": "its % now applies to version 1.1 (hello_1.1.bb) instead of 1.0 (hello_1.0.bb): check the append against the new version; its patches now apply to different source",
+      "from_recipe": "meta-up:recipes-core/hello/hello_1.0.bb:1",
+      "to_recipe": "meta-up:recipes-core/hello/hello_1.1.bb:1",
+      "patches": [
+        {
+          "entry": "file://fix.patch",
+          "file": "meta-mine:recipes-core/hello/hello/fix.patch:1",
+          "upstream": "a patch named fix.patch was added to the recipe upstream: the fix may have been upstreamed; check whether this one is still needed"
+        },
+        {
+          "entry": "file://mine.patch",
+          "file": "meta-mine:recipes-core/hello/hello/mine.patch:1",
+          "upstream": null
+        }
+      ],
+      "touches": [
+        "SRC_URI",
+        "do_install"
+      ],
+      "source_changes": [
+        "SRC_URI[sha256sum] = \"aaaa\" -> \"bbbb\"",
+        "version 1.0 -> 1.1 (file name)"
+      ]
+    },
+    {
+      "append": "meta-mine:recipes-core/widget/widget_git.bbappend:1",
+      "recipe": "widget",
+      "severity": "source_changed",
+      "detail": "still applies to widget_git.bb; the source its patches apply to changed: check them",
+      "from_recipe": "meta-up:recipes-core/widget/widget_git.bb:1",
+      "to_recipe": "meta-up:recipes-core/widget/widget_git.bb:1",
+      "patches": [
+        {
+          "entry": "file://widget-fix.patch",
+          "file": "meta-mine:recipes-core/widget/files/widget-fix.patch:1",
+          "upstream": null
+        }
+      ],
+      "touches": [],
+      "source_changes": [
+        "SRCREV = \"1111111111111111111111111111111111111111\" -> \"2222222222222222222222222222222222222222\""
+      ]
+    },
+    {
+      "append": "meta-mine:recipes-core/stable/stable_%.bbappend:1",
+      "recipe": "stable",
+      "severity": "unchanged",
+      "detail": "still applies to stable_1.0.bb; the recipe tree is unchanged",
+      "from_recipe": "meta-up:recipes-core/stable/stable_1.0.bb:1",
+      "to_recipe": "meta-up:recipes-core/stable/stable_1.0.bb:1",
+      "patches": [],
+      "touches": [],
+      "source_changes": []
+    }
+  ],
+  "recipes": [
+    {
+      "name": "hello",
+      "kind": "recipe",
+      "status": "changed",
+      "own_appended": true,
+      "reason": "appended by meta-mine:recipes-core/hello/hello_%.bbappend:1; appended by meta-mine:recipes-core/hello/hello_1.0.bbappend:1",
+      "from_file": "meta-up:recipes-core/hello/hello_1.0.bb:1",
+      "to_file": "meta-up:recipes-core/hello/hello_1.1.bb:1",
+      "from_version": "1.0",
+      "to_version": "1.1",
+      "moved": false,
+      "tree_from": [
+        "recipes-core/hello/hello_1.0.bb",
+        "recipes-core/hello/hello.inc",
+        "recipes-core/hello/hello-common.inc",
+        "recipes-core/shared/shared.inc"
+      ],
+      "tree_to": [
+        "recipes-core/hello/hello_1.1.bb",
+        "recipes-core/hello/hello.inc",
+        "recipes-core/hello/hello-common.inc",
+        "recipes-core/shared/shared.inc"
+      ],
+      "changes": [
+        {
+          "kind": "file",
+          "group": "",
+          "name": "recipes-core/hello/hello_1.1.bb",
+          "change": "renamed",
+          "old": "recipes-core/hello/hello_1.0.bb",
+          "new": "recipes-core/hello/hello_1.1.bb",
+          "detail": "version 1.0 -> 1.1",
+          "from": "meta-up:recipes-core/hello/hello_1.0.bb:1",
+          "to": "meta-up:recipes-core/hello/hello_1.1.bb:1"
+        },
+        {
+          "kind": "file",
+          "group": "",
+          "name": "conf/distro/elsewhere.inc",
+          "change": "not compared",
+          "old": null,
+          "new": null,
+          "detail": "not in the layer at this revision: not compared",
+          "from": "meta-up:recipes-core/hello/hello_1.0.bb:7",
+          "to": "meta-up:recipes-core/hello/hello_1.1.bb:7"
+        },
+        {
+          "kind": "var",
+          "group": "DEPENDS",
+          "name": "DEPENDS =",
+          "change": "changed",
+          "old": "\"zlib\"",
+          "new": "\"zlib openssl\"",
+          "detail": null,
+          "from": "meta-up:recipes-core/hello/hello.inc:2",
+          "to": "meta-up:recipes-core/hello/hello.inc:2"
+        },
+        {
+          "kind": "var",
+          "group": "SHARED_FLAGS",
+          "name": "SHARED_FLAGS =",
+          "change": "changed",
+          "old": "\"-O2\"",
+          "new": "\"-O2 -g\"",
+          "detail": null,
+          "from": "meta-up:recipes-core/shared/shared.inc:1",
+          "to": "meta-up:recipes-core/shared/shared.inc:1"
+        },
+        {
+          "kind": "var",
+          "group": "SRC_URI",
+          "name": "SRC_URI =",
+          "change": "changed",
+          "old": "\"...gz file://keep.patch\"",
+          "new": "\"...gz file://keep.patch file://fix.patch file://${@bb.utils.contains(....\" (107 chars)",
+          "detail": null,
+          "from": "meta-up:recipes-core/hello/hello_1.0.bb:9-11",
+          "to": "meta-up:recipes-core/hello/hello_1.1.bb:9-13"
+        },
+        {
+          "kind": "var",
+          "group": "SRC_URI",
+          "name": "SRC_URI[sha256sum] =",
+          "change": "changed",
+          "old": "\"aaaa\"",
+          "new": "\"bbbb\"",
+          "detail": null,
+          "from": "meta-up:recipes-core/hello/hello_1.0.bb:12",
+          "to": "meta-up:recipes-core/hello/hello_1.1.bb:14"
+        },
+        {
+          "kind": "var",
+          "group": "SUMMARY",
+          "name": "SUMMARY =",
+          "change": "changed",
+          "old": "\"Hello world\"",
+          "new": "\"Hello, world\"",
+          "detail": null,
+          "from": "meta-up:recipes-core/hello/hello_1.0.bb:1",
+          "to": "meta-up:recipes-core/hello/hello_1.1.bb:1"
+        },
+        {
+          "kind": "function",
+          "group": "do_install",
+          "name": "do_install",
+          "change": "changed",
+          "old": "4 lines",
+          "new": "5 lines",
+          "detail": "first difference at code line 3: \"... hello ${D}${bindir}\" -> \"... hello ${D}${bindir}/hello\"",
+          "from": "meta-up:recipes-core/hello/hello_1.0.bb:17-20",
+          "to": "meta-up:recipes-core/hello/hello_1.1.bb:19-23"
+        },
+        {
+          "kind": "inherit",
+          "group": "pkgconfig",
+          "name": "inherit pkgconfig",
+          "change": "added",
+          "old": null,
+          "new": null,
+          "detail": null,
+          "from": null,
+          "to": "meta-up:recipes-core/hello/hello_1.1.bb:17"
+        },
+        {
+          "kind": "SRC_URI entry",
+          "group": "SRC_URI",
+          "name": "file://${@bb.utils.contains(...)}",
+          "change": "added",
+          "old": null,
+          "new": null,
+          "detail": null,
+          "from": null,
+          "to": "meta-up:recipes-core/hello/hello_1.1.bb:9-13"
+        },
+        {
+          "kind": "SRC_URI entry",
+          "group": "SRC_URI",
+          "name": "file://fix.patch",
+          "change": "added",
+          "old": null,
+          "new": null,
+          "detail": null,
+          "from": null,
+          "to": "meta-up:recipes-core/hello/hello_1.1.bb:9-13"
+        }
+      ],
+      "whitespace_only": 1,
+      "cosmetic_files": 1,
+      "source_changes": [
+        "SRC_URI[sha256sum] = \"aaaa\" -> \"bbbb\"",
+        "version 1.0 -> 1.1 (file name)"
+      ]
+    },
+    {
+      "name": "stable",
+      "kind": "recipe",
+      "status": "unchanged",
+      "own_appended": true,
+      "reason": "appended by meta-mine:recipes-core/stable/stable_%.bbappend:1",
+      "from_file": "meta-up:recipes-core/stable/stable_1.0.bb:1",
+      "to_file": "meta-up:recipes-core/stable/stable_1.0.bb:1",
+      "from_version": "1.0",
+      "to_version": "1.0",
+      "moved": false,
+      "tree_from": [
+        "recipes-core/stable/stable_1.0.bb"
+      ],
+      "tree_to": [
+        "recipes-core/stable/stable_1.0.bb"
+      ],
+      "changes": [],
+      "whitespace_only": 0,
+      "cosmetic_files": 0,
+      "source_changes": []
+    },
+    {
+      "name": "widget",
+      "kind": "recipe",
+      "status": "changed",
+      "own_appended": true,
+      "reason": "appended by meta-mine:recipes-core/widget/widget_git.bbappend:1",
+      "from_file": "meta-up:recipes-core/widget/widget_git.bb:1",
+      "to_file": "meta-up:recipes-core/widget/widget_git.bb:1",
+      "from_version": "git",
+      "to_version": "git",
+      "moved": false,
+      "tree_from": [
+        "recipes-core/widget/widget_git.bb"
+      ],
+      "tree_to": [
+        "recipes-core/widget/widget_git.bb"
+      ],
+      "changes": [
+        {
+          "kind": "var",
+          "group": "SRCREV",
+          "name": "SRCREV =",
+          "change": "changed",
+          "old": "\"1111111111111111111111111111111111111111\"",
+          "new": "\"2222222222222222222222222222222222222222\"",
+          "detail": null,
+          "from": "meta-up:recipes-core/widget/widget_git.bb:5",
+          "to": "meta-up:recipes-core/widget/widget_git.bb:5"
+        }
+      ],
+      "whitespace_only": 0,
+      "cosmetic_files": 0,
+      "source_changes": [
+        "SRCREV = \"1111111111111111111111111111111111111111\" -> \"2222222222222222222222222222222222222222\""
+      ]
+    },
+    {
+      "name": "libfoo",
+      "kind": "recipe",
+      "status": "changed",
+      "own_appended": false,
+      "reason": "DEPENDS in meta-mine:recipes-app/app/app_1.0.bb:3",
+      "from_file": "meta-up:recipes-core/libfoo/libfoo_2.0.bb:1",
+      "to_file": "meta-up:recipes-core/libfoo/libfoo_2.0.bb:1",
+      "from_version": "2.0",
+      "to_version": "2.0",
+      "moved": false,
+      "tree_from": [
+        "recipes-core/libfoo/libfoo_2.0.bb"
+      ],
+      "tree_to": [
+        "recipes-core/libfoo/libfoo_2.0.bb"
+      ],
+      "changes": [
+        {
+          "kind": "var",
+          "group": "PACKAGECONFIG",
+          "name": "PACKAGECONFIG ??=",
+          "change": "added",
+          "old": null,
+          "new": "\"ssl\"",
+          "detail": null,
+          "from": null,
+          "to": "meta-up:recipes-core/libfoo/libfoo_2.0.bb:3"
+        }
+      ],
+      "whitespace_only": 0,
+      "cosmetic_files": 0,
+      "source_changes": []
+    },
+    {
+      "name": "meta-mine:recipes-app/app/app_1.0.bb",
+      "kind": "includes of your file",
+      "status": "changed",
+      "own_appended": false,
+      "reason": "requires recipes-core/shared/shared.inc (line 4)",
+      "from_file": null,
+      "to_file": null,
+      "from_version": null,
+      "to_version": null,
+      "moved": false,
+      "tree_from": [
+        "recipes-core/shared/shared.inc"
+      ],
+      "tree_to": [
+        "recipes-core/shared/shared.inc"
+      ],
+      "changes": [
+        {
+          "kind": "var",
+          "group": "SHARED_FLAGS",
+          "name": "SHARED_FLAGS =",
+          "change": "changed",
+          "old": "\"-O2\"",
+          "new": "\"-O2 -g\"",
+          "detail": null,
+          "from": "meta-up:recipes-core/shared/shared.inc:1",
+          "to": "meta-up:recipes-core/shared/shared.inc:1"
+        }
+      ],
+      "whitespace_only": 0,
+      "cosmetic_files": 0,
+      "source_changes": []
+    }
+  ],
+  "classes": [
+    {
+      "path": "classes/autotools.bbclass",
+      "change": "changed",
+      "statements": 1,
+      "inherited_by": [
+        "hello"
+      ],
+      "own_users": [
+        "meta-mine:recipes-app/app/app_1.0.bb:5"
+      ]
+    }
+  ],
+  "layer_files": [
+    {
+      "kind": "bb",
+      "added": 3,
+      "removed": 3,
+      "changed": 2
+    },
+    {
+      "kind": "inc",
+      "added": 0,
+      "removed": 0,
+      "changed": 3
+    },
+    {
+      "kind": "bbclass",
+      "added": 0,
+      "removed": 0,
+      "changed": 1
+    },
+    {
+      "kind": "patch",
+      "added": 1,
+      "removed": 0,
+      "changed": 0
+    }
+  ],
+  "notes": [
+    "statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once",
+    "pointers in column from are at v1 (cdcd020d327c): read them with `git show cdcd020d327c:<path>`; column to is at HEAD (3e56cf071d6c)",
+    "counted, not listed: 1 statements changed only in whitespace, 1 files only in comments, whitespace or line positions",
+    "patches are not checked against their source (nothing is fetched): \"check it\" means the source they apply to changed"
+  ]
+}

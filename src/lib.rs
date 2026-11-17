@@ -4,6 +4,7 @@
 pub mod audit;
 pub mod bitbake;
 pub mod config;
+pub mod diff;
 pub mod error;
 pub mod eval;
 pub mod handles;

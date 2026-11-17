@@ -1,6 +1,6 @@
 //! T2.5: spawn `sous-chef serve` on the fixture workspace and talk MCP over stdio.
 //!
-//! Asserts protocol-level facts only (handshake, the 15 tools, result shapes), so it passes
+//! Asserts protocol-level facts only (handshake, the 16 tools, result shapes), so it passes
 //! both while discovery and the index are stubs (the server runs degraded) and once they
 //! are implemented.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 
 const TIMEOUT: Duration = Duration::from_secs(60);
 
-const TOOLS: [&str; 15] = [
+const TOOLS: [&str; 16] = [
     "recipe",
     "var",
     "overrides",
@@ -32,6 +32,7 @@ const TOOLS: [&str; 15] = [
     "slice",
     "status",
     "audit",
+    "diff",
 ];
 
 struct Session {
@@ -181,7 +182,7 @@ fn serve_initialize_list_and_status() {
     }
     s.notify("notifications/initialized");
 
-    // tools/list: the 15 tools in registry order, six always loaded.
+    // tools/list: the 16 tools in registry order, six always loaded.
     let list = s.result("tools/list", json!({}));
     let tools = list["tools"].as_array().unwrap();
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();

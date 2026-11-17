@@ -7,6 +7,7 @@ pub mod audit;
 pub mod bitbake;
 pub mod class;
 pub mod deps;
+pub mod diff;
 pub mod item;
 pub mod layers;
 pub mod lint;

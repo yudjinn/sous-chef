@@ -281,6 +281,11 @@ pub static TOOLS: &[ToolEntry] = &[
         Deferred,
         "Findings report over every layer of the repository, stored under a handle; returns a digest."
     ),
+    tool!(
+        diff,
+        Deferred,
+        "Statement-level diff of a layer's recipes between two git revisions, and its effect on your bbappends."
+    ),
 ];
 
 /// Looks up a registry entry by tool name.
