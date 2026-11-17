@@ -390,6 +390,57 @@ async fn layers_appends_with_bbfiles_dynamic() {
             "meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1"
         ]
     );
+
+    // The typed rows the view (and the audit report) are built from: one per view row,
+    // with the same cells.
+    let (rows, unusable) =
+        layers::append_rows(&*f.ctx.index.lock().await, &f.ctx.workspace).unwrap();
+    assert!(unusable.is_empty());
+    let view_rows: Vec<&str> = out
+        .lines()
+        .skip(1)
+        .filter(|l| !l.starts_with("note:"))
+        .collect();
+    let typed: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            format!(
+                "{}\t{}\t{}\t{}",
+                r.bbappend,
+                r.priority,
+                r.matches.as_deref().unwrap_or("-"),
+                r.status()
+            )
+        })
+        .collect();
+    assert_eq!(typed, view_rows);
+    let state_of = |path: &str| {
+        rows.iter()
+            .find(|r| r.bbappend.ends_with(path))
+            .map(|r| (r.state.clone(), r.via_dynamic))
+            .unwrap()
+    };
+    assert_eq!(
+        state_of("tpm2-tools_5.7.bbappend"),
+        (
+            layers::AppendState::NotCollected(
+                "not collected (dynamic layer `tpm2` not present)".into()
+            ),
+            false
+        )
+    );
+    assert_eq!(
+        state_of("no-tpm2/recipes-core/hello/hello_1.0.bbappend"),
+        (layers::AppendState::Applies, true)
+    );
+    assert_eq!(
+        state_of("nothing_1.0.bbappend"),
+        (layers::AppendState::NoMatch, true)
+    );
+    assert_eq!(
+        state_of("orphan_9.%.bbappend"),
+        (layers::AppendState::NoMatch, false)
+    );
 }
 
 #[tokio::test]
