@@ -101,8 +101,10 @@ async fn snapshot_on_a_fixture_layer() {
     // The default rule set on the same layer: the same findings (the other rules are still
     // stubs), and the recipe-scope rules are reported as skipped until the evaluator lands.
     let all = tool::run(&env.ctx, args(Some("meta-mine"))).await.unwrap();
-    assert!(all.starts_with("4 findings in "), "{all}");
+    // org/append-no-match also reports the fixture workspace's orphan bbappend.
+    assert!(all.starts_with("5 findings in "), "{all}");
     assert!(all.contains("hygiene/parse-error 4"), "{all}");
+    assert!(all.contains("org/append-no-match 1"), "{all}");
 
     // A clean layer.
     let core = tool::run(
@@ -208,7 +210,11 @@ async fn tool_arguments_and_errors() {
     )
     .unwrap();
     let fixed = tool::run(&env.ctx, args(Some("meta-mine"))).await.unwrap();
-    assert!(fixed.starts_with("no findings"), "{fixed}");
+    // What is left is the fixture workspace's orphan bbappend (org/append-no-match).
+    assert!(
+        fixed.starts_with("1 finding in ") && fixed.contains("org/append-no-match 1"),
+        "{fixed}"
+    );
     assert!(
         fixed.contains("reindexed 1 file: meta-mine:recipes-app/bad/bad_1.0.bb"),
         "{fixed}"

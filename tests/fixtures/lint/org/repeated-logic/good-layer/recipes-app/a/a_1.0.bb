@@ -1,0 +1,15 @@
+SUMMARY = "a"
+LICENSE = "MIT"
+
+EXTRA_OEMAKE = "V=1"
+CFLAGS += "-O2"
+PACKAGECONFIG ??= "x"
+INSANE_SKIP:${PN} = "ldflags"
+FILES:${PN} += "/opt/tool"
+
+do_install() {
+    install -d ${D}/opt/tool
+    install -m 0755 tool ${D}/opt/tool/
+    install -m 0644 tool.conf ${D}/opt/tool/
+    ln -s tool ${D}/opt/tool/t
+}

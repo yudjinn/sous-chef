@@ -1,0 +1,6 @@
+SUMMARY = "x"
+LICENSE = "MIT"
+DISTRO_FEATURES:append = " x11"
+MACHINE_FEATURES += "wifi"
+PREFERRED_PROVIDER_virtual/kernel = "linux-foo"
+IMAGE_INSTALL += "p"

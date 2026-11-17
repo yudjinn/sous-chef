@@ -1,0 +1,1 @@
+MYRECIPECLASS ?= "1"

@@ -1,0 +1,6 @@
+SUMMARY = "v"
+LICENSE = "MIT"
+SRC_URI = "git://example.org/v.git;branch=main;protocol=https"
+SRCREV = "${AUTOREV}"
+PV .= "+git"
+SRCREV_FORMAT = "v"

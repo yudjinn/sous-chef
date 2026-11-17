@@ -1,0 +1,6 @@
+SRC_URI ?= "https://example.org/${BPN}-${PV}.tar.gz"
+SRC_URI += "file://fetchy.cfg"
+LICENSE ??= "MIT"
+FETCHY_MODE ?= "fast"
+FETCHY_INTERNAL = "x"
+FETCHY_MODE:class-native = "native"

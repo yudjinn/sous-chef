@@ -1,0 +1,5 @@
+SRC_URI = "https://example.org/${BPN}-${PV}.tar.gz"
+LICENSE = "MIT"
+FETCHY_MODE = "fast"
+FETCHY_OTHER = "x"
+PV ?= "1.0"
