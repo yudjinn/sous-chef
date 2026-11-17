@@ -129,6 +129,27 @@ without BitBake: `sous-chef lint` on the writable layers 0.14 s wall time (13 fi
 Not measured yet: meta-openembedded scale, a disk-cold run, authoritative `var`, the
 `bitbake`, `log`, `slice` and `scaffold` tools, the edit hook on a new file.
 
+## After the later rounds (w9-final, 2026-11-18)
+
+Re-run on the same machine and workspace at the end of the code part of branch
+`w9-final` (after w6 to w8 and this branch), release build, with `SOUS_CHEF_PERF_NO_EDIT=1`
+(no touch / change / `refresh_file` rows) and `SOUS_CHEF_PERF_DIR` under
+`runs/w9-final/`; the whole test took 24 s. Medians (worst):
+
+| Measurement | Earlier (first table, or "Status after the fix rounds") | w9-final |
+|---|---|---|
+| First index build | 1268 ms | 1161 ms (1173) |
+| No-change refresh | 19 ms | 19.4 ms (20.8) |
+| tool `var SRC_URI recipe=curl`, warm | 29 ms | 29.1 ms (29.4; first call 56.9) |
+| `evaluate` curl, cold / warm | 22.4 / 6.5 ms | 25.2 / 7.0 ms |
+| tool `layers` / `search do_install` | 21 / 25 ms | 20.7 / 25.6 ms |
+| `lint --all` (bitbake-setup build) | 14.8 s, 1745 files | 15.3 s, 1744 files, 625 findings |
+| hook Grep / Read / Edit, process wall time | 4.6 / 3.2 / 8.6 ms | 4.6 / 3.5 / 9.2 ms |
+
+The index holds 1784 files, 36 556 statements and 3204 edges (11.6 MiB); peak RSS 79 MiB.
+Nothing moved beyond run-to-run noise. On the kas build, `sous-chef audit` with the kas
+files configured took 15.4 s (lint 15.0 s of it).
+
 ## Against the targets
 
 - **Full index under 30 s: met** (1.3 s). Not checked at meta-openembedded scale.
