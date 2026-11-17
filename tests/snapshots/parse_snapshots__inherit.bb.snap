@@ -1,0 +1,9 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..17	Inherit { classes: "autotools", deferred: false }
+2	18..43	Inherit { classes: "pkgconfig gettext", deferred: false }
+3	44..73	Inherit { classes: "${BUILD_SYSTEM_CLASS}", deferred: false }
+4	74..140	Inherit { classes: "${@'native' if d.getVar('IS_NATIVE') == '1' else ''}", deferred: true }
+5	141..168	Inherit { classes: "python3native", deferred: true }

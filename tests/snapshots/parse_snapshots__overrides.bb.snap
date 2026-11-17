@@ -1,0 +1,14 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..12	Assign { var: VarRef { base: "VAR", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "base", export: false }
+2	13..37	Assign { var: VarRef { base: "VAR", overrides: ["append"], flag: None, legacy_syntax: false }, op: Set, value: " appended", export: false }
+3	38..64	Assign { var: VarRef { base: "VAR", overrides: ["prepend"], flag: None, legacy_syntax: false }, op: Set, value: "prepended ", export: false }
+4	65..84	Assign { var: VarRef { base: "VAR", overrides: ["remove"], flag: None, legacy_syntax: false }, op: Set, value: "base", export: false }
+5	85..114	Assign { var: VarRef { base: "VAR", overrides: ["qemux86"], flag: None, legacy_syntax: false }, op: Set, value: "machine value", export: false }
+6	115..153	Assign { var: VarRef { base: "VAR", overrides: ["append", "qemux86"], flag: None, legacy_syntax: false }, op: Set, value: " machine append", export: false }
+7	154..199	Assign { var: VarRef { base: "VAR", overrides: ["qemux86", "append"], flag: None, legacy_syntax: false }, op: Set, value: " append to the variant", export: false }
+8	200..249	Assign { var: VarRef { base: "VAR", overrides: ["qemux86"], flag: None, legacy_syntax: false }, op: Append, value: "parse-time append to the variant", export: false }
+9	250..297	Assign { var: VarRef { base: "VAR", overrides: ["pn-hello", "class-target"], flag: None, legacy_syntax: false }, op: Set, value: "chained overrides", export: false }
+10	298..341	Assign { var: VarRef { base: "FILES", overrides: ["${PN}-dev", "append"], flag: None, legacy_syntax: false }, op: Set, value: " ${libdir}/cmake", export: false }

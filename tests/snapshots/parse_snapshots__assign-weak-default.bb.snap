@@ -1,0 +1,6 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..20	Assign { var: VarRef { base: "GREETING", overrides: [], flag: None, legacy_syntax: false }, op: WeakDefault, value: "hello", export: false }
+2	21..38	Assign { var: VarRef { base: "GREETING", overrides: [], flag: None, legacy_syntax: false }, op: WeakDefault, value: "hi", export: false }

@@ -1,0 +1,8 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..21	Assign { var: VarRef { base: "SUMMARY", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "plain set", export: false }
+2	22..32	Assign { var: VarRef { base: "EMPTY", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "", export: false }
+3	33..74	Assign { var: VarRef { base: "SPACED", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "spaces around the operator", export: false }
+4	75..101	Assign { var: VarRef { base: "NOSPACE", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "no spaces at all", export: false }

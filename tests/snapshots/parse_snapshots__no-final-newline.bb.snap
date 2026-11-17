@@ -1,0 +1,5 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..34	Assign { var: VarRef { base: "LAST", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "no newline at end of file", export: false }

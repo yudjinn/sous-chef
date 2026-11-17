@@ -1,0 +1,5 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..41	Include { path: "conf/distro/include/extra.inc", mode: IncludeAll }

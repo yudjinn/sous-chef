@@ -1,0 +1,17 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+2	47..71	Assign { var: VarRef { base: "DEPENDS", overrides: ["append"], flag: None, legacy_syntax: true }, op: Set, value: " zlib", export: false }
+3	72..111	Assign { var: VarRef { base: "SRC_URI", overrides: ["prepend"], flag: None, legacy_syntax: true }, op: Set, value: "file://first.patch ", export: false }
+4	112..148	Assign { var: VarRef { base: "EXTRA_OECONF", overrides: ["remove"], flag: None, legacy_syntax: true }, op: Set, value: "--enable-foo", export: false }
+5	149..172	Assign { var: VarRef { base: "RDEPENDS", overrides: ["${PN}"], flag: None, legacy_syntax: true }, op: Set, value: "bash", export: false }
+6	173..206	Assign { var: VarRef { base: "FILES", overrides: ["${PN}-dev"], flag: None, legacy_syntax: true }, op: Set, value: "${includedir}", export: false }
+7	207..253	Assign { var: VarRef { base: "EXTRA_OECONF", overrides: ["append", "qemux86"], flag: None, legacy_syntax: true }, op: Set, value: " --enable-qemu", export: false }
+8-10	254..280	Function { name: Some(VarRef { base: "do_install", overrides: ["append"], flag: None, legacy_syntax: true }), lang: Shell, fakeroot: false, body: LineSpan { start: 9, end: 9 } }
+13	364..423	Assign { var: VarRef { base: "SRCREV_machine", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "0123456789abcdef0123456789abcdef01234567", export: false }
+14	424..450	Assign { var: VarRef { base: "BBFILE_PRIORITY_core", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "5", export: false }
+15	451..488	Assign { var: VarRef { base: "LAYERSERIES_COMPAT_core", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "scarthgap", export: false }
+16	489..532	Assign { var: VarRef { base: "EXTRA_OECONF", overrides: [], flag: None, legacy_syntax: false }, op: Append, value: "${PACKAGECONFIG_CONFARGS}", export: false }
+17	533..555	Assign { var: VarRef { base: "PACKAGE_BEFORE_PN", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "", export: false }
+18-20	556..575	Function { name: Some(VarRef { base: "do_install", overrides: [], flag: None, legacy_syntax: false }), lang: Shell, fakeroot: false, body: LineSpan { start: 19, end: 19 } }

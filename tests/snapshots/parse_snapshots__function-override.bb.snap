@@ -1,0 +1,7 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1-3	0..38	Function { name: Some(VarRef { base: "do_install", overrides: ["append"], flag: None, legacy_syntax: false }), lang: Shell, fakeroot: false, body: LineSpan { start: 2, end: 2 } }
+5-7	40..104	Function { name: Some(VarRef { base: "do_install", overrides: ["prepend", "class-target"], flag: None, legacy_syntax: false }), lang: Shell, fakeroot: false, body: LineSpan { start: 6, end: 6 } }
+9-11	106..168	Function { name: Some(VarRef { base: "do_configure", overrides: ["qemux86"], flag: None, legacy_syntax: false }), lang: Shell, fakeroot: false, body: LineSpan { start: 10, end: 10 } }

@@ -1,0 +1,6 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1-4	0..114	Assign { var: VarRef { base: "SRC_URI", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "https://example.org/a.tar.gz            file://one.patch            file://two.patch            ", export: false }
+5	115..150	Assign { var: VarRef { base: "AFTER", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "after the continued value", export: false }

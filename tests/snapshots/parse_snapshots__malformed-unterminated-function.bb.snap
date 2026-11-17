@@ -1,0 +1,7 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..15	Assign { var: VarRef { base: "GOOD", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "before", export: false }
+2-5	16..107	Function { name: Some(VarRef { base: "do_broken", overrides: [], flag: None, legacy_syntax: false }), lang: Shell, fakeroot: false, body: LineSpan { start: 3, end: 5 } }
+diagnostic 2-5: function do_broken is never closed: no `}` in column 0 before end of file

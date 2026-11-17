@@ -1,0 +1,10 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+1	0..25	Assign { var: VarRef { base: "do_compile", overrides: [], flag: Some("dirs"), legacy_syntax: false }, op: Set, value: "${B}", export: false }
+2	26..82	Assign { var: VarRef { base: "do_compile", overrides: [], flag: Some("depends"), legacy_syntax: false }, op: Append, value: "virtual/foo:do_populate_sysroot", export: false }
+3	83..170	Assign { var: VarRef { base: "SRC_URI", overrides: [], flag: Some("sha256sum"), legacy_syntax: false }, op: Set, value: "0000000000000000000000000000000000000000000000000000000000000000", export: false }
+4	171..226	Assign { var: VarRef { base: "PACKAGECONFIG", overrides: [], flag: Some("ssl"), legacy_syntax: false }, op: Set, value: "--with-ssl,--without-ssl,openssl", export: false }
+5	227..259	Assign { var: VarRef { base: "VAR", overrides: [], flag: Some("doc"), legacy_syntax: false }, op: Default, value: "documentation flag", export: false }
+6	260..284	Assign { var: VarRef { base: "do_install", overrides: [], flag: Some("noexec"), legacy_syntax: false }, op: Set, value: "1", export: false }

@@ -1,0 +1,7 @@
+---
+source: tests/parse_snapshots.rs
+expression: rendered
+---
+4	67..80	Assign { var: VarRef { base: "VAR", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "value", export: false }
+8	114..129	Assign { var: VarRef { base: "OTHER", overrides: [], flag: None, legacy_syntax: false }, op: Set, value: "value", export: false }
+diagnostic 3: indented comment: BitBake only treats `#` in column 0 as a comment and reports this line as unparsed
