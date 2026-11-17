@@ -1,0 +1,32 @@
+Loading cache...done.
+Loaded 1843 entries from dependency cache.
+Parsing recipes...done.
+Parsing of 912 .bb files complete (911 cached, 1 parsed). 1843 targets, 72 skipped, 0 masked, 0 errors.
+NOTE: Resolving any missing task queue dependencies
+
+Build Configuration:
+BB_VERSION           = "2.12.0"
+BUILD_SYS            = "x86_64-linux"
+NATIVELSBSTRING      = "universal"
+TARGET_SYS           = "x86_64-poky-linux"
+MACHINE              = "qemux86-64"
+DISTRO               = "poky"
+DISTRO_VERSION       = "5.2"
+TUNE_FEATURES        = "m64 core2"
+TARGET_FPU           = ""
+meta-core            = "main:3f2a9c1d0b7e4a5f6c8d9e0a1b2c3d4e5f6a7b8c"
+
+Sstate summary: Wanted 12 Local 10 Mirrors 0 Missed 2 Current 140 (83% match, 98% complete)
+Initialising tasks...done.
+NOTE: Executing Tasks
+ERROR: hello-1.0-r0 do_compile: oe_runmake failed
+ERROR: hello-1.0-r0 do_compile: Execution of '/home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/temp/run.do_compile.48213' failed with exit code 1
+ERROR: Logfile of failure stored in: /home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/temp/log.do_compile.48213
+NOTE: recipe hello-1.0-r0: task do_compile: Failed
+ERROR: Task (/home/builder/poky/meta-core/recipes-core/hello/hello_1.0.bb:do_compile) failed with exit code '1'
+NOTE: Tasks Summary: Attempted 312 tasks of which 300 didn't need to be rerun and 1 failed.
+
+Summary: 1 task failed:
+  /home/builder/poky/meta-core/recipes-core/hello/hello_1.0.bb:do_compile
+    log: /home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/temp/log.do_compile.48213
+Summary: There were 3 ERROR messages, returning a non-zero exit code.

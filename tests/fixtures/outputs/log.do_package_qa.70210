@@ -1,0 +1,14 @@
+DEBUG: Executing python function do_package_qa
+DEBUG: Executing python function read_subpackage_metadata
+DEBUG: Python function read_subpackage_metadata finished
+NOTE: Checking Package: app-dbg
+NOTE: Checking Package: app-staticdev
+NOTE: Checking Package: app-dev
+NOTE: Checking Package: app-doc
+NOTE: Checking Package: app-locale
+NOTE: Checking Package: app
+ERROR: QA Issue: File /usr/bin/app in package app doesn't have GNU_HASH (didn't pass LDFLAGS?) [ldflags]
+ERROR: QA Issue: File /usr/bin/app-helper in package app doesn't have GNU_HASH (didn't pass LDFLAGS?) [ldflags]
+NOTE: Checking Package: app-src
+ERROR: Fatal QA errors were found, failing task.
+DEBUG: Python function do_package_qa finished

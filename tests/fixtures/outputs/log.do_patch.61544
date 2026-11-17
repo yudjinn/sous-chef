@@ -1,0 +1,20 @@
+DEBUG: Executing python function extend_recipe_sysroot
+NOTE: Direct dependencies are ['/home/builder/poky/meta/recipes-devtools/quilt/quilt-native_0.67.bb:do_populate_sysroot']
+NOTE: Installed into sysroot: []
+NOTE: Skipping as already exists in sysroot: ['quilt-native']
+DEBUG: Python function extend_recipe_sysroot finished
+DEBUG: Executing python function do_patch
+DEBUG: Executing python function patch_do_patch
+NOTE: Applying patch '0001-Makefile-respect-LDFLAGS.patch' (../meta-mine/recipes-core/hello/files/0001-Makefile-respect-LDFLAGS.patch)
+NOTE: Applying patch '0002-greet-add-name-argument.patch' (../meta-mine/recipes-core/hello/files/0002-greet-add-name-argument.patch)
+ERROR: Applying patch '0002-greet-add-name-argument.patch' on target directory '/home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.1/sources/hello-1.1'
+CmdError('quilt --quiltrc /home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.1/recipe-sysroot-native/etc/quiltrc push', 1,'stdout: Applying patch 0002-greet-add-name-argument.patch
+patching file src/greet.c
+Hunk #1 FAILED at 10.
+Hunk #2 succeeded at 31 (offset 4 lines).
+1 out of 2 hunks FAILED -- rejects in file src/greet.c
+Patch 0002-greet-add-name-argument.patch does not apply (enforce with -f)
+
+stderr: ')
+DEBUG: Python function patch_do_patch finished
+DEBUG: Python function do_patch finished
