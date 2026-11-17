@@ -364,6 +364,67 @@ fn missing_package() {
     assert_eq!(lines(&env, r, "good.bb"), []);
 }
 
+/// The fixture workspace plus `lint/override/missing-package/no-packages`: its recipes in
+/// `meta-mine/recipes-images/imgs/`, and (with `classes`) its stand-in classes in
+/// `meta-core/classes-recipe/`.
+fn no_packages_env(classes: bool) -> Env {
+    let dir = fixture_path("lint/override/missing-package/no-packages");
+    let mut files: Vec<(String, String)> = Vec::new();
+    for (sub, dest) in [
+        ("recipes", "meta-mine/recipes-images/imgs"),
+        ("classes", "meta-core/classes-recipe"),
+    ] {
+        if sub == "classes" && !classes {
+            continue;
+        }
+        for f in files_under(&dir.join(sub)) {
+            let name = f.file_name().unwrap().to_str().unwrap().to_string();
+            files.push((format!("{dest}/{name}"), fs::read_to_string(&f).unwrap()));
+        }
+    }
+    let refs: Vec<(&str, String)> = files.iter().map(|(p, c)| (p.as_str(), c.clone())).collect();
+    Env::with(&refs)
+}
+
+/// `path:line` of the missing-package findings in `meta-mine/recipes-images/imgs/`.
+fn missing_package_in_images(env: &Env) -> Vec<String> {
+    let dir = env.root.join("meta-mine/recipes-images/imgs");
+    let files: Vec<PathBuf> = files_under(&dir);
+    let report = env.run(
+        &Target::Files { files, lines: None },
+        false,
+        &[&OverrideMissingPackage],
+    );
+    report
+        .findings
+        .iter()
+        .map(|f| {
+            format!(
+                "{}:{}",
+                f.loc.path.file_name().unwrap().to_str().unwrap(),
+                f.loc.lines.start
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn missing_package_is_not_reported_for_recipes_without_packages() {
+    // OE-core's pkgvarcheck runs only when PACKAGES is not empty (insane.bbclass).
+    let want = [
+        "bad-packagegroup_1.0.bb:3",
+        "bad-refilled_1.0.bb:4",
+        "shared.inc:2",
+    ];
+    let env = no_packages_env(true);
+    assert_eq!(missing_package_in_images(&env), want);
+    // Without the classes indexed, `inherit core-image` still counts by name.
+    let env = no_packages_env(false);
+    let got = missing_package_in_images(&env);
+    assert!(!got.iter().any(|g| g.starts_with("good-")), "{got:?}");
+    assert!(got.contains(&"shared.inc:2".to_string()), "{got:?}");
+}
+
 #[test]
 fn append_vs_plus_equals() {
     let env = Env::new();
