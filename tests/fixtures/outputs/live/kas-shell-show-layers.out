@@ -1,0 +1,24 @@
+2026-11-17 16:28:16 - INFO     - kas 5.5 started on EndeavourOS rolling
+2026-11-17 16:28:16 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss
+2026-11-17 16:28:16 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss-ti
+2026-11-17 16:28:16 - INFO     - Repository bitbake already contains 6e260eb6ab1631607ea414d9ff8ede1155faa5d9 as commit
+2026-11-17 16:28:16 - INFO     - Repository openembedded-core already contains 33a6bd6cc8a9a976902081642414bd67adc74879 as commit
+2026-11-17 16:28:16 - INFO     - Repository meta-arm already contains 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735 as commit
+2026-11-17 16:28:16 - INFO     - Repository bitbake checked out to 6e260eb6ab1631607ea414d9ff8ede1155faa5d9
+2026-11-17 16:28:16 - INFO     - Repository openembedded-core checked out to 33a6bd6cc8a9a976902081642414bd67adc74879
+2026-11-17 16:28:16 - INFO     - Repository meta-arm checked out to 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735
+2026-11-17 16:28:16 - INFO     - To start the default build, run: bitbake -c build kiss-image
+NOTE: Reconnecting to bitbake server...
+NOTE: Retrying server connection (#1)... (16:28:16.547254)
+NOTE: Reconnecting to bitbake server...
+NOTE: Reconnecting to bitbake server...
+NOTE: Retrying server connection (#1)... (16:28:16.547254)
+NOTE: Retrying server connection (#1)... (16:28:16.547254)
+NOTE: Starting bitbake server...
+layer                 path                                                                    priority
+========================================================================================================
+meta-arm              {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm  5
+arm-toolchain         {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm-toolchain  5
+meta-kiss             {{LIVE}}/yocto-kiss/build/../meta-kiss  9
+meta-kiss-ti          {{LIVE}}/yocto-kiss/build/../meta-kiss-ti  9
+core                  {{LIVE}}/yocto-kiss/build/../openembedded-core/meta  5

@@ -1,0 +1,29 @@
+# T9.2: the yocto-kiss kas build (kiss + dogbonedark, with its lock file) plus the scratch
+# layer, for a failed do_fetch of broken-fetch only. kas refuses to combine files from two
+# repositories on the command line ("All concatenated config files must belong to the same
+# repository"), so this file is the top file and includes yocto-kiss's files by repo.
+# Run from the yocto-kiss directory (KAS_WORK_DIR) so that the clones there are used.
+header:
+  version: 14
+  includes:
+    - repo: yocto-kiss
+      file: kas/kiss.yaml
+    - repo: yocto-kiss
+      file: kas/dogbonedark.yaml
+    - repo: yocto-kiss
+      file: kas/kiss.lock.yaml
+
+repos:
+  yocto-kiss:
+    path: {{LIVE}}/yocto-kiss
+    layers:
+      .: disabled
+  # url-less repos fall back to the top file's directory: point them back at yocto-kiss.
+  meta-kiss:
+    path: {{LIVE}}/yocto-kiss
+  meta-kiss-ti:
+    path: {{LIVE}}/yocto-kiss
+  meta-scratch:
+    path: {{LIVE}}/scratch/meta-scratch
+    layers:
+      .:

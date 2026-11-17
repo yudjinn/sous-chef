@@ -1,0 +1,53 @@
+2026-11-17 16:46:31 - INFO     - kas 5.5 started on EndeavourOS rolling
+2026-11-17 16:46:31 - INFO     - Repository bitbake already contains 6e260eb6ab1631607ea414d9ff8ede1155faa5d9 as commit
+2026-11-17 16:46:31 - INFO     - Repository openembedded-core already contains 33a6bd6cc8a9a976902081642414bd67adc74879 as commit
+2026-11-17 16:46:31 - INFO     - Repository meta-arm already contains 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735 as commit
+2026-11-17 16:46:31 - INFO     - Repository bitbake checked out to 6e260eb6ab1631607ea414d9ff8ede1155faa5d9
+2026-11-17 16:46:31 - INFO     - Repository openembedded-core checked out to 33a6bd6cc8a9a976902081642414bd67adc74879
+2026-11-17 16:46:31 - INFO     - Repository meta-arm checked out to 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735
+2026-11-17 16:46:31 - INFO     - To start the default build, run: bitbake -c build kiss-image
+Loading cache...done.
+Loaded 2086 entries from dependency cache.
+NOTE: Resolving any missing task queue dependencies
+
+Build Configuration:
+BB_VERSION           = "2.18.0"
+BUILD_SYS            = "x86_64-linux"
+NATIVELSBSTRING      = "endeavouros"
+TARGET_SYS           = "arm-oe-linux-gnueabi"
+MACHINE              = "dogbonedark"
+SDKMACHINE           = "x86_64"
+DISTRO               = "kiss"
+DISTRO_VERSION       = "1.0"
+TUNE_FEATURES        = "arm armv7a vfp thumb neon callconvention-hard"
+meta-arm             
+meta-arm-toolchain   = "wrynose:673e8d7c5dcd14de58092eb73e6ecc5eee5c1735"
+meta-kiss            
+meta-kiss-ti         = "wrynose:cc621c5d5725a51af9abb7b0d531cf6f9264a468"
+meta-scratch         = "<unknown>:<unknown>"
+meta                 = "wrynose:33a6bd6cc8a9a976902081642414bd67adc74879"
+
+WARNING: Your host glibc version (2.44) is newer than that in uninative (2.43). Disabling uninative so that sstate is not corrupted.
+Initialising tasks...Sstate summary: Wanted 1 Local 0 Mirrors 0 Missed 1 Current 0 (0% match, 0% complete)
+done.
+NOTE: Executing Tasks
+NOTE: Running task 1 of 2 ({{LIVE}}/yocto-kiss/build/../../scratch/meta-scratch/recipes-test/broken-fetch/broken-fetch_1.0.bb:do_recipe_qa)
+NOTE: recipe broken-fetch-1.0-r0: task do_recipe_qa: Started
+NOTE: recipe broken-fetch-1.0-r0: task do_recipe_qa: Succeeded
+NOTE: Running task 2 of 2 ({{LIVE}}/yocto-kiss/build/../../scratch/meta-scratch/recipes-test/broken-fetch/broken-fetch_1.0.bb:do_fetch)
+NOTE: recipe broken-fetch-1.0-r0: task do_fetch: Started
+WARNING: broken-fetch-1.0-r0 do_fetch: Failed to fetch URL https://sous-chef-verify.invalid/broken-fetch-1.0.tar.gz, attempting MIRRORS if available
+ERROR: broken-fetch-1.0-r0 do_fetch: Fetcher failure: Fetch command export PSEUDO_DISABLED=1; export SSH_AUTH_SOCK="{{REDACTED}}"; export PATH="{{LIVE}}/yocto-kiss/openembedded-core/scripts:{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/recipe-sysroot-native/usr/bin/arm-oe-linux-gnueabi:{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/recipe-sysroot/usr/bin/crossscripts:{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/recipe-sysroot-native/usr/sbin:{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/recipe-sysroot-native/usr/bin:{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/recipe-sysroot-native/sbin:{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/recipe-sysroot-native/bin:{{LIVE}}/yocto-kiss/bitbake/bin:{{LIVE}}/yocto-kiss/build/tmp/hosttools"; export HOME="/tmp/tmp{{RANDOM}}"; /usr/bin/env wget --tries=2 --timeout=100 --output-document={{LIVE}}/yocto-kiss/build/downloads/broken-fetch-1.0.tar.gz.tmp --continue --directory-prefix={{LIVE}}/yocto-kiss/build/downloads 'https://sous-chef-verify.invalid/broken-fetch-1.0.tar.gz' --progress=dot --verbose failed with exit code 4, see logfile for output
+ERROR: broken-fetch-1.0-r0 do_fetch: Bitbake Fetcher Error: FetchError('Unable to fetch URL from any source.', 'https://sous-chef-verify.invalid/broken-fetch-1.0.tar.gz')
+ERROR: Logfile of failure stored in: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/temp/log.do_fetch.1484343
+NOTE: recipe broken-fetch-1.0-r0: task do_fetch: Failed
+ERROR: Task ({{LIVE}}/yocto-kiss/build/../../scratch/meta-scratch/recipes-test/broken-fetch/broken-fetch_1.0.bb:do_fetch) failed with exit code '1'
+NOTE: Tasks Summary: Attempted 2 tasks of which 0 didn't need to be rerun and 1 failed.
+
+Summary: 1 task failed:
+  {{LIVE}}/yocto-kiss/build/../../scratch/meta-scratch/recipes-test/broken-fetch/broken-fetch_1.0.bb:do_fetch
+    log: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/broken-fetch/1.0/temp/log.do_fetch.1484343
+Summary: There were 2 WARNING messages.
+Summary: There were 2 ERROR messages, returning a non-zero exit code.
+2026-11-17 16:46:38 - ERROR    - Shell returned non-zero exit status
+2026-11-17 16:46:38 - ERROR    - Command "/usr/bin/zsh -c 'bitbake -c fetch broken-fetch'" failed with error 1

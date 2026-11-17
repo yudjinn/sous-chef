@@ -1,0 +1,40 @@
+2026-11-17 16:46:07 - INFO     - kas 5.5 started on EndeavourOS rolling
+2026-11-17 16:46:07 - INFO     - Repository bitbake already contains 6e260eb6ab1631607ea414d9ff8ede1155faa5d9 as commit
+2026-11-17 16:46:07 - INFO     - Repository openembedded-core already contains 33a6bd6cc8a9a976902081642414bd67adc74879 as commit
+2026-11-17 16:46:07 - INFO     - Repository meta-arm already contains 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735 as commit
+2026-11-17 16:46:07 - INFO     - Repository bitbake checked out to 6e260eb6ab1631607ea414d9ff8ede1155faa5d9
+2026-11-17 16:46:07 - INFO     - Repository openembedded-core checked out to 33a6bd6cc8a9a976902081642414bd67adc74879
+2026-11-17 16:46:07 - INFO     - Repository meta-arm checked out to 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735
+2026-11-17 16:46:07 - INFO     - To start the default build, run: bitbake -c build kiss-image
+Loading cache...done.
+Loaded 0 entries from dependency cache.
+Parsing recipes...done.
+Parsing of 1034 .bb files complete (0 cached, 1034 parsed). 2086 targets, 435 skipped, 0 masked, 0 errors.
+NOTE: Resolving any missing task queue dependencies
+
+Build Configuration:
+BB_VERSION           = "2.18.0"
+BUILD_SYS            = "x86_64-linux"
+NATIVELSBSTRING      = "endeavouros"
+TARGET_SYS           = "arm-oe-linux-gnueabi"
+MACHINE              = "dogbonedark"
+SDKMACHINE           = "x86_64"
+DISTRO               = "kiss"
+DISTRO_VERSION       = "1.0"
+TUNE_FEATURES        = "arm armv7a vfp thumb neon callconvention-hard"
+meta-arm             
+meta-arm-toolchain   = "wrynose:673e8d7c5dcd14de58092eb73e6ecc5eee5c1735"
+meta-kiss            
+meta-kiss-ti         = "wrynose:cc621c5d5725a51af9abb7b0d531cf6f9264a468"
+meta-scratch         = "<unknown>:<unknown>"
+meta                 = "wrynose:33a6bd6cc8a9a976902081642414bd67adc74879"
+
+WARNING: Your host glibc version (2.44) is newer than that in uninative (2.43). Disabling uninative so that sstate is not corrupted.
+Initialising tasks...Sstate summary: Wanted 1 Local 0 Mirrors 0 Missed 1 Current 0 (0% match, 0% complete)
+done.
+NOTE: Executing Tasks
+NOTE: Running task 1 of 2 ({{LIVE}}/yocto-kiss/build/../../scratch/meta-scratch/recipes-test/broken-fetch/broken-fetch_1.0.bb:do_recipe_qa)
+NOTE: Running task 2 of 2 ({{LIVE}}/yocto-kiss/build/../../scratch/meta-scratch/recipes-test/broken-fetch/broken-fetch_1.0.bb:do_fetch)
+NOTE: Tasks Summary: Attempted 2 tasks of which 0 didn't need to be rerun and all succeeded.
+
+Summary: There was 1 WARNING message.

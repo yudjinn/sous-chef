@@ -1,0 +1,64 @@
+2026-11-17 16:28:17 - INFO     - kas 5.5 started on EndeavourOS rolling
+2026-11-17 16:28:17 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss
+2026-11-17 16:28:17 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss-ti
+2026-11-17 16:28:17 - INFO     - Repository bitbake already contains 6e260eb6ab1631607ea414d9ff8ede1155faa5d9 as commit
+2026-11-17 16:28:17 - INFO     - Repository openembedded-core already contains 33a6bd6cc8a9a976902081642414bd67adc74879 as commit
+2026-11-17 16:28:17 - INFO     - Repository meta-arm already contains 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735 as commit
+2026-11-17 16:28:17 - INFO     - Repository bitbake checked out to 6e260eb6ab1631607ea414d9ff8ede1155faa5d9
+2026-11-17 16:28:17 - INFO     - Repository openembedded-core checked out to 33a6bd6cc8a9a976902081642414bd67adc74879
+2026-11-17 16:28:17 - INFO     - Repository meta-arm checked out to 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735
+2026-11-17 16:28:17 - INFO     - To start the default build, run: bitbake -c build kiss-image
+NOTE: Reconnecting to bitbake server...
+NOTE: Retrying server connection (#1)... (16:28:18.786905)
+NOTE: Reconnecting to bitbake server...
+NOTE: Reconnecting to bitbake server...
+NOTE: Retrying server connection (#1)... (16:28:18.786905)
+NOTE: Retrying server connection (#1)... (16:28:18.786905)
+NOTE: Starting bitbake server...
+Loading cache...done.
+Loaded 2085 entries from dependency cache.
+=== Appended recipes ===
+linux-kiss_7.0.bb:
+  {{LIVE}}/yocto-kiss/build/../meta-kiss-ti/recipes-kernel/linux/linux-kiss_%.bbappend
+linux-yocto-fitimage.bb:
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-kernel/linux/linux-yocto%.bbappend
+systemd-boot_259.5.bb:
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-core/systemd/systemd-boot_%.bbappend
+trusted-firmware-a_2.10.30.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-bsp/trusted-firmware-a/trusted-firmware-a_%.bbappend
+trusted-firmware-a_2.12.10.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-bsp/trusted-firmware-a/trusted-firmware-a_%.bbappend
+trusted-firmware-a_2.14.1.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-bsp/trusted-firmware-a/trusted-firmware-a_%.bbappend
+trusted-firmware-a_git.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-bsp/trusted-firmware-a/trusted-firmware-a_%.bbappend
+edk2-firmware_202602.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-bsp/uefi/edk2-firmware_%.bbappend
+optee-os_4.9.0.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-security/optee/optee-os_%.bbappend
+optee-os_git.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-security/optee/optee-os_%.bbappend
+libts_git.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-security/trusted-services/libts_%.bbappend
+ts-sp-smm-gateway_git.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-security/trusted-services/ts-sp-smm-gateway_%.bbappend
+u-boot_2026.01.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-bsp/u-boot/u-boot_%.bbappend
+musl_git.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-core/musl/musl_%.bbappend
+systemd_259.5.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-core/systemd/systemd_%.bbappend
+linux-yocto-dev.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-kernel/linux/linux-yocto%.bbappend
+linux-yocto-rt_6.18.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-kernel/linux/linux-yocto%.bbappend
+linux-yocto-tiny_6.18.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-kernel/linux/linux-yocto%.bbappend
+linux-yocto_6.18.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-kernel/linux/linux-yocto%.bbappend
+u-boot_2026.01.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-bsp/u-boot/u-boot_%.bbappend
+linux-yocto_6.18.bb (skipped):
+  {{LIVE}}/yocto-kiss/build/../meta-arm/meta-arm/recipes-kernel/linux/linux-yocto%.bbappend
