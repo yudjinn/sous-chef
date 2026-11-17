@@ -556,14 +556,14 @@ included, and the lint numbers were re-measured on the kas build without running
 
 | | Fixed by | Status |
 |---|---|---|
-| B1 | data files marked in the index (`files.not_collected = 'data'`), left out of search and lint; uncollected recipe files noted | fixed; `hygiene/parse-error` with `--all` 422 -> 3. Left: the 3 are in `meta:conf/ccache.conf` (ccache's own file, but in `conf/`, so taken as metadata), and lint still checks `meta:lib/bblayers/templates/example.bb` (no `BBFILES` glob collects it; 2 `org/recipe-path` findings) |
+| B1 | data files marked in the index (`files.not_collected = 'data'`), left out of search and lint; uncollected recipe files noted | fixed; `hygiene/parse-error` with `--all` 422 -> 3. The 3 left (in `meta:conf/ccache.conf`, ccache's own file, then taken as metadata because it is in `conf/`) went in w6 (an unreferenced `.conf` under `conf/` that does not parse is data: 3 -> 0), and so did lint's 2 `org/recipe-path` findings on `meta:lib/bblayers/templates/example.bb`, which no `BBFILES` glob collects (now 1 finding saying so) |
 | B2 | glob matches sorted as Python strings (`resolve::py_str_cmp`) | fixed; bbappend order agrees for all recipes of the bitbake-setup build (differential.md) |
 | B3 | `layers show=appends` evaluates `BBFILES_DYNAMIC` | fixed for the view; since w6 the index folds `BBFILES_DYNAMIC` into `BBFILES` (`resolve::collect`) and the view reads the index |
 | B4 | one tokeniser for list values (`parse::words`): python entries of `OVERRIDES` kept whole, never override names | fixed |
 | B5 | a reference whose text expands completely but whose value is uncertain is followed and flagged | fixed; flagged values listing `TCOVERRIDE` 156 -> 0 (differential.md) |
 | B6 | the same tokeniser in `deps` and the static `PROVIDES` | fixed |
 | B7 | the wrappers save the argv before sourcing | fixed |
-| B8 | `override/shadowed` does not judge a shared file from one includer | fixed; 338 -> 83 findings. New false positives seen in the re-run: 7 findings on a recipe's `DEPENDS =` "replaced" by `tcmode-default.inc` (the virtual-provider rewrite of `DEPENDS` is recorded as an assignment there) |
+| B8 | `override/shadowed` does not judge a shared file from one includer | fixed; 338 -> 83 findings. The false positives seen in the re-run (a recipe's `DEPENDS =` "replaced" by the virtual-provider rewrite, then recorded as an assignment) went in w6: the rewrite is its own kind of operation (`OpKind::VirtualProviderRewrite`), 83 -> 65 |
 | B9 | `override/filesextrapaths` accepts `=.` / `.=` with the colon | fixed; 12 -> 0 |
 | B10 | `override/missing-package` skips empty values and classes without packages | fixed; 3 -> 0 |
 | B11 | `overrides show=dead` counts variables read by name (`TUNE_FEATURES:tune-*`) in a note instead of listing them | fixed |
@@ -586,9 +586,20 @@ Still open from the list above: the Grep context-line format and live Bash and E
 (need a live Claude Code session); how `bitbake-layers add-layer` edits `bblayers.conf`;
 the first release with `python_hatchling`; the second client's failure after a long wait;
 cancel with `BB_SERVER_TIMEOUT` set. The `bitbake -e` format item is settled (T5.5,
-bitbake-semantics.md "Build output"). Known gaps unchanged: `BBCLASSEXTEND` providers,
-skipped recipes (`COMPATIBLE_MACHINE`), `PREFERRED_PROVIDERS`; `addfragments` is no longer
-one.
+bitbake-semantics.md "Build output"). Known gaps: `BBCLASSEXTEND` providers (since w6 such
+a name is an error naming the base recipe), skipped recipes (since w6 / w8 a "would skip" /
+"may skip" note when the values allow, which never fires on yocto-kiss because its
+`MACHINEOVERRIDES` holds python), `PREFERRED_PROVIDERS`; `addfragments` is no longer one.
+
+## After the later rounds (w9-final, 2026-11-18)
+
+At the end of the code part of branch `w9-final` (after w6 to w8 and this branch's code
+items), with the release build: `SOUS_CHEF_LIVE=... cargo test --release --test live_verify
+--test audit --test release_diff -- --ignored` passes (14 live verification tests, the live
+audit test and the live release diff test); no BitBake or kas process was started. Lint on
+the kas build: default 1 finding, `--all` 625 findings in 1718 files, unchanged since w6
+(lint-rules.md, "On a real workspace"); the differential on the existing dumps is unchanged
+(differential.md, "After w9-final").
 
 ## Left in the environment
 
