@@ -702,6 +702,63 @@ async fn large_diff_goes_to_a_handle() {
         }
     }
     assert_eq!(lines.join("\n"), stored.trim_end_matches('\n'));
+
+    // Asked for JSON: the handle holds JSON (the diff document), and paging through it
+    // with slice gives back a document that parses.
+    let mut a = args("v1", Some("HEAD"), 600, Some(Format::Json));
+    a.all = Some(true);
+    let out = diff_tool::run(&f.ctx, a).await.unwrap();
+    let t: JsonTable = serde_json::from_str(&out).unwrap();
+    assert!(t.more_over_budget > 0);
+    let hint = t
+        .notes
+        .iter()
+        .find(|n| n.starts_with("slice handle=h:"))
+        .unwrap();
+    let h = hint
+        .trim_start_matches("slice handle=")
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .to_string();
+    assert!(
+        t.notes
+            .iter()
+            .any(|n| n.contains("JSON, schema sous-chef-diff/1")),
+        "{:?}",
+        t.notes
+    );
+    let stored = String::from_utf8(f.ctx.handles.get(&Handle(h.clone())).unwrap()).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&stored).unwrap();
+    assert_eq!(v["schema"], "sous-chef-diff/1");
+    let mut lines: Vec<String> = Vec::new();
+    for page in 1.. {
+        let json = slice::run(
+            &f.ctx,
+            slice::Args {
+                handle: h.clone(),
+                lines: None,
+                grep: None,
+                context: None,
+                var: None,
+                failures: None,
+                page: Some(page),
+                budget_tokens: None,
+                format: Some(Format::Json),
+            },
+        )
+        .await
+        .unwrap();
+        let t: JsonTable = serde_json::from_str(&json).unwrap();
+        for row in &t.rows {
+            lines.push(render::unescape_cell(&row[1]));
+        }
+        if !t.notes.iter().any(|n| n.contains("; next: slice")) {
+            break;
+        }
+    }
+    let back: serde_json::Value = serde_json::from_str(&lines.join("\n")).unwrap();
+    assert_eq!(back, v);
 }
 
 /// A workspace whose upstream layer `meta-up` has `old_conf` as its `conf/layer.conf` at

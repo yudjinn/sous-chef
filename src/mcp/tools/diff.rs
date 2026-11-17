@@ -1,7 +1,9 @@
 //! Tool `diff`: the release diff (T8.4). See docs/mcp-tools.md.
 //!
 //! Builds the diff with [`crate::diff::build`] and renders its table within the budget.
-//! When the whole table is over the budget, it is stored under a `text` handle and the
+//! When the whole table is over the budget, the whole diff is stored under a `text` handle
+//! in the format asked for (the table as tab-separated text for `text`; the
+//! `sous-chef-diff/1` document, pretty-printed one field per line, for `json`), and the
 //! answer is the table cut to the budget (summary rows and own bbappends first) with the
 //! handle and the `slice` hint.
 
@@ -65,12 +67,21 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
             d.to.given.as_str()
         }
     );
-    let handle = ctx.handles.put(HandleKind::Text, &label, full.as_bytes())?;
+    let (stored, what) = match format {
+        Format::Text => (full, "tab-separated, as above"),
+        Format::Json => (
+            diff::render_json(&d),
+            "JSON, schema sous-chef-diff/1, one field per line",
+        ),
+    };
+    let handle = ctx
+        .handles
+        .put(HandleKind::Text, &label, stored.as_bytes())?;
     t.note(&format!(
-        "full diff {}: {} rows, {} bytes (tab-separated, as above)",
+        "full diff {}: {} rows, {} bytes ({what})",
         handle.0,
         t.len(),
-        full.len()
+        stored.len()
     ));
     t.note(&format!(
         "slice handle={} page=1 | grep=RE | lines=A-B",

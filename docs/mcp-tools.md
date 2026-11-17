@@ -1275,7 +1275,7 @@ to another version, or carry patches whose source changed.
 | `to` | the new revision; default **the working tree** (`HEAD` plus uncommitted and untracked files): that is what the workspace builds now and what `item` reads, so the `to` pointers can be opened directly. Give `HEAD` to compare committed states only |
 | `recipe` | one recipe by `PN`; an unknown name is an error listing similar names of the layer |
 | `all` | every recipe of the layer (unchanged ones are counted, not listed) |
-| `budget_tokens`, `format` | as every tool; a diff over the budget is stored whole under a `text` handle |
+| `budget_tokens`, `format` | as every tool; a diff over the budget is stored whole under a `text` handle, in the format asked for: the tab-separated table for `text`, the `sous-chef-diff/1` document (the CLI's JSON, pretty-printed one field per line, so `slice` pages and greps it) for `json` |
 
 Default selection (no `recipe`, no `all`): the recipes of the layer that the writable
 layers (other than `layer`) **append** (a bbappend whose `PN` is the recipe's) or **use**:
@@ -1299,8 +1299,15 @@ layer is not read).
 **What is compared.**
 
 - *Recipe identity*: the `PN` of the file name, as the scanner derives it; the `.bb`
-  files are those the layer's current `BBFILES` (and active `BBFILES_DYNAMIC`) globs match,
-  at both revisions (`BBMASK` is not applied). Several versions of one `PN`: equal versions
+  files at a revision are those **that revision's** `BBFILES` globs match: the words its
+  `conf/layer.conf` adds to `BBFILES` (`+=`, `=+`, `.=` / `=.` with a space, `:append`,
+  `:prepend`; `=` and `:=` replace them), with `${LAYERDIR}` replaced by the layer's
+  directory, read with git from the revision. When that file is the one on disk the
+  workspace's current `BBFILES` is used; when the text cannot decide it (`?=` / `??=`, an
+  `include` / `require`, `:remove` or another override, `unset BBFILES`, a reference to a
+  variable other than `LAYERDIR`, no `conf/layer.conf`), the current `BBFILES` is used and
+  a note says so. The workspace's active `BBFILES_DYNAMIC` globs for the layer are added at
+  both revisions; `BBMASK` is not applied. Several versions of one `PN`: equal versions
   pair first; each remaining old version, highest first, pairs with the new version that
   shares the longest version prefix (`fiptool-native` 2.10.4 with 2.10.30, not 2.14.1);
   a pair with different versions is a version change (`renamed`), the rest are added or
@@ -1359,8 +1366,10 @@ first, then by name, then the own files' includes) a `recipe` row (version, numb
 changes, why it was selected, source changes) and its `file`, `var`, `function`, `task`,
 `inherit`, `directive` and `SRC_URI entry` rows; then `class` rows; notes last. Everything
 is sorted; the output depends only on the two revisions and the workspace. When the whole
-table is over `budget_tokens`, it is stored under a `text` handle, and the answer is the
-table cut to the budget with `full diff h:...: N rows, B bytes` and the `slice` hint.
+table is over `budget_tokens`, it is stored under a `text` handle (as the table for
+`format: text`, as the `sous-chef-diff/1` JSON document for `format: json`), and the
+answer is the table cut to the budget with `full diff h:...: N rows, B bytes (...)` and
+the `slice` hint.
 
 The fixture repository of `tests/release_diff.rs` (two commits, a tag `v1`; the snapshot
 `tests/snapshots/release_diff__release_diff_text.snap`; recipe rows cut here):
@@ -1384,7 +1393,7 @@ hello	SRC_URI entry	file://${@bb.utils.contains(...)}	added	-	-	meta-up:recipes-
 hello	SRC_URI entry	file://fix.patch	added	-	-	meta-up:recipes-core/hello/hello_1.1.bb:9-13
 ...
 -	class	classes/autotools.bbclass	changed	1 statement differs; inherited directly by compared hello; inherited by your meta-mine:recipes-app/app/app_1.0.bb:5	meta-up:classes/autotools.bbclass:1	meta-up:classes/autotools.bbclass:1
-note: statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once
+note: statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (each revision's BBFILES, no BBMASK); classes listed once
 ...
 ```
 
