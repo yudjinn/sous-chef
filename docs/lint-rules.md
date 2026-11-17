@@ -78,7 +78,7 @@ workspace). Findings hidden by `--severity` never fail the run.
 | `override/plus-equals-with-override` | W | file | `VAR:foo += "x"` (and `=+`, `.=`, `=.`): this builds the variable `VAR:foo`, which replaces `VAR` when `foo` is active, rather than appending to `VAR`. Suggests `VAR:append:foo`. Not flagged: the package override of a package-scoped variable (`FILES:${PN} +=`, `RDEPENDS:libfoo +=`), overrides containing `${` or not starting with `[a-z0-9]`, names with `:append` / `:prepend` / `:remove`. A condition after the package is flagged (`RDEPENDS:${PN}:qemux86 +=`). |
 | `override/remove-in-recipe` | W/I | file | `:remove` (not on a flag). Warning in a `.bb`, `.inc` or `.bbclass`: it is applied last, so no bbappend or conf can add the item back. Info in a `.bbappend`, a `.conf`, or an `.inc` under a `conf/` directory (configuration), where it is the usual tool. |
 | `override/dead` | W/I | recipe | An override element of an inactive operation in the recipe's own files (the `.bb`, its `.inc` files, its bbappends) that is no entry of the recipe's `OVERRIDES`, no machine, distro, class or declared override of the workspace, and no word of any `*OVERRIDES` assignment. Suggests the closest known name. Info instead of warning when the override list is only partly known. Never checks package names, `${...}` elements or legacy names. |
-| `override/shadowed` | I | recipe | A `NAME =` / `NAME :=` in the recipe's own files that the evaluation marks shadowed, when a later `=` / `:=` of exactly the same name follows. Not flagged: functions; a later assignment in a bbappend other than the earlier one's; any `NAME` that something in the tree could read first (a `:=` mentioning it, an `inherit` / `include` / `require` with `${NAME}`). |
+| `override/shadowed` | I | recipe | A `NAME =` / `NAME :=` in the recipe's own files that the evaluation marks shadowed, when a later `=` / `:=` of exactly the same name follows. Not flagged: functions; a later assignment in a bbappend other than the earlier one's; any `NAME` that something in the tree could read first (a `:=` mentioning it, an `inherit` / `include` / `require` with `${NAME}`); an earlier assignment in a file that more than one recipe (or a class, `.conf` or bbappend) reaches through `require` / `include`, unless the later one is in that same file. |
 | `override/weak-after-default` | I | file | `??=` after a `=`, `:=` or `?=` of exactly the same name (overrides and flag included) earlier in the same file; an `unset` in between starts over. |
 | `override/missing-package` | E | file | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `ALLOW_EMPTY` and the `pkg_*` functions set to a value without a package override (`:${PN}`), in recipes that produce packages. Also `VAR:append`, `VAR:append:<cond>` and a function `pkg_postinst()`. Not flagged: an empty value (`FILES = ""`; but `+=` / `=+` store a space and are flagged), flags, `:remove` alone, legacy names (`override/legacy-syntax`), the classes `image` and `core-image`, a class that inherits one of them or itself empties `PACKAGES`. |
 | `override/append-vs-plus-equals` | I | file | An unconditional `VAR:append =` in a `.bb` after a plain `VAR =` / `VAR :=` in the same file, where `+=` (or `.=`) would do. Not flagged when a later statement of the file assigns `VAR` again or is an `inherit`, `require` or `include`, after an `unset VAR`, or outside `.bb` files (in bbappends and classes `:append` is usually right). |
@@ -113,7 +113,13 @@ Notes:
 - **`shadowed`.** Conservative on purpose: any `:=` whose value mentions `NAME` (`${NAME}`
   or python), and any `inherit` or `include` / `require` whose argument mentions `${NAME}`,
   anywhere in the tree (classes included), keeps the assignment from being reported; their
-  order relative to the two assignments is not checked.
+  order relative to the two assignments is not checked. The rule runs on one recipe's
+  evaluation, so a shared file (an `.inc` several `.bb` files require, such as OE-core's
+  `u-boot-common.inc`, or a `.bb` another `.bb` requires, such as `buildtools-tarball.bb`)
+  is not judged from it: an assignment there is reported only when the assignment that
+  replaces it is in the same file, where it is replaced for every includer. Who reaches a
+  file comes from the index's resolved include edges; an include that needs evaluation is
+  not seen, and when the index cannot answer the file counts as shared.
 - **`missing-package`.** The variables are those of OE-core's `pkgvarcheck` QA check, which
   rejects them set without a package. That check runs only when `PACKAGES` is not empty, so
   a file is not reported when every recipe it belongs to statically has an empty

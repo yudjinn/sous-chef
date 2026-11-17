@@ -741,6 +741,77 @@ fn shadowed_on_the_real_datastore() {
     );
 }
 
+#[test]
+fn shadowed_is_not_judged_from_one_includer_of_a_shared_file() {
+    // B8: u-boot-common.inc's values are replaced in u-boot-kiss, not in u-boot-tools.
+    let dir = "meta-mine/recipes-app/ub";
+    let env = Env::with(&[
+        (
+            &format!("{dir}/shared.inc"),
+            fixture("shadowed", "shared.inc"),
+        ),
+        (
+            &format!("{dir}/ub-kiss_1.0.bb"),
+            fixture("shadowed", "shared-kiss.bb"),
+        ),
+        (
+            &format!("{dir}/ub-tools_1.0.bb"),
+            fixture("shadowed", "shared-tools.bb"),
+        ),
+    ]);
+    // Only the assignment replaced in the shared file itself.
+    let want = ["info meta-mine:recipes-app/ub/shared.inc:9"];
+    assert_eq!(
+        rows(&recipe_findings(&env, "ub-kiss", &OverrideShadowed)),
+        want
+    );
+    assert_eq!(
+        rows(&recipe_findings(&env, "ub-tools", &OverrideShadowed)),
+        want
+    );
+    // With one includer, the .inc is the recipe's own and is judged as before.
+    let env = Env::with(&[
+        (
+            &format!("{dir}/shared.inc"),
+            fixture("shadowed", "shared.inc"),
+        ),
+        (
+            &format!("{dir}/ub-kiss_1.0.bb"),
+            fixture("shadowed", "shared-kiss.bb"),
+        ),
+    ]);
+    assert_eq!(
+        rows(&recipe_findings(&env, "ub-kiss", &OverrideShadowed)),
+        [
+            "info meta-mine:recipes-app/ub/shared.inc:5",
+            "info meta-mine:recipes-app/ub/shared.inc:6",
+            "info meta-mine:recipes-app/ub/shared.inc:7",
+            "info meta-mine:recipes-app/ub/shared.inc:9",
+        ]
+    );
+}
+
+#[test]
+fn shadowed_is_not_judged_from_a_recipe_that_requires_another() {
+    // B8: buildtools-docs-tarball.bb requires buildtools-tarball.bb and replaces LICENSE;
+    // in buildtools-tarball itself LICENSE is live.
+    let dir = "meta-mine/recipes-app/bt";
+    let env = Env::with(&[
+        (
+            &format!("{dir}/bt-tarball_1.0.bb"),
+            "SUMMARY = \"x\"\nLICENSE = \"MIT\"\n".into(),
+        ),
+        (
+            &format!("{dir}/bt-docs-tarball_1.0.bb"),
+            "require bt-tarball_1.0.bb\nLICENSE = \"GPL-2.0-only\"\n".into(),
+        ),
+    ]);
+    assert_eq!(
+        rows(&recipe_findings(&env, "bt-docs-tarball", &OverrideShadowed)),
+        [] as [&str; 0]
+    );
+}
+
 // ---------------------------------------------------------------------------------------
 // The whole group over the fixture workspace
 

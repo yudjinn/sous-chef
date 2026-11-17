@@ -15,9 +15,18 @@
 //!   before it is replaced: a `:=` whose value mentions `NAME` (`${NAME}` or python), or an
 //!   `inherit` / `require` / `include` whose argument mentions `${NAME}`. Their order
 //!   relative to the two assignments is not checked, so any such statement is enough;
-//! - functions (a later definition replacing an earlier one is how tasks are overridden).
+//! - functions (a later definition replacing an earlier one is how tasks are overridden);
+//! - **a statement in a shared file**, when the later assignment is in another file. A file
+//!   is shared when more than one recipe reaches it (an `.inc` that several `.bb` files
+//!   `require`, or a `.bb` that another `.bb` requires, followed through other `.inc` files:
+//!   [`helpers::including_recipes`], from the index's `require` / `include` edges), or a
+//!   class, a `.conf` or a bbappend does. The rule sees one recipe's evaluation; the
+//!   assignment may be live in the other includers (OE-core's `u-boot-common.inc`, shared by
+//!   u-boot, u-boot-tools and a layer's `u-boot-kiss`), so it is not reported at all. When
+//!   both assignments are in the same file the earlier one is replaced wherever that file is
+//!   used, and it is reported. When the index cannot answer, the file counts as shared.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::eval::OpStatus;
@@ -69,6 +78,7 @@ impl Rule for OverrideShadowed {
                 _ => false,
             })
             .collect::<Vec<_>>();
+        let mut shared: HashMap<(String, PathBuf), bool> = HashMap::new();
         for base in &bases {
             if data.is_function(base) {
                 continue;
@@ -94,6 +104,14 @@ impl Rule for OverrideShadowed {
                 if read_somewhere(&name, &readers) {
                     continue;
                 }
+                let same_file = later.loc.layer == op.loc.layer && later.loc.path == op.loc.path;
+                if !same_file
+                    && *shared
+                        .entry(key.clone())
+                        .or_insert_with(|| is_shared(cx, &key))
+                {
+                    continue;
+                }
                 out.push(Finding {
                     loc: Loc {
                         lines: LineSpan::line(op.loc.lines.start),
@@ -117,6 +135,18 @@ impl Rule for OverrideShadowed {
                 });
             }
         }
+    }
+}
+
+/// Whether more than one recipe, or anything that is not a recipe, reaches the file through
+/// include edges; true when the index cannot tell.
+fn is_shared(cx: &LintContext<'_>, (layer, path): &(String, PathBuf)) -> bool {
+    let Ok(Some(row)) = query::file_by_path(cx.index, layer, path) else {
+        return true;
+    };
+    match helpers::including_recipes(cx.index, &row) {
+        Some(inc) => inc.other || inc.recipes.len() > 1,
+        None => true,
     }
 }
 
