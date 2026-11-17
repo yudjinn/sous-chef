@@ -930,6 +930,21 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
 - **Inherit** (`BBHandler.inherit`): the argument is expanded and split; a word listed in
   `BB_DEFER_BBCLASSES` is deferred (unless already deferred); a class file in
   `__inherit_cache` is not parsed again. Not found is a parse error.
+- **Which handler parses an included file, and the class type** (BitBake 2.18.0
+  `lib/bb/parse/__init__.py` `handle`: the first handler whose `supports` accepts the
+  name; `BBHandler.supports` = `.bb`, `.bbclass`, `.inc`; `ConfHandler.supports` =
+  `.conf`; `BBHandler.inherit` reads `d.getVar("__bbclasstype", False)`; `cookerdata.py`
+  sets it to `"global"` on the base datastore before the configuration is parsed and to
+  `"recipe"` on each multiconfig datastore after it): an `.inc` is always parsed by
+  BBHandler, whoever includes it, so its `inherit` works, and searches `classes-global/`
+  then `classes/` when the `.inc` is reached during the configuration (from a `.conf`, a
+  layer conf, a global class), `classes-recipe/` then `classes/` during a recipe. A `.conf`
+  is parsed by ConfHandler, whose `feeder` has no `inherit` / `inherit_defer` (an
+  "unparsed line" `ParseError`). sous-chef: the replay's class type is per pass (`global`
+  in the configuration pass, recipe in the recipe pass), which is exactly this; (w8) an
+  `inherit` in a `.conf` is a `RefProblem::Fatal` issue and is not followed. The index's
+  static edge for an `inherit` in an `.inc` is still resolved in recipe context only
+  (`index/scan.rs` `insert_ref_edges`), also for an `.inc` only `.conf` files include.
 - **When a deferred inherit's argument is expanded** (BitBake
   2.18.0 `lib/bb/parse/parse_py/BBHandler.py` `inherit_defer` and `inherit`, `lib/bb/parse/ast.py`
   `InheritDeferredNode.eval` and `finalize`): `inherit_defer` stores the argument **as

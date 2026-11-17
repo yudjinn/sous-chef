@@ -862,22 +862,34 @@ fn kas_defaults(ws: &Workspace) -> Vec<(String, String, String)> {
     if ws.build_dir.is_some() {
         return Vec::new();
     }
-    let from = |s: Option<&crate::workspace::kas::KasSetting>, what: &str| match s {
-        Some(s) => format!("the kas file {}", s.loc.display_in(&k.root)),
-        None => format!("kas's default (no {what} in the kas files)"),
-    };
     vec![
         (
             "MACHINE".to_string(),
             k.machine_or_default().to_string(),
-            from(k.machine.as_ref(), "machine"),
+            kas_origin(k, true),
         ),
         (
             "DISTRO".to_string(),
             k.distro_or_default().to_string(),
-            from(k.distro.as_ref(), "distro"),
+            kas_origin(k, false),
         ),
     ]
+}
+
+/// Where kas's machine (`machine`) or distro value comes from, for the target note
+/// ("`MACHINE = "x"` from <this>"). The one place that describes the origin: once
+/// `KasProject::setting_source` (which also knows the `KAS_MACHINE` / `KAS_DISTRO`
+/// environment overrides) is available, it should decide the text here.
+fn kas_origin(k: &crate::workspace::kas::KasProject, machine: bool) -> String {
+    let (setting, what) = if machine {
+        (k.machine.as_ref(), "machine")
+    } else {
+        (k.distro.as_ref(), "distro")
+    };
+    match setting {
+        Some(s) => format!("the kas file {}", s.loc.display_in(&k.root)),
+        None => format!("kas's default (no {what} in the kas files)"),
+    }
 }
 
 fn recipe_pass(
@@ -2059,7 +2071,22 @@ impl<'a> Replay<'a> {
             "inherit" => {
                 let text = st.name.clone().unwrap_or_default();
                 let deferred = st.op.as_deref() == Some("inherit_defer");
-                if deferred && !self.ws.release.release.has(Feature::InheritDefer) {
+                if FileKind::from_path(file) == Some(FileKind::Conf) {
+                    // A `.conf` is parsed by ConfHandler, which has no `inherit` /
+                    // `inherit_defer` (BitBake 2.18.0 `ConfHandler.feeder`): "unparsed line".
+                    // An `.inc` is parsed by BBHandler whoever includes it, so an `inherit`
+                    // there is followed, in the class type of the pass (`self.global`).
+                    self.issue(
+                        Some(&st.loc),
+                        via,
+                        if deferred { "inherit_defer" } else { "inherit" },
+                        &text,
+                        RefProblem::Fatal(
+                            "unparsed line: a .conf file is parsed by ConfHandler, which has no inherit"
+                                .into(),
+                        ),
+                    );
+                } else if deferred && !self.ws.release.release.has(Feature::InheritDefer) {
                     // BitBake before 2.8 has no such directive: the line falls through to
                     // ConfHandler.feeder and fails with "unparsed line" (bitbake-semantics.md,
                     // "Directives"). Recorded, and the class is not inherited.

@@ -480,6 +480,103 @@ fn a_bbmask_that_depends_on_the_machine_is_said() {
     );
 }
 
+// ---------------------------------------------------------------------------------------
+// Item 6: `inherit` in an `.inc`: the class type of the parse at that point
+// ---------------------------------------------------------------------------------------
+
+fn not_found(ds: &DataStore) -> Vec<String> {
+    ds.replay()
+        .references
+        .iter()
+        .filter_map(|r| match &r.problem {
+            RefProblem::NotFound(w) if r.kind == "inherit" => Some(w.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn inherit_in_an_inc_follows_the_class_type_of_the_parse() {
+    let fx = modified(|r| {
+        // Included from local.conf: parsed by BBHandler (an .inc) while __bbclasstype is
+        // "global" (cookerdata.py), so classes-global/ then classes/.
+        append_to(
+            r,
+            "meta-core/conf/distro/testdistro.conf",
+            "\nrequire conf/distro/include/extra.inc\n",
+        );
+        write(
+            r,
+            "meta-core/conf/distro/include/extra.inc",
+            "inherit sanityish\ninherit autotoolsish\n",
+        );
+        // Required from a recipe: "recipe", so classes-recipe/ then classes/.
+        append_to(
+            r,
+            "meta-mine/recipes-app/app/app_0.1.bb",
+            "\nrequire app-extra.inc\n",
+        );
+        write(
+            r,
+            "meta-mine/recipes-app/app/app-extra.inc",
+            "inherit sanityish\ninherit autotoolsish\n",
+        );
+    });
+    let config = eval(&fx, &Target::default());
+    assert_eq!(
+        not_found(&config),
+        ["autotoolsish"],
+        "{:?}\n{:?}",
+        config.files(),
+        config.replay().references
+    );
+    assert!(
+        config
+            .files()
+            .iter()
+            .any(|v| v.loc.path.ends_with("classes-global/sanityish.bbclass")
+                && v.via.iter().any(|l| l.path.ends_with("extra.inc"))),
+        "{:?}",
+        config.files()
+    );
+    let ds = eval(&fx, &target("app"));
+    // The configuration's issue is carried; the recipe's .inc adds sanityish (not a
+    // recipe class) and finds autotoolsish.
+    assert_eq!(not_found(&ds), ["autotoolsish", "sanityish"]);
+    assert!(ds.files().iter().any(
+        |v| v.loc.path.ends_with("classes-recipe/autotoolsish.bbclass")
+            && v.via.iter().any(|l| l.path.ends_with("app-extra.inc"))
+    ));
+}
+
+#[test]
+fn inherit_in_a_conf_is_an_unparsed_line() {
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-core/conf/distro/testdistro.conf",
+            "\ninherit autotoolsish\n",
+        );
+    });
+    let config = eval(&fx, &Target::default());
+    assert!(
+        config
+            .replay()
+            .references
+            .iter()
+            .any(|r| r.kind == "inherit"
+                && matches!(&r.problem, RefProblem::Fatal(m) if m.contains("unparsed line"))),
+        "{:?}",
+        config.replay().references
+    );
+    assert!(
+        !config
+            .files()
+            .iter()
+            .any(|v| v.loc.path.ends_with("autotoolsish.bbclass"))
+    );
+}
+
 /// Live counts (ignored; starts no BitBake): every collected recipe of the bitbake-setup
 /// build evaluated with the configuration's machine and distro, and the notes counted by
 /// kind. `SOUS_CHEF_LIVE` is the live environment; the index goes to
