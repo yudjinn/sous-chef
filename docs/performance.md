@@ -31,7 +31,10 @@ SOUS_CHEF_LIVE=~/Development/sous-chef-live \
 It runs no BitBake command. Index caches go to `$SOUS_CHEF_LIVE/runs/perf/`, the report to
 `$SOUS_CHEF_LIVE/runs/perf/report.txt`. For the "changed one file" refresh it appends a
 comment line to the build's `conf/local.conf` and restores the exact bytes afterwards (the
-test asserts this). `SOUS_CHEF_PERF_RUNS` (default 5) sets the repetitions. Timing is plain
+test asserts this). `SOUS_CHEF_PERF_RUNS` (default 5) sets the repetitions.
+`SOUS_CHEF_PERF_DIR=<dir>` puts the caches and the report there instead of `runs/perf/`;
+`SOUS_CHEF_PERF_NO_EDIT=1` skips the touch / change / `refresh_file` rows, so the test
+writes nothing to the build directory. Timing is plain
 `std::time::Instant`: the crate has no benchmark dependency and none was added. The whole
 test takes about 32 s, of which 15 s is `lint --all`.
 
@@ -82,6 +85,36 @@ Other numbers:
   inside the handler (`grep_read 2 ms`, `grep_read 1 ms`, `edit 6 ms`). The hooks never
   refresh the whole index, which is why they are far below the tools.
 
+## After the w5-fix-eval2 refresh fix (item 10)
+
+Measured 2026-11-17 on the same machine and workspace, the baseline (`b19a20e`, built from
+`git archive` into `target/`) and branch `w5-fix-eval2` run back to back with
+`SOUS_CHEF_PERF_NO_EDIT=1` (the rows that write to the build's `local.conf` skipped) and
+`SOUS_CHEF_PERF_DIR` under `runs/fix-eval2/` (both switches are new in
+`tests/performance.rs`). Another agent was using the machine, so absolute times of the
+cold build are higher than in the table above for both builds.
+
+| Measurement | Before (median / worst) | After (median / worst) |
+|---|---|---|
+| No-change refresh | 104.2 / 104.9 ms | 18.9 / 21.2 ms |
+| tool `var SRC_URI recipe=curl` | 118.5 / 119.5 ms (first 137.5) | 28.6 / 29.0 ms (first 53.2) |
+| First index build | 2021 / 2037 ms | 1892 / 1920 ms |
+| `lint --all` | 14.9 s, 1784 files, 1523 findings | 14.8 s, 1745 files (data files left out), 1092 findings |
+
+Every tool call drops by about 85 ms (`layers` 105 -> 21 ms, `item` 109 -> 24 ms, `search`
+110 -> 25 ms); **`var` warm under 100 ms is now met**. The cause, as found by the previous
+round: `Workspace::confine` (`resolve_existing`) canonicalised every prefix of the path, each
+`realpath` resolving the whole prefix again (about depth² lookups per file, for 1784
+files). Now `resolve_existing` tries one `realpath` of the whole path first (the component
+walk only runs when part of the path does not exist, as for a file scaffold is about to
+create), and the walk, which never follows symlinks, confines each canonical layer root once
+and takes a regular file under it as its own resolved path; a symlink is confined on its own
+as before (`tests/index_scan.rs` `symlinked_directory_leading_outside_is_not_indexed`, and
+the confinement tests in `tests/workspace_layers.rs`). A refresh still stats every file, so
+it still notices every changed, added and removed file. The per-directory
+`conf/bblayers.conf` check in the walk was measured by limiting it to `conf` directories:
+no difference (19 ms either way), so it was kept as it is.
+
 ## Against the targets
 
 - **Full index under 30 s: met** (1.3 s). Not checked at meta-openembedded scale.
@@ -91,11 +124,11 @@ Other numbers:
   150 ms. The fallbacks the milestone lists (directory mtimes, at most one refresh per N
   seconds, a watcher) were **not** implemented: the target is met here, and this task may
   not change `src/`.
-- **`var` warm under 100 ms: not met** (118 ms). The evaluation itself is 6.5 ms warm; the
+- **`var` warm under 100 ms: not met** at `67909a3` (118 ms). The evaluation itself is 6.5 ms warm; the
   rest is the no-change refresh every tool call does first (about 104 ms, see every tool
-  row: no tool is faster than the refresh). Meeting the target needs a cheaper freshness
-  check per call (for example the milestone's second fallback, at most one full refresh per
-  few seconds per process), not a faster evaluator.
+  row: no tool is faster than the refresh). **Met since w5-fix-eval2** (29 ms): the refresh
+  itself was made cheaper (see "After the w5-fix-eval2 refresh fix"); no refresh-rate limit
+  or watcher was added.
 - **Hook budget 150 ms: met** for Grep, Read and Edit by a factor of 15 or more, including
   process start.
 - Changing a `.conf` costs a full edge rebuild (204 ms here); changing one recipe through
