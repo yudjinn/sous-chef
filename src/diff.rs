@@ -12,9 +12,10 @@
 //!
 //! - **Recipe identity.** A recipe is its `PN` from the file name (`index::scan::pn_pv`);
 //!   the `.bb` files a layer collects are those its current `BBFILES` globs match. Several
-//!   versions of one `PN`: equal versions pair first, then the rest pair from the highest
-//!   version down (`query::vercmp`); a pair with different versions is a version change,
-//!   the rest are added or removed.
+//!   versions of one `PN`: equal versions pair first; then each remaining old version,
+//!   highest first (`query::vercmp`), pairs with the new version sharing the longest
+//!   version prefix (the highest on a tie); a pair with different versions is a version
+//!   change, the rest are added or removed.
 //! - **The tree** of a recipe at a revision is its `.bb` plus the files it `require`s /
 //!   `include`s inside the same layer at that revision (relative to the including file,
 //!   then to the layer root; `${PN}`, `${BPN}`, `${PV}`, `${BP}` and `${THISDIR}` expanded
@@ -749,13 +750,28 @@ fn pair_recipes(old: &[RecipeFile], new: &[RecipeFile]) -> Vec<Pair> {
         };
         o.sort_by(by_version_desc);
         n.sort_by(by_version_desc);
-        let mut o = o.into_iter();
-        let mut n = n.into_iter();
-        loop {
-            match (o.next(), n.next()) {
-                (None, None) => break,
-                (a, b) => pairs.push((a, b)),
+        // The rest: each old version, highest first, with the new version sharing the
+        // longest version prefix (`2.10.4` with `2.10.30` before `2.14.1`), the highest on
+        // a tie.
+        for a in o {
+            let common = |x: &RecipeFile| {
+                a.pv.chars()
+                    .zip(x.pv.chars())
+                    .take_while(|(p, q)| p == q)
+                    .count()
+            };
+            let best = (0..n.len()).max_by(|i, j| {
+                common(n[*i])
+                    .cmp(&common(n[*j]))
+                    .then(query::vercmp(&n[*i].pv, &n[*j].pv))
+            });
+            match best {
+                Some(j) => pairs.push((Some(a), Some(n.remove(j)))),
+                None => pairs.push((Some(a), None)),
             }
+        }
+        for b in n {
+            pairs.push((None, Some(b)));
         }
         for (a, b) in pairs {
             out.push(Pair {
@@ -1451,6 +1467,9 @@ fn is_checksum_key(key: &str) -> bool {
 /// What changed in a recipe's source, from its changes and versions.
 fn source_changes(rd: &RecipeDiff) -> Vec<String> {
     let mut out = Vec::new();
+    if rd.from_file.is_none() || rd.to_file.is_none() {
+        return out;
+    }
     if let (Some(a), Some(b)) = (&rd.from_version, &rd.to_version)
         && a != b
     {
@@ -2667,8 +2686,15 @@ fn summary_line(d: &Diff) -> String {
     let s = &d.summary;
     let c = &s.appends;
     let mut line = format!(
-        "{}: {} recipes compared ({}): {} changed ({} renamed or moved), {} added, {} removed, {} unchanged",
-        d.layer, s.compared, d.selection, s.changed, s.renamed, s.added, s.removed, s.unchanged
+        "{}: {} compared ({}): {} changed ({} renamed or moved), {} added, {} removed, {} unchanged",
+        d.layer,
+        plural(s.compared, "recipe"),
+        d.selection,
+        s.changed,
+        s.renamed,
+        s.added,
+        s.removed,
+        s.unchanged
     );
     if s.included_files > 0 {
         let changed = d
@@ -2693,7 +2719,7 @@ fn summary_line(d: &Diff) -> String {
             other, c.recipe_changed, c.now_applies, c.unchanged
         ));
     }
-    line.push_str(&format!("; {} classes changed", s.classes_changed));
+    line.push_str(&format!("; {} changed", plural(s.classes_changed, "class")));
     line
 }
 
@@ -2701,7 +2727,7 @@ fn notes(d: &Diff) -> Vec<String> {
     let mut n = vec![
         "statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once".to_string(),
         format!(
-            "column from is at {} (`git show {}:<path>`), column to at {}",
+            "pointers in column from are at {}: read them with `git show {}:<path>`; column to is at {}",
             d.from.label(),
             &d.from.commit[..d.from.commit.len().min(12)],
             d.to.label(),
@@ -2722,6 +2748,15 @@ fn notes(d: &Diff) -> Vec<String> {
 
 // ---------------------------------------------------------------------------------------
 // Rendering
+
+/// `1 change`, `2 changes`, `1 class`, `2 classes`.
+fn plural(n: usize, word: &str) -> String {
+    match (n, word.ends_with('s')) {
+        (1, _) => format!("1 {word}"),
+        (_, true) => format!("{n} {word}es"),
+        _ => format!("{n} {word}s"),
+    }
+}
 
 /// The table: summary rows, own bbappends, then per recipe its rows, then classes.
 pub fn table(d: &Diff) -> Table {
@@ -2817,11 +2852,12 @@ pub fn table(d: &Diff) -> Table {
         if !version.is_empty() {
             value.push(version);
         }
-        value.push(format!("{listed} changes listed"));
+        value.push(format!("{} listed", plural(listed, "change")));
         if r.whitespace_only + r.cosmetic_files > 0 {
             value.push(format!(
-                "{} whitespace-only statements and {} comment-only files counted",
-                r.whitespace_only, r.cosmetic_files
+                "counted: {} only in whitespace, {} only in comments",
+                plural(r.whitespace_only, "statement"),
+                plural(r.cosmetic_files, "file")
             ));
         }
         if !r.reason.is_empty() {
@@ -2837,8 +2873,8 @@ pub fn table(d: &Diff) -> Table {
             &r.name,
             r.kind,
             &format!(
-                "tree: {} files at from, {} at to",
-                r.tree_from.len(),
+                "tree: {} at from, {} at to",
+                plural(r.tree_from.len(), "file"),
                 r.tree_to.len()
             ),
             r.status,
@@ -2874,7 +2910,7 @@ pub fn table(d: &Diff) -> Table {
         }
     }
     for c in &d.classes {
-        let mut v = format!("{} statements differ", c.statements);
+        let mut v = format!("{} differ", plural(c.statements, "statement"));
         if c.path.starts_with("classes-global/") {
             v.push_str("; a global class (base or INHERIT): it can affect every recipe");
         }
@@ -3065,9 +3101,31 @@ mod tests {
             [
                 "bar Some(\"1\") None",
                 "baz None Some(\"1\")",
-                "foo Some(\"1.0\") Some(\"2.1\")",
                 "foo Some(\"2.0\") Some(\"2.0\")",
+                "foo Some(\"1.0\") Some(\"2.1\")",
             ]
         );
+        // The longest shared version prefix wins (meta-arm's fiptool-native, 5.0 to 6.0).
+        let old = [r("x/fip_2.10.4.bb")];
+        let new = [
+            r("x/fip_2.10.30.bb"),
+            r("x/fip_2.12.10.bb"),
+            r("x/fip_2.14.1.bb"),
+        ];
+        let pairs = pair_recipes(&old, &new);
+        let paired: Vec<(Option<&str>, Option<&str>)> = pairs
+            .iter()
+            .map(|p| {
+                (
+                    p.old.as_ref().map(|x| x.pv.as_str()),
+                    p.new.as_ref().map(|x| x.pv.as_str()),
+                )
+            })
+            .collect();
+        assert!(
+            paired.contains(&(Some("2.10.4"), Some("2.10.30"))),
+            "{paired:?}"
+        );
+        assert_eq!(paired.len(), 3);
     }
 }

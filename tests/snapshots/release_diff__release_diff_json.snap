@@ -18,7 +18,7 @@ expression: "diff::render_json(&d)"
   },
   "selection": "recipes your layers (meta-mine) append or use",
   "summary": {
-    "line": "meta-up: 4 recipes compared (recipes your layers (meta-mine) append or use): 3 changed (1 renamed or moved), 0 added, 0 removed, 1 unchanged; your files requiring files of the layer: 1, 1 with changes; bbappends affected: 3 (1 no longer applies, 1 applies to a different version, 1 source changed under a patch); 1 more: 0 recipe changed, 0 now applies, 1 unchanged; 1 classes changed",
+    "line": "meta-up: 4 recipes compared (recipes your layers (meta-mine) append or use): 3 changed (1 renamed or moved), 0 added, 0 removed, 1 unchanged; your files requiring files of the layer: 1, 1 with changes; bbappends affected: 3 (1 no longer applies, 1 applies to a different version, 1 source changed under a patch); 1 more: 0 recipe changed, 0 now applies, 1 unchanged; 1 class changed",
     "compared": 4,
     "changed": 3,
     "unchanged": 1,
@@ -432,7 +432,7 @@ expression: "diff::render_json(&d)"
   ],
   "notes": [
     "statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once",
-    "column from is at v1 (cdcd020d327c) (`git show cdcd020d327c:<path>`), column to at HEAD (3e56cf071d6c)",
+    "pointers in column from are at v1 (cdcd020d327c): read them with `git show cdcd020d327c:<path>`; column to is at HEAD (3e56cf071d6c)",
     "counted, not listed: 1 statements changed only in whitespace, 1 files only in comments, whitespace or line positions",
     "patches are not checked against their source (nothing is fetched): \"check it\" means the source they apply to changed"
   ]
