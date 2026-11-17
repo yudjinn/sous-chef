@@ -1,0 +1,26 @@
+DEBUG: Executing shell function do_compile
+NOTE: make -j 8
+make -C src all
+make[1]: Entering directory '/home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/build/src'
+x86_64-poky-linux-gcc  -m64 -march=core2 -mtune=core2 -msse3 -mfpmath=sse -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot=/home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/recipe-sysroot  -O2 -pipe -g -feliminate-unused-debug-types  -c -o util.o ../../sources/hello-1.0/src/util.c
+x86_64-poky-linux-gcc  -m64 -march=core2 -mtune=core2 -msse3 -mfpmath=sse -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot=/home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/recipe-sysroot  -O2 -pipe -g -feliminate-unused-debug-types  -c -o main.o ../../sources/hello-1.0/src/main.c
+../../sources/hello-1.0/src/main.c: In function 'main':
+../../sources/hello-1.0/src/main.c:12:5: error: implicit declaration of function 'greet' [-Wimplicit-function-declaration]
+   12 |     greet(argv[1]);
+      |     ^~~~~
+../../sources/hello-1.0/src/main.c:14:12: error: 'count' undeclared (first use in this function)
+   14 |     return count;
+      |            ^~~~~
+../../sources/hello-1.0/src/main.c:14:12: note: each undeclared identifier is reported only once for each function it appears in
+make[1]: *** [Makefile:9: main.o] Error 1
+make[1]: Leaving directory '/home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/build/src'
+make: *** [Makefile:4: all] Error 2
+ERROR: oe_runmake failed
+WARNING: /home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/temp/run.do_compile.48213:88 exit 1 from 'exit 1'
+WARNING: Backtrace (BB generated script):
+	#1: bbfatal_log, /home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/temp/run.do_compile.48213, line 88
+	#2: die, /home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/temp/run.do_compile.48213, line 93
+	#3: oe_runmake, /home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/temp/run.do_compile.48213, line 98
+	#4: autotoolsish_do_compile, /home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/temp/run.do_compile.48213, line 78
+	#5: do_compile, /home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/temp/run.do_compile.48213, line 73
+	#6: main, /home/builder/poky/build/tmp/work/core2-64-poky-linux/hello/1.0/temp/run.do_compile.48213, line 117

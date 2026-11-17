@@ -1,0 +1,23 @@
+Loading cache...done.
+Loaded 1843 entries from dependency cache.
+NOTE: Resolving any missing task queue dependencies
+Sstate summary: Wanted 3 Local 2 Mirrors 0 Missed 1 Current 151 (66% match, 99% complete)
+Initialising tasks...done.
+NOTE: Executing Tasks
+ERROR: app-0.1-r0 do_install: Execution of '/home/builder/poky/build/tmp/work/core2-64-poky-linux/app/0.1/temp/run.do_install.80117' failed with exit code 1
+ERROR: Logfile of failure stored in: /home/builder/poky/build/tmp/work/core2-64-poky-linux/app/0.1/temp/log.do_install.80117
+Log data follows:
+| DEBUG: Executing shell function do_install
+| install: cannot stat 'app-helper': No such file or directory
+| WARNING: /home/builder/poky/build/tmp/work/core2-64-poky-linux/app/0.1/temp/run.do_install.80117:152 exit 1 from 'install -m 0755 app-helper /home/builder/poky/build/tmp/work/core2-64-poky-linux/app/0.1/image/usr/bin'
+| WARNING: Backtrace (BB generated script):
+| 	#1: do_install, /home/builder/poky/build/tmp/work/core2-64-poky-linux/app/0.1/temp/run.do_install.80117, line 152
+| 	#2: main, /home/builder/poky/build/tmp/work/core2-64-poky-linux/app/0.1/temp/run.do_install.80117, line 166
+NOTE: recipe app-0.1-r0: task do_install: Failed
+ERROR: Task (/home/builder/poky/meta-mine/recipes-app/app/app_0.1.bb:do_install) failed with exit code '1'
+NOTE: Tasks Summary: Attempted 160 tasks of which 155 didn't need to be rerun and 1 failed.
+
+Summary: 1 task failed:
+  /home/builder/poky/meta-mine/recipes-app/app/app_0.1.bb:do_install
+    log: /home/builder/poky/build/tmp/work/core2-64-poky-linux/app/0.1/temp/log.do_install.80117
+Summary: There were 2 ERROR messages, returning a non-zero exit code.
