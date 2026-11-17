@@ -221,13 +221,66 @@ Verified (T1.2) against BitBake `master` 2026-11 and the release branches on Git
 - `BBPATH` is the search path: by convention each `layer.conf` does `BBPATH .= ":${LAYERDIR}"`,
   so it is the layer roots in `BBLAYERS` order (the build directory comes first).
 - `require` / `include`: an absolute path is used as is. A relative path is tried relative to
-  the including file's directory, then against each `BBPATH` entry. *Verify* the order.
+  the including file's directory, then against each `BBPATH` entry.
 - Classes: `inherit foo` looks for `classes-recipe/foo.bbclass` then `classes/foo.bbclass` on
   `BBPATH`. Global `INHERIT` looks for `classes-global/foo.bbclass` then `classes/foo.bbclass`.
   The split directories exist since Yocto 4.1; older layers only have `classes/`.
 - `base.bbclass` is always inherited globally.
 - Recipes and appends: the `BBFILES` globs set in each `layer.conf`, typically
   `${LAYERDIR}/recipes-*/*/*.bb` and `.bbappend`.
+
+Verified (T1.4) against BitBake `master` (commit `5495a547`, 2026-11-16), and reproduced by
+`src/workspace/resolve.rs`:
+
+- **`include` / `require` search order** (`parse/parse_py/ConfHandler.py`
+  `include_single_file`, which the `IncludeNode` of every file kind calls): the argument is
+  expanded and split on whitespace, each word is one file. A file whose name equals the
+  including file's name is skipped. A relative name is looked up with `bb.utils.which` along
+  `"<dirname of the including file>:" + BBPATH`: the including file's directory first, then
+  each `BBPATH` entry left to right; the first path that **exists** (`os.path.exists`, so a
+  directory also stops the search, and then fails to parse) wins. Not found: `include` is
+  silent, `require` is a parse error ("Could not include required file").
+- **Class search order** (`parse/parse_py/BBHandler.py` `inherit`): the whole `BBPATH` is
+  searched for `classes-<type>/foo.bbclass` before any entry is searched for
+  `classes/foo.bbclass`. So `classes-recipe/foo.bbclass` in the *last* layer beats
+  `classes/foo.bbclass` in the first. `<type>` is the datastore's `__bbclasstype`: `global`
+  while the base configuration is parsed (so for `INHERIT` and for any `inherit` inside a
+  class reached from it), `recipe` for recipes (`cookerdata.py`). A name ending in `.bbclass`
+  is looked up on `BBPATH` as given; an absolute name is used as is. The including file's
+  directory is not searched. Not found is a parse error. A class already inherited
+  (`__inherit_cache`) is not parsed again.
+- **Global classes** (`cookerdata.py`): the configuration inherits `["base"] + INHERIT`, in that
+  order, after the configuration files, each with `__bbclasstype = "global"`.
+- **bbappend matching** (`cooker.py` `get_file_appends`): with `b` the append's file name with
+  `.bbappend` replaced by `.bb` and `f` the recipe's file name, the append applies when
+  `b == f`, or when `b` contains `%` and `b.startswith(f[:b.index('%')])`. Only file names
+  are compared, never directories.
+- **`BBFILES` expansion** (`cooker.py` `collect_bbfiles`): the words of `BBFILES` are sorted
+  (stably) by the priority of the collection whose `BBFILE_PATTERN` matches the glob text,
+  lowest first; each word is used as is when the path exists, otherwise expanded with
+  `glob.glob` (not recursive; `*` does not match a leading `.`) and sorted; a directory match
+  is walked for `.bb` / `.bbappend`; duplicates are dropped (first kept); `BBMASK` regexes
+  are applied afterwards. The `.bbappend` files are kept in this order, which is the order
+  `get_file_appends` returns them in, so appends apply **lowest layer priority first** (the
+  highest priority layer has the last word), ties in `BBFILES` order.
+- **`BBPATH`** is whatever the configuration leaves in the variable: OE layers usually do
+  `BBPATH .= ":${LAYERDIR}"` but some prepend (`BBPATH =. "${LAYERDIR}:"`), so sous-chef reads
+  the value from `bblayers.conf` and the layer confs instead of assuming the layer order
+  (`layers::read_bbpath`). Changes made later in `bitbake.conf` are not seen.
+
+sous-chef differences: only files inside the workspace (layer roots and the build directory)
+are ever found; `BBMASK` is not applied by `recipe_files`.
+
+Static expansion of reference arguments (`resolve::expand_with`): the scanner resolves
+`${VAR}` in `require` / `include` / `inherit` arguments only for values that follow from the
+file's own path. From OE-Core `meta/conf/bitbake.conf` and `meta/conf/layer.conf` (master
+2026-11): `PN` and `PV` come from the recipe file name (`bb.parse.vars_from_file`: split on
+`_`, at most three parts, `PV` defaults to `1.0`), `BPN` is `PN` with the
+`SPECIAL_PKGSUFFIX` suffixes (`-native -cross -initial -intermediate -crosssdk
+-cross-canadian`) pruned (plus `MLPREFIX`, which is empty for a plain recipe), `BP` is
+`${BPN}-${PV}`, `THISDIR` is the directory of the file being parsed, and `COREBASE` is
+`os.path.normpath("${LAYERDIR}/../")` of OE-Core's layer (collection `core`). Anything else
+is left to the evaluator.
 
 ## Layers
 
@@ -249,7 +302,8 @@ legitimately use `_<collection>` suffixes):
 
 Layer priority decides which recipe wins when two layers provide the same `PN` and version,
 and the order in which bbappends are applied (lower priority first, so the highest priority
-layer has the last word). *Verify* append ordering against `bitbake-layers show-appends`.
+layer has the last word). Verified in the BitBake source (T1.4, see "Finding files"); not
+checked against `bitbake-layers show-appends` output.
 
 Checked by T1.3 against BitBake master (`lib/bb/cookerdata.py`, `cooker.py`,
 `parse/ast.py`):
@@ -268,6 +322,17 @@ Checked by T1.3 against BitBake master (`lib/bb/cookerdata.py`, `cooker.py`,
   explicit priority. `LAYERDEPENDS` uses the `explode_dep_versions2` format.
 - **Weak defaults:** `?=`, `+=`, `.=` and the other operators read the current value with
   `noweakdefault=True`, so they ignore a `??=` default. The last `??=` wins.
+
+- **`:append` / `:prepend` / `:remove`** (`data_smart.py` `setVar`, `getVarFlag`, checked by
+  T1.4): a name matching `(?P<base>.*?)(:append|:prepend|:remove)(:(?P<add>[^A-Z]*))?$` is
+  stored as a pending operation on `base` with the condition `add`; parse-time operators
+  (`+=`, `?=`...) never see it. On read, the winning override variant (or the value, or the
+  `??=` default) gets every active append, then every active prepend; removes apply to the
+  expanded value and keep the surrounding whitespace. A plain `setVar` outside parsing (as
+  done by `expandVarref('LAYERDIR')`) folds the pending appends into the value and drops them,
+  so after each `layer.conf` an `X:append = " ${LAYERDIR}/..."` becomes part of `X`.
+  `LAYERDIR_RE` (`re.escape` of the layer path) is set alongside `LAYERDIR`; both are deleted
+  after the last layer.
 
 Not reproduced by sous-chef: the fatal `LAYERSERIES_COMPAT` and `LAYERDEPENDS` validation.
 
