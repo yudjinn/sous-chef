@@ -717,9 +717,65 @@ fn missing_metadata_on_the_fixture_recipe() {
         "meta-mine/recipes-app/app/app_0.1.bb",
     );
     let rows: Vec<&str> = got.iter().map(|(r, _)| r.as_str()).collect();
+    // B12: its SRC_URI is only `file://app.c`, so it has no upstream and no HOMEPAGE is
+    // asked for (it was reported before).
+    assert_eq!(rows, [] as [&str; 0]);
+}
+
+#[test]
+fn missing_metadata_does_not_ask_images_packagegroups_or_local_recipes_for_a_homepage() {
+    // B12. Stand-ins for OE-core's image.bbclass, core-image.bbclass and
+    // packagegroup.bbclass (each `LICENSE ?= "MIT"`; core-image inherits image).
+    let files = [
+        (
+            format!("{MD}/good-image.bb"),
+            "meta-mine/recipes-core/images/kiss-image.bb",
+        ),
+        (
+            format!("{MD}/good-packagegroup.bb"),
+            "meta-mine/recipes-core/packagegroups/packagegroup-mine.bb",
+        ),
+        (
+            format!("{MD}/good-local.bb"),
+            "meta-mine/recipes-test/local/local-conf.bb",
+        ),
+        (
+            format!("{MD}/no-src.bb"),
+            "meta-mine/recipes-test/nosrc/nosrc_1.0.bb",
+        ),
+    ];
+    let refs: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), *b)).collect();
+    let w = ws_with(&refs, |root| {
+        let dir = root.join("meta-core/classes-recipe");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("image.bbclass"),
+            "LICENSE ?= \"MIT\"\nPACKAGES = \"\"\n",
+        )
+        .unwrap();
+        fs::write(dir.join("core-image.bbclass"), "inherit image\n").unwrap();
+        fs::write(
+            dir.join("packagegroup.bbclass"),
+            "LICENSE ?= \"MIT\"\nPACKAGES = \"${PN}\"\n",
+        )
+        .unwrap();
+    });
+    for (_, rel) in &files[..3] {
+        assert_eq!(w.lint("hygiene/missing-metadata", rel), [], "{rel}");
+    }
+    // Without a SRC_URI only SUMMARY and LICENSE are asked for.
+    let got = w.lint("hygiene/missing-metadata", files[3].1);
+    let rows: Vec<&str> = got.iter().map(|(r, _)| r.as_str()).collect();
     assert_eq!(
         rows,
-        ["info hygiene/missing-metadata meta-mine:recipes-app/app/app_0.1.bb:1"]
+        ["warning hygiene/missing-metadata meta-mine:recipes-test/nosrc/nosrc_1.0.bb:1"]
+    );
+    assert!(
+        got[0]
+            .1
+            .starts_with("recipe has no SUMMARY, LICENSE; set them"),
+        "{}",
+        got[0].1
     );
 }
 

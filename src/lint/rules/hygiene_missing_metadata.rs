@@ -15,8 +15,22 @@
 //!
 //! Not reported when the value depends on python the evaluator cannot run: the value is
 //! marked `unevaluated_python`, or anonymous python sets the variable.
+//!
+//! **`HOMEPAGE`** is the upstream project's page, so it is asked for only when the recipe
+//! has an upstream: its evaluated `SRC_URI` (not python) has an entry with a URL scheme
+//! other than `file://`. Not asked for: an image (a class [`helpers::image_class`] names
+//! among the classes the recipe pass visits), a packagegroup (`packagegroup.bbclass`
+//! visited), a recipe with no `SRC_URI` or only `file://` entries (`connman-conf`,
+//! `base-files`: files of the layer itself), or one whose `SRC_URI` needs python. OE-core
+//! Wrynose `33a6bd6c` sets `SUMMARY` in nearly every image and packagegroup of
+//! `recipes-*/images/` and `recipes-*/packagegroups/`, but `HOMEPAGE` in only four of 37
+//! (`build-appliance-image`, `core-image-ptest`, `core-image-ptest-all`,
+//! `packagegroup-core-x11-sato`); `LICENSE` comes from `image.bbclass:31` /
+//! `packagegroup.bbclass:23` (`LICENSE ?= "MIT"`), which counts as set (a class is not
+//! configuration). `SUMMARY` and `LICENSE` are asked of every recipe.
 
 use crate::eval::{DataStore, OpStatus};
+use crate::index::query;
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::types::{FileKind, LineSpan};
@@ -50,6 +64,55 @@ fn state(data: &DataStore, name: &str) -> State {
     } else {
         State::Missing
     }
+}
+
+/// Whether the recipe fetches from an upstream (the `HOMEPAGE` condition): not an image or a
+/// packagegroup, and a statically known `SRC_URI` with an entry whose scheme is not `file`.
+fn has_upstream(cx: &LintContext<'_>, data: &DataStore) -> bool {
+    let kind_class = |c: &str| helpers::image_class(c) || c == "packagegroup";
+    let (tree, all) = helpers::recipe_pass_files(cx, data);
+    let visited = all.iter().any(|(_, path)| {
+        FileKind::from_path(path) == Some(FileKind::Class)
+            && path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(kind_class)
+    });
+    // Also an `inherit` in the recipe's own files whose class is not in the workspace.
+    let inherits = || {
+        let scope = query::StatementFilter {
+            kinds: vec!["inherit".into()],
+            ..query::StatementFilter::default()
+        };
+        tree.iter().any(|(layer, path)| {
+            let Ok(Some(f)) = query::file_by_path(cx.index, layer, path) else {
+                return false;
+            };
+            query::statements_in(cx.index, f.id, &scope)
+                .unwrap_or_default()
+                .iter()
+                .any(|s| {
+                    s.name
+                        .as_deref()
+                        .unwrap_or("")
+                        .split_whitespace()
+                        .any(kind_class)
+                })
+        })
+    };
+    if visited || inherits() {
+        return false;
+    }
+    let Some(src_uri) = data.value("SRC_URI") else {
+        return false;
+    };
+    if src_uri.unevaluated_python {
+        return false;
+    }
+    src_uri.text.split_whitespace().any(|w| {
+        w.split_once("://")
+            .is_some_and(|(scheme, _)| scheme != "file" && !scheme.contains('$'))
+    })
 }
 
 impl Rule for HygieneMissingMetadata {
@@ -104,7 +167,7 @@ impl Rule for HygieneMissingMetadata {
                 ),
             ));
         }
-        if state(data, "HOMEPAGE") == State::Missing {
+        if has_upstream(cx, data) && state(data, "HOMEPAGE") == State::Missing {
             let mut f = helpers::finding(
                 self,
                 cx,

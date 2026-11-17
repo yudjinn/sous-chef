@@ -150,7 +150,7 @@ Notes:
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `org/recipe-path` | W/I | layer | Recipe not at `recipes-<category>/<dir>/<file>.bb` (W); `<dir>` holds only this recipe and is neither its `PN` nor a prefix of it (I); file name with more than one `_` (W) or no `_<pv>` (I); upper-case letters in `PN` (W). Recipes under `dynamic-layers/` are skipped; the no-version check skips `packagegroup-*` and recipes that inherit `image`, `core-image` or `packagegroup` directly. |
+| `org/recipe-path` | W/I | layer | Recipe not at `recipes-<category>/<dir>/<file>.bb` (W); `<dir>` holds only this recipe and is neither its `PN` nor a prefix of it (I); file name with more than one `_` (W) or no `_<pv>` (I); upper-case letters in `PN` (W). Recipes under `dynamic-layers/` are skipped; the no-version check skips `packagegroup-*` and recipes that directly inherit an image class (`image`, `core-image`, `*-image`) or `packagegroup`; the directory check skips such an image in `images/` and such a packagegroup in `packagegroups/`. |
 | `org/duplicate-versions` | I | layer | Two or more versions of a recipe whose statements are mostly identical (at least 60 percent of the longer one, and at least 3): suggest a shared `<pn>.inc`. Version data and `require` / `include` lines are left out of the comparison. Reported on the newest version. |
 | `org/inc-has-version-data` | W/I | file | An `.inc` that `.bb` files of two or more versions require or include directly sets `PV`, `SRCREV` / `SRCREV_<name>` (not with `AUTOREV`) or a `SRC_URI` checksum flag (W), or `LIC_FILES_CHKSUM` (I: fine while the license text is the same). Appending to `PV` is not flagged. |
 | `org/inc-unused` | I | layer | A `.inc` that no `require`, `include` or `include_all` of the workspace resolves to. An unresolved argument with `${...}` that could match the file name keeps it from being reported. |
@@ -173,7 +173,10 @@ Notes:
 
 - **`recipe-path`.** The pointer is line 1 of the recipe. Directories that hold several
   `PN`s (`images/`, `packagegroups/`) are not reported, nor is a directory whose name is a
-  prefix of the `PN` (`linux/linux-foo_6.6.bb`). A file name with more than one `_` makes
+  prefix of the `PN` (`linux/linux-foo_6.6.bb`), nor an image recipe alone in `images/` or
+  a packagegroup alone in `packagegroups/` (OE-core's `recipes-core/images/` layout; the
+  directory names the kind). An image recipe is one that directly inherits a class
+  `helpers::image_class` accepts, as for `hygiene/missing-metadata`. A file name with more than one `_` makes
   BitBake read `PN`, `PV` and `PR` from it (`bb.parse.vars_from_file`).
 - **`duplicate-versions`.** Statements are normalised (lines trimmed, blank and comment
   lines dropped, whitespace collapsed) and compared as a multiset. Left out: `require` and
@@ -240,7 +243,7 @@ Notes:
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `hygiene/missing-metadata` | W/I | recipe | No `SUMMARY` or `LICENSE`, or no `LIC_FILES_CHKSUM` when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (W, one finding); no `HOMEPAGE` (I). Configuration defaults do not count as set. Values that depend on python are not reported. |
+| `hygiene/missing-metadata` | W/I | recipe | No `SUMMARY` or `LICENSE`, or no `LIC_FILES_CHKSUM` when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (W, one finding); no `HOMEPAGE` (I) when the recipe has an upstream: a `SRC_URI` entry that is not `file://`, and not an image or a packagegroup. Configuration defaults do not count as set. Values that depend on python are not reported. |
 | `hygiene/autorev` | W | file | `SRCREV` or `SRCREV_<name>` (any operator or override, not a flag) whose value contains `${AUTOREV}`, outside `local.conf` and `auto.conf`. `SRCREV_FORMAT` is not checked. |
 | `hygiene/src-uri-checksum` | W | recipe | Remote download (`http`, `https`, `ftp`) in the evaluated `SRC_URI` without a checksum; `git://` / `gitsm://` URL without a revision, or without `branch=` (or `nobranch=1`) unless a `tag=` is given. Not reported when `SRC_URI` depends on python, or for an entry still containing `${` after expansion. |
 | `hygiene/host-path` | W | file | Absolute host paths (`/usr/lib`, `/etc`, `/home/...`) at the start of a word in `do_<task>` shell bodies, instead of `${D}`, `${S}`, `${bindir}` and friends; a `do_install` that never references `${D}` while running a command that writes files itself. Not scanned: other functions, comments, here-documents, the first word of a line, values after `=`; `/dev`, `/proc`, `/sys`, `/tmp` are never reported. |
@@ -259,7 +262,14 @@ Notes:
   OE-core's `bitbake.conf` defaults (`SUMMARY ?=`, `LICENSE ??= "INVALID"`,
   `HOMEPAGE = ""`) do not count. The `LIC_FILES_CHKSUM` condition is OE-core's
   `populate_lic_qa_checksum`. A variable whose value is python, or that anonymous python
-  sets, is not reported. Both findings are on line 1 of the `.bb`.
+  sets, is not reported. Both findings are on line 1 of the `.bb`. `HOMEPAGE` is the
+  upstream project's page, so it is not asked of an image (a visited or directly inherited
+  class `image`, `core-image` or `*-image`), a packagegroup (`packagegroup`), a recipe whose
+  `SRC_URI` is empty or only `file://` entries (OE-core's `connman-conf`, `base-files`), or
+  one whose `SRC_URI` is python. OE-core's own images and packagegroups set `SUMMARY` and
+  get `LICENSE` from their class (`LICENSE ?= "MIT"`, which counts: a class is not
+  configuration); only four of its 37 set `HOMEPAGE`. `SUMMARY` and `LICENSE` are asked of
+  every recipe.
 - **`src-uri-checksum`.** A checksum is a `sha256sum` flag on `SRC_URI` (`<name>.sha256sum`
   with a `name=` parameter), a `sha256sum=` parameter, or an `md5sum`, `sha1sum`,
   `sha384sum` or `sha512sum` flag or parameter. A git revision is a `rev=` or `tag=`
@@ -292,18 +302,17 @@ What the default rule set reports on `tests/fixtures/ws`, whose `sous-chef.toml`
 `meta-mine` writable. `sous-chef lint`, run in that directory:
 
 ```
-5 findings in 6 files: 0 error, 3 warning, 2 info; by rule: hygiene/missing-metadata 1, hygiene/release-syntax 1, org/append-no-match 1, org/recipe-change-in-local-conf 1, override/plus-equals-on-default 1
+4 findings in 6 files: 0 error, 3 warning, 1 info; by rule: hygiene/release-syntax 1, org/append-no-match 1, org/recipe-change-in-local-conf 1, override/plus-equals-on-default 1
 severity	rule	pointer	message
 info	org/recipe-change-in-local-conf	build:conf/local.conf:9	`EXTRA_OECONF:append:pn-hello` in local.conf changes only recipe hello, and only in this build directory; move it to a hello_%.bbappend in your layer as `EXTRA_OECONF:append`, or to your distro conf if it is policy
 warning	override/plus-equals-on-default	build:conf/local.conf:13	`DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = " wayland"`
-info	hygiene/missing-metadata	meta-mine:recipes-app/app/app_0.1.bb:1	recipe has no HOMEPAGE; set HOMEPAGE to the upstream project's web page
 warning	hygiene/release-syntax	meta-mine:recipes-app/app/app_0.1.bb:22	`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
 warning	org/append-no-match	meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1	orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer
 note: not checked: 2 layers that are not writable (meta-core, meta-vendor); name one as the target or pass --all
 ```
 
-`sous-chef lint --all` adds three findings in the other layers (`8 findings in 21 files: 0
-error, 4 warning, 4 info`):
+`sous-chef lint --all` adds three findings in the other layers (`7 findings in 21 files: 0
+error, 4 warning, 3 info`):
 
 ```
 info	org/class-location	meta-core:classes/base.bbclass:1	class base is in classes/, but every release this layer is checked against (wrynose) searches classes-recipe/ and classes-global/ first; move it to classes-global/ (it is used through INHERIT) and keep the name
