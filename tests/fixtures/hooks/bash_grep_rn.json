@@ -1,0 +1,26 @@
+{
+  "session_id": "0b6d7c1e-5f0a-4c2e-9a51-3f1f2c0d9e11",
+  "prompt_id": "550e8400-e29b-41d4-a716-446655440000",
+  "transcript_path": "/home/user/.claude/projects/-ws/0b6d7c1e-5f0a-4c2e-9a51-3f1f2c0d9e11.jsonl",
+  "cwd": "{{WS}}",
+  "permission_mode": "default",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "grep -rn 'install -d' meta-core meta-mine meta-legacy",
+    "description": "Find install -d in the recipes",
+    "timeout": 120000,
+    "run_in_background": false
+  },
+  "tool_response": {
+    "stdout": "meta-core/recipes-core/hello/hello.inc:16:\tinstall -d ${D}${sysconfdir}\nmeta-mine/recipes-app/app/app_0.1.bb:26:\tinstall -d ${D}${bindir}\nmeta-legacy/recipes-legacy/oldapp/oldapp_1.0.bb:24:\tinstall -d ${D}${bindir}\nmeta-legacy/recipes-legacy/oldapp/oldapp_1.0.bb:28:\tinstall -d ${D}${datadir}/oldapp",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false
+  },
+  "tool_use_id": "toolu_01bashgreprn000000000000",
+  "duration_ms": 12
+}

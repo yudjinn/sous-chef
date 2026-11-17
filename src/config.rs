@@ -31,6 +31,7 @@ pub struct Config {
     pub bitbake: BitbakeConfig,
     pub lint: LintConfig,
     pub output: OutputConfig,
+    pub hooks: HooksConfig,
     /// Directory that discovery starts from (not read from the file; set by the CLI,
     /// normally the process working directory).
     #[serde(skip)]
@@ -49,6 +50,7 @@ impl Default for Config {
             bitbake: BitbakeConfig::default(),
             lint: LintConfig::default(),
             output: OutputConfig::default(),
+            hooks: HooksConfig::default(),
             work_dir: PathBuf::from("."),
         }
     }
@@ -90,6 +92,44 @@ pub struct OutputConfig {
 impl Default for OutputConfig {
     fn default() -> OutputConfig {
         OutputConfig { budget_tokens: 600 }
+    }
+}
+
+/// `[hooks]`: switches for the Claude Code hooks (`sous-chef hook`). A hook switched off
+/// exits successfully with no output. Each handler names its switch
+/// (`hook::Handler::switch`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HooksConfig {
+    /// The Grep / Read annotation, and the same annotation of a `grep -n` / `rg -n` run
+    /// through Bash.
+    pub grep_read: bool,
+    /// The digest of large `bitbake` / `devtool` / `bitbake-layers` output from Bash.
+    pub bash: bool,
+    /// The reindex and lint after Edit / Write / MultiEdit.
+    pub edit: bool,
+}
+
+impl Default for HooksConfig {
+    fn default() -> HooksConfig {
+        HooksConfig {
+            grep_read: true,
+            bash: true,
+            edit: true,
+        }
+    }
+}
+
+impl HooksConfig {
+    /// Whether the switch `key` (`grep_read`, `bash` or `edit`) is on. A key that is not a
+    /// switch is on: only a key the file can set can turn a hook off.
+    pub fn enabled(&self, key: &str) -> bool {
+        match key {
+            "grep_read" => self.grep_read,
+            "bash" => self.bash,
+            "edit" => self.edit,
+            _ => true,
+        }
     }
 }
 

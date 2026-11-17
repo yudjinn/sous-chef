@@ -7,7 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use common::*;
-use sous_chef::config::{CliOverrides, Config};
+use sous_chef::config::{CliOverrides, Config, HooksConfig};
 use sous_chef::error::Error;
 use sous_chef::lint::Severity;
 use sous_chef::workspace::Workspace;
@@ -118,9 +118,64 @@ budget_tokens = 900
                 .collect(),
             },
             output: sous_chef::config::OutputConfig { budget_tokens: 900 },
+            hooks: HooksConfig::default(),
             work_dir: tmp.path().to_path_buf(),
         }
     );
+}
+
+#[test]
+fn hooks_switches_default_on() {
+    let origin = PathBuf::from("/x/sous-chef.toml");
+    let d = Config::from_toml("", &origin).unwrap().hooks;
+    assert_eq!(
+        d,
+        HooksConfig {
+            grep_read: true,
+            bash: true,
+            edit: true
+        }
+    );
+    assert_eq!(Config::from_toml("[hooks]\n", &origin).unwrap().hooks, d);
+    for key in ["grep_read", "bash", "edit", "bash_grep", "anything"] {
+        assert!(d.enabled(key), "{key}");
+    }
+}
+
+#[test]
+fn each_hooks_switch_turns_one_hook_off() {
+    let origin = PathBuf::from("/x/sous-chef.toml");
+    for key in ["grep_read", "bash", "edit"] {
+        let h = Config::from_toml(&format!("[hooks]\n{key} = false\n"), &origin)
+            .unwrap()
+            .hooks;
+        for other in ["grep_read", "bash", "edit"] {
+            assert_eq!(h.enabled(other), other != key, "{key} off: {other}");
+        }
+    }
+    let h = Config::from_toml(
+        "[hooks]\ngrep_read = false\nbash = true\nedit = false\n",
+        &origin,
+    )
+    .unwrap()
+    .hooks;
+    assert_eq!(
+        h,
+        HooksConfig {
+            grep_read: false,
+            bash: true,
+            edit: false
+        }
+    );
+}
+
+#[test]
+fn unknown_or_mistyped_hooks_keys_are_errors() {
+    let origin = PathBuf::from("/x/sous-chef.toml");
+    let msg = config_err(Config::from_toml("[hooks]\ngrep = false\n", &origin));
+    assert!(msg.contains("grep") && msg.contains(":2:"), "{msg}");
+    let msg = config_err(Config::from_toml("[hooks]\nbash = \"no\"\n", &origin));
+    assert!(msg.contains("/x/sous-chef.toml:2:"), "{msg}");
 }
 
 #[test]

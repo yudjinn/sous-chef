@@ -35,7 +35,7 @@ use crate::index::query::{self, FileRow, ItemRow};
 use crate::types::{FileKind, LineSpan};
 
 /// Hit lines looked at per Grep call; the rest are ignored.
-const MAX_HITS: usize = 200;
+pub const MAX_HITS: usize = 200;
 /// Item lines in one response.
 const MAX_ITEM_LINES: usize = 40;
 /// Recipe lines in one response.
