@@ -1,0 +1,66 @@
+# Differential report: static evaluation vs bitbake -e
+
+recipe	compared	equal	equal-ws	flagged	gap	bug	unset-both	note
+curl	38	24	0	13	1	0	3	anonymous python 14 (11 opaque); unfollowed references 3
+sl	30	19	0	10	1	0	3	anonymous python 10 (7 opaque); unfollowed references 3
+linux-kiss	27	13	0	12	2	0	3	anonymous python 15 (11 opaque); unfollowed references 2
+u-boot-kiss	46	29	0	16	1	0	1	anonymous python 12 (7 opaque); unfollowed references 2
+kiss-image	27	16	0	10	1	0	3	anonymous python 17 (12 opaque); unfollowed references 5
+packagegroup-core-boot	31	15	0	15	1	0	2	anonymous python 12 (9 opaque); unfollowed references 4
+zlib	35	22	0	12	1	0	3	anonymous python 11 (8 opaque); unfollowed references 3
+openssl	48	34	0	13	1	0	4	anonymous python 14 (11 opaque); unfollowed references 3
+busybox	64	41	0	22	1	0	2	anonymous python 15 (11 opaque); unfollowed references 3
+dropbear	46	31	0	14	1	0	2	anonymous python 14 (11 opaque); unfollowed references 3
+ncurses	54	40	0	13	1	0	4	anonymous python 12 (9 opaque); unfollowed references 3
+dbus	45	28	0	16	1	0	2	anonymous python 15 (12 opaque); unfollowed references 3
+systemd-boot	42	26	0	14	2	0	2	anonymous python 12 (8 opaque); unfollowed references 4
+util-linux	98	76	0	20	2	0	2	anonymous python 14 (11 opaque); unfollowed references 3
+gmp-native	0	0	0	0	0	0	0	static evaluation failed [bbclassextend]: not found: recipe gmp-native; list recipes with the recipe tool
+nativesdk-zlib	0	0	0	0	0	0	0	static evaluation failed [bbclassextend]: not found: recipe nativesdk-zlib; list recipes with the recipe tool
+quilt-native	38	25	0	12	1	0	2	anonymous python 12 (9 opaque); unfollowed references 3
+expat	36	22	0	13	1	0	2	anonymous python 12 (8 opaque); unfollowed references 3
+glib-2.0	53	36	0	16	1	0	2	anonymous python 13 (10 opaque); unfollowed references 3
+base-files	46	30	0	15	1	0	3	anonymous python 10 (7 opaque); unfollowed references 3
+python3	69	41	0	27	1	0	4	anonymous python 14 (11 opaque); unfollowed references 3
+bash	42	27	0	14	1	0	2	anonymous python 13 (10 opaque); unfollowed references 3
+opencsd	31	19	0	11	1	0	3	anonymous python 10 (7 opaque); unfollowed references 3
+virtual/kernel	27	13	0	12	2	0	3	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
+virtual/bootloader	46	29	0	16	1	0	1	provider u-boot-kiss (PreferredProvider); anonymous python 12 (7 opaque); unfollowed references 2
+curl@default	38	22	0	13	1	2	3	anonymous python 13 (10 opaque); unfollowed references 4
+sl@default	30	17	0	10	1	2	3	anonymous python 9 (6 opaque); unfollowed references 4
+virtual/kernel@default	32	8	0	14	2	8	4	provider linux-dummy (FirstOfSeveral); anonymous python 10 (6 opaque); unfollowed references 4
+
+## Totals (1019 values compared, explicit machine and distro; `unset` = unset on both sides, not counted)
+(equal, but flagged)	135
+equal	656
+flagged	314
+flagged-literal-differs	22
+gap:layerdir-canonical	27
+unset	58
+
+## Variables by number of differences (any class but equal)
+FILES	27
+B	23
+CFLAGS	23
+DEPENDS	23
+DISTROOVERRIDES	23
+FILE	23
+FILESPATH	23
+OVERRIDES	23
+S	23
+WORKDIR	23
+MACHINEOVERRIDES	22
+PACKAGES	14
+RDEPENDS	10
+EXTRA_OECONF	9
+PACKAGECONFIG	7
+SRC_URI	7
+EXTRA_OEMAKE	6
+SYSROOT_DIRS	5
+FILESEXTRAPATHS	4
+PACKAGE_ARCH	4
+ALTERNATIVE	2
+CONFIGURE_FILES	2
+EXTRA_OEMESON	2
+LDFLAGS	2
+MAJOR_VER	2

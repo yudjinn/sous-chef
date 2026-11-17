@@ -1,0 +1,112 @@
+# Performance (T8.2)
+
+Speed and size of sous-chef on a real workspace, against the targets the milestone (M8,
+T8.2) and the hooks (`hook::BUDGET`) set.
+
+## Setup
+
+- **Workspace:** the bitbake-setup build of the live environment
+  ([live-environment.md](live-environment.md)), yocto-kiss for `dogbonedark` on Wrynose:
+  7 layers (OE-core, meta-yocto-bsp, meta-poky, meta-arm-toolchain, meta-arm, meta-kiss,
+  meta-kiss-ti), 1784 indexed files (1035 `.bb`, 20 `.bbappend`, 383 `.inc`, 242 `.bbclass`,
+  104 `.conf`). This is OE-core plus a BSP layer and two small product layers; it does not
+  contain meta-openembedded (the milestone asks for poky + meta-openembedded, which is
+  several times larger; see "Not measured").
+- **Machine:** AMD Ryzen 9 5900HS laptop CPU (8 cores, 16 threads), 15 GiB RAM, NVMe SSD,
+  btrfs, Linux 7.2 (Arch-based). The source files were in the page cache (they had just been
+  parsed by BitBake), so "cold" below means a cold sous-chef index or evaluation cache, not
+  a cold disk.
+- **Build:** `cargo build --release` (rustc 1.102.0-nightly); the measurements run in the
+  release test binary.
+- **Date:** 2026-11-17, sous-chef at `67909a3` (code unchanged by this task).
+
+## How to reproduce
+
+```sh
+SOUS_CHEF_LIVE=~/Development/sous-chef-live \
+    cargo test --release --test performance -- --ignored --nocapture
+```
+
+`tests/performance.rs` is ignored by default and returns at once without `SOUS_CHEF_LIVE`.
+It runs no BitBake command. Index caches go to `$SOUS_CHEF_LIVE/runs/perf/`, the report to
+`$SOUS_CHEF_LIVE/runs/perf/report.txt`. For the "changed one file" refresh it appends a
+comment line to the build's `conf/local.conf` and restores the exact bytes afterwards (the
+test asserts this). `SOUS_CHEF_PERF_RUNS` (default 5) sets the repetitions. Timing is plain
+`std::time::Instant`: the crate has no benchmark dependency and none was added. The whole
+test takes about 32 s, of which 15 s is `lint --all`.
+
+## Results
+
+Median and worst of the runs (each run is a separate call; "first call" is the first of a
+series in a fresh process state).
+
+| Measurement | Median | Worst | Runs | Target | Met |
+|---|---|---|---|---|---|
+| First index build (`Index::open_in` + `refresh`, empty cache) | 1268 ms | 1272 ms | 3 | under 30 s | yes |
+| No-change refresh | 104 ms | 105 ms | 10 | under 150 ms | yes |
+| Refresh after touching one file (mtime only, same bytes) | 104 ms | 110 ms | 5 | | |
+| Refresh after changing one file (`conf/local.conf`, reparse + edge rebuild) | 204 ms | 204 ms | 5 | | |
+| `Index::refresh_file` of that file (the edit hook's path) | 4.9 ms | 5.0 ms | 5 | | |
+| Configuration pass (`evaluate`, no recipe, cold cache) | 19.7 ms | 23.4 ms | 5 | | |
+| `evaluate` curl, cold (configuration pass included) | 22.4 ms | 23.9 ms | 5 | | |
+| `evaluate` curl, warm (configuration cached) | 6.5 ms | 6.6 ms | 10 | | |
+| `evaluate` linux-kiss / python3 / kiss-image, warm | 7.7 / 6.8 / 6.7 ms | | 1 each | | |
+| `lint` layer meta-kiss (8 files, 6 findings) | 58 ms | 75 ms | 5 | | |
+| `lint` layer meta-kiss-ti (3 files, 0 findings) | 84 ms | 85 ms | 5 | | |
+| `lint` workspace, own layers writable (14 files incl. build conf, 6 findings) | 144 ms | 166 ms | 5 | | |
+| `lint --all` (1784 files, 1505 findings) | 14.8 s | | 1 | | |
+| tool `status` (first call 133 ms) | 132 ms | 133 ms | 5 | | |
+| tool `layers` (first 104 ms) | 105 ms | 106 ms | 5 | | |
+| tool `recipe curl` (first 129 ms) | 115 ms | 116 ms | 5 | | |
+| tool `item recipe=curl name=SRC_URI` (first 105 ms) | 105 ms | 108 ms | 5 | | |
+| tool `search do_install` (first 110 ms) | 109 ms | 112 ms | 5 | | |
+| tool `class autotools` (first 105 ms) | 105 ms | 105 ms | 5 | | |
+| tool `var SRC_URI recipe=curl` (first 135 ms) | 118 ms | 120 ms | 5 | warm under 100 ms | **no** |
+| tool `overrides recipe=curl` (first 112 ms) | 111 ms | 112 ms | 5 | | |
+| tool `deps curl` (first 151 ms) | 150 ms | 153 ms | 5 | | |
+| tool `lint target=meta-kiss` (first 166 ms) | 163 ms | 165 ms | 5 | | |
+| `sous-chef hook`, Grep (19 result lines in curl and sl), process wall time | 4.6 ms | 11.1 ms | 6 | 150 ms | yes |
+| `sous-chef hook`, Read (whole `curl_8.19.0.bb`), process wall time | 3.2 ms | 3.3 ms | 6 | 150 ms | yes |
+| `sous-chef hook`, Edit (`sl_git.bb`: refresh_file + file-scope lint), process wall time | 8.6 ms | 8.8 ms | 6 | 150 ms | yes |
+
+Other numbers:
+
+- **Index size:** 1784 files, 36 556 statements, 3203 edges; the database is 11.6 MiB
+  (`index.sqlite` plus WAL). Workspace discovery takes 0.8 ms.
+- **Memory:** peak RSS of the whole test process (index build, all evaluations, lint
+  `--all`, the tool calls) was 79 MiB.
+- **CLI:** `sous-chef index` from an empty cache took 1.39 s wall time end to end (process
+  start, discovery, build, printing 1784 lines); a second run reported "reindexed 0 in
+  104 ms".
+- Every hook call produced output (6 of 6 for each tool); `hook.log` reports 1 to 6 ms
+  inside the handler (`grep_read 2 ms`, `grep_read 1 ms`, `edit 6 ms`). The hooks never
+  refresh the whole index, which is why they are far below the tools.
+
+## Against the targets
+
+- **Full index under 30 s: met** (1.3 s). Not checked at meta-openembedded scale.
+- **No-change refresh under 150 ms: met** (104 ms median, 110 ms worst), with about 45 ms of
+  headroom. A refresh walks and stats every file (it was not profiled further), so its time
+  grows with the number of files, and a workspace with meta-openembedded (several thousand more files) would likely exceed
+  150 ms. The fallbacks the milestone lists (directory mtimes, at most one refresh per N
+  seconds, a watcher) were **not** implemented: the target is met here, and this task may
+  not change `src/`.
+- **`var` warm under 100 ms: not met** (118 ms). The evaluation itself is 6.5 ms warm; the
+  rest is the no-change refresh every tool call does first (about 104 ms, see every tool
+  row: no tool is faster than the refresh). Meeting the target needs a cheaper freshness
+  check per call (for example the milestone's second fallback, at most one full refresh per
+  few seconds per process), not a faster evaluator.
+- **Hook budget 150 ms: met** for Grep, Read and Edit by a factor of 15 or more, including
+  process start.
+- Changing a `.conf` costs a full edge rebuild (204 ms here); changing one recipe through
+  the edit hook's `refresh_file` costs 5 ms.
+
+## Not measured
+
+- poky + meta-openembedded (the milestone's reference workspace): not present in the live
+  environment's bitbake-setup build (meta-openembedded is fetched but not in `BBLAYERS`).
+  Adding it would need a change to the build's `bblayers.conf`, which was not made.
+- A disk-cold run (dropping the page cache needs root).
+- `var` with `authoritative: true` (runs BitBake) and the `bitbake`, `log`, `slice` and
+  `scaffold` tools.
+- The edit hook on a new file (which recomputes every edge, like the 204 ms refresh above).

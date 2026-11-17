@@ -1,0 +1,57 @@
+
+## Files in the history (832 variables without overrides; same set of files: 784)
+
+### Files only in BitBake's history (file, count, first uses)
+{{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/build/conf/toolcfg.conf	46	curl:MACHINE curl:DISTRO sl:MACHINE sl:DISTRO
+{{LIVE}}/yocto-kiss/openembedded-core/meta/classes-recipe/image_types_wic.bbclass	1	kiss-image:DEPENDS
+{{LIVE}}/yocto-kiss/openembedded-core/meta/classes-recipe/populate_sdk_ext.bbclass	1	kiss-image:B
+### Files only in the static history (file, count, first uses)
+
+## Layers (bitbake-layers show-layers vs Workspace::discover)
+bitbake: 7 layers, static: 7 layers
+same	core	{{LIVE}}/yocto-kiss/openembedded-core/meta	5	| static: Some(("core", "{{LIVE}}/yocto-kiss/openembedded-core/meta", 5))
+same	yoctobsp	{{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/layers/meta-yocto/meta-yocto-bsp	5	| static: Some(("yoctobsp", "{{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/layers/meta-yocto/meta-yocto-bsp", 5))
+same	yocto	{{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/layers/meta-yocto/meta-poky	5	| static: Some(("yocto", "{{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/layers/meta-yocto/meta-poky", 5))
+same	arm-toolchain	{{LIVE}}/yocto-kiss/meta-arm/meta-arm-toolchain	5	| static: Some(("arm-toolchain", "{{LIVE}}/yocto-kiss/meta-arm/meta-arm-toolchain", 5))
+same	meta-arm	{{LIVE}}/yocto-kiss/meta-arm/meta-arm	5	| static: Some(("meta-arm", "{{LIVE}}/yocto-kiss/meta-arm/meta-arm", 5))
+same	meta-kiss	{{LIVE}}/yocto-kiss/meta-kiss	9	| static: Some(("meta-kiss", "{{LIVE}}/yocto-kiss/meta-kiss", 9))
+same	meta-kiss-ti	{{LIVE}}/yocto-kiss/meta-kiss-ti	9	| static: Some(("meta-kiss-ti", "{{LIVE}}/yocto-kiss/meta-kiss-ti", 9))
+
+## bbappend order (bitbake-layers show-appends vs query::appends_for)
+listed twice by show-appends (second listing skipped): ["u-boot_2026.01.bb", "linux-yocto_6.18.bb"]
+same	base-files_3.0.14.bb	1 bbappend(s)
+same	busybox_1.37.0.bb	1 bbappend(s)
+same	edk2-firmware_202602.bb	1 bbappend(s)
+same	formfactor_0.0.bb	1 bbappend(s)
+same	libts_git.bb	1 bbappend(s)
+same	linux-kiss_7.0.bb	1 bbappend(s)
+same	linux-yocto-dev.bb	2 bbappend(s)
+same	linux-yocto-fitimage.bb	1 bbappend(s)
+same	linux-yocto-rt_6.18.bb	1 bbappend(s)
+same	linux-yocto-tiny_6.18.bb	1 bbappend(s)
+same	linux-yocto_6.18.bb	2 bbappend(s)
+same	musl_git.bb	1 bbappend(s)
+DIFF	optee-os_4.9.0.bb	2 bbappend(s)
+	bitbake: ["{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend", "{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee/optee-os_%.bbappend"]
+	static:  ["{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee/optee-os_%.bbappend", "{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend"]
+DIFF	optee-os_git.bb	2 bbappend(s)
+	bitbake: ["{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend", "{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee/optee-os_%.bbappend"]
+	static:  ["{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee/optee-os_%.bbappend", "{{LIVE}}/yocto-kiss/meta-arm/meta-arm/recipes-security/optee-ftpm/optee-os_%.bbappend"]
+same	psplash_git.bb	1 bbappend(s)
+same	systemd-boot_259.5.bb	1 bbappend(s)
+same	systemd_259.5.bb	1 bbappend(s)
+same	trusted-firmware-a_2.10.30.bb	1 bbappend(s)
+same	trusted-firmware-a_2.12.10.bb	1 bbappend(s)
+same	trusted-firmware-a_2.14.1.bb	1 bbappend(s)
+same	trusted-firmware-a_git.bb	1 bbappend(s)
+same	ts-sp-smm-gateway_git.bb	1 bbappend(s)
+same	u-boot_2026.01.bb	1 bbappend(s)
+same	xserver-xf86-config_0.1.bb	1 bbappend(s)
+
+## Recipe files (index vs workspace::resolve::recipe_files)
+indexed .bb: 1035; matched by BBFILES: 1034
+indexed but not matched by BBFILES: {{LIVE}}/yocto-kiss/openembedded-core/meta/lib/bblayers/templates/example.bb (evaluate("example"): succeeds, FILE = "{{LIVE}}/yocto-kiss/openembedded-core/meta/lib/bblayers/templates/example.bb")
+
+## Configuration without an explicit machine and distro
+MACHINE = None
+DISTRO = Some(Value { text: "nodistro", unevaluated_python: false, unresolved: [] })
