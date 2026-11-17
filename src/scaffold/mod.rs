@@ -18,7 +18,11 @@
 //! New layers (T6.3) are created outside every existing layer root. A plan that does so sets
 //! [`Plan::new_layer`]; files under that root are then allowed when the new root sits in a
 //! directory that already holds a workspace layer, and `conf/bblayers.conf` of the build
-//! directory may be modified by the same plan. Nothing else outside a writable layer is.
+//! directory may be modified by the same plan. In a kas project (`Workspace::kas`) the
+//! layer generator adds the layer to a kas file instead of `bblayers.conf`, so a plan that
+//! sets `new_layer` may also `Modify` a kas file the project read (`KasProject::read`),
+//! when it is not a lock file and lies inside the kas project root; it is shown relative to
+//! that root ([`kas_file`]). Nothing else outside a writable layer is.
 
 pub mod append;
 pub mod class;
@@ -346,12 +350,19 @@ pub fn check_plan(ws: &Workspace, plan: &Plan) -> Result<Vec<CheckedFile>> {
                 f.path.display()
             )));
         }
+        let kas = match (&new_layer, &f.action) {
+            (Some(_), FileAction::Modify { .. }) => kas_file(ws, &f.path),
+            _ => None,
+        };
         let (target, display) = match new_layer
             .as_ref()
             .and_then(|root| under_new_layer(root, &f.path))
         {
             Some(found) => found?,
-            None => confine_writable(ws, &f.path, new_layer.is_some())?,
+            None => match kas {
+                Some(found) => found,
+                None => confine_writable(ws, &f.path, new_layer.is_some())?,
+            },
         };
         if out.iter().any(|c| c.target == target) {
             return Err(invalid(format!(
@@ -396,6 +407,27 @@ fn confine_writable(ws: &Workspace, path: &Path, new_layer: bool) -> Result<(Pat
     Err(Error::Confined {
         path: path.to_path_buf(),
     })
+}
+
+/// For a plan that creates a layer and modifies `path`: `Some((target, display))` when the
+/// workspace is a kas project and `path` resolves to a file the project read
+/// (`KasProject::read`) that is not one of its lock files and lies inside the project root;
+/// `display` is the path relative to that root. `None` otherwise (the caller then applies
+/// the ordinary confinement, which refuses it). Every comparison is between resolved paths.
+fn kas_file(ws: &Workspace, path: &Path) -> Option<(PathBuf, String)> {
+    let k = ws.kas.as_ref()?;
+    let target = resolve_path(path).ok()?;
+    let same = |p: &PathBuf| resolve_path(p).is_ok_and(|r| r == target);
+    if !k.read.iter().any(same) || k.lock_files.iter().any(same) {
+        return None;
+    }
+    let root = resolve_path(&k.root).ok()?;
+    let rel = target.strip_prefix(&root).ok()?;
+    if rel.as_os_str().is_empty() || !target.is_file() {
+        return None;
+    }
+    let display = rel.display().to_string();
+    Some((target, display))
 }
 
 /// The innermost layer whose root contains `target`.
