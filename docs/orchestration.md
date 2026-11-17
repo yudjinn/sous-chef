@@ -125,7 +125,7 @@ Every agent prompt contains, in this order:
 | 2 | **done** (five streams and T1.6 merged, gate passes, 418 tests) | Integrated on branch `worktree-w2-integration`; `dev` must be fast-forwarded to it before wave 3 (`git merge --ff-only worktree-w2-integration`). Wave 3 not launched. See "Wave 2 hand-off notes" below. |
 | 3 | **done** (five streams plus `w3-cleanup` and `w3-docs` merged, gate passes, 548 tests) | Integrated on branch `worktree-w2-integration`. See "Wave 3 hand-off notes" below. |
 | 4 | **done** (five streams plus `w4-followup` and `w4-docs` merged, gate passes, 696 tests) | Integrated on branch `worktree-w2-integration`. Wave 5 not launched. See "Wave 4 hand-off notes" below. |
-| 5 | not started | |
+| 5 | **done** (eight task branches, four fix branches and `w5-docs` merged, gate passes, 891 tests) | Includes M9 (kas support, live verification on yocto-kiss). Integrated on branch `worktree-w2-integration`. See "Wave 5 and M9 hand-off notes" below. T8.4 and T8.6 are not built. |
 
 ## Wave 0 hand-off notes (for whoever launches wave 1)
 
@@ -560,3 +560,81 @@ Open items and gaps (not resolved in wave 4):
 - Carried forward: everything under "Open items" in the wave 3 notes that is not marked
   resolved here (hook events not captured live, jobs, replay, the Wrynose `bitbake-setup`
   environment, the CI workflow, handle retention limits, `BB_DEFER_BBCLASSES`).
+
+## Wave 5 and M9 hand-off notes
+
+State: every task in the plan is merged on the integration branch `worktree-w2-integration`
+except T8.4 (release diff, optional) and T8.6 (workspace audit report), which were never
+scheduled. The gate passes with 891 tests; the 14 live tests in `tests/live_verify.rs` pass
+against the live environment. `dev` was last fast-forwarded at `2a4b7c6` (end of wave 2):
+`git merge --ff-only worktree-w2-integration` in the main checkout brings it up to date.
+
+Merged in this phase, in order: `m9-live` (T9.1), `w5-d` (T7.5), `w5-b` (T6.4, T6.5),
+`w5-c` (T8.3), `m9-kas` (T9.3), `w5-a` (T5.5), `w5-e` (T8.1, T8.2), `m9-verify` (T9.2),
+then four fix branches (`w5-fix-hooks`, `w5-fix-eval`, `w5-fix-lint`, `w5-fix-eval2`) and
+`w5-docs` (T8.5). Two merges needed a hand resolution, both in
+`docs/bitbake-semantics.md`, where several agents had added text at the same place.
+
+How it was run: the live environment (T9.1) went first, because T5.5, T8.1 and T9.2 needed
+real BitBake output; it was blocked until the user installed three host tools BitBake
+requires (`chrpath`, `diffstat`, `rpcgen`). The agents that ran BitBake were each given
+their own build directory (the kas build and the bitbake-setup build), because BitBake
+allows one client per directory. Fix agents were not allowed to run BitBake at all: they
+worked from the dumps already captured.
+
+The live environment: `~/Development/sous-chef-live` (yocto-kiss on Wrynose, kas 5.5,
+BitBake 2.18.0), created by `scripts/live-env.sh`, described in `docs/live-environment.md`.
+The limits in `docs/milestones/M9-kas-live.md` held: only parse-only commands and two
+fetches (`curl` and a scratch recipe) were run; nothing compiled.
+
+What the checks against real BitBake found (details in `docs/differential.md`,
+`docs/live-verification.md`, `docs/performance.md`):
+
+- **Differential test**: 1,019 values over 23 recipes: 656 equal, 336 different but flagged
+  as possibly wrong, 27 from one documented gap (the spelling of `LAYERDIR` through a
+  symlink), 0 unflagged differences. A probe without an explicit machine found 12
+  unflagged wrong values; after the fixes it finds none.
+- **Live verification**: 18 bugs (B1 to B18), all assigned and fixed; the seven live tests
+  that reproduced bugs pass.
+- **Performance** on 1,784 files: first index build 1.3 s; a no-change refresh 19 ms
+  (104 ms before the fix); `var` warm 29 ms; hooks 3 to 10 ms per call.
+- **Lint on yocto-kiss's own layers**: one finding, which is true. With `--all`,
+  `hygiene/parse-error` went from 422 findings to 3.
+
+Decisions the user made in this phase: add kas support and a live verification milestone
+(M9); use bootlin/yocto-kiss as the reference environment at
+`~/Development/sous-chef-live`; no large builds (nothing that compiles without asking).
+
+Open items, most important first (the T8.5 hand-off has the full list):
+
+- **`override/shadowed` has 7 false positives on yocto-kiss** (found by the documentation
+  pass, after the fix rounds). The rewrite of virtual providers in `DEPENDS` is recorded in
+  the history as an assignment at the `PREFERRED_PROVIDER_*` line, so the rule reports a
+  recipe's own `DEPENDS =` as replaced by `tcmode-default.inc`. The rule should ignore that
+  history entry, or the replay should record the rewrite as its own kind of operation.
+- `conf/ccache.conf` in OE-core still gives 3 `hygiene/parse-error` errors: every file
+  under a layer's `conf/` counts as metadata, and this one is a data file.
+
+- **Lint and files BitBake does not collect.** A `.bb` that no `BBFILES` glob matches is
+  marked in the index and no longer treated as a recipe by the tools, but the lint engine
+  still lints and evaluates it (`src/lint/mod.rs`, `layer_files`). Passing
+  `FileSet::COLLECTED` there would also silence `org/recipe-path`, whose purpose is to
+  report misplaced recipes; the engine needs to distinguish the two.
+- **`BBFILES_DYNAMIC`** is understood by the `layers show=appends` view only. The index
+  should fold a dynamic layer's globs into `BBFILES` when the named collection is present,
+  so that those bbappends are evaluated and linted.
+- **Not modelled**: `BBMASK`, `BBCLASSEXTEND` variants (`-native`, `nativesdk-`),
+  `SKIP_RECIPE`, `COMPATIBLE_*`; `addpylib` as a statement kind; anonymous python and
+  `${@...}` are never run, by design.
+- **Lint rules split values with their own code**; they should use `parse::words`, which
+  keeps a `${@...}` expression whole.
+- **The `.inc` split** checks safety statically and refuses some safe splits; evaluating
+  the result needs the evaluator to read files that are not on disk yet.
+- **Hooks**: Bash and Edit events were never captured from a live Claude Code session (Grep
+  and Read were); a single-file `grep -n` and compound commands are not annotated.
+- **kas**: defaults from the kas files are applied before `bitbake.conf` rather than at
+  `local.conf`'s place; `KAS_*` environment overrides are not read.
+- **Jobs**: no MCP progress notifications; one job at a time; output of a crashed server is
+  not cleaned up.
+- The repository has no license file and no remote; the CI workflow has never run.
+- T8.4 (release diff) and T8.6 (workspace audit report) are not built.
