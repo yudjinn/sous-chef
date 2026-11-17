@@ -32,6 +32,7 @@ fn ws(roots: &[&str], build: Option<&str>) -> Workspace {
                 )
             })
             .collect(),
+        ..Workspace::default()
     }
 }
 

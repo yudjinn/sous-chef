@@ -1,10 +1,12 @@
 //! `sous-chef.toml` and command-line overrides. See `docs/architecture.md` ("Configuration").
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
+use crate::lint::Severity;
 use crate::workspace::Workspace;
 
 /// Effective configuration: the file (if any) merged with command-line flags.
@@ -19,6 +21,9 @@ pub struct Config {
     pub writable_layers: Vec<String>,
     /// Sourced before any bitbake command.
     pub init_script: Option<PathBuf>,
+    /// The Yocto release codename the workspace targets (`release = "scarthgap"`). Overrides
+    /// detection; see `release::detect`.
+    pub release: Option<String>,
     pub bitbake: BitbakeConfig,
     pub lint: LintConfig,
     pub output: OutputConfig,
@@ -35,6 +40,7 @@ impl Default for Config {
             layers: Vec::new(),
             writable_layers: Vec::new(),
             init_script: None,
+            release: None,
             bitbake: BitbakeConfig::default(),
             lint: LintConfig::default(),
             output: OutputConfig::default(),
@@ -65,6 +71,9 @@ impl Default for BitbakeConfig {
 pub struct LintConfig {
     /// Rule ids or group names to disable.
     pub disable: Vec<String>,
+    /// `[lint.severity]`: rule id to `info`, `warning` or `error`, replacing the rule's
+    /// default severity.
+    pub severity: BTreeMap<String, Severity>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

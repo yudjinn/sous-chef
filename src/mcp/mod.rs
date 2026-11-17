@@ -441,7 +441,8 @@ fn one_line(s: &str) -> String {
 #[derive(Debug)]
 enum State {
     Ready(Arc<Ctx>),
-    Degraded { config: Config, error: String },
+    // Boxed: `Config` is much larger than the `Arc` of the other variant.
+    Degraded { config: Box<Config>, error: String },
 }
 
 /// The MCP server: serves [`TOOLS`] against one [`Ctx`].
@@ -461,7 +462,10 @@ impl Server {
     /// it.
     pub fn degraded(config: Config, error: String) -> Server {
         Server {
-            state: Arc::new(State::Degraded { config, error }),
+            state: Arc::new(State::Degraded {
+                config: Box::new(config),
+                error,
+            }),
         }
     }
 

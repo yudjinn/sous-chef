@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::release::{self, Release, ReleaseInfo};
 use crate::types::{LineSpan, Loc};
 
 /// The pseudo-layer name `loc_for` uses for files in the build directory.
@@ -20,6 +21,9 @@ pub struct Workspace {
     pub build_dir: Option<PathBuf>,
     /// In `BBLAYERS` order.
     pub layers: Vec<Layer>,
+    /// The Yocto release the workspace targets (see [`release::detect`]). The default is
+    /// [`Release::DEFAULT`], assumed.
+    pub release: ReleaseInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -53,6 +57,10 @@ impl Workspace {
     /// Layer roots and the build directory are stored canonicalised (symlinks resolved).
     /// `BBLAYERS` entries that cannot be expanded statically are skipped with a warning on
     /// stderr; use [`layers::read_bblayers`] to inspect them.
+    ///
+    /// The release is detected last, once the layers are known and marked writable:
+    /// `cfg.release`, then `LAYERSERIES_CORENAMES`, then the layers' `LAYERSERIES_COMPAT`
+    /// ([`release::detect`]). An unknown `cfg.release` is an error.
     pub fn discover(cfg: &Config) -> Result<Workspace> {
         let work_dir = absolute(&cfg.work_dir)?;
         let build_dir = match &cfg.build_dir {
@@ -71,7 +79,7 @@ impl Workspace {
             None => layers::find_build_dir(&work_dir),
         };
 
-        let (build_dir, mut found) = match build_dir {
+        let (build_dir, (mut found, corenames)) = match build_dir {
             Some(b) => {
                 let b = canonical(&b, "build directory")?;
                 let bb = layers::read_bblayers(&b)?;
@@ -104,7 +112,7 @@ impl Workspace {
                     }
                     roots.push(canonical(&abs, "layer")?);
                 }
-                let found = layers::read_layer_confs(&roots, Some(&bb))?;
+                let found = layers::read_layer_confs_with_corenames(&roots, Some(&bb))?;
                 (Some(b), found)
             }
             None => {
@@ -123,7 +131,7 @@ impl Workspace {
                     }
                     canon.push(c);
                 }
-                (None, layers::read_layer_confs(&canon, None)?)
+                (None, layers::read_layer_confs_with_corenames(&canon, None)?)
             }
         };
 
@@ -131,9 +139,11 @@ impl Workspace {
         for l in &mut found {
             l.writable = cfg.writable_layers.contains(&l.name);
         }
+        let release = release::detect(cfg.release.as_deref(), &corenames, &found)?;
         Ok(Workspace {
             build_dir,
             layers: found,
+            release,
         })
     }
 
@@ -209,6 +219,15 @@ impl Workspace {
     /// Looks up a layer by name.
     pub fn layer(&self, name: &str) -> Option<&Layer> {
         self.layers.iter().find(|l| l.name == name)
+    }
+}
+
+impl Layer {
+    /// The releases this layer is linted against ([`release::lint_releases`]): every
+    /// supported release in `compat` plus the workspace release, oldest first; the
+    /// workspace release alone for a layer that is not writable.
+    pub fn lint_releases(&self, ws: &Workspace) -> Vec<Release> {
+        release::lint_releases(self, ws.release.release)
     }
 }
 

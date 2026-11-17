@@ -733,7 +733,7 @@ fn layer_stats_counts() {
     );
     let core = &query::layer_stats(&fx.idx).unwrap()[0];
     assert_eq!(core.collections, ["core"]);
-    assert_eq!(core.compat, ["scarthgap", "styhead"]);
+    assert_eq!(core.compat, ["wrynose"]);
     assert_eq!(core.root, fx.ws.layer("meta-core").unwrap().root);
     assert!(core.statements > 0);
 }

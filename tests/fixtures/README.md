@@ -38,16 +38,25 @@ directly (absolute `build_dir`, `work_dir` = `ws/`).
 
 | Layer | In `BBLAYERS` | Collection | `BBFILE_PRIORITY` | `LAYERDEPENDS` | `LAYERSERIES_COMPAT` | Writable |
 |---|---|---|---|---|---|---|
-| `meta-core` | yes, 1st | `core` | 5 | (none) | `scarthgap styhead` | no |
-| `meta-vendor` | yes, 2nd | `vendor` | 6 | `core` | `scarthgap` | no |
-| `meta-mine` | yes, 3rd | `mine` | 10 | `core` | `scarthgap` | yes |
+| `meta-core` | yes, 1st | `core` | 5 | (none) | `wrynose` | no |
+| `meta-vendor` | yes, 2nd | `vendor` | 6 | `core` | `scarthgap wrynose` | no |
+| `meta-mine` | yes, 3rd | `mine` | 10 | `core` | `kirkstone scarthgap wrynose` | yes |
 | `meta-legacy` | **no** | `legacy` | 7 | `core` | `dunfell` | no |
 
 Every `layer.conf` does `BBPATH .= ":${LAYERDIR}"` and sets
 `BBFILES += "${LAYERDIR}/recipes-*/*/*.bb ${LAYERDIR}/recipes-*/*/*.bbappend"` (written over
 two lines with a `\` continuation) and `BBFILE_PATTERN_<c> = "^${LAYERDIR}/"`.
 `meta-core/conf/layer.conf` also sets `LAYERVERSION_core = "15"` and
-`LAYERSERIES_CORENAMES`.
+`LAYERSERIES_CORENAMES = "wrynose"`.
+
+The workspace is a **Wrynose** (6.0) workspace: discovery reports
+`wrynose (LAYERSERIES_CORENAMES)`. `meta-mine` is the multi-release writable layer: it is
+linted against kirkstone, scarthgap and wrynose (`Layer::lint_releases`); the other layers
+against wrynose alone. `meta-legacy` deliberately claims `dunfell`, older than the floor.
+The recipes were written before the release was set and are not all Wrynose-clean: for
+example `libfoo_2.0.bb` sets `S = "${WORKDIR}/git"` and `app_0.1.bb` reads
+`${WORKDIR}/app.c`, where Styhead and later unpack into `UNPACKDIR`. No test depends on
+that yet; release-aware lint rules (wave 3) may use them as findings.
 
 `meta-legacy` exists only for legacy-syntax tests and the "no build dir" fallback: discovery
 without a build directory (every `conf/layer.conf` under `ws/`) finds **four** layers;

@@ -97,6 +97,30 @@ pub fn read_layer_confs(roots: &[PathBuf], seed: Option<&BbLayers>) -> Result<Ve
     Ok(read_layer_confs_vars(roots, seed)?.0)
 }
 
+/// [`read_layer_confs`], plus the words of `LAYERSERIES_CORENAMES` as left once every
+/// `layer.conf` has been read (see [`read_corenames`]). Reads each file once.
+pub fn read_layer_confs_with_corenames(
+    roots: &[PathBuf],
+    seed: Option<&BbLayers>,
+) -> Result<(Vec<Layer>, Vec<String>)> {
+    let (layers, vars) = read_layer_confs_vars(roots, seed)?;
+    Ok((layers, words_of(&vars, "LAYERSERIES_CORENAMES")))
+}
+
+/// `LAYERSERIES_CORENAMES` once `bblayers.conf` (if `build_dir` is given) and every
+/// `layer.conf` of `roots` (in order) have been read: the expanded value split on
+/// whitespace. OE-core sets it in `meta/conf/layer.conf`; it is empty when no layer sets it
+/// (a layer repository checked out without OE-core). Like [`read_bbpath`], this re-reads the
+/// configuration files; `Workspace::discover` uses [`read_layer_confs_with_corenames`].
+pub fn read_corenames(build_dir: Option<&Path>, roots: &[PathBuf]) -> Result<Vec<String>> {
+    let seed = match build_dir {
+        Some(b) => Some(read_bblayers(b)?),
+        None => None,
+    };
+    let (_, vars) = read_layer_confs_vars(roots, seed.as_ref())?;
+    Ok(words_of(&vars, "LAYERSERIES_CORENAMES"))
+}
+
 /// `BBPATH` as configured once `bblayers.conf` (if `build_dir` is given) and every
 /// `layer.conf` of `roots` (in order) have been read: the expanded value split on `:`, with
 /// empty entries dropped, in order. `roots` are the layer roots in `BBLAYERS` order, as

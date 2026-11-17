@@ -334,7 +334,12 @@ pub fn detect(
 pub fn lint_releases(layer: &Layer, workspace: Release) -> Vec<Release> {
     let mut out = vec![workspace];
     if layer.writable {
-        out.extend(layer.compat.iter().filter_map(|n| Release::from_codename(n)));
+        out.extend(
+            layer
+                .compat
+                .iter()
+                .filter_map(|n| Release::from_codename(n)),
+        );
     }
     out.sort();
     out.dedup();
@@ -372,7 +377,10 @@ mod tests {
         for r in Release::ALL {
             assert_eq!(Release::from_codename(r.codename()), Some(r));
         }
-        assert_eq!(Release::from_codename(" Scarthgap "), Some(Release::Scarthgap));
+        assert_eq!(
+            Release::from_codename(" Scarthgap "),
+            Some(Release::Scarthgap)
+        );
         assert_eq!(Release::from_codename("dunfell"), None);
         assert_eq!(Release::Wrynose.version(), "6.0");
         let lts: Vec<Release> = Release::ALL.into_iter().filter(|r| r.is_lts()).collect();
@@ -495,7 +503,10 @@ mod tests {
             [Release::Kirkstone, Release::Scarthgap, Release::Wrynose]
         );
         let upstream = layer("upstream", &["kirkstone", "scarthgap"], false);
-        assert_eq!(lint_releases(&upstream, Release::Wrynose), [Release::Wrynose]);
+        assert_eq!(
+            lint_releases(&upstream, Release::Wrynose),
+            [Release::Wrynose]
+        );
         let same = layer("mine", &["wrynose"], true);
         assert_eq!(lint_releases(&same, Release::Wrynose), [Release::Wrynose]);
     }

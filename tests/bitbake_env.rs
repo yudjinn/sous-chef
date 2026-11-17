@@ -54,6 +54,7 @@ fn tree(base: &Path, poky_name: &str, with_script: bool) -> Tree {
     let ws = Workspace {
         build_dir: Some(build.clone()),
         layers: vec![layer(&poky.join("meta"))],
+        ..Workspace::default()
     };
     Tree { poky, build, ws }
 }
@@ -131,6 +132,7 @@ fn detects_configured_init_script() {
     let no_build = Workspace {
         build_dir: None,
         layers: t.ws.layers.clone(),
+        ..Workspace::default()
     };
     let e = BbEnv::probe(&cfg, &no_build, &HostEnv::default()).unwrap_err();
     assert!(e.contains("no build directory"), "{e}");
@@ -226,6 +228,7 @@ fn detects_nothing_without_a_build_environment() {
     let ws = Workspace {
         build_dir: None,
         layers: t.ws.layers.clone(),
+        ..Workspace::default()
     };
     let e = BbEnv::probe(&enabled(), &ws, &HostEnv::default()).unwrap_err();
     assert!(e.contains("no build directory"), "{e}");
