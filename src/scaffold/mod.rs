@@ -195,7 +195,7 @@ pub fn generator(kind: Kind) -> Option<&'static dyn Generator> {
         Kind::Layer => Some(&layer::LayerGen),    // T6.3: layer.rs
         Kind::Class => Some(&class::ClassGen),    // T6.3: class.rs
         Kind::IncSplit => Some(&inc_split::IncSplitGen), // T6.4: inc_split.rs
-        Kind::Where => None,                      // T6.5: placement.rs
+        Kind::Where => Some(&placement::PlacementGen), // T6.5: placement.rs
     }
 }
 

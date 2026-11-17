@@ -854,6 +854,30 @@ Checked 2026-11-17 against OE-core `wrynose` (`meta/lib/bblayers/create.py`,
   shell function is fatal ("contains a dash character and is calling an sh function"), so
   the generator refuses `-` in the name of a class with tasks.
 
+### Scaffold: `.inc` split (T6.4)
+
+What `src/scaffold/inc_split.rs` relies on, all from rules already recorded above:
+
+- `require <pn>.inc` with a relative name is tried in the including file's directory
+  first ("Finding files"), so an `.inc` beside the `.bb` files is the one found.
+- While the `.inc` is parsed, `FILE` is the `.inc` and is restored afterwards ("Replay",
+  `FILE`): an immediate expansion (`:=`, `${...}` in `inherit` / `include`, also inside a
+  class inherited from the `.inc`, since classes do not reset `FILE`) of `PN` gives
+  `defaultpkgname`, of `PV` `1.0`. `THISDIR` / `FILE_DIRNAME` are the same directory. Lazy
+  values are expanded after the whole recipe and its bbappends, with `FILE` the recipe
+  again, so moving a lazy statement into the `.inc` does not change it.
+- Operators read the current value of exactly the name written ("Datastore"); `:append`
+  and friends are applied at the end ("Overrides", parse time); `unset` clears flags.
+  The generator treats any two statements on the same variable name (any override form)
+  as order-dependent, and a flag (`VAR[f]`) as separate from the value.
+- *Verify* (used, not checked in the source): that a plain assignment `VAR = "x"` during
+  parsing leaves the flags of `VAR` alone (`data_smart.setVar` writes `_content` only), so
+  `SRC_URI = ...` and `SRC_URI[sha256sum] = ...` may change order. The before/after
+  evaluation test (`tests/scaffold_inc_split.rs`) covers this case only against the
+  sous-chef evaluator, which models flags that way.
+- `addtask` / `deltask` are not replayed; their relative order is kept by the generator (all
+  of them count as touching the task list).
+
 *Verify* (open, not used by any code): whether Wrynose changes how the build environment is
 initialised, which matters to `src/bitbake/env.rs` (it sources `oe-init-build-env` or uses an
 environment that is already set up). Checked 2026-11-17: the 6.0 migration guide only says
