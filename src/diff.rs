@@ -57,6 +57,10 @@ pub const SCHEMA: &str = "sous-chef-diff/1";
 /// The `kind` of a [`RecipeDiff`] for the files an own file requires from the layer.
 pub const INCLUDES_KIND: &str = "includes of your file";
 
+/// More flag statements of one variable with one change than this are one row in the
+/// table.
+const COLLAPSE_FLAGS: usize = 20;
+
 /// Longest value shown in a cell, in characters (each side of `old -> new`).
 const VALUE_CHARS: usize = 70;
 
@@ -2882,7 +2886,41 @@ pub fn table(d: &Diff) -> Table {
             &dash(&r.from_file),
             &dash(&r.to_file),
         ]);
+        // Many flag statements of one variable with the same change (CVE_STATUS[...] of a
+        // kernel) are one row; the JSON form lists each.
+        let flag_run = |c: &Change| {
+            (c.kind == "var" && c.name.contains('[')).then(|| (c.group.clone(), c.change))
+        };
+        let mut runs: BTreeMap<(String, &str), usize> = BTreeMap::new();
         for c in &r.changes {
+            if let Some(k) = flag_run(c) {
+                *runs.entry(k).or_default() += 1;
+            }
+        }
+        let mut collapsed: BTreeSet<(String, &str)> = BTreeSet::new();
+        for c in &r.changes {
+            if let Some(k) = flag_run(c)
+                && runs.get(&k).is_some_and(|n| *n > COLLAPSE_FLAGS)
+            {
+                if collapsed.insert(k.clone()) {
+                    let n = runs.get(&k).copied().unwrap_or(0);
+                    t.row(&[
+                        &r.name,
+                        c.kind,
+                        &format!("{}[...]", c.group),
+                        c.change,
+                        &format!(
+                            "{} {} (collapsed; the first is {}; the JSON form lists each)",
+                            plural(n, "flag statement"),
+                            c.change,
+                            c.name
+                        ),
+                        &dash(&c.from),
+                        &dash(&c.to),
+                    ]);
+                }
+                continue;
+            }
             let mut v = match (&c.old, &c.new) {
                 (Some(o), Some(n)) => format!("{o} -> {n}"),
                 (Some(o), None) => o.clone(),
