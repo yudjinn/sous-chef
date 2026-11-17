@@ -63,9 +63,25 @@ fn load_config(cli: &Cli) -> anyhow::Result<Config> {
 fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     match &cli.command {
         Command::Serve => {
-            let cfg = load_config(&cli)?;
             let rt = tokio::runtime::Runtime::new().context("starting the async runtime")?;
-            rt.block_on(sous_chef::mcp::serve(cfg))?;
+            match load_config(&cli) {
+                Ok(cfg) => rt.block_on(sous_chef::mcp::serve(cfg))?,
+                // Exiting would leave the MCP client with a dead server and no reason; serve
+                // degraded instead, so every tool call and `status` report the error.
+                Err(e) => {
+                    let cfg = Config {
+                        build_dir: cli.build_dir.clone(),
+                        layers: cli.layers.clone(),
+                        work_dir: std::env::current_dir()
+                            .context("reading the working directory")?,
+                        ..Config::default()
+                    };
+                    rt.block_on(sous_chef::mcp::serve_degraded(
+                        cfg,
+                        format!("loading the configuration: {e:#}"),
+                    ))?;
+                }
+            }
             Ok(ExitCode::SUCCESS)
         }
         Command::Index => {
