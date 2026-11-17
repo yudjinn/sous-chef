@@ -37,6 +37,51 @@ pub fn indexed_release(index: &Index) -> Result<Option<crate::release::Release>>
     Ok(name.and_then(|n| crate::release::Release::from_codename(&n)))
 }
 
+/// The files the configuration pass behind the last `BBMASK` computation read (`meta` key
+/// [`super::schema::META_BBMASK_INPUTS`]) as `(layer, path)`; `None` when not recorded.
+pub fn bbmask_inputs(index: &Index) -> Result<Option<Vec<(String, PathBuf)>>> {
+    let text: Option<String> = index
+        .conn()
+        .query_row(
+            "SELECT value FROM meta WHERE key = ?1",
+            [super::schema::META_BBMASK_INPUTS],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(text.map(|t| {
+        t.lines()
+            .filter_map(|l| l.split_once('\t'))
+            .map(|(layer, path)| (layer.to_string(), PathBuf::from(path)))
+            .collect()
+    }))
+}
+
+/// Records (or, with `None`, forgets) [`bbmask_inputs`].
+pub fn set_bbmask_inputs(index: &mut Index, files: Option<&[(String, PathBuf)]>) -> Result<()> {
+    index.write(|tx| {
+        match files {
+            Some(files) => {
+                let text: Vec<String> = files
+                    .iter()
+                    .map(|(l, p)| format!("{l}\t{}", p.display()))
+                    .collect();
+                tx.execute(
+                    "INSERT INTO meta(key, value) VALUES (?1, ?2) \
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    rusqlite::params![super::schema::META_BBMASK_INPUTS, text.join("\n")],
+                )?;
+            }
+            None => {
+                tx.execute(
+                    "DELETE FROM meta WHERE key = ?1",
+                    [super::schema::META_BBMASK_INPUTS],
+                )?;
+            }
+        }
+        Ok(())
+    })
+}
+
 /// The version of the edge computation the index was built with (`meta` key
 /// [`super::schema::META_EDGES`]), if recorded.
 pub fn indexed_edges_version(index: &Index) -> Result<Option<String>> {

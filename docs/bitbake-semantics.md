@@ -2037,8 +2037,10 @@ in the live environment:
   when invalid, the rest joined with `|` and `re.search`ed in the path of each file the
   `BBFILES` globs gave): applied (w6) when the configuration's value (default machine and
   distro) is static; masked files are `files.not_collected = 'bbmask'` (no recipe, no
-  provider, no bbappend edge, not linted). Recomputed after every full edge rebuild and
-  after a `.conf` is reindexed (not after an `.inc` a conf includes). The paths searched
+  provider, no bbappend edge, not linted). Recomputed after every full refresh that
+  changed a file, and (w10) after a one-file refresh of any file the configuration pass
+  behind the marks read (a `.conf`, an `.inc` a conf includes, a global class; the index
+  records that list), of a new file, or of a removed one. The paths searched
   are the workspace's canonical ones, not the `BBLAYERS` spelling (the `LAYERDIR` gap). A
   value with python or undefined variables, or a word Rust's `regex` cannot compile, is not
   applied and every evaluation says so (`note: BBMASK is set but sous-chef does not apply

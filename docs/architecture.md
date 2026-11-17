@@ -1165,8 +1165,11 @@ Index (w6, w7, w9; schema version 4, `EDGES_VERSION` `inc-context-1`):
 - `files.not_collected`: `bbfiles` (no `BBFILES` glob matches the `.bb` / `.bbappend`),
   `dynamic` (only an inactive `BBFILES_DYNAMIC` glob does), `bbmask` (a static `BBMASK`,
   from the configuration with the default machine and distro, masks it;
-  `scan::apply_bbmask`, run after every full edge rebuild and after a `.conf` is
-  reindexed), `data` (a `.conf` / `.inc` / `.bbclass` that is no metadata). The first three
+  `scan::apply_bbmask`, run after every full refresh that changed anything and, since w10,
+  after `refresh_file` reindexes any file the configuration pass behind the marks read,
+  recorded in `meta.bbmask_inputs` (`schema::META_BBMASK_INPUTS`,
+  `query::bbmask_inputs` / `set_bbmask_inputs`; without the record any `.conf`, `.inc` or
+  `.bbclass` edit counts), and after a new or removed file), `data` (a `.conf` / `.inc` / `.bbclass` that is no metadata). The first three
   are `schema::NOT_COLLECTED_RECIPE_REASONS`: no recipe, no provider, no `bbappend` edge,
   not evaluated or linted (a `bbfiles` file gets one layer-scope finding, below).
 - `BBFILES_DYNAMIC` is folded into the collection (`resolve::collect`, `collect_masked`):

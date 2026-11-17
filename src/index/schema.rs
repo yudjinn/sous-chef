@@ -213,6 +213,13 @@ pub const CONTEXT_BOTH: &str = "both";
 /// The `meta` key holding the codename of the release the edges were resolved for.
 pub const META_RELEASE: &str = "release";
 
+/// The `meta` key holding the files the configuration pass behind the last `BBMASK`
+/// computation read (`layer<TAB>path` lines, in visit order): an edit to any of them can
+/// change `BBMASK`, so `Index::refresh_file` recomputes the marks after it. Absent when that
+/// pass failed or the index predates it (then every `.conf`, `.inc` and `.bbclass` edit
+/// recomputes them).
+pub const META_BBMASK_INPUTS: &str = "bbmask_inputs";
+
 /// Every table [`DDL`] creates (the FTS table included).
 pub const TABLES: &[&str] = &[
     "layers",

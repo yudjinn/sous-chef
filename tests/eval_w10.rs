@@ -507,3 +507,104 @@ fn preferred_providers_conflicts_and_malformed_words_are_said() {
         set.notes
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// Item 3: BBMASK recomputed after an edit to any file the configuration pass read
+// ---------------------------------------------------------------------------------------
+
+/// `BBMASK` set in an `.inc` the distro conf requires, and a global class.
+fn mask_in_inc(root: &Path) {
+    write(
+        root,
+        "meta-core/conf/distro/include/mask.inc",
+        "BBMASK = \"\"\n",
+    );
+    write(
+        root,
+        "meta-core/classes-global/maskclass.bbclass",
+        "MASKCLASS = \"1\"\n",
+    );
+    append_to(
+        root,
+        "meta-core/conf/distro/testdistro.conf",
+        "require conf/distro/include/mask.inc\n",
+    );
+    append_to(root, "build/conf/local.conf", "INHERIT += \"maskclass\"\n");
+}
+
+fn app_is_recipe(fx: &Fx) -> bool {
+    !sous_chef::index::query::find_recipes(&fx.idx, "app")
+        .unwrap()
+        .is_empty()
+}
+
+#[test]
+fn bbmask_is_recomputed_after_an_edit_to_an_inc_the_configuration_includes() {
+    let mut fx = modified(mask_in_inc);
+    assert!(app_is_recipe(&fx));
+    let inputs = sous_chef::index::query::bbmask_inputs(&fx.idx)
+        .unwrap()
+        .unwrap();
+    assert!(
+        inputs
+            .iter()
+            .any(|(_, p)| p.ends_with("conf/distro/include/mask.inc")),
+        "{inputs:?}"
+    );
+    // An edit to the .inc: refresh_file alone recomputes the marks.
+    let inc = fx.root.join("meta-core/conf/distro/include/mask.inc");
+    fs::write(&inc, "BBMASK = \"meta-mine/recipes-app/app/\"\n").unwrap();
+    fx.idx.refresh_file(&fx.ws, &inc).unwrap();
+    assert!(
+        !app_is_recipe(&fx),
+        "app is still collected after the .inc edit"
+    );
+    // And back.
+    fs::write(&inc, "BBMASK = \"\"\n").unwrap();
+    fx.idx.refresh_file(&fx.ws, &inc).unwrap();
+    assert!(app_is_recipe(&fx));
+    // A global class the configuration inherits.
+    let class = fx.root.join("meta-core/classes-global/maskclass.bbclass");
+    fs::write(
+        &class,
+        "MASKCLASS = \"1\"\nBBMASK += \"meta-mine/recipes-app/\"\n",
+    )
+    .unwrap();
+    fx.idx.refresh_file(&fx.ws, &class).unwrap();
+    assert!(
+        !app_is_recipe(&fx),
+        "app is still collected after the class edit"
+    );
+}
+
+#[test]
+fn the_per_machine_bbmask_note_fires_for_recipe_and_variant_evaluations() {
+    // Masked for boardx only (eval_w8 checks the configuration-only evaluation).
+    let fx = modified(|r| {
+        class_extension(r);
+        append_to(
+            r,
+            "meta-core/conf/distro/testdistro.conf",
+            "BBMASK:boardx = \"meta-mine/recipes-app/app/\"\n",
+        );
+    });
+    for recipe in ["hello", "libfoo-native"] {
+        let t = Target {
+            recipe: Some(recipe.into()),
+            machine: Some("boardx".into()),
+            ..Target::default()
+        };
+        let ds = eval::evaluate_with(&ConfigCache::new(), &fx.idx, &fx.ws, &t).unwrap();
+        assert!(
+            ds.replay()
+                .target_notes
+                .iter()
+                .any(|n| n.contains("BBMASK for this machine and distro differs")
+                    && n.contains("meta-mine:recipes-app/app/app_0.1.bb")),
+            "{recipe}: {:?}",
+            ds.replay().target_notes
+        );
+    }
+    // The index keeps the default machine's mask: app stays a recipe.
+    assert!(app_is_recipe(&fx));
+}
