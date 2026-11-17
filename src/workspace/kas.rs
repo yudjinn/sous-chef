@@ -399,11 +399,16 @@ pub const CACHEDIR_TAG_MARK: &str = "# kas build directory";
 /// [`CACHEDIR_TAG_MARK`], or its `conf/local.conf` ends the way kas writes it
 /// ([`looks_generated_local_conf`]).
 pub fn is_kas_build_dir(dir: &Path) -> bool {
-    let tag = std::fs::read_to_string(dir.join("CACHEDIR.TAG")).is_ok_and(|t| {
+    has_kas_cachedir_tag(dir)
+        || std::fs::read_to_string(dir.join("conf").join("local.conf"))
+            .is_ok_and(|t| looks_generated_local_conf(&t))
+}
+
+/// Whether `dir/CACHEDIR.TAG` ends with [`CACHEDIR_TAG_MARK`].
+pub fn has_kas_cachedir_tag(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join("CACHEDIR.TAG")).is_ok_and(|t| {
         t.lines().map(str::trim_end).rfind(|l| !l.is_empty()) == Some(CACHEDIR_TAG_MARK)
-    });
-    tag || std::fs::read_to_string(dir.join("conf").join("local.conf"))
-        .is_ok_and(|t| looks_generated_local_conf(&t))
+    })
 }
 
 // ---------------------------------------------------------------------------------------

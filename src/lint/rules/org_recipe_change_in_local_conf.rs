@@ -50,6 +50,7 @@ impl Rule for OrgRecipeChangeInLocalConf {
             rest.overrides.retain(|o| o.strip_prefix("pn-") != Some(pn));
             rest.legacy_syntax = false;
             let plain = written_name(&rest, "");
+            let kas = kas_note(cx, helpers::statement_text(cx, st));
             out.push(helpers::finding(
                 self,
                 cx,
@@ -57,9 +58,38 @@ impl Rule for OrgRecipeChangeInLocalConf {
                 format!(
                     "`{name}` in local.conf changes only recipe {pn}, and only in this build \
                      directory; move it to a {pn}_%.bbappend in your layer as `{plain}`, or to \
-                     your distro conf if it is policy"
+                     your distro conf if it is policy{kas}"
                 ),
             ));
+        }
+    }
+}
+
+/// In a kas project whose build directory this `local.conf` is in: where the line comes
+/// from (a `local_conf_header` entry) or that kas rewrites the file. Empty otherwise, so the
+/// message outside kas is unchanged.
+fn kas_note(cx: &LintContext<'_>, text: &str) -> String {
+    let (Some(k), Some(build)) = (cx.ws.kas.as_ref(), cx.ws.build_dir.as_ref()) else {
+        return String::new();
+    };
+    if cx.loc.layer != crate::workspace::BUILD_LAYER || !k.generates(build) {
+        return String::new();
+    }
+    let first = text.lines().next().unwrap_or("");
+    match k.header_line_source(false, first) {
+        Some(h) => format!(
+            "; kas generated it from local_conf_header entry `{}` at {}, so change it there",
+            h.id,
+            h.loc.display_in(&k.root)
+        ),
+        None => {
+            let file = k
+                .file_for_header(false)
+                .map(|f| f.strip_prefix(&k.root).unwrap_or(f).display().to_string())
+                .unwrap_or_else(|| "your kas file".into());
+            format!(
+                "; kas rewrites this local.conf on its next run, so if it must stay a local setting put it in local_conf_header in {file}"
+            )
         }
     }
 }

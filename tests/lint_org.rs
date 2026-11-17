@@ -856,7 +856,7 @@ fn fixture_workspace_findings() {
     let mut index = Index::open_in(cache.path(), &ws).unwrap();
     index.refresh(&ws).unwrap();
     let rules = org_rules();
-    assert_eq!(rules.len(), 17);
+    assert_eq!(rules.len(), 18);
     let start = Instant::now();
     let report = lint::run_with(
         &ws,

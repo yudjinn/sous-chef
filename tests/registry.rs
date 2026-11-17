@@ -57,9 +57,9 @@ fn rule_registry_matches_docs() {
         .map(|r| r.id().to_string())
         .collect();
     let documented = documented_rules();
-    assert_eq!(documented.len(), 38);
+    assert_eq!(documented.len(), 39);
     assert_eq!(registered, documented);
-    assert_eq!(sous_chef::lint::all_rules().len(), 38);
+    assert_eq!(sous_chef::lint::all_rules().len(), 39);
 }
 
 #[test]
