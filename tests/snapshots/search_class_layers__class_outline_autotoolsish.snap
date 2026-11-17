@@ -1,0 +1,10 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+name	kind	loc
+autotoolsish_do_autoreconf	shell	meta-core:classes-recipe/autotoolsish.bbclass:13-15
+autoreconf	addtask	meta-core:classes-recipe/autotoolsish.bbclass:16
+autotoolsish_do_configure	shell	meta-core:classes-recipe/autotoolsish.bbclass:18-20
+autotoolsish_do_compile	shell	meta-core:classes-recipe/autotoolsish.bbclass:22-24
+autotoolsish_do_install	shell	meta-core:classes-recipe/autotoolsish.bbclass:26-28

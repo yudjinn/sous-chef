@@ -1,0 +1,10 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+kind	name	status	layer	priority	file
+class	autotoolsish.bbclass	wins	meta-core	5	meta-core:classes-recipe/autotoolsish.bbclass
+class	autotoolsish.bbclass	shadowed	meta-mine	10	meta-mine:classes-recipe/autotoolsish.bbclass
+recipe	libfoo_2.0.bb	wins	meta-vendor	6	meta-vendor:recipes-core/libfoo/libfoo_2.0.bb
+recipe	libfoo_2.0.bb	shadowed	meta-core	5	meta-core:recipes-core/libfoo/libfoo_2.0.bb
+note: recipes: highest layer priority wins; classes: BitBake's class search order for a recipe inherit (classes-recipe/ along BBPATH, then classes/)

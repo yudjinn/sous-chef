@@ -1,0 +1,10 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+layer	priority	collections	compat	depends	writable	bb	bbappend	inc	bbclass	conf
+meta-core	5	core	wrynose	-	no	3	0	1	3	5
+meta-vendor	6	vendor	scarthgap wrynose	core	no	1	1	0	0	1
+meta-mine	10	mine	kirkstone scarthgap wrynose	core	yes	1	2	0	0	1
+build	0	-	-	-	no	0	0	0	0	2
+release: wrynose (LAYERSERIES_CORENAMES)

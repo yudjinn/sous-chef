@@ -1,0 +1,6 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+loc	kind	item	snippet
+meta-mine:recipes-core/hello/hello_1.1.bbappend:9	function	[do_install:append 8-10]	install -m 0644 ${S}/README ${D}${sysconfdir}/hello.readme

@@ -1,0 +1,11 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+field	value	loc
+file	wins (inherit), meta-core priority 5	meta-core:classes-recipe/autotoolsish.bbclass
+interface	EXTRA_OECONF ?= ""	meta-core:classes-recipe/autotoolsish.bbclass:7
+interface	AUTOTOOLS_SCRIPT_PATH ?= "${S}"	meta-core:classes-recipe/autotoolsish.bbclass:8
+interface	EXTRA_AUTORECONF ?= "--exclude=autopoint"	meta-core:classes-recipe/autotoolsish.bbclass:9
+task	addtask autoreconf after do_patch before do_configure	meta-core:classes-recipe/autotoolsish.bbclass:16
+EXPORT_FUNCTIONS	do_autoreconf do_configure do_compile do_install	meta-core:classes-recipe/autotoolsish.bbclass:30

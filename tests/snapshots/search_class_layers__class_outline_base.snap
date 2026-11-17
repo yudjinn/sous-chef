@@ -1,0 +1,22 @@
+---
+source: tests/search_class_layers.rs
+expression: out
+---
+name	kind	loc
+base_set_filespath	def	meta-core:classes/base.bbclass:5-11
+fetch	addtask	meta-core:classes/base.bbclass:13
+base_do_fetch	python	meta-core:classes/base.bbclass:15-20
+unpack	addtask	meta-core:classes/base.bbclass:22
+base_do_unpack	python	meta-core:classes/base.bbclass:23-26
+patch	addtask	meta-core:classes/base.bbclass:28
+base_do_patch	shell	meta-core:classes/base.bbclass:29-31
+configure	addtask	meta-core:classes/base.bbclass:33
+base_do_configure	shell	meta-core:classes/base.bbclass:34-36
+compile	addtask	meta-core:classes/base.bbclass:38
+base_do_compile	shell	meta-core:classes/base.bbclass:39-43
+install	addtask	meta-core:classes/base.bbclass:45
+base_do_install	shell	meta-core:classes/base.bbclass:47-49
+build	addtask	meta-core:classes/base.bbclass:51
+base_eventhandler	addhandler	meta-core:classes/base.bbclass:56
+base_eventhandler	python	meta-core:classes/base.bbclass:58-60
+note: base.bbclass is inherited by the global configuration, before every recipe
