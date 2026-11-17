@@ -24,6 +24,10 @@ pub struct Config {
     /// The Yocto release codename the workspace targets (`release = "scarthgap"`). Overrides
     /// detection; see `release::detect`.
     pub release: Option<String>,
+    /// kas project files (`kas = ["kas/kiss.yaml", "kas/dogbonedark.yaml"]`), combined in
+    /// this order as kas combines `a.yaml:b.yaml` on its command line. Relative to the
+    /// file's directory. Empty: kas detection (see `workspace::kas`).
+    pub kas: Vec<PathBuf>,
     pub bitbake: BitbakeConfig,
     pub lint: LintConfig,
     pub output: OutputConfig,
@@ -41,6 +45,7 @@ impl Default for Config {
             writable_layers: Vec::new(),
             init_script: None,
             release: None,
+            kas: Vec::new(),
             bitbake: BitbakeConfig::default(),
             lint: LintConfig::default(),
             output: OutputConfig::default(),
@@ -174,6 +179,7 @@ impl Config {
             cfg.build_dir = Some(base.join(b));
         }
         cfg.layers = cfg.layers.iter().map(|l| base.join(l)).collect();
+        cfg.kas = cfg.kas.iter().map(|k| base.join(k)).collect();
         if let Some(s) = &cfg.init_script {
             cfg.init_script = Some(base.join(s));
         }
@@ -196,6 +202,11 @@ impl Config {
         for l in &self.layers {
             if !l.join("conf").join("layer.conf").is_file() {
                 problems.push(format!("layer {} has no conf/layer.conf", l.display()));
+            }
+        }
+        for k in &self.kas {
+            if !k.is_file() {
+                problems.push(format!("kas file {} does not exist", k.display()));
             }
         }
         if let Some(s) = &self.init_script
