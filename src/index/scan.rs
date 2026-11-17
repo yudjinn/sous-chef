@@ -73,6 +73,7 @@ use std::time::{Instant, UNIX_EPOCH};
 use rusqlite::{OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 
+use super::query::StatementRow;
 use super::{FileRefresh, Index, RefreshReport};
 use crate::error::Result;
 use crate::parse::{IncludeMode, Lang, StatementKind, lexer};
@@ -926,6 +927,45 @@ fn file_rows(text: &str, kind: FileKind, file_name: &str) -> FileRows {
     let mut seen = HashSet::new();
     out.provides.retain(|p| seen.insert(p.clone()));
     out
+}
+
+/// The statement rows the index stores for a file of `kind` holding `text`, as
+/// [`super::query`] reads them back (`id` and `file_id` 0, `loc` in `at`'s layer and path).
+/// The evaluator's overlay (`eval::overlay`) builds its in-memory files with it, so an
+/// overlaid file replays exactly as the indexed one would.
+pub fn statement_rows(text: &str, kind: FileKind, at: &Loc) -> Vec<StatementRow> {
+    let file_name = at
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    file_rows(text, kind, &file_name)
+        .statements
+        .into_iter()
+        .enumerate()
+        .map(|(ord, s)| StatementRow {
+            id: 0,
+            file_id: 0,
+            loc: Loc {
+                layer: at.layer.clone(),
+                path: at.path.clone(),
+                lines: LineSpan::new(s.start, s.end),
+            },
+            ord: ord as u32,
+            kind: s.kind.to_string(),
+            name: s.name,
+            base: s.base,
+            overrides: s
+                .overrides
+                .map(|o| o.split(':').map(str::to_string).collect())
+                .unwrap_or_default(),
+            flag: s.flag,
+            op: s.op,
+            legacy: s.legacy,
+            value: s.value,
+            snippet: s.snippet,
+        })
+        .collect()
 }
 
 fn include_op(mode: IncludeMode) -> &'static str {

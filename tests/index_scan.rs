@@ -808,3 +808,35 @@ fn refresh_through_open() {
     assert!(idx.path().starts_with(cache.path()));
     assert!(Path::new(idx.path()).exists());
 }
+
+#[test]
+fn statement_rows_are_the_rows_the_index_stores() {
+    // `scan::statement_rows` (what the evaluator's overlay uses) gives, for every fixture
+    // file, exactly the statements the index stores and reads back, ids aside.
+    use sous_chef::index::{query, scan};
+    let ws = fixture_ws();
+    let (_c, mut idx) = fresh_index(&ws);
+    idx.refresh(&ws).unwrap();
+    let files = query::all_files_in(&idx, query::FileSet::ALL).unwrap();
+    assert!(files.len() >= 20);
+    for f in files {
+        let loc = sous_chef::types::Loc {
+            layer: f.layer.clone(),
+            path: f.path.clone(),
+            lines: sous_chef::types::LineSpan::line(1),
+        };
+        let text = fs::read_to_string(ws.abs_path(&loc).unwrap()).unwrap();
+        let mut stored = query::statements_in(&idx, f.id, &Default::default()).unwrap();
+        for s in &mut stored {
+            s.id = 0;
+            s.file_id = 0;
+        }
+        assert_eq!(
+            scan::statement_rows(&text, f.kind, &loc),
+            stored,
+            "{}:{}",
+            f.layer,
+            f.path.display()
+        );
+    }
+}
