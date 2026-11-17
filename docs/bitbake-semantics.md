@@ -897,10 +897,36 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
   `PREFERRED_PROVIDER_*` assignment used (or the recipe when none has a location), it is
   `Applied`, and the operations that made the old value keep the status they had just
   before the rewrite (they are what was rewritten, not shadowed). A note names each
-  rewritten word (`ReplayNotes::var_notes`). Not reproduced: the task `depends` flags;
-  the whitespace normalisation when no word is replaced (the value then differs from
-  BitBake's in whitespace only); `DEPENDS` unset becoming `""`. A missing provider is a
-  reference issue (`RefProblem::Fatal`) and the word is kept.
+  rewritten word (`ReplayNotes::var_notes`). A missing provider is a reference issue
+  (`RefProblem::Fatal`) and the word is kept.
+
+  Read again for w8 (BitBake 2.18.0, `lib/bb/parse/ast.py` `handleVirtRecipeProviders`
+  lines 494-515, called from `finalize` with `tasklist = d.getVar('__BBTASKS', False) or
+  []`): the `setVar("DEPENDS", " ".join(newdeps))` runs **always**, so with no word
+  replaced the value is still stored with its words joined by single spaces, and an unset
+  `DEPENDS` becomes `""`; an unset `BB_RECIPE_VIRTUAL_PROVIDERS` is an empty list (`or
+  ""`). For **each task in `__BBTASKS`**: `taskdeps = (d.getVarFlag(task, "depends") or
+  "").split()` (expanded), each entry `r, t = entry.split(":")` (an entry without exactly
+  one `:` raises `ValueError`, which fails the parse), `r` in the list becomes
+  `d.getVar("PREFERRED_PROVIDER_" + r)` with **no** check (unset gives the text `None`, so
+  `None:do_x`; only `DEPENDS` has the `bb.fatal`), and `d.setVarFlag(task, "depends", "
+  ".join(remapped))` runs for every task, also one without the flag (it gets `""`). Nothing
+  else is rewritten (not `RDEPENDS`, `PROVIDES`, `RRECOMMENDS`, or the `depends` flag of a
+  name that is not in `__BBTASKS`). `__BBTASKS` is built by `bb.build.addtask` (from
+  `AddTaskNode.eval`: the names are **not** expanded, `ensure_task_prefix` adds `do_`, a
+  task already listed is not added again) and `bb.build.deltask` (`DelTaskNode.eval`
+  expands the names; the task is removed).
+
+  sous-chef (w8): the replay keeps `__BBTASKS` from `addtask` / `deltask` statements
+  (`DataStore::tasks`; tasks anonymous python adds are not seen). `DEPENDS` is stored again
+  with single spaces when that changes a certain value (an uncertain one is left flagged),
+  and set to `""` when unset, each as an `OpKind::VirtualProviderRewrite` operation at the
+  recipe with a note. Each task's `depends` flag is rewritten as above when its value is
+  certain and the text changes, recorded as a `VirtualProviderRewrite` operation on the flag
+  (at the `PREFERRED_PROVIDER_*` assignment used, else the recipe) with a note under the
+  task's name; an entry without one `:` is a `RefProblem::Fatal` issue and that flag is
+  left alone. Not reproduced: the `""` BitBake stores on a task without the flag (readers
+  treat unset and empty alike).
 - **Inherit** (`BBHandler.inherit`): the argument is expanded and split; a word listed in
   `BB_DEFER_BBCLASSES` is deferred (unless already deferred); a class file in
   `__inherit_cache` is not parsed again. Not found is a parse error.

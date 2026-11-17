@@ -132,6 +132,10 @@ pub struct ReplayNotes {
     /// normalised): a file created there would have been read. See [`super::Overlay`].
     #[serde(skip)]
     pub(crate) probed_missing: BTreeSet<PathBuf>,
+    /// `__BBTASKS`: the tasks `addtask` added and `deltask` did not remove, in order (see
+    /// [`DataStore::tasks`]).
+    #[serde(skip)]
+    pub(crate) tasks: Vec<String>,
     /// `__inherit_cache`: class files already parsed (absolute paths).
     #[serde(skip)]
     pub(crate) inherit_cache: Vec<PathBuf>,
@@ -274,6 +278,14 @@ impl DataStore {
             return true;
         }
         split_keyword(name).is_some_and(|(base, _, _)| self.notes.functions.contains(&base))
+    }
+
+    /// `__BBTASKS`: the tasks `addtask` statements added (`do_` prefixed, the names not
+    /// expanded, as `AddTaskNode.eval` does) and `deltask` statements (names expanded) did
+    /// not remove, in the order first added (BitBake 2.18.0 `lib/bb/build.py` `addtask`,
+    /// `deltask`). Tasks added by anonymous python (`bb.build.addtask`) are not seen.
+    pub fn tasks(&self) -> &[String] {
+        &self.notes.tasks
     }
 
     /// The composed pieces of a function, in order (override variant, `:append`,
@@ -940,10 +952,10 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
 /// `ast.handleVirtRecipeProviders` (BitBake 2.12 and later), on `DEPENDS`: each word listed
 /// in `BB_RECIPE_VIRTUAL_PROVIDERS` is replaced with the value of
 /// `PREFERRED_PROVIDER_<word>`, and the result is stored with a plain `setVar` (no more
-/// `:append` / override variants). Done only when a word is replaced (when none is, BitBake
-/// still stores the words joined with single spaces; the replay leaves the value as it is,
-/// so it may differ from BitBake's in whitespace only). The task `depends` flags BitBake
-/// rewrites the same way are not rewritten (the replay does not track `__BBTASKS`).
+/// `:append` / override variants), whether or not a word was replaced: the words joined
+/// with single spaces (done here when that changes a certain value), and `""` when
+/// `DEPENDS` is unset. An unset `BB_RECIPE_VIRTUAL_PROVIDERS` is an empty list. The task
+/// `depends` flags are rewritten the same way ([`task_depends`]).
 ///
 /// The new value keeps the flags of the old one: `unevaluated_python` (through
 /// `python_vars`) and `unresolved` (through `unresolved_vars`). A list that needs python or
@@ -952,7 +964,8 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
 fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
     const DEPENDS: &str = "DEPENDS";
     const LIST: &str = "BB_RECIPE_VIRTUAL_PROVIDERS";
-    let Some(list) = ds.value(LIST) else { return };
+    // `(d.getVar("BB_RECIPE_VIRTUAL_PROVIDERS") or "").split()`: unset is an empty list.
+    let list = ds.value(LIST).unwrap_or_default();
     if list.unevaluated_python || !list.unresolved.is_empty() {
         let notes = Arc::make_mut(&mut ds.notes);
         if list.unevaluated_python {
@@ -970,8 +983,25 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
         ds.ovr_cache = OnceLock::new();
         return;
     }
-    let virt: Vec<&str> = pwords::words(&list.text);
+    let virt: Vec<String> = pwords::words(&list.text)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    task_depends(ds, &virt, recipe);
+    let virt: Vec<&str> = virt.iter().map(String::as_str).collect();
     let Some(deps) = ds.value(DEPENDS) else {
+        // `(d.getVar("DEPENDS") or "").split()` then `setVar("DEPENDS", "")`.
+        ds.rewrite(
+            DEPENDS,
+            String::new(),
+            recipe.clone(),
+            OpKind::VirtualProviderRewrite,
+        );
+        Arc::make_mut(&mut ds.notes)
+            .var_notes
+            .entry(DEPENDS.to_string())
+            .or_default()
+            .push("note: DEPENDS was unset; BitBake sets it to \"\" at the end of parsing (handleVirtRecipeProviders)".to_string());
         return;
     };
     let mut words: Vec<String> = Vec::new();
@@ -987,14 +1017,8 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
             continue;
         }
         let pp = format!("PREFERRED_PROVIDER_{w}");
-        match ds.value(&pp).filter(|v| !v.text.is_empty()) {
-            Some(v) => {
-                let loc = ds
-                    .history(&pp)
-                    .into_iter()
-                    .filter(|(_, s)| *s == OpStatus::Applied)
-                    .map(|(op, _)| op.loc)
-                    .next_back();
+        match preferred_provider(ds, w) {
+            Some((v, loc)) => {
                 python |= v.unevaluated_python;
                 unresolved.extend(v.unresolved.iter().cloned());
                 words.push(v.text.clone());
@@ -1017,10 +1041,26 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
             )),
         });
     }
+    let text = words.join(" ");
     if rewrites.is_empty() {
+        // `setVar("DEPENDS", " ".join(newdeps))` all the same: the words joined with single
+        // spaces. Done when that changes the text and the value is certain (an uncertain
+        // value is flagged anyway, and its words may not be the ones BitBake splits).
+        if text != deps.text && !python && unresolved.is_empty() {
+            ds.rewrite(
+                DEPENDS,
+                text,
+                recipe.clone(),
+                OpKind::VirtualProviderRewrite,
+            );
+            Arc::make_mut(&mut ds.notes)
+                .var_notes
+                .entry(DEPENDS.to_string())
+                .or_default()
+                .push("note: DEPENDS stored again at the end of parsing with its words joined by single spaces (BitBake handleVirtRecipeProviders; no BB_RECIPE_VIRTUAL_PROVIDERS word in it)".to_string());
+        }
         return;
     }
-    let text = words.join(" ");
     // setVar(DEPENDS, text) after parsing: the keyword lists and the override variants go.
     // Recorded as a rewrite, not a statement: what made the old value stays applied.
     let loc = rewrites
@@ -1055,6 +1095,109 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
         "note: DEPENDS rewritten at the end of parsing (BB_RECIPE_VIRTUAL_PROVIDERS, BitBake handleVirtRecipeProviders): {line}"
     ));
     ds.ovr_cache = OnceLock::new();
+}
+
+/// `getVar("PREFERRED_PROVIDER_<word>")` when set and not empty, with the location of the
+/// last applied operation on it.
+fn preferred_provider(ds: &DataStore, word: &str) -> Option<(super::Value, Option<Loc>)> {
+    let pp = format!("PREFERRED_PROVIDER_{word}");
+    let v = ds.value(&pp).filter(|v| !v.text.is_empty())?;
+    let loc = ds
+        .history(&pp)
+        .into_iter()
+        .filter(|(_, s)| *s == OpStatus::Applied)
+        .map(|(op, _)| op.loc)
+        .next_back();
+    Some((v, loc))
+}
+
+/// The task half of `handleVirtRecipeProviders` (BitBake 2.18.0 `lib/bb/parse/ast.py`): for
+/// every task in `__BBTASKS` (see [`DataStore::tasks`]), `getVarFlag(task, "depends")`
+/// (expanded) is split on whitespace, each entry split with `entry.split(":")` into
+/// `r, t` (anything but exactly one `:` is a python `ValueError`, which fails the parse);
+/// an `r` listed in `BB_RECIPE_VIRTUAL_PROVIDERS` becomes `getVar("PREFERRED_PROVIDER_" +
+/// r)` (no check here: unset gives the text `None`), and the entries joined with single
+/// spaces are stored with `setVarFlag`. Recorded as an operation on the flag of kind
+/// [`OpKind::VirtualProviderRewrite`], when the text changes. Not reproduced: BitBake also
+/// stores `""` on a task without the flag (every reader treats unset and empty alike), and
+/// tasks or flags added by anonymous python are not seen; a flag whose value holds python
+/// or undefined variables is left as it is.
+fn task_depends(ds: &mut DataStore, virt: &[String], recipe: &Loc) {
+    const FLAG: &str = "depends";
+    for task in ds.notes.tasks.clone() {
+        let Some(v) = ds.flag(&task, FLAG) else {
+            continue;
+        };
+        if v.unevaluated_python || !v.unresolved.is_empty() {
+            continue;
+        }
+        let mut out: Vec<String> = Vec::new();
+        let mut rewrites: Vec<String> = Vec::new();
+        let mut at: Option<Loc> = None;
+        let mut failed = false;
+        for entry in v.text.split_whitespace() {
+            let parts: Vec<&str> = entry.split(':').collect();
+            let [r, t] = parts.as_slice() else {
+                Arc::make_mut(&mut ds.notes).references.push(RefIssue {
+                    loc: Some(recipe.clone()),
+                    via: Vec::new(),
+                    kind: "virtual_provider".into(),
+                    text: format!("{task}[{FLAG}]"),
+                    problem: RefProblem::Fatal(format!(
+                        "ValueError in handleVirtRecipeProviders: {task}[{FLAG}] entry {entry:?} is not `recipe:task`"
+                    )),
+                });
+                failed = true;
+                break;
+            };
+            if !virt.iter().any(|w| w == r) {
+                out.push(entry.to_string());
+                continue;
+            }
+            let (new, loc) = match preferred_provider(ds, r) {
+                Some((p, loc)) => (p.text, loc),
+                None => ("None".to_string(), None),
+            };
+            rewrites.push(match &loc {
+                Some(l) => format!("{r} -> {new} (PREFERRED_PROVIDER_{r} at {l})"),
+                None if new == "None" => {
+                    format!("{r} -> None (PREFERRED_PROVIDER_{r} is not set; BitBake writes the text None)")
+                }
+                None => format!("{r} -> {new} (PREFERRED_PROVIDER_{r})"),
+            });
+            at = at.or(loc);
+            out.push(format!("{new}:{t}"));
+        }
+        let text = out.join(" ");
+        if failed || text == v.text {
+            continue;
+        }
+        ds.apply(VarOp {
+            var: VarRef {
+                base: task.clone(),
+                overrides: Vec::new(),
+                flag: Some(FLAG.to_string()),
+                legacy_syntax: false,
+            },
+            op: AssignOp::Set,
+            value: text,
+            loc: at.unwrap_or_else(|| recipe.clone()),
+            via: Vec::new(),
+            kind: OpKind::VirtualProviderRewrite,
+        });
+        let line = if rewrites.is_empty() {
+            "its entries joined by single spaces".to_string()
+        } else {
+            rewrites.join(", ")
+        };
+        Arc::make_mut(&mut ds.notes)
+            .var_notes
+            .entry(task.clone())
+            .or_default()
+            .push(format!(
+                "note: {task}[{FLAG}] rewritten at the end of parsing (BB_RECIPE_VIRTUAL_PROVIDERS, BitBake handleVirtRecipeProviders): {line}"
+            ));
+    }
 }
 
 /// `FILE_LAYERNAME` (`CookerCollectFiles.get_layername`): the collection whose
@@ -1490,7 +1633,27 @@ impl<'a> Replay<'a> {
             "include" => self.include(st, via, file)?,
             "addfragments" => self.add_fragments(st, via)?,
             "export_functions" => self.export_functions(st, via, classname),
-            // addtask, deltask, addhandler: task and handler bookkeeping, not values.
+            // The task list only (`bb.build.addtask` / `deltask`); their `task` and `deps`
+            // flags are not stored.
+            "addtask" => {
+                let names = st.name.clone().unwrap_or_default();
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                for t in names.split_whitespace() {
+                    let t = task_name(t);
+                    if !notes.tasks.contains(&t) {
+                        notes.tasks.push(t);
+                    }
+                }
+            }
+            "deltask" => {
+                let names = self.ds.expand(st.name.as_deref().unwrap_or("")).text;
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                for t in names.split_whitespace() {
+                    let t = task_name(t);
+                    notes.tasks.retain(|x| *x != t);
+                }
+            }
+            // addhandler: handler bookkeeping, not values.
             _ => {}
         }
         Ok(())
@@ -2380,6 +2543,15 @@ impl<'a> Replay<'a> {
             }
             None => Vec::new(),
         }
+    }
+}
+
+/// `bb.build.ensure_task_prefix`.
+fn task_name(name: &str) -> String {
+    if name.starts_with("do_") {
+        name.to_string()
+    } else {
+        format!("do_{name}")
     }
 }
 
