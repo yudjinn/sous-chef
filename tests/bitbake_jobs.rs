@@ -1,0 +1,818 @@
+//! T5.4: background jobs and the `bitbake` tool, against the fake `bitbake` in
+//! `tests/fixtures/fakebb/` (never a real BitBake). Also the connections that waited for
+//! the job table: `log job=...`, `status.job`, and the release-dependent work directory
+//! layout in `bitbake::logs`.
+//!
+//! Each test configures `init_script = tests/fixtures/fakebb/init-with-env`, which sources
+//! the fake `oe-init-build-env` and then `<build>/fakebb.env`; the test writes `FAKEBB_*`
+//! settings there instead of changing the test process environment.
+#![cfg(unix)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+mod common;
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use sous_chef::bitbake::logs::{meta_from_path, meta_from_path_in};
+use sous_chef::bitbake::{JobState, JobTable};
+use sous_chef::config::Config;
+use sous_chef::error::Error;
+use sous_chef::handles::{HandleKind, HandleStore};
+use sous_chef::index::Index;
+use sous_chef::mcp::tools::bitbake::{self, Args, Op, check_destructive, plan};
+use sous_chef::mcp::tools::{log, status};
+use sous_chef::mcp::{Ctx, tool_error_message};
+use sous_chef::release::{Release, ReleaseInfo, ReleaseSource};
+use sous_chef::render::Format;
+use sous_chef::workspace::Workspace;
+
+struct Fixture {
+    _tmp: tempfile::TempDir,
+    _cache: tempfile::TempDir,
+    root: PathBuf,
+    ctx: Ctx,
+}
+
+fn fixture_with(edit: impl FnOnce(&mut Config)) -> Fixture {
+    let (tmp, root) = common::temp_ws();
+    let mut config = common::ws_config(&root);
+    config.bitbake.enabled = true;
+    config.init_script = Some(common::fixture_path("fakebb/init-with-env"));
+    edit(&mut config);
+    let workspace = Workspace::discover(&config).unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let index = Index::open_in(cache.path(), &workspace).unwrap();
+    let handles = HandleStore::open(&index.cache_dir().join("handles")).unwrap();
+    let ctx = Ctx {
+        config,
+        workspace,
+        index: tokio::sync::Mutex::new(index),
+        handles,
+        jobs: JobTable::new(),
+    };
+    Fixture {
+        _tmp: tmp,
+        _cache: cache,
+        root,
+        ctx,
+    }
+}
+
+fn fixture() -> Fixture {
+    fixture_with(|_| {})
+}
+
+impl Fixture {
+    fn build(&self) -> PathBuf {
+        self.ctx.workspace.build_dir.clone().unwrap()
+    }
+
+    /// Settings for the next fake bitbake run.
+    fn fake(&self, vars: &[(&str, &str)]) {
+        let text: String = vars
+            .iter()
+            .map(|(k, v)| format!("export {k}='{v}'\n"))
+            .collect();
+        fs::write(self.build().join("fakebb.env"), text).unwrap();
+    }
+
+    async fn call(&self, args: Args) -> sous_chef::error::Result<String> {
+        bitbake::run(&self.ctx, args).await
+    }
+
+    async fn wait_done(&self, id: &str) {
+        let job = self
+            .ctx
+            .jobs
+            .wait(id, Duration::from_secs(20))
+            .await
+            .unwrap();
+        assert_ne!(job.state, JobState::Running, "{job:?}");
+    }
+}
+
+fn args(op: Op) -> Args {
+    Args {
+        op,
+        target: None,
+        task: None,
+        args: Vec::new(),
+        confirm: false,
+        job: None,
+        budget_tokens: None,
+        format: None,
+    }
+}
+
+fn target(op: Op, t: &str) -> Args {
+    Args {
+        target: Some(t.into()),
+        ..args(op)
+    }
+}
+
+fn with_args(mut a: Args, extra: &[&str]) -> Args {
+    a.args = extra.iter().map(|s| s.to_string()).collect();
+    a
+}
+
+fn status_of(id: Option<&str>) -> Args {
+    Args {
+        job: id.map(str::to_string),
+        ..args(Op::Status)
+    }
+}
+
+fn json(text: &str) -> serde_json::Value {
+    serde_json::from_str(text).unwrap_or_else(|e| panic!("{e}: {text}"))
+}
+
+/// Waits until `path` exists.
+async fn wait_for_file(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "{} never appeared",
+            path.display()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+fn alive(pid: &str) -> bool {
+    // A zombie still has a /proc entry; check its state.
+    fs::read_to_string(format!("/proc/{pid}/stat"))
+        .map(|s| {
+            s.rsplit_once(')')
+                .is_some_and(|(_, rest)| !rest.trim_start().starts_with('Z'))
+        })
+        .unwrap_or(false)
+}
+
+// --- argv ------------------------------------------------------------------------------
+
+#[test]
+fn argv_for_each_operation() {
+    let f = fixture();
+    let ws = &f.ctx.workspace;
+    let cfg = &f.ctx.config;
+    let argv = |a: Args| {
+        let p = plan(cfg, ws, &a).unwrap();
+        (p.spec.command_line(), p.destructive, p.spec.kind)
+    };
+    assert_eq!(
+        argv(target(Op::Build, "core-image-minimal")),
+        (
+            "bitbake core-image-minimal".into(),
+            false,
+            HandleKind::Build
+        )
+    );
+    assert_eq!(
+        argv(with_args(target(Op::Build, "hello"), &["continue"])).0,
+        "bitbake -k hello"
+    );
+    let mut t = with_args(target(Op::Task, "hello"), &["force"]);
+    t.task = Some("do_compile".into());
+    assert_eq!(argv(t).0, "bitbake -c compile -f hello");
+    let mut t = target(Op::Task, "hello");
+    t.task = Some("install".into());
+    assert_eq!(argv(t).0, "bitbake -c install hello");
+    assert_eq!(
+        argv(args(Op::Env)),
+        ("bitbake -e".into(), false, HandleKind::Env)
+    );
+    assert_eq!(argv(target(Op::Env, "hello")).0, "bitbake -e hello");
+    assert_eq!(
+        argv(target(Op::Clean, "hello")),
+        ("bitbake -c clean hello".into(), false, HandleKind::Build)
+    );
+    assert_eq!(
+        argv(with_args(target(Op::Clean, "hello"), &["cleansstate"])),
+        (
+            "bitbake -c cleansstate hello".into(),
+            true,
+            HandleKind::Build
+        )
+    );
+    assert!(argv(with_args(target(Op::Clean, "hello"), &["cleanall"])).1);
+    assert_eq!(
+        argv(with_args(args(Op::Devtool), &["status"])).0,
+        "devtool status"
+    );
+    for (sub, destructive) in [("modify", false), ("build", false), ("reset", true)] {
+        assert_eq!(
+            argv(with_args(target(Op::Devtool, "hello"), &[sub])),
+            (
+                format!("devtool {sub} hello"),
+                destructive,
+                HandleKind::Build
+            )
+        );
+    }
+    assert_eq!(
+        argv(with_args(
+            target(Op::Devtool, "hello"),
+            &["finish", "meta-mine"]
+        )),
+        (
+            "devtool finish hello meta-mine".into(),
+            true,
+            HandleKind::Build
+        )
+    );
+    assert_eq!(
+        argv(args(Op::Layers)),
+        ("bitbake-layers show-layers".into(), false, HandleKind::Text)
+    );
+    assert_eq!(
+        argv(with_args(target(Op::Layers, "hello"), &["show-recipes"])).0,
+        "bitbake-layers show-recipes hello"
+    );
+    assert_eq!(
+        argv(with_args(args(Op::Layers), &["show-appends"])).0,
+        "bitbake-layers show-appends"
+    );
+    assert_eq!(
+        argv(with_args(args(Op::Layers), &["show-overlayed"])).0,
+        "bitbake-layers show-overlayed"
+    );
+
+    // Refused: unknown arguments, missing targets, wrong shapes.
+    for bad in [
+        args(Op::Build),
+        with_args(target(Op::Build, "hello"), &["-f"]),
+        with_args(target(Op::Build, "hello"), &["force"]),
+        target(Op::Task, "hello"),
+        with_args(target(Op::Env, "hello"), &["continue"]),
+        with_args(target(Op::Clean, "hello"), &["clean", "cleanall"]),
+        with_args(target(Op::Clean, "hello"), &["distclean"]),
+        target(Op::Devtool, "hello"),
+        with_args(target(Op::Devtool, "hello"), &["add"]),
+        with_args(target(Op::Devtool, "hello"), &["status"]),
+        with_args(target(Op::Devtool, "hello"), &["modify", "/src/tree"]),
+        with_args(args(Op::Devtool), &["reset"]),
+        with_args(target(Op::Devtool, "hello"), &["finish"]),
+        with_args(target(Op::Layers, "hello"), &["show-layers"]),
+        with_args(args(Op::Layers), &["add-layer"]),
+    ] {
+        assert!(
+            matches!(plan(cfg, ws, &bad), Err(Error::Invalid { .. })),
+            "{bad:?}"
+        );
+    }
+    // devtool finish: the destination must be a known, writable layer.
+    let e = plan(
+        cfg,
+        ws,
+        &with_args(target(Op::Devtool, "hello"), &["finish", "meta-core"]),
+    )
+    .unwrap_err();
+    assert!(e.to_string().contains("not writable"), "{e}");
+    let e = plan(
+        cfg,
+        ws,
+        &with_args(target(Op::Devtool, "hello"), &["finish", "meta-nope"]),
+    )
+    .unwrap_err();
+    assert!(matches!(e, Error::NotFound { .. }), "{e}");
+}
+
+#[tokio::test]
+async fn unsafe_names_are_rejected_before_anything_runs() {
+    let f = fixture();
+    let marker = f.root.join("pwned");
+    let bad_targets = [
+        "hello;touch pwned".to_string(),
+        "$(touch pwned)".to_string(),
+        "`touch pwned`".to_string(),
+        "-k".to_string(),
+        "--help".to_string(),
+        "a b".to_string(),
+        "a:b".to_string(),
+    ];
+    for t in &bad_targets {
+        for op in [Op::Build, Op::Task, Op::Env, Op::Clean] {
+            let mut a = target(op, t);
+            a.task = Some("compile".into());
+            let e = f.call(a).await.unwrap_err();
+            assert!(matches!(e, Error::Invalid { .. }), "{op:?} {t}: {e}");
+        }
+        let e = f
+            .call(with_args(target(Op::Devtool, t), &["modify"]))
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Error::Invalid { .. }), "devtool {t}: {e}");
+        let e = f
+            .call(with_args(target(Op::Layers, t), &["show-recipes"]))
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Error::Invalid { .. }), "layers {t}: {e}");
+    }
+    for task in ["-f", "compile;id", "$(id)", "do_compile x"] {
+        let mut a = target(Op::Task, "hello");
+        a.task = Some(task.into());
+        assert!(f.call(a).await.is_err(), "{task}");
+    }
+    let e = f
+        .call(with_args(
+            target(Op::Devtool, "hello"),
+            &["finish", "meta-mine;id"],
+        ))
+        .await
+        .unwrap_err();
+    assert!(matches!(e, Error::Invalid { .. }), "{e}");
+    assert!(f.ctx.jobs.list().is_empty(), "a process was started");
+    assert!(!marker.exists());
+}
+
+// --- builds ----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn successful_build() {
+    let f = fixture();
+    f.fake(&[("FAKEBB_STDERR", "NOTE: Tasks Summary: all succeeded")]);
+    let out = f.call(target(Op::Build, "hello")).await.unwrap();
+    assert!(out.contains("job\tjob:1\n"), "{out}");
+    assert!(out.contains("state\trunning\n"), "{out}");
+    assert!(out.contains("command\tbitbake hello\n"), "{out}");
+    assert!(out.contains("op=status job=job:1"), "{out}");
+    f.wait_done("job:1").await;
+
+    let out = f.call(status_of(None)).await.unwrap();
+    assert!(out.contains("state\tsucceeded\n"), "{out}");
+    assert!(out.contains("exit\t0\n"), "{out}");
+    assert!(
+        out.contains("tail\tNOTE: Tasks Summary: all succeeded"),
+        "{out}"
+    );
+    assert!(out.contains("slice handle=h:"), "{out}");
+
+    let v = json(
+        &f.call(Args {
+            format: Some(Format::Json),
+            ..status_of(Some("1"))
+        })
+        .await
+        .unwrap(),
+    );
+    assert_eq!(v["job"]["state"], "succeeded");
+    assert_eq!(v["job"]["op"], "build");
+    assert_eq!(v["job"]["target"], "hello");
+    assert_eq!(v["job"]["kind"], "build");
+    let handle: sous_chef::handles::Handle = v["job"]["handle"].as_str().unwrap().parse().unwrap();
+    let stored = String::from_utf8(f.ctx.handles.get(&handle).unwrap()).unwrap();
+    // stdout and stderr both land in the output; the build ran in the build directory.
+    assert!(stored.contains("fakebb: bitbake\n"), "{stored}");
+    assert!(stored.contains("arg: hello\n"), "{stored}");
+    assert!(stored.contains("argc: 1\n"), "{stored}");
+    assert!(
+        stored.contains(&format!("cwd: {}", f.build().display())),
+        "{stored}"
+    );
+    assert!(stored.contains("all succeeded"), "{stored}");
+    // The output file is gone once the handle holds it.
+    let job = f.ctx.jobs.get("job:1").unwrap();
+    assert!(!job.output.exists());
+    assert!(v["digest"].is_null());
+}
+
+/// The recorded console output of a failing `do_compile`, with its paths moved into the
+/// temporary workspace, and the task log it names in place.
+fn recorded_failure(f: &Fixture, with_task_log: bool) -> PathBuf {
+    let text = fs::read_to_string(common::fixture_path("outputs/bitbake-hello-compile.out"))
+        .unwrap()
+        .replace("/home/builder/poky", &f.root.display().to_string());
+    let out = f.root.join("console.out");
+    fs::write(&out, text).unwrap();
+    if with_task_log {
+        let temp = f
+            .build()
+            .join("tmp/work/core2-64-poky-linux/hello/1.0/temp");
+        fs::create_dir_all(&temp).unwrap();
+        for name in ["log.do_compile.48213", "run.do_compile.48213"] {
+            let text = fs::read_to_string(common::fixture_path(&format!("outputs/{name}")))
+                .unwrap()
+                .replace("/home/builder/poky", &f.root.display().to_string());
+            fs::write(temp.join(name), text).unwrap();
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn failing_build_digest_and_log_job() {
+    let f = fixture();
+    let console = recorded_failure(&f, true);
+    f.fake(&[
+        ("FAKEBB_OUTPUT", &console.display().to_string()),
+        ("FAKEBB_EXIT", "1"),
+    ]);
+    f.call(target(Op::Build, "hello")).await.unwrap();
+    f.wait_done("job:1").await;
+
+    let out = f.call(status_of(Some("job:1"))).await.unwrap();
+    assert!(out.contains("state\tfailed\n"), "{out}");
+    assert!(out.contains("exit\t1\n"), "{out}");
+    // The digest of the console output names the failing task and the first error.
+    assert!(out.contains("recipe\thello"), "{out}");
+    assert!(out.contains("task\tdo_compile"), "{out}");
+    assert!(out.contains("oe_runmake failed"), "{out}");
+    assert!(out.contains("handle\th:"), "{out}");
+    assert!(out.contains("log job=job:1"), "{out}");
+    assert!(out.len() < 2048, "{}", out.len());
+
+    let v = json(
+        &f.call(Args {
+            format: Some(Format::Json),
+            ..status_of(None)
+        })
+        .await
+        .unwrap(),
+    );
+    assert_eq!(v["job"]["state"], "failed");
+    assert_eq!(v["job"]["exit_code"], 1);
+    assert_eq!(v["digest"]["meta"]["task"], "do_compile");
+    let job_handle = v["job"]["handle"].as_str().unwrap().to_string();
+
+    // log job=...: the task log named in the output, digested as usual.
+    let la = |task: Option<&str>| log::Args {
+        recipe: None,
+        task: task.map(str::to_string),
+        job: Some("job:1".into()),
+        budget_tokens: None,
+        format: None,
+    };
+    let out = log::run(&f.ctx, la(None)).await.unwrap();
+    assert!(out.contains("task\tdo_compile"), "{out}");
+    assert!(out.contains("log.do_compile.48213"), "{out}");
+    assert!(
+        !out.contains(&job_handle),
+        "the task log has its own handle: {out}"
+    );
+    assert!(out.contains("slice handle=h:"), "{out}");
+    // A task filter that matches no named log falls back to the console output.
+    let out = log::run(&f.ctx, la(Some("install"))).await.unwrap();
+    assert!(out.contains(&job_handle), "{out}");
+    assert!(out.contains("names no task log"), "{out}");
+    // Unknown job.
+    let mut a = la(None);
+    a.job = Some("job:9".into());
+    let e = log::run(&f.ctx, a).await.unwrap_err();
+    assert!(matches!(e, Error::NotFound { .. }), "{e}");
+}
+
+#[tokio::test]
+async fn log_job_without_a_readable_task_log_digests_the_output() {
+    let f = fixture();
+    let console = recorded_failure(&f, false);
+    f.fake(&[
+        ("FAKEBB_OUTPUT", &console.display().to_string()),
+        ("FAKEBB_EXIT", "1"),
+    ]);
+    f.call(target(Op::Build, "hello")).await.unwrap();
+    f.wait_done("job:1").await;
+    let out = log::run(
+        &f.ctx,
+        log::Args {
+            recipe: None,
+            task: None,
+            job: Some("1".into()),
+            budget_tokens: None,
+            format: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(out.contains("is not readable"), "{out}");
+    assert!(out.contains("task\tdo_compile"), "{out}");
+    assert!(out.contains("oe_runmake failed"), "{out}");
+}
+
+// --- running, status, cancel -----------------------------------------------------------
+
+#[tokio::test]
+async fn status_while_running_then_cancel() {
+    let f = fixture();
+    let pidfile = f.root.join("fake.pids");
+    f.fake(&[
+        ("FAKEBB_SLEEP", "60"),
+        ("FAKEBB_PIDFILE", &pidfile.display().to_string()),
+        ("FAKEBB_STDERR", "NOTE: Executing Tasks"),
+    ]);
+    let mut a = target(Op::Task, "hello");
+    a.task = Some("compile".into());
+    f.call(a).await.unwrap();
+    wait_for_file(&pidfile).await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+
+    let out = f.call(status_of(None)).await.unwrap();
+    assert!(out.contains("state\trunning\n"), "{out}");
+    assert!(out.contains("op\ttask\n"), "{out}");
+    assert!(out.contains("command\tbitbake -c compile hello\n"), "{out}");
+    assert!(out.contains("tail\tNOTE: Executing Tasks"), "{out}");
+    assert!(!out.contains("elapsed\t0s"), "{out}");
+
+    // The `status` tool reports the running job.
+    let v = json(
+        &status::run(
+            &f.ctx,
+            status::Args {
+                budget_tokens: None,
+                format: Some(Format::Json),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let job = v["job"].as_str().unwrap();
+    assert!(job.starts_with("job:1 task hello running "), "{job}");
+    assert!(job.ends_with('s'), "{job}");
+    // log job= refuses a running job.
+    let e = log::run(
+        &f.ctx,
+        log::Args {
+            recipe: None,
+            task: None,
+            job: Some("job:1".into()),
+            budget_tokens: None,
+            format: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(e.to_string().contains("still running"), "{e}");
+
+    let pids = fs::read_to_string(&pidfile).unwrap();
+    let pids: Vec<&str> = pids.split_whitespace().collect();
+    assert!(pids.iter().all(|p| alive(p)), "{pids:?}");
+
+    let started = Instant::now();
+    let out = f.call(args(Op::Cancel)).await.unwrap();
+    assert!(out.contains("state\tcancelled\n"), "{out}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    // The whole group is gone: the fake and its sleep child.
+    for p in &pids {
+        assert!(!alive(p), "pid {p} survived the cancel");
+    }
+    let job = f.ctx.jobs.get("job:1").unwrap();
+    assert_eq!(job.state, JobState::Cancelled);
+    assert!(job.ended.is_some() && job.handle.is_some());
+
+    // After the cancel nothing is running.
+    let v = json(
+        &status::run(
+            &f.ctx,
+            status::Args {
+                budget_tokens: None,
+                format: Some(Format::Json),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    assert!(v["job"].is_null());
+    let e = f.call(args(Op::Cancel)).await.unwrap_err();
+    assert!(e.to_string().contains("no job is running"), "{e}");
+    let e = f.call(status_of(Some("job:1"))).await.unwrap();
+    assert!(e.contains("state\tcancelled"), "{e}");
+    let e = f
+        .call(Args {
+            job: Some("job:1".into()),
+            ..args(Op::Cancel)
+        })
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("not running"), "{e}");
+}
+
+#[tokio::test]
+async fn cancel_kills_a_job_that_ignores_sigterm() {
+    let f = fixture();
+    let pidfile = f.root.join("fake.pids");
+    f.fake(&[
+        ("FAKEBB_SLEEP", "60"),
+        ("FAKEBB_PIDFILE", &pidfile.display().to_string()),
+        ("FAKEBB_IGNORE_TERM", "1"),
+    ]);
+    f.call(target(Op::Build, "hello")).await.unwrap();
+    wait_for_file(&pidfile).await;
+    let pids = fs::read_to_string(&pidfile).unwrap();
+    let out = f.call(args(Op::Cancel)).await.unwrap();
+    assert!(out.contains("state\tcancelled\n"), "{out}");
+    for p in pids.split_whitespace() {
+        assert!(!alive(p), "pid {p} survived");
+    }
+}
+
+#[tokio::test]
+async fn one_job_at_a_time() {
+    let f = fixture();
+    let pidfile = f.root.join("fake.pids");
+    f.fake(&[
+        ("FAKEBB_SLEEP", "60"),
+        ("FAKEBB_PIDFILE", &pidfile.display().to_string()),
+    ]);
+    f.call(target(Op::Build, "hello")).await.unwrap();
+    wait_for_file(&pidfile).await;
+
+    // A second build, a task, env and layers all get the running job back.
+    let mut task = target(Op::Task, "libfoo");
+    task.task = Some("compile".into());
+    for a in [
+        target(Op::Build, "core-image-minimal"),
+        task,
+        target(Op::Clean, "hello"),
+        args(Op::Env),
+        args(Op::Layers),
+    ] {
+        let out = f.call(a).await.unwrap();
+        assert!(out.contains("job\tjob:1\n"), "{out}");
+        assert!(out.contains("already running"), "{out}");
+        assert!(out.contains("target\thello\n"), "{out}");
+    }
+    assert_eq!(f.ctx.jobs.list().len(), 1);
+
+    f.call(args(Op::Cancel)).await.unwrap();
+    // Once it has ended, env and layers run (one after the other).
+    f.fake(&[]);
+    let out = f.call(target(Op::Env, "hello")).await.unwrap();
+    assert!(out.contains("job\tjob:2\n"), "{out}");
+    f.wait_done("job:2").await;
+    let v = json(
+        &f.call(Args {
+            format: Some(Format::Json),
+            ..status_of(None)
+        })
+        .await
+        .unwrap(),
+    );
+    assert_eq!(v["job"]["kind"], "env");
+    assert_eq!(v["job"]["command"], "bitbake -e hello");
+    assert!(v["notes"][0].as_str().unwrap().contains("var=NAME"), "{v}");
+    let out = f
+        .call(with_args(args(Op::Layers), &["show-layers"]))
+        .await
+        .unwrap();
+    assert!(out.contains("job\tjob:3\n"), "{out}");
+    f.wait_done("job:3").await;
+    let job = f.call(status_of(None)).await.unwrap();
+    assert!(
+        job.contains("command\tbitbake-layers show-layers\n"),
+        "{job}"
+    );
+    assert!(job.contains("state\tsucceeded\n"), "{job}");
+    assert_eq!(f.ctx.jobs.get("job:3").unwrap().kind, HandleKind::Text);
+}
+
+// --- destructive gates -----------------------------------------------------------------
+
+#[tokio::test]
+async fn destructive_operations_need_confirm_and_config() {
+    let cases: [(&str, Args); 4] = [
+        (
+            "bitbake -c cleansstate hello",
+            with_args(target(Op::Clean, "hello"), &["cleansstate"]),
+        ),
+        (
+            "bitbake -c cleanall hello",
+            with_args(target(Op::Clean, "hello"), &["cleanall"]),
+        ),
+        (
+            "devtool reset hello",
+            with_args(target(Op::Devtool, "hello"), &["reset"]),
+        ),
+        (
+            "devtool finish hello meta-mine",
+            with_args(target(Op::Devtool, "hello"), &["finish", "meta-mine"]),
+        ),
+    ];
+
+    // Not allowed in the configuration (the default).
+    let f = fixture();
+    for (cmd, a) in &cases {
+        let e = f.call(a.clone()).await.unwrap_err();
+        let msg = e.to_string();
+        assert!(msg.contains("confirm: true"), "{msg}");
+        assert!(msg.contains("allow_destructive"), "{msg}");
+        let e = f
+            .call(Args {
+                confirm: true,
+                ..a.clone()
+            })
+            .await
+            .unwrap_err();
+        let msg = tool_error_message("bitbake", &e);
+        assert!(msg.contains(cmd), "{msg}");
+        assert!(msg.contains("allow_destructive = true"), "{msg}");
+        assert!(msg.contains("[bitbake]"), "{msg}");
+    }
+    // `clean` itself is not destructive.
+    assert!(
+        check_destructive(
+            &f.ctx.config,
+            &plan(&f.ctx.config, &f.ctx.workspace, &target(Op::Clean, "hello")).unwrap(),
+            false
+        )
+        .is_ok()
+    );
+    assert!(f.ctx.jobs.list().is_empty());
+
+    // Allowed in the configuration: confirm is still required, then the job runs.
+    let f = fixture_with(|c| c.bitbake.allow_destructive = true);
+    for (n, (cmd, a)) in cases.iter().enumerate() {
+        let e = f.call(a.clone()).await.unwrap_err();
+        assert!(e.to_string().contains("confirm: true"), "{e}");
+        let out = f
+            .call(Args {
+                confirm: true,
+                ..a.clone()
+            })
+            .await
+            .unwrap();
+        let id = format!("job:{}", n + 1);
+        assert!(out.contains(&format!("job\t{id}\n")), "{out}");
+        assert!(out.contains(&format!("command\t{cmd}\n")), "{out}");
+        f.wait_done(&id).await;
+    }
+    assert_eq!(f.ctx.jobs.list().len(), 4);
+}
+
+#[tokio::test]
+async fn no_environment_is_an_error() {
+    let f = fixture_with(|c| c.bitbake.enabled = false);
+    let e = f.call(target(Op::Build, "hello")).await.unwrap_err();
+    assert!(e.to_string().contains("enabled = false"), "{e}");
+    let e = f.call(status_of(None)).await.unwrap_err();
+    assert!(matches!(e, Error::NotFound { .. }), "{e}");
+}
+
+// --- release-dependent work directory layout --------------------------------------------
+
+#[test]
+fn version_directory_follows_the_release() {
+    let ws = |release| Workspace {
+        release: ReleaseInfo {
+            release,
+            source: ReleaseSource::Config,
+            note: None,
+        },
+        ..Workspace::default()
+    };
+    let kirkstone = ws(Release::Kirkstone);
+    let mickledore = ws(Release::Mickledore);
+    let nanbield = ws(Release::Nanbield);
+    let wrynose = ws(Release::Wrynose);
+
+    let old = Path::new("/b/tmp/work/core2-64-poky-linux/hello/1.0-r0/temp/log.do_compile.1");
+    let m = meta_from_path_in(old, Some(&kirkstone));
+    assert_eq!(m.recipe.as_deref(), Some("hello"));
+    assert_eq!(m.version.as_deref(), Some("1.0"));
+    assert_eq!(m.task.as_deref(), Some("do_compile"));
+    assert_eq!(
+        meta_from_path_in(old, Some(&mickledore)).version.as_deref(),
+        Some("1.0")
+    );
+    // With EXTENDPE (`${PE}_`).
+    let pe = Path::new("/b/tmp/work/x86_64-linux/foo/2_1.2.3-r5/temp/log.do_install");
+    assert_eq!(
+        meta_from_path_in(pe, Some(&kirkstone)).version.as_deref(),
+        Some("1.2.3")
+    );
+    // From nanbield the directory is PV, taken as it is.
+    let new = Path::new("/b/tmp/work/core2-64-poky-linux/hello/1.0/temp/log.do_compile.1");
+    assert_eq!(
+        meta_from_path_in(new, Some(&nanbield)).version.as_deref(),
+        Some("1.0")
+    );
+    assert_eq!(
+        meta_from_path_in(new, Some(&wrynose)).version.as_deref(),
+        Some("1.0")
+    );
+    let git = Path::new("/b/tmp/work/core2-64-poky-linux/foo/1.0+git-r0/temp/log.do_fetch");
+    assert_eq!(
+        meta_from_path_in(git, Some(&wrynose)).version.as_deref(),
+        Some("1.0+git-r0")
+    );
+    assert_eq!(
+        meta_from_path_in(git, Some(&kirkstone)).version.as_deref(),
+        Some("1.0+git")
+    );
+    // No workspace: lexical, as before.
+    assert_eq!(meta_from_path(old).version.as_deref(), Some("1.0-r0"));
+    assert_eq!(
+        meta_from_path_in(old, None).version.as_deref(),
+        Some("1.0-r0")
+    );
+    // The digest uses the workspace release.
+    let d = sous_chef::bitbake::logs::digest(&sous_chef::bitbake::logs::DigestInput {
+        text: "ERROR: oe_runmake failed\n",
+        log_path: Some(old),
+        ws: Some(&kirkstone),
+        ..Default::default()
+    });
+    assert_eq!(d.meta.version.as_deref(), Some("1.0"));
+}

@@ -51,7 +51,8 @@ pub struct Report {
     pub files: BTreeMap<String, u32>,
     pub index: IndexStatus,
     pub bitbake: BitbakeStatus,
-    /// The running background job, if any.
+    /// The running background job, if any, as `<id> <op> [<target>] running <elapsed>s`
+    /// ([`job_line`]).
     pub job: Option<String>,
 }
 
@@ -132,10 +133,18 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         report.bitbake.env_build_dir = Some(env.build_dir.display().to_string());
         report.bitbake.init_script = env.init_script.map(|p| p.display().to_string());
     }
-    // The job table has no query API yet (T5.4); until then no job is ever reported.
-    report.job = None;
+    report.job = ctx.jobs.running().map(|j| job_line(&j));
 
     output(&report, freshness, &args, ctx.config.output.budget_tokens)
+}
+
+/// The running job as one line: `job:3 build core-image-minimal running 42s`.
+pub fn job_line(j: &crate::bitbake::JobInfo) -> String {
+    let mut parts = vec![j.id.clone(), j.op.clone()];
+    parts.extend(j.target.clone());
+    parts.push(j.state.as_str().to_string());
+    parts.push(format!("{}s", j.elapsed_secs));
+    parts.join(" ")
 }
 
 /// `status` when the server has no context: same shape, with `startup_error` set.
