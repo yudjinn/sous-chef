@@ -892,15 +892,23 @@ it. Each `.bb` keeps the rest in its order, with `require <pn>.inc` where the fi
 statement was. Notes list what each version keeps and name other versions of the recipe
 that are not changed.
 
-The plan is refused (no files; the notes say why) when the move could change what BitBake
-parses: a statement that stays in a `.bb` would come after a moved one it does not commute
-with (they set a common variable or flag, or one expands immediately, with `:=` or in
-`inherit` / `include`, what the other sets, the classes and files an `inherit` / `require`
-pulls in counted as part of it), or a moved statement expands `FILE`, `PN`, `PV`, `BPN`,
-`BP`, `P` or `PF` immediately (inside the `.inc`, `FILE` is the `.inc`). Also refused:
-versions in different directories, an existing `<pn>.inc`, a version that does not parse
-cleanly, versions with nothing in common. This check is static (the order of statements and
-what they reference); the result is not evaluated to confirm the values are unchanged.
+The plan is refused (no files; the notes say why) when the move would change what BitBake
+parses. Every version is evaluated as it is and with the planned files in memory (nothing
+is written): any difference in a final value, a flag, a function's pieces, the anonymous
+python or the `addtask` / `deltask` / `addhandler` order refuses the split, and the notes
+name each variable with both values (`greet_1.0.bb: GREET_FLAGS would change from "--old
+--shared" to "--old"`). A static check runs first and finds the possible problems: a
+statement that stays in a `.bb` would come after a moved one it does not commute with (they
+set a common variable or flag, or one expands immediately, with `:=` or in `inherit` /
+`include`, what the other sets, the classes and files an `inherit` / `require` pulls in
+counted as part of it), or a moved statement expands `FILE`, `PN`, `PV`, `BPN`, `BP`, `P`
+or `PF` immediately (inside the `.inc`, `FILE` is the `.inc`). Those that involve python
+(which the evaluator does not run, so it cannot see the change) or a file that cannot be
+read refuse the split on their own; the others are listed after the evaluated changes when
+there are some, and otherwise do not stop the split (a note says the static check could not
+prove it safe and the evaluation shows no change). Also refused: versions in different
+directories, an existing `<pn>.inc`, a version that does not parse cleanly, versions with
+nothing in common.
 
 Two versions of `greet` (`tests/snapshots/scaffold_inc_split__inc_split_clean.snap`; the
 `.inc` and `greet_1.1.bb` cut here):
@@ -925,6 +933,8 @@ Refused (`inc_split_refused_order.snap`):
 ```
 note: nothing planned: the split is not safe or not possible
 note: the split would change what BitBake parses for greet_1.1.bb and greet_1.0.bb:
+note: greet_1.1.bb: GREET_FLAGS would change from "--new --shared" to "--new"
+note: greet_1.0.bb: GREET_FLAGS would change from "--old --shared" to "--old"
 note: meta-mine:recipes-app/greet/greet_1.1.bb:20 `GREET_FLAGS +=` would move into the .inc, ahead of meta-mine:recipes-app/greet/greet_1.1.bb:19 `GREET_FLAGS =`, which stays in the .bb: both set GREET_FLAGS
 note: meta-mine:recipes-app/greet/greet_1.0.bb:19 `GREET_FLAGS +=` would move into the .inc, ahead of meta-mine:recipes-app/greet/greet_1.0.bb:18 `GREET_FLAGS =`, which stays in the .bb: both set GREET_FLAGS
 note: make these statements the same in every version, or reorder them by hand, then re-run

@@ -1701,6 +1701,16 @@ What `src/scaffold/inc_split.rs` relies on, all from rules already recorded abov
   against the sous-chef evaluator, which models flags the same way.
 - `addtask` / `deltask` are not replayed; their relative order is kept by the generator (all
   of them count as touching the task list).
+- (w8) The plan evaluates every version before and after the split, the planned files held
+  in memory (`eval::evaluate_with_overlay`; the configuration cache and the index are not
+  changed), and is refused when any final value, flag, function piece text, anonymous python
+  text or `addtask` / `deltask` / `addhandler` statement order differs; the notes name the
+  variables. The static order and `FILE` analysis above runs first: the cases it finds that
+  involve python (an immediate expansion that reaches `${@...}`, which the evaluator leaves
+  unexpanded both times) or a file it cannot read refuse the split on their own; the others
+  are only explanations, and a split they would have refused is made when the evaluation
+  shows no change (`:append` reordered past a version's own `=`: `:append` is applied at
+  the end of parsing, "Overrides").
 
 ## OE-core checks and defaults used by lint
 

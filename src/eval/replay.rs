@@ -68,7 +68,7 @@ use sha2::{Digest, Sha256};
 
 use super::datastore::{Content, OpKind, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
-use super::{DataStore, FileVisit, OpStatus, Target, VarOp};
+use super::{DataStore, FileVisit, OpStatus, Overlay, Target, VarOp};
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
 use crate::index::{self, Index};
@@ -128,6 +128,10 @@ pub struct ReplayNotes {
     /// Names with `${...}` that `expand_keys` could not expand (python or undefined
     /// variables); they stay under their written name.
     pub incomplete_keys: Vec<String>,
+    /// Paths probed for an `include` / `require` / `include_all` that held no file (absolute,
+    /// normalised): a file created there would have been read. See [`super::Overlay`].
+    #[serde(skip)]
+    pub(crate) probed_missing: BTreeSet<PathBuf>,
     /// `__inherit_cache`: class files already parsed (absolute paths).
     #[serde(skip)]
     pub(crate) inherit_cache: Vec<PathBuf>,
@@ -347,25 +351,87 @@ pub fn evaluate_with(
     ws: &Workspace,
     target: &Target,
 ) -> Result<DataStore> {
+    evaluate_inner(cache, index, ws, target, None)
+}
+
+/// [`evaluate_with`] with some files replaced by in-memory contents ([`Overlay`]): wherever
+/// the replay reads a file's statements, an overlay path is read from the overlay instead,
+/// and an overlay path that is not indexed counts as an existing file. Nothing is written;
+/// the index is only read; `cache` is used for the configuration pass only when no overlay
+/// path could have changed it (see [`Overlay`]), and is never filled from an overlay
+/// evaluation.
+///
+/// A recipe target must still name an indexed recipe (its contents may be replaced). For a
+/// recipe *name*, the version is chosen without the overlay (`providers.rs`), then the chosen
+/// file is evaluated with it. bbappends are the indexed ones of the recipe.
+pub fn evaluate_overlay_with(
+    cache: &ConfigCache,
+    index: &Index,
+    ws: &Workspace,
+    target: &Target,
+    overlay: &Overlay,
+) -> Result<DataStore> {
+    evaluate_inner(cache, index, ws, target, Some(overlay))
+}
+
+fn evaluate_inner(
+    cache: &ConfigCache,
+    index: &Index,
+    ws: &Workspace,
+    target: &Target,
+    overlay: Option<&Overlay>,
+) -> Result<DataStore> {
+    let overlay = overlay.filter(|o| !o.is_empty());
     let files = Files::load(index, ws)?;
     let Some(name) = &target.recipe else {
-        return configuration(cache, index, ws, &files, target);
+        return configuration(cache, index, ws, &files, target, overlay);
     };
     // A path is resolved before the configuration pass; a recipe name needs it, because
     // the choice of file reads PREFERRED_VERSION (providers.rs).
     if let Some(r) = find_recipe_file(index, ws, name)? {
-        let config = configuration(cache, index, ws, &files, target)?;
-        return recipe_pass(index, ws, &files, &config, &r);
+        let config = configuration(cache, index, ws, &files, target, overlay)?;
+        return recipe_pass(index, ws, &files, &config, &r, overlay);
     }
-    let config = configuration(cache, index, ws, &files, target)?;
+    let config = configuration(cache, index, ws, &files, target, overlay)?;
     let version = target.version.as_deref();
     let chosen = super::providers::Providers::with_config(cache, index, ws, target, config.fork())?
         .best_version(name, version)?
         .ok_or_else(|| recipe_not_found(name, version))?;
-    recipe_pass(index, ws, &files, &config, &chosen.recipe.file)
+    recipe_pass(index, ws, &files, &config, &chosen.recipe.file, overlay)
 }
 
+/// The configuration pass: the cached one, unless an overlay path could have changed it
+/// (a `.conf` or `.bbclass`, a file it visited, a path it probed and found empty), in which
+/// case it is replayed with the overlay and not cached.
 fn configuration(
+    cache: &ConfigCache,
+    index: &Index,
+    ws: &Workspace,
+    files: &Files,
+    target: &Target,
+    overlay: Option<&Overlay>,
+) -> Result<DataStore> {
+    let config = cached_configuration(cache, index, ws, files, target)?;
+    let Some(o) = overlay else {
+        return Ok(config);
+    };
+    let touched = o.paths().any(|p| {
+        matches!(
+            FileKind::from_path(p),
+            Some(FileKind::Conf) | Some(FileKind::Class)
+        ) || config.notes.probed_missing.contains(p)
+            || config
+                .files()
+                .iter()
+                .any(|v| ws.abs_path(&v.loc).is_some_and(|a| normalize(&a) == p))
+    });
+    if !touched {
+        return Ok(config);
+    }
+    config_pass(index, ws, files, target, overlay)
+}
+
+fn cached_configuration(
     cache: &ConfigCache,
     index: &Index,
     ws: &Workspace,
@@ -383,7 +449,7 @@ fn configuration(
     {
         return Ok(e.ds.fork());
     }
-    let ds = config_pass(index, ws, files, target)?;
+    let ds = config_pass(index, ws, files, target, None)?;
     cache.passes.fetch_add(1, Ordering::Relaxed);
     let fingerprint = files.fingerprint(ds.files());
     cache.lock().insert(
@@ -430,6 +496,9 @@ fn find_recipe_file(index: &Index, ws: &Workspace, name: &str) -> Result<Option<
 // ---------------------------------------------------------------------------------------
 // Indexed files
 // ---------------------------------------------------------------------------------------
+
+/// `(layer, path, kind, statements)` of a file the replay reads.
+type FileStatements = (String, PathBuf, FileKind, Vec<StatementRow>);
 
 #[derive(Debug, Clone)]
 struct FileInfo {
@@ -526,7 +595,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 /// Lexical normalisation (`.` and `..` removed).
-fn normalize(p: &Path) -> PathBuf {
+pub(crate) fn normalize(p: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in p.components() {
         match c {
@@ -544,7 +613,13 @@ fn normalize(p: &Path) -> PathBuf {
 // The two passes
 // ---------------------------------------------------------------------------------------
 
-fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) -> Result<DataStore> {
+fn config_pass(
+    index: &Index,
+    ws: &Workspace,
+    files: &Files,
+    target: &Target,
+    overlay: Option<&Overlay>,
+) -> Result<DataStore> {
     let mut pins = Vec::new();
     if let Some(m) = &target.machine {
         pins.push(("MACHINE", m.clone()));
@@ -553,6 +628,7 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
         pins.push(("DISTRO", d.clone()));
     }
     let mut r = Replay::new(index, ws, files, DataStore::new(), true, false, pins);
+    r.overlay = overlay;
     for (name, value) in r.pins.clone() {
         put(&mut r.ds, name, &value);
     }
@@ -568,7 +644,7 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
             put(&mut r.ds, "BBPATH", &build.to_string_lossy());
         }
         let bblayers = normalize(&build.join("conf/bblayers.conf"));
-        if r.files.by_abs.contains_key(&bblayers) {
+        if r.exists(&bblayers) {
             r.visit(&bblayers, FileKind::Conf, Vec::new(), true)?;
         }
     }
@@ -577,7 +653,7 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
     let bblayers_via = r.via_of_word("BBLAYERS", None);
     for layer in &ws.layers {
         let conf = normalize(&layer.root.join("conf/layer.conf"));
-        if !r.files.by_abs.contains_key(&conf) {
+        if !r.exists(&conf) {
             continue;
         }
         let dir = layer.root.to_string_lossy().to_string();
@@ -607,7 +683,7 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
         .bbpath()
         .into_iter()
         .map(|e| normalize(&e.join("conf/bitbake.conf")))
-        .find(|p| r.files.by_abs.contains_key(p));
+        .find(|p| r.exists(p));
     match bitbake_conf {
         Some(p) => r.visit(&p, FileKind::Conf, Vec::new(), true)?,
         None => r.issue(
@@ -702,8 +778,10 @@ fn recipe_pass(
     files: &Files,
     config: &DataStore,
     recipe: &FileRow,
+    overlay: Option<&Overlay>,
 ) -> Result<DataStore> {
     let mut r = Replay::new(index, ws, files, config.fork(), false, true, Vec::new());
+    r.overlay = overlay;
     let recipe_loc = recipe.loc(LineSpan::line(1));
     let abs = ws
         .abs_path(&recipe_loc)
@@ -1168,6 +1246,8 @@ struct Replay<'a> {
     resolver: Option<(Vec<PathBuf>, Resolver)>,
     /// Uncertain references being followed, innermost last.
     taint: Vec<Taint>,
+    /// Files replaced in memory (see [`Overlay`]).
+    overlay: Option<&'a Overlay>,
 }
 
 impl<'a> Replay<'a> {
@@ -1191,7 +1271,36 @@ impl<'a> Replay<'a> {
             pins,
             resolver: None,
             taint: Vec::new(),
+            overlay: None,
         }
+    }
+
+    /// Whether `abs` is a file the replay can read: indexed, or in the overlay.
+    fn exists(&self, abs: &Path) -> bool {
+        self.files.by_abs.contains_key(abs) || self.overlay.is_some_and(|o| o.contains(abs))
+    }
+
+    /// `(layer, path, kind, statements)` of a file: from the overlay when it has the path,
+    /// else from the index. `None` when neither knows it.
+    fn file_statements(&self, abs: &Path) -> Result<Option<FileStatements>> {
+        if let Some(f) = self.overlay.and_then(|o| o.get(abs)) {
+            return Ok(Some((
+                f.layer.clone(),
+                f.path.clone(),
+                f.kind,
+                f.rows.clone(),
+            )));
+        }
+        let Some(info) = self.files.by_abs.get(abs) else {
+            return Ok(None);
+        };
+        let stmts = query::statements_in(self.index, info.id, &StatementFilter::default())?;
+        Ok(Some((
+            info.layer.clone(),
+            info.path.clone(),
+            info.kind,
+            stmts,
+        )))
     }
 
     // ----- files -----
@@ -1200,10 +1309,9 @@ impl<'a> Replay<'a> {
     /// statements. `restore`: put the previous `FILE` back afterwards (every file except
     /// the top-level recipe, which BitBake parses with `include == 0`).
     fn visit(&mut self, abs: &Path, kind: FileKind, via: Vec<Loc>, restore: bool) -> Result<()> {
-        let Some(info) = self.files.by_abs.get(abs).cloned() else {
+        let Some((layer, path, file_kind, stmts)) = self.file_statements(abs)? else {
             return Ok(());
         };
-        let stmts = query::statements_in(self.index, info.id, &StatementFilter::default())?;
         let end = stmts
             .iter()
             .map(|s| s.loc.lines.end)
@@ -1212,14 +1320,14 @@ impl<'a> Replay<'a> {
             .max(1);
         self.ds.record_visit(FileVisit {
             loc: Loc {
-                layer: info.layer.clone(),
-                path: info.path.clone(),
+                layer,
+                path,
                 lines: LineSpan::new(1, end),
             },
             kind,
             via: via.clone(),
         });
-        let is_class = info.kind == FileKind::Class;
+        let is_class = file_kind == FileKind::Class;
         let old_file = if is_class {
             None
         } else {
@@ -1558,6 +1666,9 @@ impl<'a> Replay<'a> {
 
     /// The text of the lines `loc` covers, read from disk (the index has no bodies).
     fn body_text(&self, loc: &Loc) -> Option<String> {
+        if let Some(text) = self.overlay.and_then(|o| o.lines(self.ws, loc)) {
+            return Some(text);
+        }
         let abs = self.ws.abs_path(loc)?;
         let abs = self.ws.confine(&abs).ok()?;
         let text = fs::read_to_string(abs).ok()?;
@@ -1762,10 +1873,15 @@ impl<'a> Replay<'a> {
             self.resolver = None;
         }
         let files = self.files;
+        let overlay = self.overlay;
         &self
             .resolver
             .get_or_insert_with(|| {
-                let r = Resolver::with_bbpath(bbpath.clone()).with_known_files(files.known.clone());
+                let mut known = files.known.clone();
+                if let Some(o) = overlay {
+                    known.extend(o.paths().map(Path::to_path_buf));
+                }
+                let r = Resolver::with_bbpath(bbpath.clone()).with_known_files(known);
                 (bbpath, r)
             })
             .1
@@ -1815,6 +1931,7 @@ impl<'a> Replay<'a> {
                     .into_iter()
                     .collect()
             };
+            self.record_probed(&mode, &word, from, &targets);
             if targets.is_empty() && mode == "require" {
                 self.issue(
                     Some(&st.loc),
@@ -1833,6 +1950,41 @@ impl<'a> Replay<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Records the candidate paths an include of `word` looked at and found empty, in the
+    /// resolver's order (`Resolver::find_in_bbpath`: absolute as is, else the including
+    /// file's directory, then each `BBPATH` entry; `include_all`: every `BBPATH` entry),
+    /// up to the first one found. A file created at one of them would have been read.
+    fn record_probed(&mut self, mode: &str, word: &str, from: &Path, found: &[PathBuf]) {
+        if word.is_empty() {
+            return;
+        }
+        let p = Path::new(word);
+        let bbpath = self.bbpath();
+        let cands: Vec<PathBuf> = if p.is_absolute() {
+            vec![normalize(p)]
+        } else if mode == "include_all" {
+            bbpath.iter().map(|e| normalize(&e.join(p))).collect()
+        } else {
+            from.parent()
+                .map(Path::to_path_buf)
+                .into_iter()
+                .chain(bbpath)
+                .filter(|d| d.is_absolute())
+                .map(|d| normalize(&d.join(p)))
+                .collect()
+        };
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        for c in cands {
+            if found.contains(&c) {
+                if mode != "include_all" {
+                    break;
+                }
+                continue;
+            }
+            notes.probed_missing.insert(c);
+        }
     }
 
     /// `AddFragmentsNode.eval` (BitBake 2.18 `lib/bb/parse/ast.py`; 2.12 without the
@@ -2075,7 +2227,7 @@ impl<'a> Replay<'a> {
     fn find_fragment(&self, layerid: &str, rel: &str) -> Option<PathBuf> {
         for layer in &self.ws.layers {
             let cand = normalize(&layer.root.join(rel));
-            let exists = self.files.by_abs.contains_key(&cand) || cand.is_file();
+            let exists = self.exists(&cand) || cand.is_file();
             if exists && self.file_collection(&cand, &layer.collections).as_deref() == Some(layerid)
             {
                 return Some(cand);
