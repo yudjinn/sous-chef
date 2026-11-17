@@ -73,7 +73,8 @@ $SOUS_CHEF_LIVE/                          ~/Development/sous-chef-live
 ├── bitbake-setup-sources.json            bitbake-setup --source-overrides (pins + local links)
 ├── scratch/                              left by the live verification (see below)
 └── runs/                                 raw output: the script's runs, --verify, verify/,
-                                          differential/, perf/, the fix rounds, docs/
+                                          differential/, perf/, the fix rounds (fix-*,
+                                          w6-* to w9-final), docs/
 ```
 
 kas clones every repository into its work directory, which is the directory it is started
@@ -87,10 +88,15 @@ in the kas files; kas logs "Using .../yocto-kiss as root for repository meta-kis
 
 Set `SOUS_CHEF_LIVE` to the directory. The live tests are `#[ignore]`: `tests/live_verify.rs`
 (live-verification.md), `tests/kas_live.rs` (kas discovery against `bitbake-layers
-show-layers`), `tests/differential.rs` (differential.md) and `tests/performance.rs`
-(performance.md). All but `kas_live.rs` return at once without `SOUS_CHEF_LIVE`. Two start
-BitBake, parse-only: `kas_live.rs` runs `bitbake-layers show-layers` through kas, and
-`differential.rs` runs `scripts/differential.sh` for a missing dump.
+show-layers`), `tests/differential.rs` (differential.md), `tests/performance.rs`
+(performance.md), and since w6 / w7 one test each in `tests/audit.rs`
+(`live_workspace_audit`) and `tests/release_diff.rs` (`live_openembedded_core_release_diff`,
+read-only git on the OE-core clone). All but `kas_live.rs` return at once without
+`SOUS_CHEF_LIVE`. Two start BitBake, parse-only: `kas_live.rs` runs `bitbake-layers
+show-layers` through kas, and `differential.rs` runs `scripts/differential.sh` for a
+missing dump (`SOUS_CHEF_DIFF_NO_BITBAKE=1` makes that a failure instead).
+`performance.rs` writes to the build's `conf/local.conf` (and restores it) unless
+`SOUS_CHEF_PERF_NO_EDIT=1`.
 
 ```sh
 SOUS_CHEF_LIVE=~/Development/sous-chef-live cargo test --test live_verify -- --ignored
