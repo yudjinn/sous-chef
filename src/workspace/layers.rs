@@ -63,7 +63,9 @@ pub struct BbLayers {
     topdir: PathBuf,
 }
 
-/// Reads `<build_dir>/conf/bblayers.conf`. `build_dir` becomes `TOPDIR`.
+/// Reads `<build_dir>/conf/bblayers.conf`. `build_dir` becomes `TOPDIR`, and `BBPATH` starts
+/// as `build_dir`, the value OE-core's build environment exports (`scripts/oe-buildenv-internal`:
+/// `BBPATH=$BUILDDIR`, taken by BitBake's `inheritFromOS`); `bblayers.conf` may replace it.
 ///
 /// `include` / `require` / `include_all` inside the file are followed when their argument
 /// expands statically; only files inside `build_dir` are read.
@@ -71,6 +73,7 @@ pub fn read_bblayers(build_dir: &Path) -> Result<BbLayers> {
     let path = build_dir.join("conf").join("bblayers.conf");
     let mut vars = Vars::default();
     vars.set("TOPDIR", &build_dir.to_string_lossy());
+    vars.set("BBPATH", &build_dir.to_string_lossy());
     read_conf(&path, &mut vars, &[canonical_or_self(build_dir)], 0)?;
     let mut out = BbLayers::default();
     let expanded = vars.value("BBLAYERS").unwrap_or_default();

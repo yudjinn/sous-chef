@@ -507,9 +507,16 @@ fn config_pass(index: &Index, ws: &Workspace, files: &Files, target: &Target) ->
         put(&mut r.ds, name, &value);
     }
 
-    // bblayers.conf; TOPDIR is its build directory.
+    // bblayers.conf; TOPDIR is its build directory. BBPATH starts as the build directory:
+    // OE-core's build environment exports `BBPATH=$BUILDDIR` (scripts/oe-buildenv-internal)
+    // and BitBake takes it from the environment (`data.inheritFromOS`, "from env" in the
+    // history), which is how `conf/local.conf` and `conf/toolcfg.conf` are found when
+    // `bblayers.conf` does not set BBPATH (a bitbake-setup build).
     if let Some(build) = &ws.build_dir {
         put(&mut r.ds, "TOPDIR", &build.to_string_lossy());
+        if !r.pins.iter().any(|(n, _)| *n == "BBPATH") {
+            put(&mut r.ds, "BBPATH", &build.to_string_lossy());
+        }
         let bblayers = normalize(&build.join("conf/bblayers.conf"));
         if r.files.by_abs.contains_key(&bblayers) {
             r.visit(&bblayers, FileKind::Conf, Vec::new(), true)?;

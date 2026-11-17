@@ -183,6 +183,44 @@ fn machine_and_distro_come_from_builtin_fragments() {
     );
 }
 
+/// A bitbake-setup `bblayers.conf` sets no `BBPATH`: the build directory is on it because
+/// the build environment exports `BBPATH=$BUILDDIR`, so `conf/toolcfg.conf` and
+/// `conf/local.conf` are found there.
+#[test]
+fn the_build_directory_is_on_bbpath_without_bblayers_setting_it() {
+    let fx = modified(|r| {
+        fragment_build(r, FRAGMENTS_4, TOOLCFG);
+        replace_in(
+            r,
+            "build/conf/bblayers.conf",
+            "BBPATH = \"${TOPDIR}\"\n",
+            "",
+        );
+    });
+    let ds = eval(&fx, &target(None));
+    assert_eq!(text(&ds, "MACHINE").as_deref(), Some("boardx"));
+    let bbpath = text(&ds, "BBPATH").unwrap();
+    assert!(
+        bbpath.starts_with(&fx.ws.build_dir.as_ref().unwrap().display().to_string()),
+        "{bbpath}"
+    );
+    assert!(
+        ds.files()
+            .iter()
+            .any(|v| v.loc.layer == "build" && v.loc.path == Path::new("conf/local.conf"))
+    );
+    // The index resolves the include the same way.
+    let conf = query::file_by_path(&fx.idx, "meta-core", Path::new("conf/bitbake.conf"))
+        .unwrap()
+        .unwrap();
+    let edges = query::edges_from(&fx.idx, conf.id).unwrap();
+    let e = edges
+        .iter()
+        .find(|e| e.target_text == "conf/toolcfg.conf")
+        .unwrap();
+    assert_eq!(e.target.as_ref().unwrap().layer, "build");
+}
+
 #[test]
 fn a_recipe_is_evaluated_for_the_fragment_machine() {
     let fx = modified(|r| fragment_build(r, FRAGMENTS_4, TOOLCFG));

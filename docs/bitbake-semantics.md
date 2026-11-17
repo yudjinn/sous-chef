@@ -640,6 +640,17 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
 `data_smart.py` `expandVarref`) and OE-Core `master` (`meta/conf/bitbake.conf`,
 `meta/classes-global/base.bbclass`). This is what `src/eval/replay.rs` reproduces:
 
+- **`BBPATH` from the environment** (verified, w5, BitBake 2.18.0 `lib/bb/cookerdata.py`
+  `findTopdir` and `lib/bb/data.py` `inheritFromOS`; OE-core `scripts/oe-buildenv-internal`
+  line 82, `BBPATH=$BUILDDIR` / `export BBPATH`, sourced by `oe-init-build-env` and by
+  bitbake-setup's `init-build-env`; the live curl dump shows `from env data.py:105
+  [inheritFromOS]` as the first `BBPATH` operation): BitBake starts with `BBPATH` = the build
+  directory. A bitbake-setup `bblayers.conf` sets only `BBLAYERS`, so this is how
+  `include conf/site.conf`, `conf/toolcfg.conf` and `conf/local.conf` in `bitbake.conf` find
+  the build directory's files. sous-chef seeds `BBPATH` with the build directory in the
+  replay and in `layers::read_bblayers` (so the index edges agree); a `BBPATH = ...` in
+  `bblayers.conf` replaces it, a `?=` keeps it (kas writes `BBPATH ?= "${TOPDIR}"`, the same
+  value).
 - **Configuration order.** `TOPDIR` = the directory above `conf/bblayers.conf`; parse
   `bblayers.conf`; for each `BBLAYERS` entry (trailing `/` stripped, *not* normalised): set
   `LAYERDIR` and `LAYERDIR_RE` (`re.escape`), parse `<layer>/conf/layer.conf`, then
