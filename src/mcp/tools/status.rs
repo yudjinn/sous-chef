@@ -109,6 +109,11 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
                 report.index.removed = Some(r.removed);
                 report.index.refresh_millis = Some(r.millis);
                 freshness = render::freshness_line(&r);
+                // The index is fresh: its counts replace the disk walk done above, which
+                // stays as the answer when the refresh fails.
+                if let Ok(stats) = crate::index::query::layer_stats(&index) {
+                    report.files = indexed_counts(&stats);
+                }
             }
             Err(e) => report.index.error = Some(e.to_string()),
         }
@@ -276,6 +281,26 @@ fn age_secs(path: &Path) -> Option<u64> {
             .map(|d| d.as_secs())
             .unwrap_or(0),
     )
+}
+
+/// File counts by kind over all indexed layers (the build pseudo-layer included); kinds
+/// with no files are left out, as in [`count_files`].
+fn indexed_counts(stats: &[crate::index::query::LayerStats]) -> BTreeMap<String, u32> {
+    let mut counts = BTreeMap::new();
+    for s in stats {
+        for (kind, n) in [
+            (FileKind::Recipe, s.recipes),
+            (FileKind::Append, s.appends),
+            (FileKind::Include, s.includes),
+            (FileKind::Class, s.classes),
+            (FileKind::Conf, s.confs),
+        ] {
+            if n > 0 {
+                *counts.entry(kind.as_str().to_string()).or_insert(0) += n;
+            }
+        }
+    }
+    counts
 }
 
 /// Counts BitBake files by kind under every layer root (not descending into another layer

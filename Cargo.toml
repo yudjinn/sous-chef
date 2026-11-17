@@ -22,11 +22,6 @@ toml = "1.2.1"
 insta = "1.49.0"
 tempfile = "3.27.0"
 
-[lints.cargo]
-# M0: `ignore` (T2.2 scanner) and `regex` (T2.7 search, T5.2 slice) are declared up front so
-# later tasks never edit Cargo.toml. Remove this allowance once both are used.
-unused_dependencies = "allow"
-
 [lints.clippy]
 # Conventions from docs/architecture.md: no unwrap/expect outside tests, stubs never panic.
 # Tests are exempt through clippy.toml; integration test files allow them explicitly.
