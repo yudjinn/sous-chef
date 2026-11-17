@@ -33,7 +33,7 @@ libfoo	var	PACKAGECONFIG ??=	added	"ssl"	-	meta-up:recipes-core/libfoo/libfoo_2.
 meta-mine:recipes-app/app/app_1.0.bb	includes of your file	tree: 1 file at from, 1 at to	changed	1 change listed; requires recipes-core/shared/shared.inc (line 4)	-	-
 meta-mine:recipes-app/app/app_1.0.bb	var	SHARED_FLAGS =	changed	"-O2" -> "-O2 -g"	meta-up:recipes-core/shared/shared.inc:1	meta-up:recipes-core/shared/shared.inc:1
 -	class	classes/autotools.bbclass	changed	1 statement differs; inherited directly by compared hello; inherited by your meta-mine:recipes-app/app/app_1.0.bb:5	meta-up:classes/autotools.bbclass:1	meta-up:classes/autotools.bbclass:1
-note: statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once
+note: statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (each revision's BBFILES, no BBMASK); classes listed once
 note: pointers in column from are at v1 (cdcd020d327c): read them with `git show cdcd020d327c:<path>`; column to is at HEAD (3e56cf071d6c)
 note: counted, not listed: 1 statements changed only in whitespace, 1 files only in comments, whitespace or line positions
 note: patches are not checked against their source (nothing is fetched): "check it" means the source they apply to changed

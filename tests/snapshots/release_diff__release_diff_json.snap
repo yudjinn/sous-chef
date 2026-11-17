@@ -431,7 +431,7 @@ expression: "diff::render_json(&d)"
     }
   ],
   "notes": [
-    "statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once",
+    "statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (each revision's BBFILES, no BBMASK); classes listed once",
     "pointers in column from are at v1 (cdcd020d327c): read them with `git show cdcd020d327c:<path>`; column to is at HEAD (3e56cf071d6c)",
     "counted, not listed: 1 statements changed only in whitespace, 1 files only in comments, whitespace or line positions",
     "patches are not checked against their source (nothing is fetched): \"check it\" means the source they apply to changed"

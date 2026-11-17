@@ -11,7 +11,11 @@
 //! only the full commit hash is passed on.
 //!
 //! - **Recipe identity.** A recipe is its `PN` from the file name (`index::scan::pn_pv`);
-//!   the `.bb` files a layer collects are those its current `BBFILES` globs match. Several
+//!   the `.bb` files a layer collects at a revision are those that revision's `BBFILES`
+//!   globs match: read from its `conf/layer.conf` (`${LAYERDIR}` replaced, the words the
+//!   file adds; the current workspace's when the file is unchanged, and also, with a note,
+//!   when the text cannot decide it: `?=`, an include, another variable), plus the
+//!   workspace's active `BBFILES_DYNAMIC` entries for the layer. Several
 //!   versions of one `PN`: equal versions pair first; then each remaining old version,
 //!   highest first (`query::vercmp`), pairs with the new version sharing the longest
 //!   version prefix (the highest on a tie); a pair with different versions is a version
@@ -46,7 +50,7 @@ use crate::index::{query, scan};
 use crate::mcp::Ctx;
 use crate::parse::{self, IncludeMode, Lang, ParsedFile, StatementKind, words};
 use crate::render::Table;
-use crate::types::{FileKind, LineSpan, Loc, VarRef};
+use crate::types::{AssignOp, FileKind, LineSpan, Loc, VarRef};
 use crate::workspace::{Layer, Workspace, resolve};
 
 /// The `schema` field of the JSON form; bumped when a field is renamed or removed.
@@ -537,17 +541,24 @@ fn parent_dir(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(d, _)| d)
 }
 
-/// Whether the layer's `BBFILES` globs (as the workspace has them now, with the active
-/// `BBFILES_DYNAMIC` entries) collect the `.bb` at `rel`. No glob: every `.bb` counts.
+/// Whether the layer's `BBFILES` globs (as the workspace has them now, or as a revision's
+/// `conf/layer.conf` sets them: [`collector_at`]), with the active `BBFILES_DYNAMIC`
+/// entries of the workspace, collect the `.bb` at `rel`. No glob: every `.bb` counts.
+#[derive(Debug, Clone)]
 struct Collector {
     root: PathBuf,
     globs: Vec<resolve::DynamicEntry>,
 }
 
 impl Collector {
+    /// With the layer's current `BBFILES`.
     fn new(ws: &Workspace, layer: &Layer) -> Collector {
-        let mut globs: Vec<resolve::DynamicEntry> = layer
-            .bbfiles
+        Collector::with_bbfiles(ws, layer, &layer.bbfiles)
+    }
+
+    /// With `bbfiles` (absolute globs) as the layer's `BBFILES`.
+    fn with_bbfiles(ws: &Workspace, layer: &Layer, bbfiles: &[String]) -> Collector {
+        let mut globs: Vec<resolve::DynamicEntry> = bbfiles
             .iter()
             .map(|g| resolve::DynamicEntry {
                 layer: layer.name.clone(),
@@ -572,6 +583,125 @@ impl Collector {
     fn collects(&self, rel: &str) -> bool {
         let abs = self.root.join(rel);
         self.globs.is_empty() || self.globs.iter().any(|g| g.matches(&abs))
+    }
+}
+
+/// The `BBFILES` words a `conf/layer.conf` text adds, with `${LAYERDIR}` replaced by `root`
+/// (as `cookerdata` does once the file is read: `expandVarref('LAYERDIR')`), when that can
+/// be decided from the text alone; otherwise why not. Only what decides membership is kept
+/// (BitBake's `collect_bbfiles` takes every word of `BBFILES`), so `=+` and `:prepend` add
+/// words like `+=` and `:append`; `=` and `:=` replace what this file added before. Not
+/// decided: `?=` / `??=` (they depend on what `bblayers.conf` or an earlier layer set),
+/// `:remove`, any other override or the legacy `_` syntax, `unset BBFILES`, `.=` / `=.`
+/// that glue onto a word, a reference to any variable other than `LAYERDIR`, and an
+/// `include` / `require` (the included file could set `BBFILES`).
+fn static_bbfiles(text: &str, root: &Path) -> std::result::Result<Vec<String>, String> {
+    let parsed = parse::parse(text);
+    let root = root.to_string_lossy();
+    let mut words: Vec<String> = Vec::new();
+    for st in &parsed.statements {
+        match &st.kind {
+            StatementKind::Include { path, .. } => {
+                return Err(format!("conf/layer.conf includes {path}"));
+            }
+            StatementKind::Unset { name, flag: None } if name == "BBFILES" => {
+                return Err("conf/layer.conf unsets BBFILES".into());
+            }
+            StatementKind::Unknown { text } if text.contains("BBFILES") => {
+                return Err(format!(
+                    "conf/layer.conf has a line the parser does not know: {}",
+                    text.trim()
+                ));
+            }
+            StatementKind::Assign { var, op, value, .. }
+                if var.base == "BBFILES" && var.flag.is_none() =>
+            {
+                let op_text = op.as_str();
+                if var.legacy_syntax {
+                    return Err(format!(
+                        "BBFILES is set with the legacy override syntax ({op_text})"
+                    ));
+                }
+                let by_override = match var.overrides.as_slice() {
+                    [] => false,
+                    [o] if o == "append" || o == "prepend" => true,
+                    _ => {
+                        return Err(format!(
+                            "BBFILES:{} {op_text} needs evaluation",
+                            var.overrides.join(":")
+                        ));
+                    }
+                };
+                let expanded = value.replace("${LAYERDIR}", &root);
+                if expanded.contains("${") {
+                    return Err(format!(
+                        "BBFILES {op_text} \"{value}\" refers to a variable other than LAYERDIR"
+                    ));
+                }
+                let new: Vec<String> = expanded.split_whitespace().map(str::to_string).collect();
+                match op {
+                    AssignOp::Default | AssignOp::WeakDefault => {
+                        return Err(format!(
+                            "BBFILES {op_text} depends on what was set before this layer"
+                        ));
+                    }
+                    AssignOp::AppendDot
+                        if !new.is_empty() && !expanded.starts_with(char::is_whitespace) =>
+                    {
+                        return Err(format!(
+                            "BBFILES {op_text} joins onto a word without a space"
+                        ));
+                    }
+                    AssignOp::PrependDot
+                        if !new.is_empty() && !expanded.ends_with(char::is_whitespace) =>
+                    {
+                        return Err(format!(
+                            "BBFILES {op_text} joins onto a word without a space"
+                        ));
+                    }
+                    AssignOp::Set | AssignOp::Immediate if !by_override => words = new,
+                    _ => words.extend(new),
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(words)
+}
+
+/// The collector for a revision's side: the current one when its `conf/layer.conf` is the
+/// one on disk; else one with the `BBFILES` that file sets ([`static_bbfiles`]), or the
+/// current one when that cannot be decided, with a note saying so.
+fn collector_at(
+    side: &mut Side,
+    ws: &Workspace,
+    layer: &Layer,
+    current: &Collector,
+    rev: &str,
+    notes: &mut Vec<String>,
+) -> Result<Collector> {
+    const CONF: &str = "conf/layer.conf";
+    side.read(&[CONF.to_string()])?;
+    let Some(text) = side.texts.get(CONF).cloned() else {
+        notes.push(format!(
+            "the layer has no {CONF} at {rev}; recipes there are collected with the current BBFILES"
+        ));
+        return Ok(current.clone());
+    };
+    let on_disk = fs::read(layer.root.join(CONF))
+        .ok()
+        .map(|b| parse::lexer::decode(&b).into_owned());
+    if on_disk.as_deref() == Some(&*text) {
+        return Ok(current.clone());
+    }
+    match static_bbfiles(&text, &layer.root) {
+        Ok(words) => Ok(Collector::with_bbfiles(ws, layer, &words)),
+        Err(why) => {
+            notes.push(format!(
+                "BBFILES at {rev} cannot be decided statically ({why}); recipes there are collected with the current BBFILES"
+            ));
+            Ok(current.clone())
+        }
     }
 }
 
@@ -1625,9 +1755,23 @@ pub fn compute(ws: &Workspace, own: &[OwnFile], opts: &Options) -> Result<Diff> 
         None => Some(uncommitted_count(&dir)),
     };
 
-    let collector = Collector::new(ws, layer);
-    let old_recipes = recipes_at(&old, &collector);
-    let new_recipes = recipes_at(&new, &collector);
+    // Which `.bb` files each revision collects: its own `BBFILES` (module docs).
+    let current = Collector::new(ws, layer);
+    let mut bbfiles_notes = Vec::new();
+    let old_collector = collector_at(
+        &mut old,
+        ws,
+        layer,
+        &current,
+        &opts.from,
+        &mut bbfiles_notes,
+    )?;
+    let new_collector = match &opts.to {
+        Some(to) => collector_at(&mut new, ws, layer, &current, to, &mut bbfiles_notes)?,
+        None => current.clone(),
+    };
+    let old_recipes = recipes_at(&old, &old_collector);
+    let new_recipes = recipes_at(&new, &new_collector);
     let pairs = pair_recipes(&old_recipes, &new_recipes);
     let pns: BTreeSet<String> = pairs.iter().map(|p| p.pn.clone()).collect();
 
@@ -1859,6 +2003,7 @@ pub fn compute(ws: &Workspace, own: &[OwnFile], opts: &Options) -> Result<Diff> 
     };
     diff.summary.line = summary_line(&diff);
     diff.notes = notes(&diff);
+    diff.notes.extend(bbfiles_notes);
     Ok(diff)
 }
 
@@ -2606,7 +2751,7 @@ fn summary_line(d: &Diff) -> String {
 
 fn notes(d: &Diff) -> Vec<String> {
     let mut n = vec![
-        "statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (current BBFILES, no BBMASK); classes listed once".to_string(),
+        "statement-level diff: statements as written, not evaluated; a tree is the .bb and what it requires inside the layer (each revision's BBFILES, no BBMASK); classes listed once".to_string(),
         format!(
             "pointers in column from are at {}: read them with `git show {}:<path>`; column to is at {}",
             d.from.label(),
