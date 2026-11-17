@@ -88,6 +88,22 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After w8-eval
+
+Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/w8-eval/`), after the virtual-provider change (task
+`depends` flags, `DEPENDS` always stored with single spaces, unset `DEPENDS` = `""`) and
+again at the end of branch `w8-eval`:
+
+| | Compared | Equal | Flagged (of which literal differs) | Known gap | Bug |
+|---|---|---|---|---|---|
+| Sample, explicit machine and distro: before | 1019 | 656 | 336 (20) | 27 | 0 |
+| Sample, explicit machine and distro: after | 1019 | 656 | 336 (20) | 27 | 0 |
+
+- **No class moved.** On yocto-kiss every sampled `DEPENDS` holds python, so the
+  whitespace normalisation (done only for a certain value) does not apply, and the
+  comparison normalises whitespace anyway; task flags are not compared.
+
 ## After w6-fix
 
 Re-run on 2026-11-17 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
