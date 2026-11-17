@@ -74,8 +74,9 @@ the release it applies to. Scaffold output follows the same releases.
 With the plugin's hooks on: Grep and Read results on Yocto files get the enclosing item,
 and for a recipe the bbappends and includes that also contribute; large `bitbake`,
 `devtool` or `bitbake-layers` output in Bash is replaced by a digest and a handle; after an
-Edit or Write of a Yocto file its lint findings are added. A `grep` run through Bash gets
-no annotation: use `search`.
+Edit or Write of a Yocto file its lint findings are added. A plain `grep -rn` or `rg -n`
+run through Bash (no pipe; line numbers asked for) gets the same annotation as Grep, for
+its first 200 hits; anything else run through Bash gets none: use `search`.
 
 ## kas projects
 
