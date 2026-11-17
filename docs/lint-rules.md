@@ -45,6 +45,11 @@ Recipe-scope rules run once per `.bb` of the target, on the evaluation of that f
 `override/dead` and `override/shadowed` run only when the `.bb` itself is linted, and their
 findings can be located in a bbappend of another layer.
 
+Which files: the indexed BitBake files of the target. Data files (a `.conf` / `.inc` a recipe
+installs, bitbake-semantics.md "Data files") are left out. A `.bb` or `.bbappend` that no
+`BBFILES` glob matches is linted like any other, recipe-scope rules included (evaluated as
+the file it is); BitBake never parses it.
+
 Which rules run:
 
 - With no selection, every rule except those in `[lint] disable` and those off by default
@@ -77,7 +82,7 @@ workspace). Findings hidden by `--severity` never fail the run.
 | `override/append-no-space` | W | file | `:append` value without a leading space, or `:prepend` without a trailing space, on a variable known to be a space-separated list. Not flagged: colon lists (`FILESEXTRAPATHS`), scalars, flags and unknown variables; values starting with `${@`, and a `:prepend` value ending in python; a value starting (`:append`) or ending (`:prepend`) with `${NAME}`, unless the file itself gives `NAME` a non-empty literal value without the space; `+=` / `=+` on an `:append` / `:prepend` name (they add the space); function bodies. |
 | `override/plus-equals-with-override` | W | file | `VAR:foo += "x"` (and `=+`, `.=`, `=.`): this builds the variable `VAR:foo`, which replaces `VAR` when `foo` is active, rather than appending to `VAR`. Suggests `VAR:append:foo`. Not flagged: the package override of a package-scoped variable (`FILES:${PN} +=`, `RDEPENDS:libfoo +=`), overrides containing `${` or not starting with `[a-z0-9]`, names with `:append` / `:prepend` / `:remove`. A condition after the package is flagged (`RDEPENDS:${PN}:qemux86 +=`). |
 | `override/remove-in-recipe` | W/I | file | `:remove` (not on a flag). Warning in a `.bb`, `.inc` or `.bbclass`: it is applied last, so no bbappend or conf can add the item back. Info in a `.bbappend`, a `.conf`, or an `.inc` under a `conf/` directory (configuration), where it is the usual tool. |
-| `override/dead` | W/I | recipe | An override element of an inactive operation in the recipe's own files (the `.bb`, its `.inc` files, its bbappends) that is no entry of the recipe's `OVERRIDES`, no machine, distro, class or declared override of the workspace, and no word of any `*OVERRIDES` assignment. Suggests the closest known name. Info instead of warning when the override list is only partly known. Never checks package names, `${...}` elements or legacy names. |
+| `override/dead` | W/I | recipe | An override element of an inactive operation in the recipe's own files (the `.bb`, its `.inc` files, its bbappends) that is no entry of the recipe's `OVERRIDES` (an entry that holds python is never a name), no machine, distro, class or declared override of the workspace, and no word of any `*OVERRIDES` assignment. Suggests the closest known name. Info instead of warning when the override list is only partly known. Never checks package names, `${...}` elements or legacy names. |
 | `override/shadowed` | I | recipe | A `NAME =` / `NAME :=` in the recipe's own files that the evaluation marks shadowed, when a later `=` / `:=` of exactly the same name follows. Not flagged: functions; a later assignment in a bbappend other than the earlier one's; any `NAME` that something in the tree could read first (a `:=` mentioning it, an `inherit` / `include` / `require` with `${NAME}`); an earlier assignment in a file that more than one recipe (or a class, `.conf` or bbappend) reaches through `require` / `include`, unless the later one is in that same file. |
 | `override/weak-after-default` | I | file | `??=` after a `=`, `:=` or `?=` of exactly the same name (overrides and flag included) earlier in the same file; an `unset` in between starts over. |
 | `override/missing-package` | E | file | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `ALLOW_EMPTY` and the `pkg_*` functions set to a value without a package override (`:${PN}`), in recipes that produce packages. Also `VAR:append`, `VAR:append:<cond>` and a function `pkg_postinst()`. Not flagged: an empty value (`FILES = ""`; but `+=` / `=+` store a space and are flagged), flags, `:remove` alone, legacy names (`override/legacy-syntax`), the classes `image` and `core-image`, a class that inherits one of them or itself empties `PACKAGES`. |
@@ -97,7 +102,9 @@ Notes:
 - **`plus-equals-with-override`.** The package-scoped variables are OE-core's `PACKAGEVARS`
   plus `INSANE_SKIP` and `QA_EMPTY_DIRS`. The first override of such a variable is taken as
   the package unless it is a known machine, distro, class or other conditional override.
-- **`dead`.** "Known" means: in the recipe's evaluated `OVERRIDES`; a machine or distro conf
+- **`dead`.** "Known" means: in the recipe's evaluated `OVERRIDES` (its known entries: an
+  entry that holds `${@...}` or an undefined `${VAR}` stands for unknown text and is never
+  taken as a name, bitbake-semantics.md "Splitting list values"); a machine or distro conf
   stem, a static word of `OVERRIDES` / `MACHINEOVERRIDES` / `DISTROOVERRIDES`, a `class-*`
   or `pn-*` form, the target OS or architecture, or a class name; or any word in the value
   of an `OVERRIDES`, `MACHINEOVERRIDES`, `MACHINEOVERRIDES_EXTENDER`, `DISTROOVERRIDES`,
@@ -254,7 +261,7 @@ Notes:
 | `hygiene/tabs` | I | file | Tabs in shell task bodies mixed with spaces; python bodies not indented with 4 spaces. At most one finding per function. |
 | `hygiene/continuation` | W | file | Whitespace after a trailing `\`; a blank line that ends a continued statement before its closing quote. A comment line inside a continued statement is reported by `hygiene/parse-error`, not here. |
 | `hygiene/release-syntax` | E/W | file | A construct that one of the releases the file is checked against lacks, from the `Feature` table: `inherit_defer` before Scarthgap (not in a `.conf`, where `hygiene/parse-error` reports it), `include_all` before Walnascar, a class in `classes-recipe/` or `classes-global/` on Kirkstone, `${UNPACKDIR}` before Styhead (unless some file assigns `UNPACKDIR`). Warning: `${WORKDIR}/<file>` for a `file://` entry of the same file's `SRC_URI` on Styhead and later (unpacked into `UNPACKDIR`). The message names the releases. |
-| `hygiene/parse-error` | E/W | file | Any `Unknown` statement no parser diagnostic covers, and parser diagnostics. Not reported: whitespace after a trailing `\` (left to `hygiene/continuation`), `addfragments`, and `addpylib` in a `.conf`. Warning: the `addtask` quirk that joins two `before`/`after` groups into one task name. Error: everything else. In a `.conf` file, a function, `def`, `inherit`, `inherit_defer`, `addtask`, `deltask`, `addhandler` or `EXPORT_FUNCTIONS` is an error (BitBake's configuration parser rejects them). |
+| `hygiene/parse-error` | E/W | file | Any `Unknown` statement no parser diagnostic covers, and parser diagnostics. Not reported: whitespace after a trailing `\` (left to `hygiene/continuation`) and `addpylib` in a `.conf` (valid BitBake that the parser does not model). `addfragments` with three or more arguments is a statement of its own; with fewer it is an unparsed line. Data files are not linted. Warning: the `addtask` quirk that joins two `before`/`after` groups into one task name. Error: everything else. In a `.conf` file, a function, `def`, `inherit`, `inherit_defer`, `addtask`, `deltask`, `addhandler` or `EXPORT_FUNCTIONS` is an error (BitBake's configuration parser rejects them). |
 
 Notes:
 
@@ -338,13 +345,73 @@ a deliberate typo of `boardx`. The tests pin these lists per group
 (`tests/fixtures/lint/override/workspace.expected`, `fixture_workspace_findings` in
 `tests/lint_org.rs`).
 
+## On a real workspace
+
+The kas build of the live environment (live-environment.md): OE-core (`meta`), meta-arm,
+meta-arm-toolchain, and yocto-kiss's `meta-kiss` and `meta-kiss-ti` as the writable layers.
+"Before" is the live verification at `c4930b7` (live-verification.md, item 8); "after" was
+measured for this document at `8f66f94` with `sous-chef lint --severity info`, no BitBake
+run (2026-11-17).
+
+| Run | Before | After |
+|---|---|---|
+| Default (writable layers and build conf, 13 files) | 6 findings, all info | 1 finding (info: no `HOMEPAGE` in `linux-kiss_7.0.bb`, true) |
+| With --all | 1486 findings in 1755 files (437 E, 186 W, 863 I) | 647 findings in 1719 files (3 E, 167 W, 477 I); data files are no longer linted |
+
+Per rule with `--all` (rules with no finding either time left out):
+
+| Rule | Before | After | Cause of the change |
+|---|---|---|---|
+| hygiene/parse-error | 422 | 3 | data files (B1) |
+| override/shadowed | 338 | 83 | shared files are not judged from one includer (B8) |
+| hygiene/missing-metadata | 132 | 16 | no `HOMEPAGE` asked of images, packagegroups, local-only recipes (B12) |
+| org/recipe-path | 115 | 102 | images in `images/`, packagegroups in `packagegroups/` (B12) |
+| override/remove-in-recipe | 114 | 114 | |
+| hygiene/tabs | 92 | 92 | |
+| override/dead | 92 | 92 | |
+| org/class-location | 45 | 45 | |
+| override/plus-equals-with-override | 32 | 32 | |
+| org/class-export-functions | 23 | 23 | |
+| hygiene/host-path | 15 | 0 | text, patterns and quoted arguments are data (B13) |
+| override/filesextrapaths | 12 | 0 | `=.` / `.=` with the colon accepted (B9) |
+| override/append-no-space | 10 | 6 | leading / trailing references judged by the file's own value (B14) |
+| org/inc-has-version-data | 8 | 8 | |
+| org/class-recipe-specific | 7 | 7 | |
+| hygiene/continuation | 6 | 6 | |
+| override/append-vs-plus-equals | 6 | 6 | |
+| hygiene/autorev, org/duplicate-versions, org/repeated-logic | 4 each | 4 each | |
+| override/missing-package | 3 | 0 | empty values and classes without packages (B10) |
+
+What the rules still get wrong there, as far as it was checked:
+
+- `hygiene/parse-error`: the 3 errors are in `meta:conf/ccache.conf`, ccache's own
+  configuration file. A `.conf` under a layer's `conf/` counts as metadata, so it is linted.
+- `org/recipe-path`: reports `meta:lib/bblayers/templates/example.bb` (a template no
+  `BBFILES` glob collects, 2 findings): lint takes every indexed `.bb`, collected or not.
+- `override/shadowed`: 7 findings say a recipe's `DEPENDS =` is replaced by
+  `tcmode-default.inc:5` / `:7` (`wic-tools.bb`, `musl_git.bb`, `libssp-nonshared.bb`, ...):
+  the rewrite of virtual providers in `DEPENDS` (`BB_RECIPE_VIRTUAL_PROVIDERS`) is recorded
+  as an assignment located at the `PREFERRED_PROVIDER_virtual/cross-*` line, and the rule
+  takes it for a later `=`. False positives. The 36 `SECTION` findings replaced by
+  `pypi.bbclass:42` are true.
+- `override/dead` (92, info): real overrides of architectures and target OSes no machine
+  of the workspace uses; expected noise while `OVERRIDES` holds python.
+- `org/class-export-functions` (23) and `org/class-recipe-specific` (7): false in the
+  sample checked (a class's own tasks; `native.bbclass` setting `EXCLUDE_FROM_WORLD`).
+- `org/inc-has-version-data` (8): false in the sample (`common-clang.inc` `PV`,
+  `u-boot-common.inc` `SRCREV`, shared on purpose by recipes of one version).
+- `override/remove-in-recipe`, `org/class-location`, `override/plus-equals-with-override`:
+  true by the rule's definition; OE-core does these on purpose.
+- No rule reports `PV = "1.0+git${SRCPV}"` (`SRCPV` is empty in Wrynose): a miss.
+
 ## Output
 
 A summary line first (counts by severity and by rule), then one row per finding:
 `severity rule pointer message`, then the notes (skipped layers or rules, configuration
 problems, evaluation failures). The message says what is wrong and what to write instead,
 in one line. Findings are sorted by file (layer, path), then line, rule and message; exact
-duplicates are removed.
+duplicates are removed. The `lint` tool on `meta-mine` of a fixture copy with broken files
+(`tests/snapshots/lint_tool__lint_meta_mine.snap`):
 
 ```
 4 findings in 6 files: 3 error, 1 warning, 0 info; by rule: hygiene/parse-error 4
