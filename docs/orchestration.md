@@ -1,27 +1,39 @@
 # Orchestration
 
-How the build is run: one orchestrator (Fable) directing up to five Opus subagents per wave.
+How the build is run: the user orchestrates, launching up to five Opus agents per wave with
+`claude agents`. There is no model orchestrator for now (waves 0 and 1 were run by a Fable
+orchestrator session; see the hand-off notes below).
 
 ## Roles
 
-**Orchestrator (Fable).** Does not write feature code. It:
-- launches each wave's agents in parallel, each in its own git worktree, with `model: opus`;
+**Orchestrator (the user).** Does not write feature code. The orchestrator:
+- launches each wave's agents in parallel with `claude agents`, one agent per stream, each
+  on Opus and each in its own git worktree, giving each the brief from the template below;
 - reviews each hand-off against the task's *Done when* list;
 - merges the agent branches into the integration branch in the order given below;
-- runs the gate after every merge and fixes small integration breaks itself (a missed
-  import, a renamed field); anything larger goes back to the agent that owns the file;
+- runs the gate after every merge and fixes small integration breaks (a missed import, a
+  renamed field); anything larger goes back to the agent that owns the file;
 - records contract changes in `docs/architecture.md` before the next wave starts;
 - keeps a short status table at the bottom of this file up to date.
 
-**Subagents (Opus).** Each gets one stream of tasks for the wave, works only in the files
-those tasks own, and ends with a hand-off.
+Any of the review, merge or doc steps can be handed to an agent as its own task, but nothing
+in this process depends on an agent doing them.
+
+**Agents (Opus).** Each gets one stream of tasks for the wave, works only in the files
+those tasks own, and ends with a hand-off. Agents are independent sessions: they do not see
+each other's work or the orchestrator's context, so each brief must be complete on its own.
 
 ## Git layout
 
 - Integration branch: `dev`. `main` is not touched; the user merges `dev` when satisfied.
 - First commit on `dev`: the current skeleton plus `docs/`.
-- Each agent works in a worktree on a branch `w<wave>-<stream>` cut from `dev` at the start of
-  the wave, and commits there. Agents do not push, merge or rebase.
+- Each agent works in its own worktree (under `.claude/worktrees/`) on a branch
+  `w<wave>-<stream>` cut from `dev` at the start of the wave, and commits there. An agent's
+  worktree starts on an auto-named branch, so the brief tells it to check that it starts
+  from the current `dev` commit and to rename the branch. Agents do not push, merge or
+  rebase.
+- `dev` must contain the whole previous wave before a wave is launched, since agents branch
+  from it.
 - The orchestrator merges with `git merge --no-ff`, one stream at a time, gate after each.
 
 ## Gate
@@ -61,10 +73,13 @@ Notes:
 
 ## Agent brief (template)
 
-Every subagent prompt contains, in this order:
+Every agent prompt contains, in this order:
 
 1. **Stream and tasks**: e.g. "Wave 2, stream B: T3.1, T3.2, T3.3 from
    `docs/milestones/M3-evaluator.md`."
+   Followed by **setup**: "Check `git log --oneline -1` shows `<dev commit>`; if not,
+   `git reset --hard <dev commit>` (the worktree is fresh). Rename your branch:
+   `git branch -m w<wave>-<stream>`. Work only inside your worktree."
 2. **Read first**: `docs/README.md` (rules for agents), `docs/architecture.md`, the milestone
    file, and any reference doc the task names.
 3. **Files you own**: copied from the tasks' *Owns* lines. "Do not edit anything else. If you
@@ -74,7 +89,9 @@ Every subagent prompt contains, in this order:
    other agents right now, so the agent knows what it can call and what it must stub.
 5. **Finish line**: every *Done when* item, the gate passing in the worktree, work committed
    on the worktree branch.
-6. **Hand-off format**:
+6. **Hand-off format** (the agent's final message):
+   - branch name, final commit hash and worktree path;
+   - the last lines of the gate output (test counts);
    - tasks completed, and each *Done when* item with pass / not done;
    - files touched outside the owned set, and why;
    - contract changes or additions other agents need to know;
@@ -162,8 +179,10 @@ Orchestrator changes at integration:
 - `docs/bitbake-semantics.md`: added the layer behaviour T1.3 checked against the BitBake
   source.
 
-How the agents were run: each one was launched with worktree isolation and renamed its
-branch to `w<wave>-<stream>`. The orchestrator integrated on its own worktree branch
+How the agents were run in wave 1 (by a Fable orchestrator session, since replaced by the
+user orchestrating with `claude agents`): each one was launched with worktree isolation and
+renamed its branch to `w<wave>-<stream>`. The orchestrator integrated on its own worktree
+branch
 (`.claude/worktrees/orchestrator`). The agent worktrees are under `.claude/worktrees/`,
 which `.gitignore` does not list, so they show as untracked in the main checkout.
 
