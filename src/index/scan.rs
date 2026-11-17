@@ -16,8 +16,12 @@
 //! 6. After any change every edge is recomputed: `require` / `include` / `include_all` /
 //!    `inherit` from the statements, resolved against the indexed files with
 //!    `workspace::resolve` where no evaluation is needed (otherwise `target_file` is NULL),
-//!    and `bbappend` edges from the `BBFILES` collection. This is a superset of "re-resolve
-//!    edges whose target was unresolved or changed" and keeps edge order meaningful.
+//!    and `bbappend` edges from the `BBFILES` collection. An `inherit` in a class under
+//!    `classes/` is searched in both class contexts, one in an `.inc` in the contexts of the
+//!    files that reach it through include edges (`insert_inc_inherit_edges`); an `inherit`
+//!    in a `.conf` gets no edge (BitBake's configuration parser rejects the line). This is
+//!    a superset of "re-resolve edges whose target was unresolved or changed" and keeps edge
+//!    order meaningful.
 //! 7. The edges depend on the workspace's release (class directories, `SplitClassDirs`), so
 //!    the release they were resolved for is stored in `meta` (`release`). When it differs
 //!    from `ws.release.release` (or is absent), every edge is recomputed even if no file
@@ -33,13 +37,15 @@
 //! - `statements.name` is the full name as written for assignments, functions (anonymous
 //!   python: `__anonymous`), `def`, `export`, `unset`; the argument text for `inherit` and
 //!   `include`; the task names for `addtask` / `deltask`; the handler names for
-//!   `addhandler`; the space-joined names for `export_functions`; NULL for `unknown`.
+//!   `addhandler`; the space-joined names for `export_functions`; the library directory
+//!   for `addpylib`; NULL for `unknown`.
 //! - `statements.op` is the operator for assignments; `include` / `require` / `include_all`
 //!   for includes; `inherit` / `inherit_defer` for inherits; `shell` / `python`, prefixed
 //!   with `fakeroot ` when so declared, for functions; `python` for `def`.
-//! - `statements.value` is the raw value for assignments and the text of `unknown` lines.
-//! - `statements.kind` `addfragments`: an `addfragments` line (the parser's unknown statement
-//!   that `Statement::add_fragments` reads); `name` is its argument text, `value` the line.
+//! - `statements.value` is the raw value for assignments, the text of `unknown` lines and
+//!   the namespace for `addpylib` (which makes no edge).
+//! - `statements.kind` `addfragments`: an `addfragments` line (`StatementKind::AddFragments`);
+//!   `name` is its argument text, `value` the line.
 //!   Its edge (kind `addfragments`, `target_text` the argument text) is never resolved: the
 //!   files it includes follow from the evaluated fragments variable.
 //! - `edges.target_text` is the argument as written when it resolves to one target, else the
@@ -51,9 +57,11 @@
 //!   skipped and version constraints dropped.
 //! - `provides`: a recipe's `PN`, plus the words of unconditional `PROVIDES` assignments that
 //!   need no expansion, in any file kind except `.conf`.
-//! - `files.not_collected`: set with the edges (step 6) from the same `BBFILES` collection:
-//!   `bbfiles` for a `.bb` / `.bbappend` no glob matches, NULL otherwise. Only collected files
-//!   take part in `bbappend` edges.
+//! - `files.not_collected`: set with the edges (step 6) from the same `BBFILES` collection
+//!   (`BBFILES_DYNAMIC` folded in): for a `.bb` / `.bbappend`, `bbfiles` when no glob
+//!   matches, `dynamic` when only an inactive `BBFILES_DYNAMIC` glob does, `bbmask` when a
+//!   static `BBMASK` masks it; `data` for a data file (below); NULL otherwise. Only collected
+//!   files take part in `bbappend` edges.
 //!
 //! **Data files.** Then [`mark_data`] sets `not_collected` = `data` on every `.conf`, `.inc`
 //! and `.bbclass` that is not BitBake metadata: not in the layer's `conf/` tree, not a class
