@@ -68,6 +68,7 @@ use sha2::{Digest, Sha256};
 
 use super::datastore::{Content, OpKind, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
+use super::license;
 use super::{DataStore, FileVisit, OpStatus, Overlay, Target, VarOp};
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
@@ -894,17 +895,22 @@ fn static_value(ds: &DataStore, name: &str) -> Option<Option<String>> {
     }
 }
 
-/// The reasons BitBake would skip the recipe, as `note:` lines, when they can be decided
-/// from static values. OE-core `classes-global/base.bbclass` (Wrynose) anonymous python:
+/// The reasons BitBake would, or may, skip the recipe, as `note:` lines. OE-core
+/// `classes-global/base.bbclass` (Wrynose `33a6bd6c`) anonymous python, in this order:
 /// `SKIP_RECIPE[<PN>]` non-empty raises `SkipRecipe("Recipe will be skipped because:
 /// <msg>")`; a non-empty `COMPATIBLE_MACHINE`, unless `PARSE_ALL_RECIPES` is true, must
-/// `re.match` (anchored at the start only) some entry of `MACHINEOVERRIDES.split(":")`,
-/// else "incompatible with machine <MACHINE> (not in COMPATIBLE_MACHINE)"; a non-empty
-/// `COMPATIBLE_HOST`, unless `SOURCE_MIRROR_FETCH` or `PARSE_ALL_RECIPES` is true, must
-/// `re.match` `HOST_SYS`, else "incompatible with host <HOST_SYS> (not in
-/// COMPATIBLE_HOST)". Nothing is said when a value involved holds python or undefined
-/// variables, anonymous python sets it by name, an `MACHINEOVERRIDES` entry is unknown
-/// and no known one matches, or the regular expression does not compile in Rust.
+/// `re.match` (anchored at the start only) some entry of `(MACHINEOVERRIDES or
+/// "").split(":")`, else "incompatible with machine <MACHINE> (not in COMPATIBLE_MACHINE)";
+/// unless `SOURCE_MIRROR_FETCH` or `PARSE_ALL_RECIPES` is true, a non-empty
+/// `COMPATIBLE_HOST` must `re.match` `HOST_SYS`, else "incompatible with host <HOST_SYS>
+/// (not in COMPATIBLE_HOST)", and `INCOMPATIBLE_LICENSE` is checked ([`license_skip`]).
+///
+/// Three answers, never a guess: "would skip" when every value involved is known and the
+/// check fails; nothing when the check passes on what is known (a `COMPATIBLE_MACHINE`
+/// that matches a known `MACHINEOVERRIDES` entry matches); "may skip" when it fails on what
+/// is known but values that are not known (python, undefined variables, anonymous python
+/// that sets them by name, a regular expression Rust cannot compile) could still decide it.
+/// `SKIP_RECIPE` is only said when its flag is static.
 fn skip_reasons(ds: &DataStore) -> Vec<String> {
     const TAIL: &str = "(decided from static values; anonymous python is not run)";
     let mut out = Vec::new();
@@ -920,39 +926,371 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
             msg.text
         ));
     }
+    const MAY: &str = "note: BitBake may skip this recipe:";
     let anchored = |re: &str| regex::Regex::new(&format!("^(?:{re})")).ok();
-    if let Some(Some(need)) = static_value(ds, "COMPATIBLE_MACHINE")
-        && !need.is_empty()
-        && static_bool(ds, "PARSE_ALL_RECIPES") == Some(false)
-        && let Some(Some(mo)) = static_value(ds, "MACHINEOVERRIDES")
-        && let Some(re) = anchored(&need)
-    {
-        let entries = pwords::colon_parts(&mo);
-        let all_known = entries.iter().all(|e| !pwords::is_unevaluated(e));
-        let hit = entries
-            .iter()
-            .filter(|e| !pwords::is_unevaluated(e))
-            .any(|e| re.is_match(e));
-        if all_known && !hit {
-            let machine = ds.value("MACHINE").map(|v| v.text).unwrap_or_default();
-            out.push(format!(
-                "note: BitBake would skip this recipe: incompatible with machine {machine} (COMPATIBLE_MACHINE = \"{need}\" matches no entry of MACHINEOVERRIDES = \"{mo}\") {TAIL}"
+    let parse_all = static_bool(ds, "PARSE_ALL_RECIPES");
+    match static_value(ds, "COMPATIBLE_MACHINE") {
+        _ if parse_all == Some(true) => {}
+        Some(Some(need)) if need.is_empty() => {}
+        Some(None) => {}
+        None => out.push(format!(
+            "{MAY} COMPATIBLE_MACHINE is set but not known statically ({}), so whether it matches MACHINEOVERRIDES cannot be told",
+            unknown_why(ds, "COMPATIBLE_MACHINE")
+        )),
+        Some(Some(need)) => match anchored(&need) {
+            None => out.push(format!(
+                "{MAY} COMPATIBLE_MACHINE = \"{need}\" is a regular expression sous-chef cannot compile, so whether it matches MACHINEOVERRIDES cannot be told"
+            )),
+            Some(re) => {
+                let mo = ds.value("MACHINEOVERRIDES").unwrap_or_default();
+                let entries = pwords::colon_parts(&mo.text);
+                let known: Vec<&str> = entries
+                    .iter()
+                    .copied()
+                    .filter(|e| !pwords::is_unevaluated(e))
+                    .collect();
+                let unknown = entries.len() - known.len();
+                let by_python = ds.replay().python_vars.contains("MACHINEOVERRIDES");
+                let hit = known.iter().any(|e| re.is_match(e));
+                if hit {
+                    // A match on a known entry is a match: not skipped.
+                } else if unknown > 0 || by_python || parse_all.is_none() {
+                    let mut why = Vec::new();
+                    if unknown > 0 {
+                        why.push(format!(
+                            "{unknown} part{} of MACHINEOVERRIDES {} not evaluated",
+                            if unknown == 1 { "" } else { "s" },
+                            if unknown == 1 { "is" } else { "are" }
+                        ));
+                    }
+                    if by_python {
+                        why.push("anonymous python may change MACHINEOVERRIDES".into());
+                    }
+                    if parse_all.is_none() {
+                        why.push("PARSE_ALL_RECIPES is not known statically".into());
+                    }
+                    out.push(format!(
+                        "{MAY} COMPATIBLE_MACHINE = \"{need}\" matches none of the known machine overrides ({}); {}",
+                        if known.iter().all(|k| k.is_empty()) {
+                            "none is known".to_string()
+                        } else {
+                            known.join(":")
+                        },
+                        why.join("; ")
+                    ));
+                } else {
+                    let machine = ds.value("MACHINE").map(|v| v.text).unwrap_or_default();
+                    out.push(format!(
+                        "note: BitBake would skip this recipe: incompatible with machine {machine} (COMPATIBLE_MACHINE = \"{need}\" matches no entry of MACHINEOVERRIDES = \"{}\") {TAIL}",
+                        mo.text
+                    ));
+                }
+            }
+        },
+    }
+    let mirror = static_bool(ds, "SOURCE_MIRROR_FETCH");
+    let host_checked = match (parse_all, mirror) {
+        (Some(false), Some(false)) => Some(true),
+        (Some(true), _) | (_, Some(true)) => Some(false),
+        _ => None,
+    };
+    if host_checked == Some(false) {
+        return out;
+    }
+    let unsure_check = if host_checked.is_none() {
+        "; SOURCE_MIRROR_FETCH or PARSE_ALL_RECIPES is not known statically"
+    } else {
+        ""
+    };
+    match static_value(ds, "COMPATIBLE_HOST") {
+        Some(None) => {}
+        Some(Some(need)) if need.is_empty() => {}
+        None => out.push(format!(
+            "{MAY} COMPATIBLE_HOST is set but not known statically ({}), so whether it matches HOST_SYS cannot be told",
+            unknown_why(ds, "COMPATIBLE_HOST")
+        )),
+        Some(Some(need)) => match (anchored(&need), static_value(ds, "HOST_SYS")) {
+            (None, _) => out.push(format!(
+                "{MAY} COMPATIBLE_HOST = \"{need}\" is a regular expression sous-chef cannot compile, so whether it matches HOST_SYS cannot be told"
+            )),
+            (Some(_), None) => out.push(format!(
+                "{MAY} COMPATIBLE_HOST = \"{need}\"; HOST_SYS is not known statically ({})",
+                unknown_why(ds, "HOST_SYS")
+            )),
+            (Some(_), Some(None)) => out.push(format!(
+                "{MAY} COMPATIBLE_HOST = \"{need}\"; HOST_SYS is not set (BitBake's re.match would raise)"
+            )),
+            (Some(re), Some(Some(host))) => {
+                if !re.is_match(&host) {
+                    if host_checked.is_none() {
+                        out.push(format!(
+                            "{MAY} COMPATIBLE_HOST = \"{need}\" does not match HOST_SYS = \"{host}\"{unsure_check}"
+                        ));
+                    } else {
+                        out.push(format!(
+                            "note: BitBake would skip this recipe: incompatible with host {host} (COMPATIBLE_HOST = \"{need}\" does not match HOST_SYS) {TAIL}"
+                        ));
+                    }
+                }
+            }
+        },
+    }
+    out.extend(license_skip(ds, host_checked.is_none()));
+    out
+}
+
+/// Why `name`'s value is not static, for a note.
+fn unknown_why(ds: &DataStore, name: &str) -> String {
+    if ds.replay().python_vars.contains(name) {
+        return "anonymous python sets it".into();
+    }
+    match ds.value(name) {
+        Some(v) if v.unevaluated_python => "it holds python".into(),
+        Some(v) if !v.unresolved.is_empty() => {
+            format!("it uses undefined variables: {}", v.unresolved.join(", "))
+        }
+        _ => "not known".into(),
+    }
+}
+
+/// One package's outcome in `skip_incompatible_package_licenses`.
+enum PkgLicense {
+    /// Incompatible licenses: the package is skipped.
+    Skipped(Vec<String>),
+    Kept,
+    /// Cannot be told; why.
+    Unknown(String),
+}
+
+/// `INCOMPATIBLE_LICENSE` (OE-core Wrynose `33a6bd6c`, `classes-global/base.bbclass`
+/// anonymous python and `lib/oe/license.py` `skip_incompatible_package_licenses`,
+/// `incompatible_license`, `incompatible_pkg_license`, `expand_wildcard_licenses`,
+/// `apply_pkg_license_exception`, `canonical_license`). With `bad =
+/// INCOMPATIBLE_LICENSE.split()` and `pkgs = PACKAGES.split()`: nothing when `pkgs` is
+/// empty. A package is skipped when `incompatible_license(d, remaining, pkg)` is not empty,
+/// where `remaining` is `expand_wildcard_licenses(bad)` (`AGPL-3.0*`, `GPL-3.0*`,
+/// `LGPL-3.0*` become their `-only` / `-or-later` names; an obsolete name or another `*` is
+/// `bb.fatal`) without the `<pkg>:<lic>` entries of `INCOMPATIBLE_LICENSE_EXCEPTIONS`, and
+/// the license is `LICENSE:<pkg>` or else `LICENSE`, flattened choosing, at each `|`, the
+/// left side when all its licenses (mapped through `SPDXLICENSEMAP[lic]`) match no pattern
+/// (`fnmatchcase`), else the right. No package is skipped when `PN` starts with
+/// `nativesdk-` or `gcc-source-`, or ends with `-native`, `-cross-${TARGET_ARCH}`,
+/// `-cross-initial-${TARGET_ARCH}`, `-crosssdk-${SDK_SYS}`, `-crosssdk-initial-${SDK_SYS}`
+/// or `-cross-canadian-${TRANSLATED_TARGET_ARCH}`. The recipe is skipped only when every
+/// package is, with "it has incompatible license(s): <sorted, unique: the recipe's own
+/// incompatible licenses (against `bad` unexpanded) and every package's>".
+fn license_skip(ds: &DataStore, check_unsure: bool) -> Vec<String> {
+    const MAY: &str = "note: BitBake may skip this recipe:";
+    const TAIL: &str = "(decided from static values; anonymous python is not run)";
+    let may = |why: String| vec![format!("{MAY} {why}")];
+    let unsure = if check_unsure {
+        "; SOURCE_MIRROR_FETCH or PARSE_ALL_RECIPES is not known statically"
+    } else {
+        ""
+    };
+    let bad: Vec<String> = match static_value(ds, "INCOMPATIBLE_LICENSE") {
+        Some(v) => pwords::words(&v.unwrap_or_default())
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        None => {
+            return may(format!(
+                "INCOMPATIBLE_LICENSE is set but not known statically ({})",
+                unknown_why(ds, "INCOMPATIBLE_LICENSE")
             ));
         }
+    };
+    if bad.is_empty() {
+        return Vec::new();
     }
-    if let Some(Some(need)) = static_value(ds, "COMPATIBLE_HOST")
-        && !need.is_empty()
-        && static_bool(ds, "PARSE_ALL_RECIPES") == Some(false)
-        && static_bool(ds, "SOURCE_MIRROR_FETCH") == Some(false)
-        && let Some(Some(host)) = static_value(ds, "HOST_SYS")
-        && let Some(re) = anchored(&need)
-        && !re.is_match(&host)
-    {
-        out.push(format!(
-            "note: BitBake would skip this recipe: incompatible with host {host} (COMPATIBLE_HOST = \"{need}\" does not match HOST_SYS) {TAIL}"
+    let Some(Some(pn)) = static_value(ds, "PN") else {
+        return may("INCOMPATIBLE_LICENSE is set and PN is not known statically".into());
+    };
+    if pn.starts_with("nativesdk-") || pn.starts_with("gcc-source-") {
+        return Vec::new();
+    }
+    for t in [
+        "-native",
+        "-cross-${TARGET_ARCH}",
+        "-cross-initial-${TARGET_ARCH}",
+        "-crosssdk-${SDK_SYS}",
+        "-crosssdk-initial-${SDK_SYS}",
+        "-cross-canadian-${TRANSLATED_TARGET_ARCH}",
+    ] {
+        let e = ds.expand(t);
+        if e.unevaluated_python || !e.unresolved.is_empty() {
+            // The suffix is not known; only a PN that could end with it is in doubt.
+            let stem = t.split("${").next().unwrap_or(t);
+            if pn.contains(stem) {
+                return may(format!(
+                    "INCOMPATIBLE_LICENSE is set and whether {pn} ends with {t} (no license check) cannot be told"
+                ));
+            }
+            continue;
+        }
+        if pn.ends_with(&e.text) {
+            return Vec::new();
+        }
+    }
+    let expanded = match license::expand_wildcards(&bad) {
+        Ok(x) => x,
+        Err(fatal) => {
+            return vec![format!(
+                "note: BitBake would stop parsing this recipe: {fatal} {TAIL}"
+            )];
+        }
+    };
+    let exceptions: Vec<String> = match static_value(ds, "INCOMPATIBLE_LICENSE_EXCEPTIONS") {
+        Some(v) => pwords::words(&v.unwrap_or_default())
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        None => {
+            return may(format!(
+                "INCOMPATIBLE_LICENSE_EXCEPTIONS is not known statically ({})",
+                unknown_why(ds, "INCOMPATIBLE_LICENSE_EXCEPTIONS")
+            ));
+        }
+    };
+    for e in &exceptions {
+        let lic = e.split(':').nth(1).unwrap_or(e);
+        if license::OBSOLETE.contains(&lic) {
+            return vec![format!(
+                "note: BitBake would stop parsing this recipe: Obsolete license {lic} used in INCOMPATIBLE_LICENSE_EXCEPTIONS {TAIL}"
+            )];
+        }
+    }
+    let pkgs: Vec<String> = match static_value(ds, "PACKAGES") {
+        Some(v) => pwords::words(&v.unwrap_or_default())
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        None => {
+            return may(format!(
+                "INCOMPATIBLE_LICENSE is set and PACKAGES is not known statically ({})",
+                unknown_why(ds, "PACKAGES")
+            ));
+        }
+    };
+    if pkgs.is_empty() {
+        return Vec::new();
+    }
+    let mut skipped: Vec<(String, Vec<String>)> = Vec::new();
+    let mut unknown: Vec<String> = Vec::new();
+    for pkg in &pkgs {
+        let remaining: Vec<String> = expanded
+            .iter()
+            .filter(|l| !exceptions.contains(&format!("{pkg}:{l}")))
+            .cloned()
+            .collect();
+        match package_license(ds, Some(pkg), &remaining) {
+            PkgLicense::Kept => return Vec::new(),
+            PkgLicense::Skipped(l) => skipped.push((pkg.clone(), l)),
+            PkgLicense::Unknown(why) => unknown.push(why),
+        }
+    }
+    if !unknown.is_empty() {
+        let n = unknown.len();
+        unknown.sort();
+        unknown.dedup();
+        return may(format!(
+            "INCOMPATIBLE_LICENSE = \"{}\": {} of {} package{} have incompatible licenses; for the other {n} it cannot be told ({}){unsure}",
+            bad.join(" "),
+            skipped.len(),
+            pkgs.len(),
+            if pkgs.len() == 1 { "" } else { "s" },
+            unknown.join("; ")
         ));
     }
-    out
+    let mut all: Vec<String> = match package_license(ds, None, &bad) {
+        PkgLicense::Skipped(l) => l,
+        PkgLicense::Kept => Vec::new(),
+        PkgLicense::Unknown(why) => {
+            return may(format!(
+                "INCOMPATIBLE_LICENSE = \"{}\": every package has incompatible licenses, and the recipe's LICENSE cannot be read ({why}){unsure}",
+                bad.join(" ")
+            ));
+        }
+    };
+    for (_, l) in skipped {
+        all.extend(l);
+    }
+    all.sort();
+    all.dedup();
+    if check_unsure {
+        return may(format!(
+            "it has incompatible license(s): {} (INCOMPATIBLE_LICENSE = \"{}\"){unsure}",
+            all.join(" "),
+            bad.join(" ")
+        ));
+    }
+    vec![format!(
+        "note: BitBake would skip this recipe: it has incompatible license(s): {} (INCOMPATIBLE_LICENSE = \"{}\") {TAIL}",
+        all.join(" "),
+        bad.join(" ")
+    )]
+}
+
+/// `incompatible_license(d, dont_want, package)`: the incompatible licenses of
+/// `LICENSE:<package>` (or `LICENSE` when that is empty or `package` is `None`).
+fn package_license(ds: &DataStore, package: Option<&str>, dont_want: &[String]) -> PkgLicense {
+    let own = package.map(|p| format!("LICENSE:{p}"));
+    let name = match &own {
+        Some(n) => match static_value(ds, n) {
+            Some(Some(v)) if !v.is_empty() => n.as_str(),
+            Some(_) => "LICENSE",
+            None => return PkgLicense::Unknown(format!("{n}: {}", unknown_why(ds, n))),
+        },
+        None => "LICENSE",
+    };
+    let text = match static_value(ds, name) {
+        Some(v) => v.unwrap_or_default(),
+        None => return PkgLicense::Unknown(format!("{name}: {}", unknown_why(ds, name))),
+    };
+    // canonical_license: SPDXLICENSEMAP[lic] or lic. `None` when the flag is not static.
+    let canonical = |lic: &str| -> Option<String> {
+        match ds.flag("SPDXLICENSEMAP", lic) {
+            None => Some(lic.to_string()),
+            Some(v) if v.unevaluated_python || !v.unresolved.is_empty() => None,
+            Some(v) if v.text.is_empty() => Some(lic.to_string()),
+            Some(v) => Some(v.text),
+        }
+    };
+    let ok = |lic: &str| !dont_want.iter().any(|p| license::fnmatch(lic, p));
+    let unknown_map = std::cell::Cell::new(false);
+    let choose = |a: &[String], _: &[String]| -> bool {
+        a.iter().all(|l| match canonical(l) {
+            Some(c) => ok(&c),
+            None => {
+                unknown_map.set(true);
+                true
+            }
+        })
+    };
+    let lics = match license::flatten(&text, &choose) {
+        Ok(l) => l,
+        Err(e) => return PkgLicense::Unknown(format!("{name} = \"{text}\": {e}")),
+    };
+    let mut bad = Vec::new();
+    for l in &lics {
+        match canonical(l) {
+            Some(c) => {
+                if !ok(&c) {
+                    bad.push(c);
+                }
+            }
+            None => unknown_map.set(true),
+        }
+    }
+    if unknown_map.get() {
+        return PkgLicense::Unknown("SPDXLICENSEMAP is not known statically".into());
+    }
+    bad.sort();
+    if bad.is_empty() {
+        PkgLicense::Kept
+    } else {
+        PkgLicense::Skipped(bad)
+    }
 }
 
 /// `ast.handleVirtRecipeProviders` (BitBake 2.12 and later), on `DEPENDS`: each word listed

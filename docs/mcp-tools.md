@@ -31,9 +31,13 @@ Common to every tool:
   and in lint's target; a `BBMASK` the evaluator cannot apply (python, undefined variables, a
   regular expression Rust cannot compile) gives `note: BBMASK is set but sous-chef does not
   apply it (...)` in every evaluated view; a recipe that `SKIP_RECIPE[<pn>]`,
-  `COMPATIBLE_MACHINE` or `COMPATIBLE_HOST` makes BitBake skip, when that is decided from
-  static values, gives `note: BitBake would skip this recipe: ...`; nothing is hidden, and an
-  undecidable check says nothing.
+  `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST` or `INCOMPATIBLE_LICENSE` makes BitBake skip,
+  when that is decided from static values, gives `note: BitBake would skip this recipe:
+  ...`; when the check fails on what is known but values that are not known (python,
+  undefined variables) could still decide it, `note: BitBake may skip this recipe: ...`
+  names them (`COMPATIBLE_MACHINE = "^qemu.*$" matches none of the known machine overrides
+  (none is known); 1 part of MACHINEOVERRIDES is not evaluated`); a check that passes on
+  known values (a match on a known `MACHINEOVERRIDES` entry) says nothing.
 - `machine` and `distro`, where a tool takes them, default to what the evaluated
   configuration sets (`local.conf`, and OE configuration fragments such as bitbake-setup's
   `OE_FRAGMENTS` in `conf/toolcfg.conf`). In a kas project whose build directory does not

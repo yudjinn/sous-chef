@@ -267,3 +267,242 @@ fn kas_defaults_apply_where_bitbake_conf_includes_local_conf() {
         ds.replay().target_notes
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// Item 4: skip notes that can fire: COMPATIBLE_MACHINE against partly known
+// MACHINEOVERRIDES, INCOMPATIBLE_LICENSE
+// ---------------------------------------------------------------------------------------
+
+fn skip_notes(fx: &Fx, recipe: &str) -> Vec<String> {
+    eval(fx, &target(recipe))
+        .replay()
+        .target_notes
+        .iter()
+        .filter(|n| n.contains("skip this recipe") || n.contains("stop parsing"))
+        .cloned()
+        .collect()
+}
+
+fn recipe(root: &Path, pn: &str, body: &str) {
+    write(
+        root,
+        &format!("meta-mine/recipes-app/{pn}/{pn}_1.0.bb"),
+        body,
+    );
+}
+
+#[test]
+fn compatible_machine_against_partly_known_machine_overrides() {
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-core/conf/distro/testdistro.conf",
+            "MACHINEOVERRIDES = \"${@'soc-x' if d.getVar('Y') else ''}:${MACHINE}\"\n",
+        );
+        recipe(
+            r,
+            "known",
+            "LICENSE = \"CLOSED\"\nCOMPATIBLE_MACHINE = \"qemux86\"\n",
+        );
+        recipe(
+            r,
+            "unknown",
+            "LICENSE = \"CLOSED\"\nCOMPATIBLE_MACHINE = \"boardx|soc-.*\"\n",
+        );
+    });
+    // A match on a known entry is a match.
+    assert!(skip_notes(&fx, "known").is_empty());
+    // No known entry matches, and one part is python: BitBake may skip it.
+    let n = skip_notes(&fx, "unknown");
+    assert_eq!(n.len(), 1, "{n:?}");
+    assert!(
+        n[0].contains(
+            "BitBake may skip this recipe: COMPATIBLE_MACHINE = \"boardx|soc-.*\" matches none of the known machine overrides (qemux86); 1 part of MACHINEOVERRIDES is not evaluated"
+        ),
+        "{n:?}"
+    );
+}
+
+#[test]
+fn incompatible_license_three_ways() {
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-core/conf/distro/testdistro.conf",
+            "INCOMPATIBLE_LICENSE = \"GPL-3.0*\"\n\
+             INCOMPATIBLE_LICENSE_EXCEPTIONS = \"excepted:GPL-3.0-only excepted-dbg:GPL-3.0-only excepted-dev:GPL-3.0-only excepted-doc:GPL-3.0-only\"\n\
+             SPDXLICENSEMAP[GPLv3] = \"GPL-3.0-only\"\n",
+        );
+        recipe(r, "gpl3", "LICENSE = \"GPL-3.0-only & MIT\"\n");
+        recipe(r, "oldname", "LICENSE = \"GPLv3\"\n");
+        recipe(r, "either", "LICENSE = \"GPL-3.0-only | MIT\"\n");
+        recipe(r, "bothways", "LICENSE = \"MIT | GPL-3.0-or-later\"\n");
+        recipe(
+            r,
+            "pkgonly",
+            "LICENSE = \"GPL-3.0-only\"\nLICENSE:${PN} = \"MIT\"\n",
+        );
+        recipe(r, "excepted", "LICENSE = \"GPL-3.0-only\"\n");
+        recipe(r, "pyl", "LICENSE = \"${@'GPL-3.0-only'}\"\n");
+        recipe(r, "bad", "LICENSE = \"GPL-3.0-only, MIT\"\n");
+        recipe(r, "empty", "LICENSE = \"GPL-3.0-only\"\nPACKAGES = \"\"\n");
+    });
+    // Every package has an incompatible license: would skip, the recipe's own and the
+    // packages' licenses listed once.
+    let n = skip_notes(&fx, "gpl3");
+    assert_eq!(n.len(), 1, "{n:?}");
+    assert!(
+        n[0].contains(
+            "BitBake would skip this recipe: it has incompatible license(s): GPL-3.0-only (INCOMPATIBLE_LICENSE = \"GPL-3.0*\")"
+        ),
+        "{n:?}"
+    );
+    // Through SPDXLICENSEMAP.
+    let n = skip_notes(&fx, "oldname");
+    assert!(
+        n.len() == 1 && n[0].contains("incompatible license(s): GPL-3.0-only"),
+        "{n:?}"
+    );
+    // An `|` with a compatible side, either way round; a package with its own compatible
+    // LICENSE; exceptions for every package; no packages: not skipped.
+    for pn in ["either", "bothways", "pkgonly", "excepted", "empty"] {
+        assert!(
+            skip_notes(&fx, pn).is_empty(),
+            "{pn}: {:?}",
+            skip_notes(&fx, pn)
+        );
+    }
+    // Python in LICENSE, an invalid character: may skip.
+    let n = skip_notes(&fx, "pyl");
+    assert!(
+        n.len() == 1
+            && n[0].starts_with("note: BitBake may skip this recipe: INCOMPATIBLE_LICENSE = \"GPL-3.0*\": 0 of 4 packages")
+            && n[0].contains("LICENSE: it holds python"),
+        "{n:?}"
+    );
+    let n = skip_notes(&fx, "bad");
+    assert!(
+        n.len() == 1 && n[0].contains("invalid characters in license 'GPL-3.0-only,'"),
+        "{n:?}"
+    );
+}
+
+#[test]
+fn incompatible_license_obsolete_name_and_native() {
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-core/conf/distro/testdistro.conf",
+            "INCOMPATIBLE_LICENSE = \"GPLv3\"\n",
+        );
+        recipe(r, "gpl3", "LICENSE = \"GPL-3.0-only\"\n");
+        write(
+            r,
+            "meta-mine/recipes-app/tool/tool-native_1.0.bb",
+            "LICENSE = \"GPL-3.0-only\"\n",
+        );
+    });
+    let n = skip_notes(&fx, "gpl3");
+    assert!(
+        n.len() == 1
+            && n[0].contains(
+                "BitBake would stop parsing this recipe: Error, GPLv3 is an obsolete license"
+            ),
+        "{n:?}"
+    );
+    // -native recipes are not checked.
+    assert!(skip_notes(&fx, "tool-native").is_empty());
+}
+
+/// Live counts (ignored; starts no BitBake): every collected recipe of the bitbake-setup
+/// build evaluated with the configuration's machine and distro, and the notes counted by
+/// kind. `SOUS_CHEF_LIVE` is the live environment; the index goes to
+/// `$SOUS_CHEF_W8_DIR/cache` (required, so that nothing is written elsewhere).
+#[test]
+#[ignore]
+fn live_note_counts() {
+    use sous_chef::config::Config;
+    use sous_chef::index::query;
+    use sous_chef::types::FileKind;
+    use std::collections::BTreeMap;
+    let live = PathBuf::from(std::env::var_os("SOUS_CHEF_LIVE").expect("SOUS_CHEF_LIVE"));
+    let out = PathBuf::from(std::env::var_os("SOUS_CHEF_W8_DIR").expect("SOUS_CHEF_W8_DIR"));
+    let build = live.join("bitbake-builds/kiss-wrynose-dogbonedark/build");
+    let mut cfg = Config {
+        build_dir: Some(build.clone()),
+        work_dir: build,
+        ..Config::default()
+    };
+    cfg.bitbake.enabled = false;
+    let ws = Workspace::discover(&cfg).unwrap();
+    let mut idx = Index::open_in(&out.join("cache"), &ws).unwrap();
+    idx.refresh(&ws).unwrap();
+    let machines: Vec<Option<String>> = match std::env::var("SOUS_CHEF_W8_MACHINES") {
+        Ok(m) => m.split_whitespace().map(|s| Some(s.to_string())).collect(),
+        Err(_) => vec![None],
+    };
+    let cache = ConfigCache::new();
+    for machine in machines {
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+        let mut examples: BTreeMap<String, String> = BTreeMap::new();
+        let mut n = 0;
+        for f in query::all_files_in(&idx, query::FileSet::COLLECTED).unwrap() {
+            if f.kind != FileKind::Recipe {
+                continue;
+            }
+            let t = Target {
+                recipe: Some(format!("{}:{}", f.layer, f.path.display())),
+                machine: machine.clone(),
+                ..Target::default()
+            };
+            let Ok(ds) = eval::evaluate_with(&cache, &idx, &ws, &t) else {
+                continue;
+            };
+            if n == 0
+                && let Ok(vars) = std::env::var("SOUS_CHEF_W8_PRINT")
+            {
+                for v in vars.split_whitespace() {
+                    println!("{v} = {:?}", ds.value(v));
+                }
+            }
+            n += 1;
+            for note in &ds.replay().target_notes {
+                let kind = if note.contains("would skip") || note.contains("may skip") {
+                    let what = [
+                        "SKIP_RECIPE",
+                        "COMPATIBLE_MACHINE",
+                        "machine",
+                        "COMPATIBLE_HOST",
+                        "host",
+                        "license",
+                        "LICENSE",
+                    ]
+                    .iter()
+                    .find(|w| note.contains(*w))
+                    .copied()
+                    .unwrap_or("other");
+                    format!(
+                        "{} {what}",
+                        if note.contains("would skip") {
+                            "would"
+                        } else {
+                            "may"
+                        }
+                    )
+                } else if note.contains("BBMASK") {
+                    "BBMASK".to_string()
+                } else {
+                    continue;
+                };
+                *counts.entry(kind.clone()).or_default() += 1;
+                examples
+                    .entry(kind)
+                    .or_insert_with(|| format!("{}: {note}", f.path.display()));
+            }
+        }
+        println!("machine {machine:?}: {n} recipes evaluated");
+        for (k, c) in &counts {
+            println!("  {k}: {c}\n    e.g. {}", examples[k]);
+        }
+    }
+}

@@ -6,6 +6,7 @@
 
 pub mod datastore;
 pub mod expand;
+mod license;
 pub mod overlay;
 pub mod overrides;
 pub mod providers;

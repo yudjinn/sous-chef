@@ -1825,9 +1825,49 @@ in the live environment:
   nor `PARSE_ALL_RECIPES` true) that does not `re.match` `HOST_SYS`. Nothing is hidden: when
   every value involved is static (no python, no undefined variable, not set by anonymous
   python by name) and the check fails, the evaluation gets `note: BitBake would skip this
-  recipe: ...` (`replay::skip_reasons`), shown by `recipe`, `var`, `deps`, `overrides`;
-  otherwise nothing is said. `INCOMPATIBLE_LICENSE` and the other checks of that function
-  are not modelled.
+  recipe: ...` (`replay::skip_reasons`), shown by `recipe`, `var`, `deps`, `overrides`.
+  (w8) When the check fails on what is known but unknown values could still decide it, the
+  note is `note: BitBake may skip this recipe: ...` naming them: `COMPATIBLE_MACHINE` that
+  matches none of the known entries of `MACHINEOVERRIDES` while some entries hold python or
+  undefined variables ("N parts of MACHINEOVERRIDES are not evaluated") or anonymous python
+  sets it by name; a `COMPATIBLE_MACHINE` / `COMPATIBLE_HOST` / `HOST_SYS` that is not
+  static, unset `HOST_SYS`, a regular expression Rust cannot compile. A match on a known
+  `MACHINEOVERRIDES` entry is a match (nothing said). On yocto-kiss `MACHINEOVERRIDES` is
+  `${@...}...${@...}dogbonedark` (the `soc-family.inc` and `arch-arm*.inc` `=.` python
+  glued to the machine name, no `:` outside the python), so no entry is known statically.
+  `SKIP_RECIPE` is said only when its flag is static.
+- **`INCOMPATIBLE_LICENSE`** (OE-core Wrynose `33a6bd6c`, `classes-global/base.bbclass`
+  anonymous python lines 591-621, only when neither `SOURCE_MIRROR_FETCH` nor
+  `PARSE_ALL_RECIPES` is true; `lib/oe/license.py` `skip_incompatible_package_licenses`,
+  `incompatible_license`, `incompatible_pkg_license`, `flattened_licenses` /
+  `FlattenVisitor` / `LicenseVisitor.get_elements`, `expand_wildcard_licenses`,
+  `apply_pkg_license_exception`, `canonical_license`, `license_ok`): `bad =
+  (INCOMPATIBLE_LICENSE or "").split()`; `pkgs = PACKAGES.split()`; when `pkgs` is empty
+  nothing is skipped. `skip_incompatible_package_licenses` returns nothing (so nothing is
+  skipped) when `bad` is empty or `PN` starts with `nativesdk-` or `gcc-source-` or ends
+  with `-native`, `-cross-${TARGET_ARCH}`, `-cross-initial-${TARGET_ARCH}`,
+  `-crosssdk-${SDK_SYS}`, `-crosssdk-initial-${SDK_SYS}`,
+  `-cross-canadian-${TRANSLATED_TARGET_ARCH}`; otherwise `bad` goes through
+  `expand_wildcard_licenses` (`AGPL-3.0*`, `GPL-3.0*`, `LGPL-3.0*` become their `-only` and
+  `-or-later` names; any name in `obsolete_license_list()` or any other `*` is `bb.fatal`,
+  for every recipe), an obsolete license in `INCOMPATIBLE_LICENSE_EXCEPTIONS` (the part
+  after `:`) is `bb.fatal`, and for each package the patterns left after removing
+  exceptions written `<pkg>:<lic>` are checked against `LICENSE:<pkg>`, or `LICENSE` when
+  that is empty: the license string is split on `&|() `, names are `[a-zA-Z0-9.+_\-]+`
+  (two in a row get `&`; anything else is `InvalidLicense`, `bb.fatal`), parsed as a Python
+  expression (`&` binds tighter than `|`), and flattened keeping, at each `|`, the left
+  side if every license in it, mapped through `SPDXLICENSEMAP[lic]`, matches no pattern
+  (`fnmatchcase`), else the right side; the package is skipped when a kept license matches
+  a pattern. The recipe is skipped only when **every** package is, with `SkipRecipe("it
+  has incompatible license(s): <sorted unique list>")`, the list being the recipe
+  `LICENSE`'s own incompatible licenses (against `bad` **unexpanded**, no exceptions) plus
+  every package's. sous-chef (w8, `replay::license_skip`, `eval/license.rs`) does this on
+  static values: "would skip" with BitBake's list when everything is known, nothing when
+  some package keeps a compatible license, "may skip" naming what is not known (a
+  `LICENSE` with python, undefined variables, or a form it does not parse such as `A (B)`,
+  `PACKAGES`, a non-static `SPDXLICENSEMAP` flag, `INCOMPATIBLE_LICENSE` itself), and
+  `note: BitBake would stop parsing this recipe: ...` for the fatal cases. On yocto-kiss
+  `INCOMPATIBLE_LICENSE` is not set.
 
 These are reported, never silently guessed. Authoritative mode (M5) covers them.
 

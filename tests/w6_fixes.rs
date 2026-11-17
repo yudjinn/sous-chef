@@ -667,7 +667,7 @@ fn skip_notes(fx: &Fx, recipe: &str) -> Vec<String> {
         .replay()
         .target_notes
         .iter()
-        .filter(|n| n.contains("BitBake would skip this recipe"))
+        .filter(|n| n.contains("skip this recipe"))
         .cloned()
         .collect()
 }
@@ -725,7 +725,7 @@ fn skipped_recipes_are_noted() {
 }
 
 #[test]
-fn an_undecidable_skip_check_says_nothing() {
+fn an_undecidable_skip_check_says_bitbake_may_skip() {
     let fx = modified(|r| {
         append_to(
             r,
@@ -733,8 +733,20 @@ fn an_undecidable_skip_check_says_nothing() {
             "COMPATIBLE_MACHINE = \"${@'boardx' if d.getVar('X') else 'qemux86'}\"\nCOMPATIBLE_HOST = \"arm.*\"\n",
         );
     });
-    // Python in COMPATIBLE_MACHINE; HOST_SYS is not set in the fixture.
-    assert!(skip_notes(&fx, "app").is_empty());
+    // Python in COMPATIBLE_MACHINE; HOST_SYS is not set in the fixture. (w8: said, not
+    // silent; it was silent before.)
+    let notes = skip_notes(&fx, "app");
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert!(
+        notes[0].contains("BitBake may skip this recipe: COMPATIBLE_MACHINE is set but not known statically (it holds python)"),
+        "{notes:?}"
+    );
+    assert!(
+        notes[1].contains(
+            "BitBake may skip this recipe: COMPATIBLE_HOST = \"arm.*\"; HOST_SYS is not set"
+        ),
+        "{notes:?}"
+    );
 }
 
 #[tokio::test]
