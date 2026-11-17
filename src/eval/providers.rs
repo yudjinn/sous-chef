@@ -39,6 +39,7 @@ use crate::index::Index;
 use crate::index::query::{self, FileRow, RecipeRow, StatementFilter};
 use crate::types::{FileKind, Loc};
 use crate::workspace::Workspace;
+use crate::workspace::resolve;
 
 /// A configuration variable that took part in a selection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -576,7 +577,7 @@ fn order(a: &Info, b: &Info) -> Ordering {
         .cmp(&a.recipe.file.priority)
         .then_with(|| a.dp.cmp(&b.dp))
         .then_with(|| a.recipe.file.layer_id.cmp(&b.recipe.file.layer_id))
-        .then_with(|| a.recipe.file.path.cmp(&b.recipe.file.path))
+        .then_with(|| resolve::py_str_cmp(&a.recipe.file.path, &b.recipe.file.path))
 }
 
 fn versions(infos: &[Info]) -> String {

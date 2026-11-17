@@ -263,6 +263,22 @@ def helper(d):                       top-level python def, body is the indented 
 A shell or `python` function body ends at the first line that is exactly `}` in column 0
 (trailing whitespace after the `}` is allowed; see "Lines").
 
+**The `func` flag of renamed and keyword functions** (verified, w5 fix of differential
+observation 6, BitBake 2.18.0 `lib/bb/parse/ast.py` `MethodNode.eval` and
+`lib/bb/data_smart.py` `renameVar`, `setVar`): `MethodNode.eval` does
+`setVar(name, body, parsing=True)` and `setVarFlag(name, "func", 1)` with the name as
+written. For `pkg_postinst:${PN}:prepend () {` the `setVar` puts the body in the prepend
+list of `pkg_postinst:${PN}` and the flag lands on the separate name
+`pkg_postinst:${PN}:prepend`. `expandKeys` then renames `pkg_postinst:${PN}` to
+`pkg_postinst:busybox` with `renameVar`, which copies the value and only the
+`_append` / `_prepend` / `_remove` flags; `func` is lost. So in BitBake
+`getVarFlag("pkg_postinst:busybox", "func")` is `None` and `bitbake -e` prints it as a
+variable (`pkg_postinst:busybox="..."`, checked in the busybox dump of the differential
+run), although its text is the shell body. sous-chef keeps the same flags
+(`raw_flag(name, "func")`), and `DataStore::is_function` answers the question tools need,
+"is this value a function body": the flag, or a name a function statement wrote (followed
+through `expand_keys`).
+
 ### Directives
 
 ```
@@ -359,12 +375,28 @@ Verified (T1.4) against BitBake `master` (commit `5495a547`, 2026-11-16), and re
   are compared, never directories.
 - **`BBFILES` expansion** (`cooker.py` `collect_bbfiles`): the words of `BBFILES` are sorted
   (stably) by the priority of the collection whose `BBFILE_PATTERN` matches the glob text,
-  lowest first; each word is used as is when the path exists, otherwise expanded with
-  `glob.glob` (not recursive; `*` does not match a leading `.`) and sorted; a directory match
-  is walked for `.bb` / `.bbappend`; duplicates are dropped (first kept); `BBMASK` regexes
-  are applied afterwards. The `.bbappend` files are kept in this order, which is the order
-  `get_file_appends` returns them in, so appends apply **lowest layer priority first** (the
-  highest priority layer has the last word), ties in `BBFILES` order.
+  lowest first; a word that is a directory (`os.path.isdir`) is walked for `.bb` /
+  `.bbappend` (`find_bbfiles`, `os.walk` order); any other word is expanded with
+  `glob.glob` (not recursive; `*` does not match a leading `.`), a word that matches nothing
+  but exists is kept as is, and the matches are taken in `sorted(globbed)` order; duplicates
+  are dropped (first kept); `BBMASK` regexes are applied afterwards and only names ending in
+  `.bb` / `.bbappend` are kept (a directory a glob matches is not walked). The `.bbappend`
+  files are kept in this order, which is the order `get_file_appends` returns them in, so
+  appends apply **lowest layer priority first** (the highest priority layer has the last
+  word), ties in `BBFILES` order.
+- **The sort is a string sort** (verified, w5 fix of differential bug 2, BitBake 2.18.0
+  `lib/bb/cooker.py` `CookerCollectFiles.collect_bbfiles`, `for g in sorted(globbed)`):
+  Python compares `str` by code point, so `-` (U+002D) sorts before `/` (U+002F) and
+  `.../recipes-x/foo-bar/a_%.bbappend` comes before `.../recipes-x/foo/a_%.bbappend`; the
+  `foo/` append is applied last. A `Path` comparison (component by component) gives the
+  opposite. sous-chef compares the path strings by code point (`resolve::py_str_cmp`); a
+  byte that is not valid UTF-8 counts as `U+DC00 + byte`, as Python's `surrogateescape`
+  decoding of file names makes it (exact for single invalid bytes; for a longer invalid
+  sequence Rust's and Python's decoders agree on which bytes are invalid as both follow
+  the Unicode "maximal subpart" rule, not separately checked). The same order breaks ties
+  between recipe files of one layer in provider selection and `query::find_recipes`.
+  `find_bbfiles` (a directory in `BBFILES`) is not sorted by BitBake; sous-chef sorts it the
+  same way for determinism.
 - **`BBPATH`** is whatever the configuration leaves in the variable: OE layers usually do
   `BBPATH .= ":${LAYERDIR}"` but some prepend (`BBPATH =. "${LAYERDIR}:"`), so sous-chef reads
   the value from `bblayers.conf` and the layer confs instead of assuming the layer order

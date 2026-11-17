@@ -59,7 +59,7 @@ use regex::Regex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use super::datastore::{Content, Var, base_of, full_name};
+use super::datastore::{Content, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
 use super::{DataStore, FileVisit, OpStatus, Target, VarOp};
 use crate::error::{Error, Result};
@@ -104,6 +104,11 @@ pub struct ReplayNotes {
     /// Names whose current value the replay computed (see the module documentation).
     #[serde(skip)]
     pub(crate) computed: BTreeSet<String>,
+    /// Names a function statement wrote, as stored: the function's own name and, for a
+    /// `NAME:append () {` / `NAME:prepend () {` piece, the name it is added to. Renamed with
+    /// the variable by `expand_keys`. See [`DataStore::is_function`].
+    #[serde(skip)]
+    pub(crate) functions: BTreeSet<String>,
 }
 
 /// One anonymous python function.
@@ -177,9 +182,23 @@ impl DataStore {
         &self.notes
     }
 
-    /// Whether `name` is a function (`func` flag set).
+    /// Whether the value of `name` is a function body (its pieces are pointers, read them
+    /// with [`DataStore::function`]): the `func` flag is set, or a function statement wrote
+    /// the name.
+    ///
+    /// This is wider than BitBake's `func` flag, which `raw_flag(name, "func")` reports.
+    /// BitBake loses the flag in two cases (BitBake 2.18, `lib/bb/data_smart.py`):
+    /// `renameVar`, which `expandKeys` runs for a name containing `${...}`, copies only the
+    /// `:append` / `:prepend` / `:remove` lists to the new name, so `pkg_postrm:${PN} () {`
+    /// ends up as `pkg_postrm:dropbear` without the flag; and `NAME:prepend () {` stores the
+    /// body in `NAME`'s prepend list and the flag on the name with `:prepend`, so a `NAME`
+    /// built only from such pieces has no flag either. `bitbake -e` then prints the value
+    /// as a variable; its text is still the shell body.
     pub fn is_function(&self, name: &str) -> bool {
-        self.raw_flag(name, "func").is_some()
+        if self.raw_flag(name, "func").is_some() || self.notes.functions.contains(name) {
+            return true;
+        }
+        split_keyword(name).is_some_and(|(base, _, _)| self.notes.functions.contains(&base))
     }
 
     /// The composed pieces of a function, in order (override variant, `:append`,
@@ -1095,6 +1114,13 @@ impl<'a> Replay<'a> {
                 put_flag(&mut self.ds, &key, "fakeroot", "1");
             }
             put_flag(&mut self.ds, &key, "func", "1");
+        }
+        {
+            let notes = Arc::make_mut(&mut self.ds.notes);
+            if let Some((target, _, _)) = split_keyword(&key) {
+                notes.functions.insert(target);
+            }
+            notes.functions.insert(key.clone());
         }
         if anonymous {
             self.anonymous(st, via, key);

@@ -23,9 +23,11 @@
 //!   `i` being the position of the first `%` in `b`.
 //! - **`BBFILES`** (`cooker.py` `collect_bbfiles`): the globs are taken in order of their
 //!   layer's priority (lowest first, stable); each is used as is when the path exists,
-//!   otherwise expanded with Python's `glob.glob` and sorted; a directory match is walked
-//!   for `.bb` / `.bbappend` files; duplicates are dropped, first occurrence kept. `BBMASK`
-//!   is not applied (it is evaluated configuration).
+//!   a directory is walked for `.bb` / `.bbappend` files; anything else is expanded with
+//!   Python's `glob.glob` and the matches sorted with `sorted()`, a string sort (see
+//!   [`py_str_cmp`]: `foo-bar/` before `foo/`), and a pattern that matches nothing but exists
+//!   is used as is; duplicates are dropped, first occurrence kept. `BBMASK` is not applied
+//!   (it is evaluated configuration).
 
 use std::collections::HashSet;
 use std::fs;
@@ -438,28 +440,29 @@ pub fn recipe_files(ws: &Workspace) -> Vec<PathBuf> {
         if !gp.is_absolute() {
             continue;
         }
-        let matched = if gp.exists() {
-            vec![gp.to_path_buf()]
-        } else {
-            let mut m = glob(ws, g);
-            m.sort();
-            m
-        };
-        for m in matched {
-            if m.is_dir() {
-                for f in walk_recipes(ws, &m) {
-                    add(f, &mut out);
-                }
-            } else {
-                add(m, &mut out);
+        // `collect_bbfiles`: a directory is walked; anything else is globbed, the matches
+        // sorted as Python sorts strings, and a pattern that matches nothing but exists as
+        // a path is used as is.
+        if gp.is_dir() {
+            for f in walk_recipes(ws, gp) {
+                add(f, &mut out);
             }
+            continue;
+        }
+        let mut matched = glob(ws, g);
+        if matched.is_empty() && fs::symlink_metadata(gp).is_ok() {
+            matched.push(gp.to_path_buf());
+        }
+        matched.sort_by(|a, b| py_str_cmp(a, b));
+        for m in matched {
+            add(m, &mut out);
         }
     }
     out
 }
 
-/// `cooker.find_bbfiles`: every `.bb` / `.bbappend` under `dir` (sorted for determinism;
-/// BitBake uses `os.walk` order).
+/// `cooker.find_bbfiles`: every `.bb` / `.bbappend` under `dir` (sorted as strings for
+/// determinism; BitBake uses `os.walk` order, which depends on the file system).
 fn walk_recipes(ws: &Workspace, dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
@@ -483,8 +486,29 @@ fn walk_recipes(ws: &Workspace, dir: &Path) -> Vec<PathBuf> {
             }
         }
     }
-    out.sort();
+    out.sort_by(|a, b| py_str_cmp(a, b));
     out
+}
+
+/// The order of Python's `sorted()` on the path strings BitBake works with: code point by
+/// code point. On Unix Python decodes a file name as UTF-8 with `surrogateescape`, so a byte
+/// that is not valid UTF-8 becomes the code point `U+DC00 + byte`; that is reproduced here.
+/// For valid UTF-8 this is byte order. It differs from `Path` order, which compares
+/// components: `foo-bar/x` sorts before `foo/x` as a string (`-` is 0x2D, `/` 0x2F) but
+/// after it as a path.
+pub fn py_str_cmp(a: &Path, b: &Path) -> std::cmp::Ordering {
+    py_code_points(a.as_os_str().as_encoded_bytes())
+        .cmp(py_code_points(b.as_os_str().as_encoded_bytes()))
+}
+
+fn py_code_points(bytes: &[u8]) -> impl Iterator<Item = u32> + '_ {
+    bytes.utf8_chunks().flat_map(|c| {
+        c.valid()
+            .chars()
+            .map(u32::from)
+            .chain(c.invalid().iter().map(|b| 0xDC00 + u32::from(*b)))
+            .collect::<Vec<u32>>()
+    })
 }
 
 /// Python `glob.glob(pattern)` (not recursive) for an absolute pattern. Directories outside

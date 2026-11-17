@@ -393,7 +393,7 @@ pub fn find_recipes(index: &Index, name: &str) -> Result<Vec<RecipeRow>> {
             .cmp(&a.file.priority)
             .then_with(|| vercmp(&b.pv, &a.pv))
             .then_with(|| a.file.layer_id.cmp(&b.file.layer_id))
-            .then_with(|| a.file.path.cmp(&b.file.path))
+            .then_with(|| resolve::py_str_cmp(&a.file.path, &b.file.path))
     });
     Ok(rows)
 }
@@ -421,7 +421,7 @@ pub fn preferred_recipe(
             .priority
             .cmp(&a.file.priority)
             .then_with(|| a.file.layer_id.cmp(&b.file.layer_id))
-            .then_with(|| a.file.path.cmp(&b.file.path))
+            .then_with(|| resolve::py_str_cmp(&a.file.path, &b.file.path))
     });
     if let Some(v) = version {
         let v = strip_epoch(v);
