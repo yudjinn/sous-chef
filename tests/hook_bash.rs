@@ -1,0 +1,231 @@
+//! T7.3: the Bash output digest. Large bitbake output is stored under a handle the MCP
+//! server's `slice` can read, and the tool output is replaced by the digest
+//! (`updatedToolOutput`); small output and other commands pass through untouched.
+//!
+//! The recorded events `bash_build_failure.json` and `bash_other_command.json` were written
+//! by hand in the documented `PostToolUse` shape (see `plugin/README.md`), like the other
+//! recorded events; they were not captured from a live session.
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
+mod common;
+mod hook_support;
+
+use std::path::Path;
+use std::time::Instant;
+
+use hook_support::*;
+use serde_json::Value;
+use sous_chef::bitbake::JobTable;
+use sous_chef::handles::{Handle, HandleStore};
+use sous_chef::index::Index;
+use sous_chef::mcp::Ctx;
+use sous_chef::mcp::tools::slice::{self, Args};
+
+/// The `updatedToolOutput` of a hook run (asserting the response shape).
+fn replaced(out: &std::process::Output) -> Value {
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8(out.stdout.clone()).unwrap();
+    let v: Value = serde_json::from_str(&text)
+        .unwrap_or_else(|e| panic!("stdout is not one JSON object ({e}): {text:?}"));
+    let spec = v["hookSpecificOutput"].as_object().unwrap();
+    assert_eq!(spec["hookEventName"], "PostToolUse");
+    assert!(!spec.contains_key("additionalContext"), "{text}");
+    assert_eq!(v.as_object().unwrap().len(), 1);
+    spec["updatedToolOutput"].clone()
+}
+
+/// The handle named in a replacement.
+fn handle_of(stdout: &str) -> Handle {
+    let at = stdout.find("stored as h:").unwrap() + "stored as ".len();
+    stdout[at..at + 12].parse().unwrap()
+}
+
+/// The MCP server's view of the workspace at `root` with the cache root `cache`, as
+/// `mcp::Ctx::open` builds it.
+fn server(root: &Path, cache: &Path) -> Ctx {
+    let config = sous_chef::config::Config::load(&sous_chef::config::CliOverrides {
+        build_dir: None,
+        config: None,
+        layers: Vec::new(),
+        work_dir: root.to_path_buf(),
+    })
+    .unwrap();
+    let workspace = discover(root);
+    let index = Index::open_in(cache, &workspace).unwrap();
+    let handles = HandleStore::open(&index.cache_dir().join("handles")).unwrap();
+    Ctx {
+        config,
+        workspace,
+        index: tokio::sync::Mutex::new(index),
+        handles,
+        jobs: JobTable::new(),
+    }
+}
+
+fn slice_args(h: &Handle) -> Args {
+    Args {
+        handle: h.0.clone(),
+        lines: None,
+        grep: None,
+        context: None,
+        var: None,
+        failures: None,
+        page: None,
+        budget_tokens: None,
+        format: None,
+    }
+}
+
+#[tokio::test]
+async fn a_failing_build_is_replaced_by_its_digest_and_the_handle_slices() {
+    let cache = indexed_cache(&ws_root());
+    let ev = event("bash_build_failure");
+    let original: Value = serde_json::from_str(&ev).unwrap();
+    let original_stdout = original["tool_response"]["stdout"].as_str().unwrap();
+    assert!(original_stdout.len() > 3 * 1024);
+
+    let out = run_hook(ev.as_bytes(), cache.path());
+    let r = replaced(&out);
+    // The Bash output shape, other fields as they were.
+    assert_eq!(r["stderr"], "");
+    assert_eq!(r["interrupted"], false);
+    assert_eq!(r["isImage"], false);
+    assert_eq!(r.as_object().unwrap().len(), 4, "{r}");
+    let stdout = r["stdout"].as_str().unwrap();
+    assert!(stdout.len() < 2000, "{stdout}");
+    assert!(
+        stdout.starts_with(&format!(
+            "sous-chef: bitbake output (115 lines, {} bytes) stored as h:",
+            original_stdout.len()
+        )),
+        "{stdout}"
+    );
+    for want in [
+        "recipe\thello\n",
+        "task\tdo_compile\n",
+        "exit\t1\n",
+        "oe_runmake failed",
+        // The task's definition, from the index: the class default hello inherits.
+        "definition\tmeta-core:classes-recipe/autotoolsish.bbclass:22-24\n",
+    ] {
+        assert!(stdout.contains(want), "{want:?} not in:\n{stdout}");
+    }
+    let h = handle_of(stdout);
+    assert!(
+        stdout.trim_end().ends_with(&format!(
+            "slice handle={h} failures=true | grep=RE | lines=105-107"
+        )),
+        "{stdout}"
+    );
+
+    // The server's slice reads the handle: the full output, byte for byte.
+    let ctx = server(&ws_root(), cache.path());
+    assert_eq!(ctx.handles.get(&h).unwrap(), original_stdout.as_bytes());
+    let failures = slice::run(
+        &ctx,
+        Args {
+            failures: Some(true),
+            ..slice_args(&h)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(failures.contains("oe_runmake failed"), "{failures}");
+    let first = slice::run(
+        &ctx,
+        Args {
+            lines: Some("1-1".into()),
+            ..slice_args(&h)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(first.contains("Loading cache...done."), "{first}");
+}
+
+#[test]
+fn large_output_without_a_failure_gets_its_tail_and_a_handle() {
+    let cache = indexed_cache(&ws_root());
+    let mut ev: Value = serde_json::from_str(&event("bash")).unwrap();
+    let listing: String = (0..120)
+        .map(|i| format!("recipe-{i:03}                                   1.0-r0\n"))
+        .collect();
+    ev["tool_input"]["command"] = Value::String("bitbake-layers show-recipes".into());
+    ev["tool_response"]["stdout"] = Value::String(listing);
+    ev["tool_response"]["stderr"] = Value::String("WARNING: something on stderr\n".into());
+    let r = replaced(&run_hook(ev.to_string().as_bytes(), cache.path()));
+    let stdout = r["stdout"].as_str().unwrap();
+    assert!(
+        stdout.contains("bytes, stdout then stderr) stored as h:"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("no failure recognised; last 10 lines:\n"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("recipe-119"), "{stdout}");
+    assert!(stdout.contains("WARNING: something on stderr"), "{stdout}");
+    assert!(!stdout.contains("recipe-100 "), "{stdout}");
+    let h = handle_of(stdout);
+    assert!(
+        stdout
+            .trim_end()
+            .ends_with(&format!("slice handle={h} grep=RE | lines=72-121")),
+        "{stdout}"
+    );
+    let ctx = server(&ws_root(), cache.path());
+    let full = String::from_utf8(ctx.handles.get(&h).unwrap()).unwrap();
+    assert!(full.starts_with("recipe-000 "));
+    assert!(full.ends_with(
+        "recipe-119                                   1.0-r0\nWARNING: something on stderr\n"
+    ));
+}
+
+#[test]
+fn small_output_and_other_commands_are_untouched() {
+    let cache = indexed_cache(&ws_root());
+    // bitbake-layers, a few hundred bytes.
+    assert_noop(&run_hook(event("bash").as_bytes(), cache.path()));
+    // The same large failing output, from `cat`.
+    assert_noop(&run_hook(
+        event("bash_other_command").as_bytes(),
+        cache.path(),
+    ));
+    // Nothing was stored.
+    let ctx = server(&ws_root(), cache.path());
+    assert!(ctx.handles.list().unwrap().is_empty());
+}
+
+#[test]
+fn no_index_or_a_locked_database_fails_open() {
+    let empty = tempfile::tempdir().unwrap();
+    assert_noop(&run_hook(
+        event("bash_build_failure").as_bytes(),
+        empty.path(),
+    ));
+    let cache = indexed_cache(&ws_root());
+    let db = sous_chef::index::cache_dir_in(cache.path(), &discover(&ws_root()))
+        .join(sous_chef::index::INDEX_FILE);
+    let lock = rusqlite::Connection::open(&db).unwrap();
+    lock.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let out = run_hook(event("bash_build_failure").as_bytes(), cache.path());
+    lock.execute_batch("ROLLBACK").unwrap();
+    assert_noop(&out);
+    assert!(log_text(cache.path(), Some(&ws_root())).contains("bash"));
+}
+
+#[test]
+#[ignore = "timing; run with --ignored --nocapture"]
+fn timing() {
+    let cache = indexed_cache(&ws_root());
+    let ev = event("bash_build_failure");
+    let n = 20;
+    let start = Instant::now();
+    for _ in 0..n {
+        replaced(&run_hook(ev.as_bytes(), cache.path()));
+    }
+    println!(
+        "bash hook, failing build: {:.1} ms per call",
+        start.elapsed().as_secs_f64() * 1000.0 / f64::from(n)
+    );
+}
