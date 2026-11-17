@@ -1,0 +1,4 @@
+SUMMARY = "x"
+LICENSE = "MIT"
+inherit ${QCLASS}
+IMAGE_INSTALL += "q"

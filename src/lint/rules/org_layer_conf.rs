@@ -24,6 +24,8 @@
 //!     check the layer against it; harmless to BitBake when another name matches;
 //!   - a name that is not a known release, older or supported (info): probably a typo, or a
 //!     release newer than sous-chef's table; BitBake only compares names.
+//! - **`LAYERDEPENDS` names a collection no layer adds** (error): BitBake stops ("depends on
+//!   layer '<d>', but this layer is not enabled in your configuration").
 //! - **Missing `LAYERDEPENDS`** (warning): a file of the layer inherits (resolved index
 //!   edge) a class from another layer whose collections are not among the layer's
 //!   `LAYERDEPENDS`, followed transitively through the other layers' `LAYERDEPENDS`. One
@@ -254,6 +256,21 @@ impl OrgLayerConf {
         let Ok(files) = query::files_in_layer(cx.index, &layer.name) else {
             return;
         };
+        let var = format!("LAYERDEPENDS_{c}");
+        for d in &layer.depends {
+            if !cx.ws.layers.iter().any(|l| l.collections.contains(d)) {
+                conf.push(
+                    out,
+                    Severity::Error,
+                    conf.line_of(&var),
+                    format!(
+                        "{var} names `{d}`, which no layer of the workspace adds, so BitBake \
+                         stops with \"Layer '{c}' depends on layer '{d}', but this layer is not \
+                         enabled\"; add that layer to BBLAYERS or drop `{d}`"
+                    ),
+                );
+            }
+        }
         let have = reachable(cx, &layer.depends);
         // Missing collection -> (other layer, the first inherit that needs it).
         let mut missing: Vec<(String, String, Loc)> = Vec::new();
@@ -280,7 +297,6 @@ impl OrgLayerConf {
                 }
             }
         }
-        let var = format!("LAYERDEPENDS_{c}");
         for (oc, other, via) in missing {
             conf.push(
                 out,

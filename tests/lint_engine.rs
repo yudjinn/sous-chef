@@ -506,7 +506,12 @@ fn a_pointer_with_lines_reports_only_those_lines() {
 // Rule selection and configuration
 
 fn garbage_env(edit: impl FnOnce(&mut Config)) -> Env {
-    let mut env = Env::with(edit);
+    // The org rules (T4.3) report the fixture workspace's deliberate problems (the orphan
+    // bbappend, the `pn-` override in local.conf); these tests count hygiene/parse-error.
+    let mut env = Env::with(|c| {
+        edit(c);
+        c.lint.disable.push("org".into());
+    });
     env.add("meta-mine/recipes-app/bad/bad_1.0.bb", GARBAGE);
     env
 }
