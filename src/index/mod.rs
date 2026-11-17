@@ -67,6 +67,31 @@ impl Index {
         })
     }
 
+    /// Opens an existing database read-only, for hooks (T7.1): never creates the file, never
+    /// rebuilds it, never writes. A missing file, a schema version other than
+    /// [`schema::SCHEMA_VERSION`], or a lock held longer than `busy` is an error.
+    pub fn open_read_only(path: &Path, busy: std::time::Duration) -> Result<Index> {
+        let conn = rusqlite::Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(busy)?;
+        let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version != schema::SCHEMA_VERSION {
+            return Err(Error::Invalid {
+                msg: format!(
+                    "index {} has schema version {version}, expected {}",
+                    path.display(),
+                    schema::SCHEMA_VERSION
+                ),
+            });
+        }
+        Ok(Index {
+            conn,
+            path: path.to_path_buf(),
+        })
+    }
+
     /// Brings the index up to date with the files on disk. Call at the start of every tool.
     pub fn refresh(&mut self, ws: &Workspace) -> Result<RefreshReport> {
         scan::refresh(self, ws)

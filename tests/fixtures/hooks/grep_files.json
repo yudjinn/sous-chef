@@ -1,0 +1,31 @@
+{
+  "session_id": "0b6d7c1e-5f0a-4c2e-9a51-3f1f2c0d9e11",
+  "prompt_id": "550e8400-e29b-41d4-a716-446655440000",
+  "transcript_path": "/home/user/.claude/projects/-ws/0b6d7c1e-5f0a-4c2e-9a51-3f1f2c0d9e11.jsonl",
+  "cwd": "{{WS}}",
+  "permission_mode": "default",
+  "effort": { "level": "high" },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Grep",
+  "tool_input": {
+    "pattern": "EXTRA_OECONF",
+    "path": "{{WS}}"
+  },
+  "tool_response": {
+    "mode": "files_with_matches",
+    "numFiles": 9,
+    "filenames": [
+      "{{WS}}/build/conf/local.conf",
+      "{{WS}}/meta-core/classes-recipe/autotoolsish.bbclass",
+      "{{WS}}/meta-core/conf/bitbake.conf",
+      "{{WS}}/meta-core/recipes-core/hello/hello.inc",
+      "{{WS}}/meta-legacy/classes/oldclass.bbclass",
+      "{{WS}}/meta-legacy/recipes-legacy/oldapp/oldapp_1.0.bb",
+      "{{WS}}/meta-mine/recipes-core/hello/hello_1.1.bbappend",
+      "{{WS}}/meta-vendor/recipes-core/hello/hello_%.bbappend",
+      "{{WS}}/meta-vendor/recipes-vendor/libfoo-alt/libfoo-alt_1.0.bb"
+    ]
+  },
+  "tool_use_id": "toolu_01GrepFiles00000000000",
+  "duration_ms": 7
+}
