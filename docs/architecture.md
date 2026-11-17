@@ -1005,8 +1005,9 @@ Evaluator (w5 fixes, `eval`): the replay follows `addfragments` (`Feature::AddFr
 `BuiltinFragments`: built-in fragments set `MACHINE` / `DISTRO`, named ones are included);
 `BBPATH` starts as the build directory, as BitBake's does from the environment; at the end
 of a recipe the `DEPENDS` words in `BB_RECIPE_VIRTUAL_PROVIDERS` are replaced
-(`Feature::RecipeVirtualProviders`; the new value is recorded as an assignment located at the
-`PREFERRED_PROVIDER_*` used, with a note); a reference whose text expands completely but
+(`Feature::RecipeVirtualProviders`; the new value is recorded as a rewrite,
+`VarOp::kind` = `OpKind::VirtualProviderRewrite` (w6 fix), located at the
+`PREFERRED_PROVIDER_*` used, with a note; the operations before it keep their status); a reference whose text expands completely but
 whose value is uncertain (`inherit_defer toolchain/${TOOLCHAIN}`) is followed and what its
 files set is flagged. `RefProblem` gained `NotInRelease(Feature)` and `Fatal(String)` (a
 statement BitBake stops on; the replay skips it and goes on). `ReplayNotes` gained

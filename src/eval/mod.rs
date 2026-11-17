@@ -10,7 +10,7 @@ pub mod overrides;
 pub mod providers;
 pub mod replay;
 
-pub use datastore::{DataStore, OpStatus, UnsetRecord, VarOp};
+pub use datastore::{DataStore, OpKind, OpStatus, UnsetRecord, VarOp};
 pub use replay::{
     AnonPython, ConfigCache, FunctionPiece, RefIssue, RefProblem, ReplayNotes, UncertainRef,
     evaluate_with, global_cache,

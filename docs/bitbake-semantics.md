@@ -807,9 +807,13 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
   `PREFERRED_PROVIDER_*` are per `TARGET_ARCH`. sous-chef (`replay::virtual_recipe_providers`,
   `Feature::RecipeVirtualProviders`) does the `DEPENDS` part after `expand_keys` (it does not
   run anonymous python, so the rewrite sees `DEPENDS` without what python would add, and
-  the value stays flagged when it was): the new value is stored as a plain assignment whose
-  history entry points at the `PREFERRED_PROVIDER_*` assignment used, with a note naming
-  each rewritten word (`ReplayNotes::var_notes`). Not reproduced: the task `depends` flags;
+  the value stays flagged when it was): the new value is stored by `DataStore::rewrite`,
+  recorded in the history as an operation of its own kind (`OpKind::VirtualProviderRewrite`,
+  op `rewrite` in the `var` tool), not as an assignment: it points at the
+  `PREFERRED_PROVIDER_*` assignment used (or the recipe when none has a location), it is
+  `Applied`, and the operations that made the old value keep the status they had just
+  before the rewrite (they are what was rewritten, not shadowed). A note names each
+  rewritten word (`ReplayNotes::var_notes`). Not reproduced: the task `depends` flags;
   the whitespace normalisation when no word is replaced (the value then differs from
   BitBake's in whitespace only); `DEPENDS` unset becoming `""`. A missing provider is a
   reference issue (`RefProblem::Fatal`) and the word is kept.

@@ -388,12 +388,14 @@ What the rules still get wrong there, as far as it was checked:
   configuration file. A `.conf` under a layer's `conf/` counts as metadata, so it is linted.
 - `org/recipe-path`: reports `meta:lib/bblayers/templates/example.bb` (a template no
   `BBFILES` glob collects, 2 findings): lint takes every indexed `.bb`, collected or not.
-- `override/shadowed`: 7 findings say a recipe's `DEPENDS =` is replaced by
-  `tcmode-default.inc:5` / `:7` (`wic-tools.bb`, `musl_git.bb`, `libssp-nonshared.bb`, ...):
-  the rewrite of virtual providers in `DEPENDS` (`BB_RECIPE_VIRTUAL_PROVIDERS`) is recorded
-  as an assignment located at the `PREFERRED_PROVIDER_virtual/cross-*` line, and the rule
-  takes it for a later `=`. False positives. The 36 `SECTION` findings replaced by
-  `pypi.bbclass:42` are true.
+- `override/shadowed`: fixed in w6 (83 -> 65 findings with `--all`). 18 findings said a
+  recipe's `DEPENDS =` is replaced by the rewrite of virtual providers in `DEPENDS`
+  (`BB_RECIPE_VIRTUAL_PROVIDERS`), located at a `PREFERRED_PROVIDER_virtual/cross-*` line
+  (`tcmode-default.inc:5` / `:7`: 7, `classes/toolchain/gcc.bbclass`: 5) or at the recipe
+  itself when no provider assignment had a location (6: `picolibc_git.bb`,
+  `gcc-runtime.inc`, `libgcc.inc`, ...). The history now records that rewrite as its own kind
+  of operation, which replaces nothing; the other 65 findings are unchanged. The 36
+  `SECTION` findings replaced by `pypi.bbclass:42` are true.
 - `override/dead` (92, info): real overrides of architectures and target OSes no machine
   of the workspace uses; expected noise while `OVERRIDES` holds python.
 - `org/class-export-functions` (23) and `org/class-recipe-specific` (7): false in the

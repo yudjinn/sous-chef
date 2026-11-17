@@ -196,6 +196,10 @@ Output: one row per operation on the variable and its override variants, in pars
   `shadowed` (overwritten, lost to another variant, or a default that did not take effect)
   or `removed` (every word it added was removed again).
 - `op`: the operator; `unset` statements are rows with op `unset` (status `applied`).
+  BitBake's rewrite of the virtual providers in `DEPENDS` at the end of parsing
+  (`BB_RECIPE_VIRTUAL_PROVIDERS`) is a row with op `rewrite` (status `applied`, located at
+  the `PREFERRED_PROVIDER_*` used, snippet `DEPENDS rewritten after parsing ... to "..."`);
+  it replaces nothing, so the rows before it keep their status.
 - `override`: the overrides as written (`append:boardx`), `-` for none; a flag operation
   shows `[flag]` (`append[flag]` with overrides).
 - A function is a variable too: each definition is a row with snippet `name() { ... }`, and

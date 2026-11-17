@@ -66,7 +66,7 @@ use regex::Regex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use super::datastore::{Content, Var, base_of, full_name, split_keyword};
+use super::datastore::{Content, OpKind, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
 use super::{DataStore, FileVisit, OpStatus, Target, VarOp};
 use crate::error::{Error, Result};
@@ -843,30 +843,12 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
     }
     let text = words.join(" ");
     // setVar(DEPENDS, text) after parsing: the keyword lists and the override variants go.
-    {
-        let v = ds.var_mut(DEPENDS);
-        v.appends.clear();
-        v.prepends.clear();
-        v.removes.clear();
-        v.default = None;
-    }
-    Arc::make_mut(&mut ds.overridedata).remove(DEPENDS);
+    // Recorded as a rewrite, not a statement: what made the old value stays applied.
     let loc = rewrites
         .iter()
         .find_map(|(_, _, l)| l.clone())
         .unwrap_or_else(|| recipe.clone());
-    ds.apply(VarOp {
-        var: VarRef {
-            base: DEPENDS.to_string(),
-            overrides: Vec::new(),
-            flag: None,
-            legacy_syntax: false,
-        },
-        op: AssignOp::Set,
-        value: text,
-        loc,
-        via: Vec::new(),
-    });
+    ds.rewrite(DEPENDS, text, loc, OpKind::VirtualProviderRewrite);
     let notes = Arc::make_mut(&mut ds.notes);
     if python {
         notes.python_vars.insert(DEPENDS.to_string());
@@ -1334,6 +1316,7 @@ impl<'a> Replay<'a> {
             value: st.value.clone().unwrap_or_default(),
             loc: st.loc.clone(),
             via: via.to_vec(),
+            kind: OpKind::Statement,
         });
         if exported && !st.legacy {
             self.ds.mark_exported(&name);
@@ -1425,6 +1408,7 @@ impl<'a> Replay<'a> {
             value: format!("{}\n", st.loc),
             loc: st.loc.clone(),
             via: via.to_vec(),
+            kind: OpKind::Statement,
         });
         if !legacy {
             if python {
@@ -1520,6 +1504,7 @@ impl<'a> Replay<'a> {
                 value: format!("{}{MARK}{called}\n", st.loc),
                 loc: st.loc.clone(),
                 via: via.to_vec(),
+                kind: OpKind::Statement,
             });
         }
     }
@@ -1979,6 +1964,7 @@ impl<'a> Replay<'a> {
             value: value.to_string(),
             loc,
             via: op_via,
+            kind: OpKind::Statement,
         });
         self.after_write(var, &[], None, true);
     }

@@ -29,11 +29,11 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
-use crate::eval::OpStatus;
+use crate::eval::{OpKind, OpStatus, VarOp};
 use crate::index::query::{self, StatementFilter, StatementRow};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
-use crate::types::{AssignOp, FileKind, LineSpan, Loc, VarRef};
+use crate::types::{AssignOp, FileKind, LineSpan, Loc};
 
 pub struct OverrideShadowed;
 
@@ -85,7 +85,7 @@ impl Rule for OverrideShadowed {
             }
             let history = data.history(base);
             for (i, (op, status)) in history.iter().enumerate() {
-                if *status != OpStatus::Shadowed || !plain_set(&op.var, op.op) {
+                if *status != OpStatus::Shadowed || !plain_set(op) {
                     continue;
                 }
                 let key = (op.loc.layer.clone(), op.loc.path.clone());
@@ -94,7 +94,7 @@ impl Rule for OverrideShadowed {
                 }
                 let name = helpers::colon_name(&op.var);
                 let Some(later) = history[i + 1..].iter().map(|(o, _)| o).find(|o| {
-                    plain_set(&o.var, o.op)
+                    plain_set(o)
                         && helpers::colon_name(&o.var) == name
                         && (FileKind::from_path(&o.loc.path) != Some(FileKind::Append)
                             || (o.loc.layer == op.loc.layer && o.loc.path == op.loc.path))
@@ -151,8 +151,12 @@ fn is_shared(cx: &LintContext<'_>, (layer, path): &(String, PathBuf)) -> bool {
 }
 
 /// `NAME =` / `NAME :=`, no keyword, no flag, no `${` in the name, not legacy.
-fn plain_set(var: &VarRef, op: AssignOp) -> bool {
-    matches!(op, AssignOp::Set | AssignOp::Immediate)
+/// A `NAME =` / `NAME :=` statement. BitBake's own rewrites after parsing
+/// ([`OpKind::VirtualProviderRewrite`]) are not statements and never replace one.
+fn plain_set(op: &VarOp) -> bool {
+    let var = &op.var;
+    op.kind == OpKind::Statement
+        && matches!(op.op, AssignOp::Set | AssignOp::Immediate)
         && !var.legacy_syntax
         && var.flag.is_none()
         && !var.base.contains("${")

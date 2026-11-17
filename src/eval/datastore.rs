@@ -54,6 +54,39 @@ pub struct VarOp {
     pub loc: Loc,
     /// The include / inherit / bbappend statements that led here, outermost first.
     pub via: Vec<Loc>,
+    /// A statement of a file, or a change BitBake itself makes after parsing.
+    #[serde(skip_serializing_if = "OpKind::is_statement")]
+    pub kind: OpKind,
+}
+
+/// Where a recorded operation comes from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize)]
+pub enum OpKind {
+    /// An assignment statement in a file (`op` is its operator).
+    #[default]
+    Statement,
+    /// BitBake's rewrite of the virtual providers in `DEPENDS` at the end of parsing
+    /// (`ast.handleVirtRecipeProviders`, `BB_RECIPE_VIRTUAL_PROVIDERS`): the value is the
+    /// rewritten text, `loc` the `PREFERRED_PROVIDER_*` assignment that supplied the
+    /// provider. It does not replace what came before: the operations that made the old
+    /// value keep the status they had, and the rewrite itself is `Applied`.
+    VirtualProviderRewrite,
+}
+
+impl OpKind {
+    /// For serde: `kind` is left out for a statement.
+    pub fn is_statement(&self) -> bool {
+        *self == OpKind::Statement
+    }
+
+    /// The `op` column text of a history row: the operator for a statement, `rewrite` for a
+    /// change BitBake makes itself.
+    pub fn label(self, op: AssignOp) -> String {
+        match self {
+            OpKind::Statement => op.to_string(),
+            OpKind::VirtualProviderRewrite => "rewrite".into(),
+        }
+    }
 }
 
 /// What finalisation did with an operation.
@@ -145,6 +178,9 @@ pub struct DataStore {
     /// What the replay recorded beside the variables (T3.4, `replay.rs`): references it
     /// could not follow, anonymous python, names python may change.
     pub(crate) notes: Arc<ReplayNotes>,
+    /// Per base name rewritten by [`DataStore::rewrite`]: the status every earlier operation
+    /// had just before the rewrite (by sequence number), which [`DataStore::history`] keeps.
+    pub(crate) rewrites: Arc<BTreeMap<String, Arc<BTreeMap<u64, OpStatus>>>>,
 }
 
 impl DataStore {
@@ -330,7 +366,55 @@ impl DataStore {
     /// statements (see [`DataStore::unsets`]).
     pub fn history(&self, name: &str) -> Vec<(VarOp, OpStatus)> {
         let ops = self.ops_for(name, None);
-        self.statuses(name, ops)
+        let seqs: Vec<u64> = ops.iter().map(|(s, _)| *s).collect();
+        let mut out = self.statuses(name, ops);
+        // After a rewrite (BitBake's own `setVar` at the end of parsing) the operations
+        // before it keep the status they had for the value that was rewritten.
+        if let Some(before) = self.rewrites.get(name) {
+            for (seq, (_, st)) in seqs.iter().zip(out.iter_mut()) {
+                if let Some(b) = before.get(seq) {
+                    *st = *b;
+                }
+            }
+        }
+        out
+    }
+
+    /// Replaces the value of the plain variable `name` with `value` the way BitBake's
+    /// `setVar` after parsing does (the `:append` / `:prepend` / `:remove` lists, the weak
+    /// default and the override variants go), recorded as an operation of `kind` (not a
+    /// statement) at `loc`. The operations that made the old value keep their status in
+    /// [`DataStore::history`]; the new one is `Applied`.
+    pub fn rewrite(&mut self, name: &str, value: String, loc: Loc, kind: OpKind) {
+        let ops = self.ops_for(name, None);
+        let seqs: Vec<u64> = ops.iter().map(|(s, _)| *s).collect();
+        let before: BTreeMap<u64, OpStatus> = seqs
+            .into_iter()
+            .zip(self.statuses(name, ops).into_iter().map(|(_, st)| st))
+            .collect();
+        {
+            let v = self.var_mut(name);
+            v.appends.clear();
+            v.prepends.clear();
+            v.removes.clear();
+            v.default = None;
+        }
+        Arc::make_mut(&mut self.overridedata).remove(name);
+        self.apply(VarOp {
+            var: VarRef {
+                base: name.to_string(),
+                overrides: Vec::new(),
+                flag: None,
+                legacy_syntax: false,
+            },
+            op: AssignOp::Set,
+            value,
+            loc,
+            via: Vec::new(),
+            kind,
+        });
+        Arc::make_mut(&mut self.rewrites).insert(name.to_string(), Arc::new(before));
+        self.touch();
     }
 
     /// Assignments to `name[flag]`, in parse order. `Applied` marks the operations the final
@@ -739,6 +823,7 @@ mod tests {
             value: value.into(),
             loc: loc(line),
             via: vec![],
+            kind: OpKind::Statement,
         });
     }
 
@@ -818,6 +903,7 @@ mod tests {
                 value: "${X}".into(),
                 loc: loc(1),
                 via: vec![],
+                kind: OpKind::Statement,
             },
             |_, t| format!("<{t}>"),
         );
@@ -979,6 +1065,7 @@ mod tests {
                 value: format!("v{i}"),
                 loc: loc(i as u32 + 1),
                 via: via.clone(),
+                kind: OpKind::Statement,
             });
         }
         let h = ds.history("A");
