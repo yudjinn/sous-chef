@@ -864,7 +864,17 @@ fn plan(
             })
         }
         Target::Recipe { name, version } => {
-            let Some(recipe) = query::preferred_recipe(index, name, version.as_deref())? else {
+            // The file BitBake uses (PREFERRED_VERSION, DEFAULT_PREFERENCE, layer priority,
+            // version), for the configured machine and distro.
+            let chosen = crate::eval::providers::preferred_recipe(
+                index,
+                ws,
+                name,
+                version.as_deref(),
+                None,
+                None,
+            )?;
+            let Some(recipe) = chosen.map(|s| s.recipe) else {
                 return Err(Error::NotFound {
                     what: match version {
                         Some(v) => format!("recipe {name} version {v}"),

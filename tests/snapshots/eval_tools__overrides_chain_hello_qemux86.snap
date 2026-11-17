@@ -1,0 +1,15 @@
+---
+source: tests/eval_tools.rs
+expression: q
+---
+priority	entry	from	loc
+0	linux	OVERRIDES <- TARGET_OS	meta-core:conf/bitbake.conf:32
+1	i686	OVERRIDES <- TRANSLATED_TARGET_ARCH <- TARGET_ARCH	meta-core:conf/machine/qemux86.conf:5
+2	pn-hello	OVERRIDES	meta-core:conf/bitbake.conf:39
+3	layer-core	OVERRIDES	meta-core:conf/bitbake.conf:39
+4	qemux86	OVERRIDES <- MACHINEOVERRIDES <- MACHINE	build:conf/local.conf:2
+5	testdistro	OVERRIDES <- DISTROOVERRIDES <- DISTRO	meta-core:conf/distro/testdistro.conf:1
+6	class-target	OVERRIDES <- CLASSOVERRIDE	meta-core:conf/bitbake.conf:37
+7	libc-glibc	OVERRIDES <- LIBCOVERRIDE	meta-core:conf/bitbake.conf:38
+8	forcevariable	OVERRIDES	meta-core:conf/bitbake.conf:39
+note: entries to the right (higher priority) win; loc is the deepest assignment that contributes the entry

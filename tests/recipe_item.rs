@@ -99,12 +99,15 @@ async fn recipe_summary_hello() {
         .find("meta-mine:recipes-core/hello/hello_1.1.bbappend")
         .unwrap();
     assert!(v < m, "{out}");
-    // Four SRC_URI entries for qemux86: the conditional boardx append is not counted.
+    // Four SRC_URI entries for qemux86: the boardx append is inactive (evaluated values).
     assert!(
-        out.contains("SRC_URI\t4 entries in 5 statements; 1 conditional"),
+        out.contains("SRC_URI\t4 entries from 4 applied operations; 1 inactive operation"),
         "{out}"
     );
-    assert!(out.contains("direct statements only"), "{out}");
+    assert!(
+        out.contains("key values are evaluated for MACHINE=qemux86"),
+        "{out}"
+    );
 }
 
 #[tokio::test]

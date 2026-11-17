@@ -1,0 +1,10 @@
+---
+source: tests/eval_tools.rs
+expression: out
+---
+depth	recipe	kind	target	loc	status
+1	app 0.1	DEPENDS	libfoo	meta-mine:recipes-app/app/app_0.1.bb:4	by name
+1	app 0.1	RDEPENDS:${PN}	libfoo	meta-mine:recipes-app/app/app_0.1.bb:11	by name
+1	hello 1.0	DEPENDS	virtual/foo	meta-core:recipes-core/hello/hello.inc:7	via virtual/foo (selected provider is libfoo-alt)
+1	hello 1.1	DEPENDS	virtual/foo	meta-core:recipes-core/hello/hello.inc:7	via virtual/foo (selected provider is libfoo-alt)
+note: static: unconditional DEPENDS / RDEPENDS:<package> statements and PACKAGECONFIG build fields as written in the index (names with ${...} and conditional statements are not seen)

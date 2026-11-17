@@ -543,6 +543,58 @@ anonymous function changes by a literal name are flagged `unevaluated_python`.
   highest-priority layer wins; `DEFAULT_PREFERENCE = "-1"` lowers a recipe.
 - `BBMASK` hides files; `SKIP_RECIPE` / `COMPATIBLE_MACHINE` / `COMPATIBLE_HOST` skip recipes.
 
+Verified (T3.7) against BitBake `master` 2026-11, `lib/bb/providers.py`
+(`versionVariableMatch`, `preferredVersionMatch`, `sortPriorities`,
+`findPreferredProvider`, `findLatestProvider`, `findBestProvider`, `_filterProviders`,
+`filterProviders`). This is what `src/eval/providers.rs` reproduces:
+
+- **Version variables** are read from the configuration datastore, first set wins:
+  `<K>_VERSION:pn-<pn>`, then `<K>_VERSION_<pn>`, then `<K>_VERSION` (`OVERRIDES` are not
+  used for the `pn`, because a `pn` may contain `_`). `K` is `REQUIRED` (takes precedence;
+  no match is an error, no provider) and `PREFERRED` (no match: a note, then the latest).
+- **Matching** (`preferredVersionMatch`): the value is split with
+  `(\d+:)*(.*)(_.*)*`: a leading `N:` is the epoch, compared with `PE`; the middle group is
+  greedy, so a `_rN` suffix stays in the version and the revision never takes part. The
+  version matches when equal to `PV`, or when it ends in `%` and `PV` starts with the rest.
+- **Order of files of one `PN`** (`sortPriorities`): buckets by layer priority, highest
+  first; inside a bucket by `DEFAULT_PREFERENCE` ascending, then the order the files were
+  collected. `findPreferredProvider` takes the first match in that order, bucket by bucket,
+  so with a pattern such as `1.%` a file with a *lower* `DEFAULT_PREFERENCE` in the same
+  layer priority is found first.
+- **Latest** (`findLatestProvider`) looks only at the highest priority bucket: a file
+  replaces the current pick when its `DEFAULT_PREFERENCE` is higher, or equal with a higher
+  `(PE, PV, PR)` (`bb.utils.vercmp`: epoch as an integer, then `PV`, then `PR`). So
+  `DEFAULT_PREFERENCE` outranks the version but never a layer priority.
+- **Providers of a name** (`_filterProviders`): every file that provides it (`PN` or a
+  `PROVIDES` word), grouped by `PN` in sorted order; per `PN` the preferred-version file
+  (if a `PREFERRED_VERSION` matches) goes to a first list, the latest file of the others to
+  a second; the eligible list is the first list then the second; a `PN` equal to the name
+  is moved to the front. `filterProviders` then reads `PREFERRED_PROVIDER_<name>` (e.g.
+  `PREFERRED_PROVIDER_virtual/foo`) and, if an eligible file has that `PN`, moves it to the
+  front and marks the choice unique. There is no `PREFERRED_PROVIDERS` variable. Without a
+  unique choice and with several eligible files BitBake fires `MultipleProviders` and uses
+  the first one (`taskdata.py`: *verify*, not read for this task).
+
+sous-chef differences: the candidates are the recipes whose `PN` or static `PROVIDES` (also
+in an include, class or bbappend of the recipe) names the item in the index, confirmed by
+evaluating each; a `PROVIDES` word that needs expansion, or one from a global class, is not
+found. The file order inside a bucket is layer then path, not BitBake's collection order.
+`DEFAULT_PREFERENCE`, `PE` and `PR` come from evaluating each candidate only when some
+non-`.conf` file (or a `.conf` statement with an override) sets one of them; values set by
+anonymous python are not seen. `BBMASK`, `SKIP_RECIPE` and `COMPATIBLE_*` are not applied.
+
+### `PACKAGECONFIG` (verified, T3.7)
+
+Checked against OE-Core `master` 2026-11 `meta/classes-global/base.bbclass` (anonymous
+python) and the Yocto reference manual (`PACKAGECONFIG`, 6.1): `PACKAGECONFIG[f] =
+"a,b,c,d,e,g"`, up to six comma-separated fields (more is a `bb.error`): 1 extra configure
+arguments (`PACKAGECONFIG_CONFARGS`) when `f` is in `PACKAGECONFIG`, 2 the same when it is
+not, 3 build dependencies (`DEPENDS`), 4 runtime dependencies (`RDEPENDS:${PN}`), 5 runtime
+recommendations (`RRECOMMENDS:${PN}`), 6 conflicting options (an enabled conflict is fatal).
+Flags are iterated in sorted order; a word of `PACKAGECONFIG` with no flag is ignored; no
+flag name is special. The additions are made by anonymous python, which sous-chef does not
+run: `deps` lists them from the flags and says so.
+
 ## Files and patches
 
 `file://` entries in `SRC_URI` are searched along `FILESPATH`, built from `FILESEXTRAPATHS`

@@ -1,0 +1,11 @@
+---
+source: tests/eval_tools.rs
+expression: out
+---
+status	op	override	loc	snippet
+applied	=	-	meta-core:recipes-core/hello/hello.inc:9	SRC_URI = "https://example.org/releases/hello-${PV}.tar.gz"
+applied	+=	-	meta-core:recipes-core/hello/hello_1.1.bb:5	SRC_URI += "file://hello.patch"
+applied	=	append	meta-vendor:recipes-core/hello/hello_%.bbappend:4	SRC_URI:append = " file://vendor.patch"
+inactive	=	append:boardx	meta-vendor:recipes-core/hello/hello_%.bbappend:5	SRC_URI:append:boardx = " file://boardx.cfg"
+applied	=	append	meta-mine:recipes-core/hello/hello_1.1.bbappend:4	SRC_URI:append = " file://mine.patch"
+final: "https://example.org/releases/hello-1.1.tar.gz file://hello.patch file://vendor.patch file://mine.patch"

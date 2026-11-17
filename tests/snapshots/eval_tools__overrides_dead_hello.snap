@@ -1,0 +1,7 @@
+---
+source: tests/eval_tools.rs
+expression: out
+---
+override	closest	name	loc	snippet
+boradx	boardx (distance 2)	EXTRA_OECONF:append:boradx	meta-vendor:recipes-core/hello/hello_%.bbappend:9	EXTRA_OECONF:append:boradx = " --enable-typo"
+note: known overrides: OVERRIDES of 3 machine/distro configurations, machine and distro names, declared MACHINEOVERRIDES/DISTROOVERRIDES words, class-/pn-/layer- forms, and the recipe's packages

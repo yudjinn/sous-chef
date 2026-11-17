@@ -1,0 +1,16 @@
+---
+source: tests/eval_tools.rs
+expression: b
+---
+priority	entry	from	loc
+0	linux	OVERRIDES <- TARGET_OS	meta-core:conf/bitbake.conf:32
+1	arm	OVERRIDES <- TRANSLATED_TARGET_ARCH <- TARGET_ARCH	meta-core:conf/machine/boardx.conf:9
+2	pn-hello	OVERRIDES	meta-core:conf/bitbake.conf:39
+3	layer-core	OVERRIDES	meta-core:conf/bitbake.conf:39
+4	socx	OVERRIDES <- MACHINEOVERRIDES	meta-core:conf/machine/boardx.conf:7
+5	boardx	OVERRIDES <- MACHINEOVERRIDES <- MACHINE (machine argument)	meta-core:conf/bitbake.conf:35
+6	testdistro	OVERRIDES <- DISTROOVERRIDES <- DISTRO	meta-core:conf/distro/testdistro.conf:1
+7	class-target	OVERRIDES <- CLASSOVERRIDE	meta-core:conf/bitbake.conf:37
+8	libc-glibc	OVERRIDES <- LIBCOVERRIDE	meta-core:conf/bitbake.conf:38
+9	forcevariable	OVERRIDES	meta-core:conf/bitbake.conf:39
+note: entries to the right (higher priority) win; loc is the deepest assignment that contributes the entry

@@ -1,0 +1,8 @@
+---
+source: tests/eval_tools.rs
+expression: out
+---
+option	selected	enable	disable	build	runtime	loc
+ssl	no	--with-ssl	--without-ssl	openssl	-	meta-core:recipes-core/libfoo/libfoo_2.0.bb:16
+zlib	yes	--with-zlib	--without-zlib	zlib	zlib	meta-core:recipes-core/libfoo/libfoo_2.0.bb:15
+note: PACKAGECONFIG = "zlib" (meta-core:recipes-core/libfoo/libfoo_2.0.bb:14)

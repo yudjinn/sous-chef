@@ -1,0 +1,10 @@
+---
+source: tests/eval_tools.rs
+expression: out
+---
+state	condition	name	loc	snippet
+active	pn-hello	EXTRA_OECONF:append:pn-hello	build:conf/local.conf:9	EXTRA_OECONF:append:pn-hello = " --enable-local-debug"
+inactive	boardx	SRC_URI:append:boardx	meta-vendor:recipes-core/hello/hello_%.bbappend:5	SRC_URI:append:boardx = " file://boardx.cfg"
+inactive	boardx	EXTRA_OECONF:append:boardx	meta-vendor:recipes-core/hello/hello_%.bbappend:7	EXTRA_OECONF:append:boardx = " --enable-boardx"
+inactive	boradx	EXTRA_OECONF:append:boradx	meta-vendor:recipes-core/hello/hello_%.bbappend:9	EXTRA_OECONF:append:boradx = " --enable-typo"
+note: 1 active, 3 inactive; scope: the recipe's files, and .conf statements conditional on pn-<recipe>

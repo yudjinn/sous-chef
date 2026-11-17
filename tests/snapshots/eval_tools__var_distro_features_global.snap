@@ -1,0 +1,9 @@
+---
+source: tests/eval_tools.rs
+expression: g
+---
+status	op	override	loc	snippet
+applied	+=	-	build:conf/local.conf:13	DISTRO_FEATURES += "wayland"
+shadowed	?=	-	meta-core:conf/distro/testdistro.conf:5	DISTRO_FEATURES ?= "acl ipv4 ipv6 usbhost"
+final: " wayland"
+note: global configuration only (no recipe)
