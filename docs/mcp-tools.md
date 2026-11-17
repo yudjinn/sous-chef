@@ -1320,7 +1320,12 @@ layer is not read).
   a tree.
 - *Statements, as written, never evaluated*: assignments keyed by the left-hand side as
   written (`SRC_URI:append:qemux86 +=`, `SRC_URI[sha256sum] =`), so the operations of one
-  variable and its override and flag variants sort together; functions and tasks by name
+  variable and its override and flag variants sort together. A statement in the legacy
+  `_` override syntax (`DEPENDS_append +=`) is keyed with its `:` form, so it pairs with
+  the same statement in the `:` syntax, but the two never match: a rewrite from one to the
+  other is `changed`, with `rewritten from the legacy _ override syntax: DEPENDS_append +=
+  -> DEPENDS:append +=` (and the value change, if any); the `name` column shows the key as
+  written at `to`. Functions and tasks by name
   (bodies compared; the first differing code line shown); `inherit` per class;
   `require`, `include`, `addhandler`, `EXPORT_FUNCTIONS` and unparsed lines as
   directives; and `SRC_URI` word by word (`parse::words`, so a `${@...}` expression is one

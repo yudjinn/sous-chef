@@ -26,7 +26,8 @@
 //!   from the file name). An include found elsewhere, or needing evaluation, is shown as
 //!   not compared. Classes are not part of a tree: changed classes are listed once.
 //! - **The diff** compares statements as written, never evaluated: assignments grouped by
-//!   variable (override variants and flags each their own key), functions and tasks by
+//!   variable (override variants and flags each their own key; a legacy `_` spelling is
+//!   keyed with its `:` form but never matches it, so a rewrite is a change), functions and tasks by
 //!   name with their bodies, `inherit`, other directives, and the `SRC_URI` entries word by
 //!   word (`parse::words`). Whitespace-only statement changes and files that differ only in
 //!   comments, whitespace or line positions are counted, not listed.
@@ -1044,12 +1045,30 @@ struct Item {
     /// Set by an `:remove` (for `SRC_URI` entries).
     remove: bool,
     flag: bool,
+    /// Written with the legacy `_` override syntax (`VarRef.legacy_syntax`). `key` is the
+    /// `:` form either way, so the two spellings group together; they never match, so a
+    /// rewrite from one to the other is a change.
+    legacy: bool,
+    /// `key` as written (`DEPENDS_append +=` for a legacy statement).
+    written: String,
 }
 
+/// The name with its overrides in the `:` form, and its flag.
 fn lhs(var: &VarRef) -> String {
+    lhs_with(var, ':')
+}
+
+/// [`lhs`] as written: with `_` between the overrides of a legacy-syntax name (the parser
+/// keeps the overrides, not where the `_` part ended; a name mixing both spellings is
+/// shown all in `_`).
+fn written_lhs(var: &VarRef) -> String {
+    lhs_with(var, if var.legacy_syntax { '_' } else { ':' })
+}
+
+fn lhs_with(var: &VarRef, sep: char) -> String {
     let mut s = var.base.clone();
     for o in &var.overrides {
-        s.push(':');
+        s.push(sep);
         s.push_str(o);
     }
     if let Some(f) = &var.flag {
@@ -1081,6 +1100,7 @@ fn items_of(tree: &Tree, layer: &str) -> Vec<Item> {
             let item = |kind, group: &str, key: String, raw: String| Item {
                 kind,
                 group: group.to_string(),
+                written: key.clone(),
                 key,
                 norm: collapse(&raw),
                 raw,
@@ -1088,6 +1108,7 @@ fn items_of(tree: &Tree, layer: &str) -> Vec<Item> {
                 body: false,
                 remove: false,
                 flag: false,
+                legacy: false,
             };
             match &st.kind {
                 StatementKind::Assign {
@@ -1096,15 +1117,18 @@ fn items_of(tree: &Tree, layer: &str) -> Vec<Item> {
                     value,
                     export,
                 } => {
-                    let key = format!(
-                        "{}{} {}",
-                        if *export { "export " } else { "" },
-                        lhs(var),
-                        op.as_str()
-                    );
-                    let mut it = item(Kind::Var, &var.base, key, value.clone());
+                    let key = |name: String| {
+                        format!(
+                            "{}{name} {}",
+                            if *export { "export " } else { "" },
+                            op.as_str()
+                        )
+                    };
+                    let mut it = item(Kind::Var, &var.base, key(lhs(var)), value.clone());
                     it.remove = var.overrides.iter().any(|o| o == "remove");
                     it.flag = var.flag.is_some();
+                    it.legacy = var.legacy_syntax;
+                    it.written = key(written_lhs(var));
                     out.push(it);
                 }
                 StatementKind::Export { name } => {
@@ -1128,21 +1152,27 @@ fn items_of(tree: &Tree, layer: &str) -> Vec<Item> {
                     fakeroot,
                     ..
                 } => {
-                    let (group, display) = match name {
-                        Some(v) => (v.base.clone(), lhs(v)),
-                        None => ("__anonymous".to_string(), "__anonymous".to_string()),
+                    let (group, display, written) = match name {
+                        Some(v) => (v.base.clone(), lhs(v), written_lhs(v)),
+                        None => (
+                            "__anonymous".to_string(),
+                            "__anonymous".to_string(),
+                            "__anonymous".to_string(),
+                        ),
                     };
-                    let mut key = String::new();
+                    let mut prefix = String::new();
                     if *fakeroot {
-                        key.push_str("fakeroot ");
+                        prefix.push_str("fakeroot ");
                     }
                     if *lang == Lang::Python {
-                        key.push_str("python ");
+                        prefix.push_str("python ");
                     }
-                    key.push_str(&display);
+                    let key = format!("{prefix}{display}");
                     let mut it = item(Kind::Function, &group, key, text.to_string());
                     it.norm = code_lines(text).join("\n");
                     it.body = true;
+                    it.legacy = name.as_ref().is_some_and(|v| v.legacy_syntax);
+                    it.written = format!("{prefix}{written}");
                     out.push(it);
                 }
                 StatementKind::PyDef { name, .. } => {
@@ -1304,22 +1334,36 @@ fn change_of(
     n: Option<&Item>,
 ) -> Change {
     let any = o.or(n);
-    let (old, new, detail) = if any.is_some_and(|i| i.body) {
+    let (old, new, mut detail) = if any.is_some_and(|i| i.body) {
         body_summary(o, n)
     } else {
         let show = |i: &Item| (!i.raw.is_empty()).then(|| short(&i.raw));
         match (o, n) {
-            (Some(a), Some(b)) if !a.raw.is_empty() && !b.raw.is_empty() => {
+            (Some(a), Some(b)) if !a.raw.is_empty() && !b.raw.is_empty() && a.raw != b.raw => {
                 let (x, y) = short_pair(&a.raw, &b.raw);
                 (Some(x), Some(y), None)
             }
             _ => (o.and_then(show), n.and_then(show), None),
         }
     };
+    if let (Some(a), Some(b)) = (o, n)
+        && a.legacy != b.legacy
+    {
+        let what = if a.legacy {
+            "rewritten from the legacy _ override syntax"
+        } else {
+            "rewritten to the legacy _ override syntax"
+        };
+        let note = format!("{what}: {} -> {}", a.written, b.written);
+        detail = Some(match detail {
+            Some(d) => format!("{note}; {d}"),
+            None => note,
+        });
+    }
     Change {
         kind,
         group: any.map(|i| i.group.clone()).unwrap_or_default(),
-        name: any.map(|i| i.key.clone()).unwrap_or_default(),
+        name: n.or(o).map(|i| i.written.clone()).unwrap_or_default(),
         change,
         old,
         new,
@@ -1356,11 +1400,12 @@ fn compare_items(old: &[Item], new: &[Item]) -> (Vec<Change>, usize) {
             let mut i = 0;
             while i < o.len() {
                 let found = n.iter().position(|x| {
-                    if exact {
-                        x.raw == o[i].raw
-                    } else {
-                        x.norm == o[i].norm
-                    }
+                    x.legacy == o[i].legacy
+                        && if exact {
+                            x.raw == o[i].raw
+                        } else {
+                            x.norm == o[i].norm
+                        }
                 });
                 match found {
                     Some(j) => {
@@ -3119,6 +3164,113 @@ mod tests {
             "a...b",
         ] {
             assert!(validate_revision(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    fn items(text: &str) -> Vec<Item> {
+        let text: Arc<str> = Arc::from(text);
+        let tree = Tree {
+            files: vec![TreeFile {
+                path: "r_1.0.bb".into(),
+                data: Arc::new(FileData {
+                    parsed: Arc::new(parse::parse(&text)),
+                    text,
+                }),
+            }],
+            outside: Vec::new(),
+        };
+        items_of(&tree, "meta-x")
+    }
+
+    #[test]
+    fn a_legacy_to_colon_rewrite_is_a_change() {
+        let old = items(
+            "DEPENDS_append = \" zlib\"\nEXTRA_OECONF_append_qemux86 = \" --x\"\ndo_install_append() {\n    true\n}\nKEEP:append = \" a\"\n",
+        );
+        let new = items(
+            "DEPENDS:append = \" zlib\"\nEXTRA_OECONF:append:qemux86 = \" --y\"\ndo_install:append() {\n    true\n}\nKEEP:append = \" a\"\n",
+        );
+        let (changes, cosmetic) = compare_items(&old, &new);
+        assert_eq!(cosmetic, 0);
+        let show: Vec<(&str, &str, &str, Option<&str>)> = changes
+            .iter()
+            .map(|c| (c.kind, c.name.as_str(), c.change, c.detail.as_deref()))
+            .collect();
+        assert_eq!(
+            show,
+            [
+                (
+                    "var",
+                    "DEPENDS:append =",
+                    "changed",
+                    Some(
+                        "rewritten from the legacy _ override syntax: DEPENDS_append = -> DEPENDS:append ="
+                    )
+                ),
+                (
+                    "var",
+                    "EXTRA_OECONF:append:qemux86 =",
+                    "changed",
+                    Some(
+                        "rewritten from the legacy _ override syntax: EXTRA_OECONF_append_qemux86 = -> EXTRA_OECONF:append:qemux86 ="
+                    )
+                ),
+                (
+                    "function",
+                    "do_install:append",
+                    "changed",
+                    Some(
+                        "rewritten from the legacy _ override syntax: do_install_append -> do_install:append; first difference at code line 1: \"do_install_append() {\" -> \"do_install:append() {\""
+                    )
+                ),
+            ]
+        );
+        // The value change of the second one still shows.
+        assert_eq!(changes[1].old.as_deref(), Some("\"--x\""));
+        assert_eq!(changes[1].new.as_deref(), Some("\"--y\""));
+        // A legacy statement that stays legacy is no change.
+        let (changes, _) = compare_items(&old, &old);
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn bbfiles_from_a_layer_conf_text() {
+        let root = Path::new("/l");
+        assert_eq!(
+            static_bbfiles(
+                "BBPATH .= \":${LAYERDIR}\"\nBBFILES += \"${LAYERDIR}/a/*.bb \\\n ${LAYERDIR}/a/*.bbappend\"\nBBFILES:append = \" ${LAYERDIR}/b/*.bb\"\nBBFILES .= \" ${LAYERDIR}/c/*.bb\"\nBBFILES[doc] = \"x\"\n",
+                root
+            ),
+            Ok(vec![
+                "/l/a/*.bb".to_string(),
+                "/l/a/*.bbappend".to_string(),
+                "/l/b/*.bb".to_string(),
+                "/l/c/*.bb".to_string(),
+            ])
+        );
+        assert_eq!(
+            static_bbfiles(
+                "BBFILES += \"${LAYERDIR}/a/*.bb\"\nBBFILES = \"${LAYERDIR}/z/*.bb\"\n",
+                root
+            ),
+            Ok(vec!["/l/z/*.bb".to_string()])
+        );
+        for (text, why) in [
+            (
+                "BBFILES ?= \"${LAYERDIR}/a/*.bb\"\n",
+                "depends on what was set before",
+            ),
+            ("include conf/x.inc\n", "includes conf/x.inc"),
+            (
+                "BBFILES:remove = \"x\"\n",
+                "BBFILES:remove = needs evaluation",
+            ),
+            ("BBFILES += \"${TOPDIR}/a/*.bb\"\n", "other than LAYERDIR"),
+            ("BBFILES .= \"${LAYERDIR}/a/*.bb\"\n", "without a space"),
+            ("unset BBFILES\n", "unsets BBFILES"),
+        ] {
+            let err = static_bbfiles(text, root).unwrap_err();
+            assert!(err.contains(why), "{text:?}: {err}");
         }
     }
 
