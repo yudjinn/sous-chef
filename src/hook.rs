@@ -272,9 +272,22 @@ pub struct Env<'c> {
     pub ws: &'c Workspace,
     pub index: &'c Index,
     fresh: &'c mut HashMap<PathBuf, Option<FileRow>>,
+    deadline: Instant,
+    budget: Duration,
 }
 
 impl Env<'_> {
+    /// `Err` once the call's budget is spent (the same clock as [`Ctx::check_budget`]).
+    pub fn check_budget(&self) -> Result<()> {
+        if Instant::now() > self.deadline {
+            Err(Error::Invalid {
+                msg: format!("over the {} ms budget", self.budget.as_millis()),
+            })
+        } else {
+            Ok(())
+        }
+    }
+
     /// The index row for `abs` if it is a Yocto file inside the workspace, indexed, and
     /// unchanged since it was indexed (sha256 of the bytes on disk equals the row's). Any
     /// other case is `None`: the hook says nothing about files it cannot vouch for.
@@ -371,23 +384,19 @@ impl<'o> Ctx<'o> {
         if let Some(e) = &self.env_error {
             return Err(Error::Invalid { msg: e.clone() });
         }
-        if self.index.is_none() {
-            match self.open() {
-                Ok((ws, idx)) => {
-                    self.ws = Some(ws);
-                    self.index = Some(idx);
-                }
-                Err(e) => {
-                    self.env_error = Some(e.to_string());
-                    return Err(e);
-                }
-            }
+        if self.index.is_none()
+            && let Err(e) = self.open()
+        {
+            self.env_error = Some(e.to_string());
+            return Err(e);
         }
         match (&self.ws, &self.index) {
             (Some(ws), Some(index)) => Ok(Env {
                 ws,
                 index,
                 fresh: &mut self.fresh,
+                deadline: self.start + self.budget,
+                budget: self.budget,
             }),
             _ => Err(Error::Invalid {
                 msg: "workspace not open".into(),
@@ -395,27 +404,36 @@ impl<'o> Ctx<'o> {
         }
     }
 
-    fn open(&self) -> Result<(Workspace, Index)> {
-        let Some(cwd) = self.cwd.clone() else {
+    /// Discovers the workspace (kept even when the index is missing, so the log lands in
+    /// the workspace cache directory), then opens the index.
+    fn open(&mut self) -> Result<()> {
+        if self.ws.is_none() {
+            let Some(cwd) = self.cwd.clone() else {
+                return Err(Error::Invalid {
+                    msg: "event has no absolute cwd".into(),
+                });
+            };
+            let cfg = Config::load(&CliOverrides {
+                build_dir: self.opts.build_dir.clone(),
+                config: self.opts.config.clone(),
+                layers: self.opts.layers.clone(),
+                work_dir: cwd,
+            })?;
+            self.ws = Some(Workspace::discover(&cfg)?);
+        }
+        let Some(ws) = &self.ws else {
             return Err(Error::Invalid {
-                msg: "event has no absolute cwd".into(),
+                msg: "workspace not open".into(),
             });
         };
-        let cfg = Config::load(&CliOverrides {
-            build_dir: self.opts.build_dir.clone(),
-            config: self.opts.config.clone(),
-            layers: self.opts.layers.clone(),
-            work_dir: cwd,
-        })?;
-        let ws = Workspace::discover(&cfg)?;
-        let path = index::cache_dir_in(&self.opts.cache_root()?, &ws).join(INDEX_FILE);
+        let path = index::cache_dir_in(&self.opts.cache_root()?, ws).join(INDEX_FILE);
         if !path.is_file() {
             return Err(Error::NotFound {
                 what: format!("index {} (run `sous-chef index` once)", path.display()),
             });
         }
-        let idx = Index::open_read_only(&path, BUSY)?;
-        Ok((ws, idx))
+        self.index = Some(Index::open_read_only(&path, BUSY)?);
+        Ok(())
     }
 
     /// Where the debug log goes.

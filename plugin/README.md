@@ -102,6 +102,22 @@ milliseconds (measured below), so a process per event fits the budget.
   with the time taken and the outcome, truncated at 1 MB.
 - `SOUS_CHEF_HOOK_BUDGET_MS` overrides the 150 ms budget.
 
+## Measured cost
+
+Fixture workspace, warm page cache, 50 calls each, whole process (start, discovery,
+read-only index open, handler, exit), on the development machine, 2026-11-17:
+
+| Event | release | debug |
+|---|---|---|
+| Grep, content mode (6 hits, 4 files) | 6.5 ms | 7.9 ms |
+| Grep, files mode (9 files) | 6.0 ms | 7.4 ms |
+| Read, cut item | 3.8 ms | 5.0 ms |
+| Read, whole recipe | 3.0 ms | 5.3 ms |
+| Bash (stub, no workspace lookup) | 1.8 ms | 2.6 ms |
+
+The handler itself (as logged in `hook.log`) takes 0 to 4 ms. A real poky workspace has
+more layers to discover; not measured yet (M8 scale check).
+
 ## Not verified
 
 - The exact text of `Grep`'s `content` in `content` mode is not documented. Assumed: one
