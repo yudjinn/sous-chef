@@ -258,15 +258,21 @@ pub fn evaluate_with(
     target: &Target,
 ) -> Result<DataStore> {
     let files = Files::load(index, ws)?;
-    let recipe = match &target.recipe {
-        Some(r) => Some(find_recipe(index, ws, r, target.version.as_deref())?),
-        None => None,
+    let Some(name) = &target.recipe else {
+        return configuration(cache, index, ws, &files, target);
     };
-    let config = configuration(cache, index, ws, &files, target)?;
-    match recipe {
-        None => Ok(config),
-        Some(r) => recipe_pass(index, ws, &files, &config, &r),
+    // A path is resolved before the configuration pass; a recipe name needs it, because
+    // the choice of file reads PREFERRED_VERSION (providers.rs).
+    if let Some(r) = find_recipe_file(index, ws, name)? {
+        let config = configuration(cache, index, ws, &files, target)?;
+        return recipe_pass(index, ws, &files, &config, &r);
     }
+    let config = configuration(cache, index, ws, &files, target)?;
+    let version = target.version.as_deref();
+    let chosen = super::providers::Providers::with_config(cache, index, ws, target, config.fork())?
+        .best_version(name, version)?
+        .ok_or_else(|| recipe_not_found(name, version))?;
+    recipe_pass(index, ws, &files, &config, &chosen.recipe.file)
 }
 
 fn configuration(
@@ -300,36 +306,35 @@ fn configuration(
     Ok(ds)
 }
 
-/// The recipe a target names: a recipe name (with `version`, `PREFERRED_VERSION` style, `%`
-/// allowed), an absolute path to a `.bb`, or `layer:path`.
-fn find_recipe(
-    index: &Index,
-    ws: &Workspace,
-    name: &str,
-    version: Option<&str>,
-) -> Result<FileRow> {
-    let not_found = || Error::NotFound {
+/// `NotFound` for a recipe target.
+fn recipe_not_found(name: &str, version: Option<&str>) -> Error {
+    Error::NotFound {
         what: match version {
             Some(v) => format!("recipe {name} version {v}; list recipes with the recipe tool"),
             None => format!("recipe {name}; list recipes with the recipe tool"),
         },
-    };
-    if name.ends_with(".bb") {
-        let p = Path::new(name);
-        let row = if p.is_absolute() {
-            query::file_by_abs(index, ws, p)?
-        } else if let Some((layer, path)) = name.split_once(':') {
-            query::file_by_path(index, layer, Path::new(path))?
-        } else {
-            None
-        };
-        return row
-            .filter(|f| f.kind == FileKind::Recipe)
-            .ok_or_else(not_found);
     }
-    query::preferred_recipe(index, name, version)?
-        .map(|r| r.file)
-        .ok_or_else(not_found)
+}
+
+/// The recipe file a path target names (an absolute path to a `.bb`, or `layer:path`);
+/// `Ok(None)` when `name` is not a path but a recipe name, which
+/// [`super::providers::Providers::best_version`] resolves (`PREFERRED_VERSION`,
+/// `DEFAULT_PREFERENCE`, layer priority and version).
+fn find_recipe_file(index: &Index, ws: &Workspace, name: &str) -> Result<Option<FileRow>> {
+    if !name.ends_with(".bb") {
+        return Ok(None);
+    }
+    let p = Path::new(name);
+    let row = if p.is_absolute() {
+        query::file_by_abs(index, ws, p)?
+    } else if let Some((layer, path)) = name.split_once(':') {
+        query::file_by_path(index, layer, Path::new(path))?
+    } else {
+        None
+    };
+    row.filter(|f| f.kind == FileKind::Recipe)
+        .map(Some)
+        .ok_or_else(|| recipe_not_found(name, None))
 }
 
 // ---------------------------------------------------------------------------------------

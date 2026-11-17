@@ -460,6 +460,58 @@ pub fn orphan_appends(index: &Index) -> Result<Vec<FileRow>> {
     collect(index, &sql, &[], |r| file_row(r, 0))
 }
 
+// ---- provides and depends (added by T3.7) ----
+
+/// One row of the `depends` table: a static dependency named in `file`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DependRow {
+    pub file: FileRow,
+    /// `DEPENDS`, `RDEPENDS` or `PACKAGECONFIG`.
+    pub kind: String,
+    /// The package (`RDEPENDS`, as written, e.g. `${PN}`) or the option (`PACKAGECONFIG`).
+    pub pkg: Option<String>,
+    pub target: String,
+    pub line: u32,
+}
+
+/// Files whose `provides` rows name `name` (recipes by `PN` or `PROVIDES`, and any other
+/// non-conf file with a static `PROVIDES`), by layer row id then path.
+pub fn files_providing(index: &Index, name: &str) -> Result<Vec<FileRow>> {
+    let sql = format!(
+        "SELECT DISTINCT {FILE_COLS} FROM provides p JOIN files f ON f.id = p.file_id \
+         JOIN layers l ON l.id = f.layer_id WHERE p.name = ?1 ORDER BY l.id, f.path"
+    );
+    collect(index, &sql, &[&name], |r| file_row(r, 0))
+}
+
+/// The `provides` rows of one file, in insertion order.
+pub fn provides_of(index: &Index, file: i64) -> Result<Vec<String>> {
+    collect(
+        index,
+        "SELECT name FROM provides WHERE file_id = ?1 ORDER BY rowid",
+        &[&file],
+        |r| r.get::<_, String>(0),
+    )
+}
+
+/// `depends` rows whose target is `target`, by layer row id, path and line.
+pub fn depends_on(index: &Index, target: &str) -> Result<Vec<DependRow>> {
+    let sql = format!(
+        "SELECT {FILE_COLS}, d.kind, d.pkg, d.target, d.line FROM depends d \
+         JOIN files f ON f.id = d.file_id JOIN layers l ON l.id = f.layer_id \
+         WHERE d.target = ?1 ORDER BY l.id, f.path, d.line"
+    );
+    collect(index, &sql, &[&target], |r| {
+        Ok(DependRow {
+            file: file_row(r, 0)?,
+            kind: r.get(9)?,
+            pkg: r.get(10)?,
+            target: r.get(11)?,
+            line: r.get::<_, Option<u32>>(12)?.unwrap_or(0),
+        })
+    })
+}
+
 // ---- statements ----
 
 fn filter_sql(filter: &StatementFilter, sql: &mut String, params: &mut Vec<Box<dyn ToSql>>) {
