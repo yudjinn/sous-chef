@@ -60,7 +60,8 @@ Not taken: the memory store, embeddings and semantic search, discussions, SCIP i
 
 - Not a BitBake reimplementation. Python expansion (`${@...}`), anonymous python and
   `d.setVar` in classes are **not** evaluated statically. Affected values are marked
-  `unevaluated-python`; authoritative mode exists for those.
+  (`unevaluated_python`; the tools say `depends on python, not evaluated`); authoritative
+  mode exists for those.
 - No arbitrary shell execution through MCP.
 - No editing of upstream layers; writes are confined to layers marked writable.
 - No GUI, no network service, no telemetry.
@@ -74,4 +75,4 @@ Not taken: the memory store, embeddings and semantic search, discussions, SCIP i
 | Handle | `h:<10 hex>`, a key to stored output on disk. |
 | Digest | A short summary of stored output, returned in place of it. |
 | Target | The thing an evaluation is for: a recipe (or global config) plus optional MACHINE and DISTRO. |
-| Workspace | The build directory (if any) and the set of layers. |
+| Workspace | The build directory (if any) and the set of layers, and the kas project when there is one. |
