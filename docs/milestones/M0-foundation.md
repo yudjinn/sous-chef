@@ -101,8 +101,8 @@ tests/fixtures/ws/
     recipes-app/app/app_0.1.bb        python task, anonymous python, ${@...}, fakeroot
     recipes-app/orphan/orphan_9.%.bbappend   matches nothing
   meta-legacy/                        NOT in bblayers; legacy "_" syntax samples
-  lint/                               one positive and one negative file per rule (filled by M4)
-  syntax/                             one file per statement form, plus malformed files
+tests/fixtures/lint/                  one positive and one negative file per rule (filled by M4)
+tests/fixtures/syntax/                one file per statement form, plus malformed files
 ```
 
 `tests/common/mod.rs`: helpers `fixture_ws() -> Workspace`, `fixture_path(rel)`, and a helper

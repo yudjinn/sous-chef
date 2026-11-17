@@ -1,0 +1,2 @@
+PATHVAR = "/usr"
+PATHVAR .= "/bin"

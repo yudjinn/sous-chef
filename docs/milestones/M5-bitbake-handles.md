@@ -51,7 +51,8 @@ Exactly one selector per call; none means `page: 1`.
 - `BbEnv::detect(cfg, ws) -> Option<BbEnv>`: needs a build directory and an init script
   (`Config.init_script`, else search for `oe-init-build-env` next to the layers). Also accept
   an already-initialised environment (`BBPATH` / `BUILDDIR` set and `bitbake` on `PATH`).
-- `BbEnv::command(program, args) -> tokio::process::Command`: runs
+- `BbEnv::command(program, args) -> Result<tokio::process::Command>` (errors on a program
+  outside the allowlist or an invalid argument): runs
   `bash -c 'source "$1" "$2" >/dev/null && shift 2 && exec "$@"' -- <init> <build_dir> <program> <args...>`.
   Arguments are passed as argv, never interpolated into the script.
 - Allowlisted programs: `bitbake`, `bitbake-layers`, `bitbake-getvar`, `devtool`,

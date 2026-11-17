@@ -1,0 +1,2 @@
+GREETING ??= "hello"
+GREETING ??= "hi"

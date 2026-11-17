@@ -1,0 +1,5 @@
+FILES:${PN}-dev = "${includedir}"
+RDEPENDS:${PN}-ptest += "bash"
+PREFERRED_PROVIDER_virtual/kernel = "linux-yocto"
+PREFERRED_VERSION_gcc-cross-${TARGET_ARCH} = "13.%"
+MY.DOTTED+NAME = "dots and plus"

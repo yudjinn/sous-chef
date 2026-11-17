@@ -1,0 +1,2 @@
+LIST = "b"
+LIST =+ "a"

@@ -1,0 +1,6 @@
+# Configuration for the fixture workspace. Paths are relative to this file.
+build_dir = "build"
+writable_layers = ["meta-mine"]
+
+[bitbake]
+enabled = false

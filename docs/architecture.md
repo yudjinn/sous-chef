@@ -7,7 +7,8 @@ with an explicit note in your hand-off.
 
 ```
 src/
-  main.rs              CLI entry (clap): serve | index | lint | hook
+  main.rs              CLI entry (clap): serve | index | lint | hook; each calls one library
+                       function (mcp::serve, mcp::index_command, lint::cli, hook::handle)
   lib.rs               module declarations only
   types.rs             shared types (below)
   error.rs             Error, Result
@@ -44,12 +45,14 @@ src/
   lint/
     mod.rs             engine, Rule trait, registry
     helpers.rs         shared classification helpers (owned by T4.1)
-    rules/<id>.rs      one file per rule
+    rules/mod.rs       registry (`ALL`), complete since M0
+    rules/<group>_<name>.rs   one file per rule; id with `/` and `-` replaced by `_`
   scaffold/
     mod.rs             engine (dry run, confinement)
     recipe.rs  append.rs  layer.rs  class.rs  inc_split.rs  placement.rs
   mcp/
-    mod.rs             server and tool registry
+    mod.rs             Ctx, tool registry (`TOOLS`), rmcp server
+    tools/mod.rs       module declarations
     tools/<name>.rs    one file per tool (plus var_authoritative.rs, filled by T5.5)
   hook.rs              Claude Code hook entry and dispatch
   hook/
@@ -78,6 +81,12 @@ adding them; do not rely on memory, especially for `rmcp`.
 | `toml` | Config |
 | `thiserror`, `anyhow` | Errors (`thiserror` in the library, `anyhow` only in `main.rs`) |
 | `tempfile`, `insta` (dev) | Tests and snapshots |
+
+Pinned by M0 (Cargo.toml): rmcp 3.10 (features `server`, `macros`, `transport-io`), tokio 1.54
+(`rt-multi-thread`, `macros`, `process`, `io-util`, `io-std`, `time`, `sync`, `signal`), serde 1
+(`derive`), serde_json 1, schemars 1.2 (same major as rmcp's, so `JsonSchema` derives are
+compatible), rusqlite 0.43 (`bundled`), sha2 0.11, ignore 0.4, regex 1.13, clap 4.6 (`derive`),
+toml 1.2, thiserror 2, anyhow 1; dev: tempfile 3.27, insta 1.49.
 
 ## Shared types (`src/types.rs`)
 
@@ -111,6 +120,12 @@ pub struct VarRef {
 }
 ```
 
+Helpers (M0): `LineSpan::{new, line}` and `Display`/`FromStr` (`A` or `A-B`);
+`Loc: Display + FromStr`; `FileKind::{from_path, as_str}` (`as_str` is the index `kind`
+text: `bb`, `bbappend`, `inc`, `bbclass`, `conf`) and `FromStr`; `AssignOp::{as_str, ALL}`,
+`Display` and `FromStr` (operator text both ways). All derive `Debug, Clone, PartialEq, Eq,
+Serialize`.
+
 ## Parser contract (`src/parse`)
 
 ```rust
@@ -143,7 +158,11 @@ pub enum StatementKind {
 }
 
 pub enum Lang { Shell, Python }
+pub enum IncludeMode { Include, Require, IncludeAll }
+pub struct ParseDiagnostic { pub span: LineSpan, pub message: String }
 ```
+
+The types are in `parse/ast.rs` and re-exported from `parse`.
 
 `value` is the raw text between the quotes with continuation lines joined; no expansion.
 
@@ -170,6 +189,8 @@ impl Workspace {
     pub fn discover(cfg: &Config) -> Result<Workspace>;
     pub fn loc_for(&self, abs: &Path, lines: LineSpan) -> Option<Loc>;
     pub fn abs_path(&self, loc: &Loc) -> Option<PathBuf>;
+    pub fn confine(&self, path: &Path) -> Result<PathBuf>;   // resolves symlinks; Err(Confined)
+    pub fn layer(&self, name: &str) -> Option<&Layer>;
 }
 
 // resolve.rs
@@ -258,7 +279,12 @@ impl DataStore {
     pub fn files(&self) -> &[FileVisit];                    // replay order, for `recipe`
 }
 pub struct Value { pub text: String, pub unevaluated_python: bool, pub unresolved: Vec<String> }
+pub struct FileVisit { pub loc: Loc, pub kind: FileKind, pub via: Vec<Loc> }
 ```
+
+`VarOp`, `OpStatus` and `DataStore` live in `eval/datastore.rs` (T3.1: `history`, `files`,
+`fork`); `impl DataStore { value, overrides }` lives in `eval/overrides.rs` (T3.3). Fields of
+`DataStore` are `pub(crate)` so both files can reach them.
 
 ## Rendering contract (`src/render.rs`)
 
@@ -273,6 +299,10 @@ impl Table {
 }
 pub fn estimate_tokens(s: &str) -> usize;        // bytes / 4, rounded up
 pub fn freshness_line(r: &RefreshReport) -> Option<String>;
+
+#[derive(Deserialize, JsonSchema, clap::ValueEnum)] #[serde(rename_all = "lowercase")]
+pub enum Format { Text, Json }                   // the `format` argument of every tool
+pub const DEFAULT_BUDGET_TOKENS: usize = 600;
 ```
 
 Output rules:
@@ -304,12 +334,65 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String>;
 ```
 
 `Ctx` holds the `Workspace`, the `Index` (behind a mutex), the `Config`, the handle store and
-the job table.
+the job table:
+
+```rust
+// src/mcp/mod.rs
+pub struct Ctx {
+    pub config: Config,
+    pub workspace: Workspace,
+    pub index: tokio::sync::Mutex<Index>,    // `ctx.index.lock().await`; may be held across .await
+    pub handles: HandleStore,                // handles.rs, methods take &self
+    pub jobs: JobTable,                      // bitbake/jobs.rs, methods take &self
+}
+
+pub enum Loading { Always, Deferred }
+pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>>;
+pub type ToolFn = for<'a> fn(&'a Ctx, JsonObject) -> ToolFuture<'a>;   // JsonObject = rmcp::model::JsonObject
+pub struct ToolEntry {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub loading: Loading,
+    pub schema: fn() -> Arc<JsonObject>,     // rmcp::handler::server::common::schema_for_type::<Args>
+    pub call: ToolFn,                        // parse_args::<Args>, then tools::<name>::run
+}
+pub static TOOLS: &[ToolEntry];              // one `tool!(name, Always|Deferred, "desc")` row per tool
+pub fn find_tool(name: &str) -> Option<&'static ToolEntry>;
+pub fn parse_args<A: DeserializeOwned>(args: JsonObject) -> Result<A>;
+pub struct Server;                           // impl rmcp::ServerHandler: list_tools / call_tool over TOOLS
+pub async fn serve(config: Config) -> Result<()>;   // stdio
+pub fn index_command(config: &Config) -> Result<String>;
+```
+
+The server does not use rmcp's `#[tool]` / `#[tool_router]` macros: tool files depend only
+on `serde`/`schemars`, and the table is served by implementing `ServerHandler::list_tools`
+and `call_tool` directly. The future returned by `run` must be `Send`.
+
+Lint (`src/lint/mod.rs`): `Scope`, `Severity` (ordered `Info < Warning < Error`,
+deserialises lowercase), `Finding`, `Rule` and `all_rules()` as in M0 T0.3, plus:
+
+```rust
+pub struct LintContext<'a> {
+    pub file: Option<&'a ParsedFile>,     // File and Recipe scope
+    pub source: Option<&'a str>,          // raw text of that file
+    pub kind: Option<FileKind>,
+    pub data: Option<&'a DataStore>,      // Recipe scope
+    pub layer: Option<&'a str>,           // Layer scope
+    pub index: &'a Index,
+    pub ws: &'a Workspace,
+    pub loc: Loc,
+}
+#[derive(clap::Args)] pub struct LintCliArgs { target, rules (--rule), severity, format, fail_on, all }
+pub fn cli(cfg: &Config, args: &LintCliArgs) -> Result<i32>;   // exit code
+```
 
 ## Errors
 
-`error::Error` (thiserror) with variants `Io`, `Sqlite`, `Config`, `NotFound { what }`,
-`Ambiguous { what, candidates }`, `Confined { path }`, `BitbakeUnavailable`, `Invalid { msg }`.
+`error::Error` (thiserror) with variants `Io(io::Error)`, `Sqlite(rusqlite::Error)`,
+`Config { msg }`, `NotFound { what }`, `Ambiguous { what, candidates }`, `Confined { path }`,
+`BitbakeUnavailable`, `Invalid { msg }`; `From` for `io::Error`, `rusqlite::Error` and
+`toml::de::Error` (to `Config`). `Error::not_implemented()` is the M0 stub error.
+`pub type Result<T, E = Error>`.
 A tool error is returned to the client as an MCP tool error with a one-line message that says
 what to do next (for example, list the candidates for an ambiguous recipe name).
 
@@ -333,6 +416,13 @@ disable = ["style/variable-order"]
 [output]
 budget_tokens = 600
 ```
+
+In code (`src/config.rs`): `Config { build_dir, layers, writable_layers, init_script,
+bitbake: BitbakeConfig { enabled, allow_destructive }, lint: LintConfig { disable },
+output: OutputConfig { budget_tokens }, work_dir }` (`work_dir` is not read from the file),
+`Config::load(&CliOverrides) -> Result<Config>`, `Config::from_toml(text, origin)`,
+`Config::validate(&Workspace)`. `CliOverrides { build_dir, config, layers, work_dir }` carries
+the global flags `--build-dir`, `--config`, `--layer` (repeatable).
 
 With no config and no `--build-dir`, discovery walks up from the working directory looking
 for `conf/bblayers.conf`, then falls back to treating directories containing `conf/layer.conf`

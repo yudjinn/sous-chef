@@ -1,6 +1,7 @@
 # Lint rules
 
-Each rule is one file `src/lint/rules/<id with / replaced by _>.rs`, implements the `Rule`
+Each rule is one file `src/lint/rules/<id with / and - replaced by _>.rs` (e.g.
+`override/legacy-syntax` is `override_legacy_syntax.rs`), implements the `Rule`
 trait (M4, T4.1), has a positive and a negative fixture, and can be disabled by id or group
 in `sous-chef.toml`.
 

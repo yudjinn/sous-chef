@@ -1,0 +1,8 @@
+Subject: [PATCH] hello: add README
+
+Upstream-Status: Submitted [https://example.org/hello/pull/1]
+---
+--- /dev/null
++++ b/README
+@@ -0,0 +1 @@
++hello, patched by meta-mine

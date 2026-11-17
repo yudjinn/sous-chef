@@ -1,0 +1,6 @@
+do_compile[dirs] = "${B}"
+do_compile[depends] += "virtual/foo:do_populate_sysroot"
+SRC_URI[sha256sum] = "0000000000000000000000000000000000000000000000000000000000000000"
+PACKAGECONFIG[ssl] = "--with-ssl,--without-ssl,openssl"
+VAR[doc] ?= "documentation flag"
+do_install[noexec] = "1"

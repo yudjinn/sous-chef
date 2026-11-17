@@ -1,0 +1,11 @@
+Subject: [PATCH] hello: vendor branding
+
+Upstream-Status: Inappropriate [vendor specific]
+---
+--- a/src/hello.c
++++ b/src/hello.c
+@@ -1,3 +1,3 @@
+ int main(void) {
+-	puts("hello, world");
++	puts("hello from vendor");
+ }
