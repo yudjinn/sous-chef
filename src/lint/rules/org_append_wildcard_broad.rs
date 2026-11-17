@@ -14,6 +14,7 @@
 
 use crate::index::query;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
+use crate::parse::words;
 use crate::types::FileKind;
 
 pub struct OrgAppendWildcardBroad;
@@ -27,7 +28,7 @@ fn pinned(s: &query::StatementRow) -> Option<&'static str> {
     let flag = s.flag.as_deref();
     match (base, flag) {
         ("SRC_URI", None)
-            if value.split_whitespace().any(|w| {
+            if words::words(value).into_iter().any(|w| {
                 let w = w.split(';').next().unwrap_or(w);
                 w.starts_with("file://") && (w.ends_with(".patch") || w.ends_with(".diff"))
             }) =>

@@ -5,7 +5,9 @@
 //! `status op override loc snippet`, where `status` is `applied`, `inactive` (an override
 //! condition is not in `OVERRIDES`), `shadowed` (overwritten, lost to another variant, or a
 //! default that did not take effect) or `removed` (every word it added was removed again).
-//! `unset` statements are rows with op `unset`. With `flags: true` the `VAR[flag]`
+//! `unset` statements are rows with op `unset`; BitBake's rewrite of virtual providers in
+//! `DEPENDS` after parsing is a row with op `rewrite` (it replaces nothing: the rows before
+//! it keep their status). With `flags: true` the `VAR[flag]`
 //! operations follow, per flag. A name written `VAR[flag]` shows that flag only.
 //!
 //! The notes carry the final value (`final: ...`, cut at [`MAX_FINAL_CHARS`] characters,
@@ -27,7 +29,7 @@ use serde::Deserialize;
 use super::recipe;
 use crate::error::{Error, Result};
 use crate::eval::datastore::full_name;
-use crate::eval::{self, DataStore, OpStatus, Target, UnsetRecord, VarOp};
+use crate::eval::{self, DataStore, OpKind, OpStatus, Target, UnsetRecord, VarOp};
 use crate::handles::HandleKind;
 use crate::index::Index;
 use crate::index::query;
@@ -257,7 +259,12 @@ pub fn status_str(s: OpStatus) -> &'static str {
 /// The statement as written, for the snippet column.
 pub fn op_snippet(ds: &DataStore, op: &VarOp) -> String {
     let name = full_name(&op.var);
-    let text = if is_function_op(ds, op) {
+    let text = if op.kind == OpKind::VirtualProviderRewrite {
+        format!(
+            "{name} rewritten after parsing (BB_RECIPE_VIRTUAL_PROVIDERS) to \"{}\"",
+            op.value
+        )
+    } else if is_function_op(ds, op) {
         format!("{name}() {{ ... }}")
     } else {
         match &op.var.flag {
@@ -331,7 +338,7 @@ fn value_rows(t: &mut Table, ds: &DataStore, name: &str) {
             position(ds, &op.loc),
             [
                 status_str(*st).into(),
-                op.op.to_string(),
+                op.kind.label(op.op),
                 override_str(op),
                 op.loc.to_string(),
                 op_snippet(ds, op),

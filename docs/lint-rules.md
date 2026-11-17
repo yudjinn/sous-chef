@@ -46,9 +46,13 @@ Recipe-scope rules run once per `.bb` of the target, on the evaluation of that f
 findings can be located in a bbappend of another layer.
 
 Which files: the indexed BitBake files of the target. Data files (a `.conf` / `.inc` a recipe
-installs, bitbake-semantics.md "Data files") are left out. A `.bb` or `.bbappend` that no
-`BBFILES` glob matches is linted like any other, recipe-scope rules included (evaluated as
-the file it is); BitBake never parses it.
+installs, bitbake-semantics.md "Data files") are left out. A `.bb` or `.bbappend` BitBake does
+not collect (no `BBFILES` glob matches it, only an inactive `BBFILES_DYNAMIC` entry does, or
+`BBMASK` masks it; `files.not_collected`) is told about once and otherwise left alone: it
+is never evaluated, no file- or recipe-scope rule runs on it, and a layer-scope rule reports
+it: `org/recipe-path` for a `.bb` that no `BBFILES` glob matches, `org/layer-conf` for such a
+`.bbappend` (one finding at the layer's `BBFILES` line). It still counts in the number of
+files checked.
 
 Which rules run:
 
@@ -109,7 +113,9 @@ Notes:
   or `pn-*` form, the target OS or architecture, or a class name; or any word in the value
   of an `OVERRIDES`, `MACHINEOVERRIDES`, `MACHINEOVERRIDES_EXTENDER`, `DISTROOVERRIDES`,
   `CLASSOVERRIDE`, `LIBCOVERRIDE`, `TCOVERRIDE`, `TUNEOVERRIDES` or `FILESOVERRIDES`
-  assignment of the workspace, python included. The override list counts as partly known
+  assignment of the workspace, python included (only the quoted strings of a `${@...}`
+  expression, the values it may add, not its code: `bb`, `utils`, `d` are no override
+  names). The override list counts as partly known
   when `OVERRIDES` needs python or has unresolved references, when anonymous python is
   opaque, or when it changes one of those variables; this is the usual case on real
   OE-core, so findings there are mostly info. The suggestion is a known machine, distro,
@@ -157,7 +163,7 @@ Notes:
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `org/recipe-path` | W/I | layer | Recipe not at `recipes-<category>/<dir>/<file>.bb` (W); `<dir>` holds only this recipe and is neither its `PN` nor a prefix of it (I); file name with more than one `_` (W) or no `_<pv>` (I); upper-case letters in `PN` (W). Recipes under `dynamic-layers/` are skipped; the no-version check skips `packagegroup-*` and recipes whose static tree (their own lines and the files they require) inherits an image class (`image`, `core-image`, `*-image`) or `packagegroup`; the directory check skips such an image in `images/` and such a packagegroup in `packagegroups/`. |
+| `org/recipe-path` | W/I | layer | Recipe not at `recipes-<category>/<dir>/<file>.bb` (W); `<dir>` holds only this recipe and is neither its `PN` nor a prefix of it (I); file name with more than one `_` (W) or no `_<pv>` (I); upper-case letters in `PN` (W). Recipes under `dynamic-layers/` are skipped; the no-version check skips `packagegroup-*` and recipes whose static tree (their own lines and the files they require) inherits an image class (`image`, `core-image`, `*-image`) or `packagegroup`; the directory check skips such an image in `images/` and such a packagegroup in `packagegroups/`. A `.bb` no `BBFILES` glob matches gets one finding instead, naming its layer's globs: I in a directory that is clearly no recipe tree (a `lib/`, `scripts/`, `files/`, `wic/`, `templates/` or `*-templates/` component, or a recipe's own `<pn>/` directory), W anywhere else; a `.bb` left out by an inactive `BBFILES_DYNAMIC` entry or `BBMASK` gets none. |
 | `org/duplicate-versions` | I | layer | Two or more versions of a recipe whose statements are mostly identical (at least 60 percent of the longer one, and at least 3): suggest a shared `<pn>.inc`. Version data and `require` / `include` lines are left out of the comparison. Reported on the newest version. |
 | `org/inc-has-version-data` | W/I | file | An `.inc` that `.bb` files of two or more versions require or include directly sets `PV`, `SRCREV` / `SRCREV_<name>` (not with `AUTOREV`) or a `SRC_URI` checksum flag (W), or `LIC_FILES_CHKSUM` (I: fine while the license text is the same). Appending to `PV` is not flagged. |
 | `org/inc-unused` | I | layer | A `.inc` that no `require`, `include` or `include_all` of the workspace resolves to. An unresolved argument with `${...}` that could match the file name keeps it from being reported. |
@@ -382,18 +388,39 @@ Per rule with `--all` (rules with no finding either time left out):
 | hygiene/autorev, org/duplicate-versions, org/repeated-logic | 4 each | 4 each | |
 | override/missing-package | 3 | 0 | empty values and classes without packages (B10) |
 
+After branch `w6-fix` (measured 2026-11-17 with the same command, kas build, no BitBake run;
+"before" is `ba8902b`):
+
+| Run | Before | After |
+|---|---|---|
+| Default (13 files) | 1 finding (info, `hygiene/missing-metadata`) | the same |
+| With --all | 647 findings in 1719 files (3 E, 167 W, 477 I) | 625 findings in 1718 files (0 E, 166 W, 459 I) |
+
+| Rule (with --all) | Before | After | Cause |
+|---|---|---|---|
+| override/shadowed | 83 | 65 | the virtual-provider rewrite of `DEPENDS` is no assignment (18 false positives) |
+| org/recipe-path | 102 | 101 | an uncollected `.bb` gets one finding (`example.bb`: 2 -> 1) |
+| hygiene/parse-error | 3 | 0 | `conf/ccache.conf` is a data file |
+
+Every other rule's count is unchanged, and so is every other finding.
+
 What the rules still get wrong there, as far as it was checked:
 
-- `hygiene/parse-error`: the 3 errors are in `meta:conf/ccache.conf`, ccache's own
-  configuration file. A `.conf` under a layer's `conf/` counts as metadata, so it is linted.
-- `org/recipe-path`: reports `meta:lib/bblayers/templates/example.bb` (a template no
-  `BBFILES` glob collects, 2 findings): lint takes every indexed `.bb`, collected or not.
-- `override/shadowed`: 7 findings say a recipe's `DEPENDS =` is replaced by
-  `tcmode-default.inc:5` / `:7` (`wic-tools.bb`, `musl_git.bb`, `libssp-nonshared.bb`, ...):
-  the rewrite of virtual providers in `DEPENDS` (`BB_RECIPE_VIRTUAL_PROVIDERS`) is recorded
-  as an assignment located at the `PREFERRED_PROVIDER_virtual/cross-*` line, and the rule
-  takes it for a later `=`. False positives. The 36 `SECTION` findings replaced by
-  `pypi.bbclass:42` are true.
+- `hygiene/parse-error`: fixed in w6 (3 -> 0 with `--all`): the 3 errors were in
+  `meta:conf/ccache.conf`, ccache's own configuration file, which is now a data file (an
+  unreferenced `.conf` in `conf/` that BitBake does not read by convention and that does not
+  parse; bitbake-semantics.md "Data files").
+- `org/recipe-path`: fixed in w6 (102 -> 101 with `--all`): `meta:lib/bblayers/templates/example.bb`
+  (a template no `BBFILES` glob collects) had 2 layout and naming findings; it now has one
+  info finding saying BitBake does not collect it, and no other rule runs on it.
+- `override/shadowed`: fixed in w6 (83 -> 65 findings with `--all`). 18 findings said a
+  recipe's `DEPENDS =` is replaced by the rewrite of virtual providers in `DEPENDS`
+  (`BB_RECIPE_VIRTUAL_PROVIDERS`), located at a `PREFERRED_PROVIDER_virtual/cross-*` line
+  (`tcmode-default.inc:5` / `:7`: 7, `classes/toolchain/gcc.bbclass`: 5) or at the recipe
+  itself when no provider assignment had a location (6: `picolibc_git.bb`,
+  `gcc-runtime.inc`, `libgcc.inc`, ...). The history now records that rewrite as its own kind
+  of operation, which replaces nothing; the other 65 findings are unchanged. The 36
+  `SECTION` findings replaced by `pypi.bbclass:42` are true.
 - `override/dead` (92, info): real overrides of architectures and target OSes no machine
   of the workspace uses; expected noise while `OVERRIDES` holds python.
 - `org/class-export-functions` (23) and `org/class-recipe-specific` (7): false in the

@@ -203,7 +203,13 @@ for the python OE-core writes the two agree.) Used by `eval/overrides.rs`,
 `eval/providers.rs`, `eval/replay.rs` (`INHERIT`, `BB_DEFER_BBCLASSES`, the
 `BB_RECIPE_VIRTUAL_PROVIDERS` rewrite, which keeps an expression whole when it joins the
 words again), `index/scan.rs` (`provides` and `depends` rows, the `PACKAGECONFIG` build
-field) and the `overrides` and `deps` tools. Lint rules still split values with their own code.
+field), the `overrides` and `deps` tools, and (w6) every lint rule that splits a value
+(`SRC_URI` entries, `inherit` / `INHERIT` class lists, `BBCLASSEXTEND`, the `*OVERRIDES`
+values `KnownOverrides` reads, task names, the words of `bblayers.conf` lines). The known
+set of `override/dead` (and the `overrides` tool's dead view) takes candidate names from
+`words::visible_text`: the text outside `${...}` and, inside `${@...}`, only its quoted
+strings (the values python may add, `'armv7a:'`), never the python code (`bb`, `utils`,
+`d`).
 
 ### Datastore
 
@@ -509,7 +515,8 @@ Checked against BitBake master (commit `5495a547`, 2026-11-16), and reproduced b
   value).
 
 sous-chef differences: only files inside the workspace (layer roots and the build directory)
-are ever found; `BBMASK` is not applied by `recipe_files`.
+are ever found; `BBMASK` is not applied by `recipe_files` (the index applies a static one,
+see "What the static evaluator cannot do").
 
 Static expansion of reference arguments (`resolve::expand_with`): the scanner resolves
 `${VAR}` in `require` / `include` / `inherit` arguments only for values that follow from the
@@ -572,11 +579,21 @@ word must be `<collection>:<glob>` (split on the first `:`; anything else is fat
 "BBFILES_DYNAMIC entries must be of the form {!}<collection name>:<filename pattern>"); a
 leading `!` inverts the test; the glob is appended to `BBFILES` when the collection is in
 `BBFILE_COLLECTIONS` (or, inverted, when it is not). `collect_bbfiles` then treats it as
-any other `BBFILES` glob. The index does not fold these into `BBFILES`, so such files have
-no `bbappend` edge and `query::orphan_appends` (a collected append whose edge has no
-target) never lists them: `org/append-no-match` cannot report them, rightly when the
-collection is absent and as a miss when it is present. `layers show=appends` evaluates
-the entries itself.
+any other `BBFILES` glob. The first release with `BBFILES_DYNAMIC` is BitBake 1.36
+(`04f8bd50a`, 2017, `git describe --contains`: `1.35.0~73`), the `!` form came with
+`bfd729cfe` (2020, `1.48.0~144`); both are in `lib/bb/cookerdata.py` on branch `2.0`
+(Kirkstone), so every supported release has them and no `Feature` gates them. A word with
+an empty collection (`:glob`) makes `l[0]` raise in BitBake. sous-chef (w6,
+`resolve::collect` / `resolve::bbfiles_dynamic`, used by `resolve::recipe_files` and so by
+the index): each layer's `conf/layer.conf` is parsed and its `BBFILES_DYNAMIC` assignments
+applied in order (`${LAYERDIR}` replaced by that layer's root, as `expandVarref` does after
+each file; `=` replaces, `+=` adds, `:append` / `:prepend` / `:remove` after all; no
+`include` in a layer.conf, no conditional assignment followed); an active entry's glob is
+added to the globs, sorted by its layer's priority like the static ones; a malformed word or
+one with another `${...}` is left out. The index marks a file only an inactive entry matches
+`files.not_collected = 'dynamic'`; an active entry's files get `bbappend` edges, are
+evaluated with their recipe, linted, and `org/append-no-match` sees a dangling one.
+`layers show=appends` reads the index.
 
 **A `.bb` or `.bbappend` that no `BBFILES` glob matches** (BitBake 2.18.0 `lib/bb/cooker.py`): BitBake knows only the files `collect_bbfiles`
 returns; recipe names, providers (`bb.providers` over the parsed recipes) and
@@ -590,11 +607,13 @@ file in the index (`item`, `search`, `layers` show it) and marks it
 `query::find_recipes`, `recipe_names_like`, `files_providing` and
 `providers::recipes_using` leave it out, it takes part in no `bbappend` edge, and an
 evaluation addressed to it by path (`layer:path`) adds the note "not matched by any layer's
-BBFILES" (`ReplayNotes::target_notes`). A file `BBMASK` masks would be another value of the
-same column (not implemented: `BBMASK` is evaluated configuration). The
+BBFILES" (`ReplayNotes::target_notes`). A file a static `BBMASK` masks is `not_collected =
+'bbmask'` (w6), one only an inactive `BBFILES_DYNAMIC` entry matches `dynamic`. The
 `item` and `search` tools add the same note for a hit in such a file, and
-`query::files_in_layer_in(.., FileSet::COLLECTED)` lists a layer's files without them (lint's
-engine uses `files_in_layer`, which still includes them).
+`query::files_in_layer_in(.., FileSet::COLLECTED)` lists a layer's files without them. Lint
+(w6) runs no file- or recipe-scope rule on such a file and reports it once
+(`query::uncollected_recipe_files`; `org/recipe-path` for a `.bb`, `org/layer-conf` for a
+`.bbappend`).
 
 ### Data files
 
@@ -615,16 +634,28 @@ in the layer's `conf/` tree, is a class under a `classes*/` directory, is the ta
 resolved `include` / `require` / `include_all` / `inherit` edge, or could be the target of
 an unresolved one (the reference's path, `${...}` standing for any text within a component,
 ends the file's path; a bare name only next to the including file or at a layer root; a
-reference that is all `${...}` matches nothing); otherwise it is **data** when it is under a
+reference that is all `${...}` matches nothing); a `.conf` in `conf/` is metadata unless
+it is none of the files BitBake and OE-core read by convention **and** it has a line
+BitBake's configuration parser rejects (w6, `scan.rs` `conventional_conf`: BitBake 2.18.0
+`cookerdata.py` `parseConfigurationFiles` reads `conf/bblayers.conf`, every
+`conf/layer.conf` and `conf/bitbake.conf`; OE-core's `bitbake.conf`, Wrynose lines
+813-833, includes `conf/site.conf`, `auto.conf`, `toolcfg.conf`, `local.conf`, and by
+pattern `conf/multiconfig/`, `conf/machine/`, `conf/machine-sdk/`, `conf/distro/`, and
+`conf/fragments/` through `addfragments`; `conf/templates/` holds build templates; "rejects":
+an unparsed line, a function, `inherit`, `addtask`, `deltask`, `addhandler` or
+`EXPORT_FUNCTIONS`, which `ConfHandler.feeder` does not accept), in which case it is data
+(a `.conf` that parses cleanly stays metadata: it may be included in a way the index cannot
+see); otherwise it is **data** when it is under a
 directory a recipe takes files from (`files/`, `<pn>/` or `<pn>-<pv>/` next to a `.bb` /
 `.bbappend` of that name, `FILESPATH`'s defaults) or under `files/`, `lib/`, `scripts/` or
 `wic/`; anything else stays metadata. A data file is indexed and marked
 (`files.not_collected = 'data'`): `item` shows it with a note, `search` (every mode) and the
 file listings (`all_files`, `files_by_kind`, `files_in_layer`; lint's file list) leave it out
 unless `FileSet::ALL` is asked for, and the replay still reads it if an evaluation reaches it.
-The marks are recomputed with the edges, and with one file's edges on `refresh_file`. Known
-residual: `conf/ccache.conf` is in `conf/` and stays metadata (3 `hygiene/parse-error`
-findings on OE-core, from 422).
+The marks are recomputed with the edges, and with one file's edges on `refresh_file`.
+`conf/ccache.conf` (ccache's `key = value` syntax, unparsed lines for BitBake, referenced only
+through `CCACHE_CONFIGPATH`) is data since w6: `hygiene/parse-error` with `--all` on the
+live workspace went from 3 to 0 (422 before the data-file rule).
 
 ## Layers
 
@@ -807,9 +838,13 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
   `PREFERRED_PROVIDER_*` are per `TARGET_ARCH`. sous-chef (`replay::virtual_recipe_providers`,
   `Feature::RecipeVirtualProviders`) does the `DEPENDS` part after `expand_keys` (it does not
   run anonymous python, so the rewrite sees `DEPENDS` without what python would add, and
-  the value stays flagged when it was): the new value is stored as a plain assignment whose
-  history entry points at the `PREFERRED_PROVIDER_*` assignment used, with a note naming
-  each rewritten word (`ReplayNotes::var_notes`). Not reproduced: the task `depends` flags;
+  the value stays flagged when it was): the new value is stored by `DataStore::rewrite`,
+  recorded in the history as an operation of its own kind (`OpKind::VirtualProviderRewrite`,
+  op `rewrite` in the `var` tool), not as an assignment: it points at the
+  `PREFERRED_PROVIDER_*` assignment used (or the recipe when none has a location), it is
+  `Applied`, and the operations that made the old value keep the status they had just
+  before the rewrite (they are what was rewritten, not shadowed). A note names each
+  rewritten word (`ReplayNotes::var_notes`). Not reproduced: the task `depends` flags;
   the whitespace normalisation when no word is replaced (the value then differs from
   BitBake's in whitespace only); `DEPENDS` unset becoming `""`. A missing provider is a
   reference issue (`RefProblem::Fatal`) and the word is kept.
@@ -1664,6 +1699,39 @@ in the live environment:
 - anonymous python functions and event handlers
 - `d.setVar` / `d.appendVar` inside classes (e.g. `PACKAGECONFIG` processing in `base.bbclass`)
 - `inherit` / `require` whose argument depends on any of the above
+- **class-extended variants** (`BBCLASSEXTEND`): BitBake 2.18.0 `lib/bb/parse/ast.py`
+  `multi_finalize` makes a datastore per word (`ext.split(':', 2)`; a plain word sets
+  `PN = "<pn>-<word>"` and `inherit_defer`s the class); OE-core (Wrynose)
+  `nativesdk.bbclass` `nativesdk_virtclass_handler` renames `<pn>-nativesdk` to
+  `nativesdk-<pn>`, `classes/multilib.bbclass` sets `PN = "<variant>-<pn>"` for
+  `multilib:<variant>`. sous-chef evaluates the base recipe only. Reported (w6,
+  `recipe::class_extend_hint`): a name of the form `<pn>-native`, `nativesdk-<pn>` or
+  `<variant>-<pn>` whose base recipe's files list `native`, `nativesdk` or
+  `multilib:<variant>` in `BBCLASSEXTEND` (static words; `${...}` words and global
+  `BBCLASSEXTEND:append` from multilib configuration are not seen) is an error saying it is
+  that variant and naming the base recipe; other classes' naming was not checked and is not
+  claimed.
+- **`BBMASK`** (BitBake 2.18.0 `lib/bb/cooker.py` `CookerCollectFiles.collect_bbfiles`:
+  `BBMASK.split()`, a leading `|` dropped from a word, each word compiled alone and ignored
+  when invalid, the rest joined with `|` and `re.search`ed in the path of each file the
+  `BBFILES` globs gave): applied (w6) when the configuration's value (default machine and
+  distro) is static; masked files are `files.not_collected = 'bbmask'` (no recipe, no
+  provider, no bbappend edge, not linted). Recomputed after every full edge rebuild and
+  after a `.conf` is reindexed (not after an `.inc` a conf includes). The paths searched
+  are the workspace's canonical ones, not the `BBLAYERS` spelling (the `LAYERDIR` gap). A
+  value with python or undefined variables, or a word Rust's `regex` cannot compile, is not
+  applied and every evaluation says so (`note: BBMASK is set but sous-chef does not apply
+  it`).
+- **Skipped recipes** (OE-core `classes-global/base.bbclass`, Wrynose, anonymous python):
+  `SKIP_RECIPE[<PN>]` non-empty; `COMPATIBLE_MACHINE` set (and `PARSE_ALL_RECIPES` not
+  true) that `re.match`es (anchored at the start only) no entry of
+  `MACHINEOVERRIDES.split(":")`; `COMPATIBLE_HOST` set (and neither `SOURCE_MIRROR_FETCH`
+  nor `PARSE_ALL_RECIPES` true) that does not `re.match` `HOST_SYS`. Nothing is hidden: when
+  every value involved is static (no python, no undefined variable, not set by anonymous
+  python by name) and the check fails, the evaluation gets `note: BitBake would skip this
+  recipe: ...` (`replay::skip_reasons`), shown by `recipe`, `var`, `deps`, `overrides`;
+  otherwise nothing is said. `INCOMPATIBLE_LICENSE` and the other checks of that function
+  are not modelled.
 
 These are reported, never silently guessed. Authoritative mode (M5) covers them.
 

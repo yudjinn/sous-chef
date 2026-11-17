@@ -8,10 +8,13 @@
 //! - `appends`: one row per bbappend and recipe it applies to (in application order for
 //!   each recipe); a bbappend that `BBFILES` collects and that matches nothing is a row with
 //!   `matches` = `-` and status `no-match` (the same set as `query::orphan_appends`, which
-//!   `org/append-no-match` reports). A bbappend that no `BBFILES` glob collects is judged by
-//!   the layers' `BBFILES_DYNAMIC` entries, which the index does not fold into `BBFILES`:
-//!   inactive (`not collected (dynamic layer ... not present)`), active (matched here by
-//!   file name), or none (`not collected (no BBFILES glob)`).
+//!   `org/append-no-match` reports). What BitBake collects comes from the index
+//!   (`files.not_collected`, the `bbappend` edges), which folds the active `BBFILES_DYNAMIC`
+//!   globs into `BBFILES` (`resolve::collect`): a bbappend only an active entry collects has
+//!   `(BBFILES_DYNAMIC)` after its status; one only an inactive entry matches is
+//!   `not collected (dynamic layer ... not present)` (or `!<c>`: `... is present`); one no
+//!   glob matches is `not collected (no BBFILES glob)`, one `BBMASK` masks
+//!   `not collected (masked by BBMASK)`.
 //! - `compat`: per layer in `BBLAYERS` order, the `LAYERSERIES_COMPAT` it claims against the
 //!   workspace release and the core layer's `LAYERSERIES_CORENAMES`, then the problems
 //!   `org/layer-conf` finds in its compat series and `LAYERDEPENDS`
@@ -23,7 +26,7 @@
 //!   decides which file an `include` / `require`, an `inherit` or a conf lookup finds. The
 //!   row says which files that changes.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -33,6 +36,7 @@ use super::recipe::file_label;
 use crate::error::Result;
 use crate::index::Index;
 use crate::index::query::{self, FileRow, StatementFilter};
+use crate::index::schema::{NOT_COLLECTED_BBMASK, NOT_COLLECTED_DYNAMIC};
 use crate::lint::Severity;
 use crate::lint::rules::org_layer_conf::{self, LayerCheck, LayerProblem};
 use crate::mcp::Ctx;
@@ -426,82 +430,57 @@ fn appends(index: &Index, ws: &Workspace) -> Result<Table> {
     let mut t = Table::new(&["bbappend", "priority", "matches", "status"]);
     let mut orphans = 0;
     let mut uncollected = 0;
-    let dynamic = dynamic_entries(index, ws)?;
-    let collections: BTreeSet<&str> = ws
-        .layers
-        .iter()
-        .flat_map(|l| l.collections.iter().map(String::as_str))
+    // The index says what BitBake collects (`files.not_collected`, `bbappend` edges);
+    // `resolve::collect` says which `BBFILES_DYNAMIC` entry was involved.
+    let collection = resolve::collect(ws);
+    let not_collected: HashMap<i64, String> = query::uncollected_recipe_files(index)?
+        .into_iter()
+        .map(|(f, r)| (f.id, r))
         .collect();
-    let mut recipes: Option<Vec<FileRow>> = None;
     for a in query::files_by_kind(index, &[FileKind::Append])? {
-        let edges: Vec<_> = query::edges_from(index, a.id)?
-            .into_iter()
-            .filter(|e| e.kind == "bbappend")
-            .collect();
-        let matched: Vec<FileRow> = edges.iter().filter_map(|e| e.target.clone()).collect();
-        if edges.is_empty() {
-            // No `BBFILES` glob of the index collects it: BitBake never reads it, unless a
-            // `BBFILES_DYNAMIC` entry adds a glob for it (which the index does not model).
-            let label = file_label(&a);
-            let prio = a.priority.to_string();
-            let abs = ws.abs_path(&a.loc(LineSpan::line(1)));
+        let label = file_label(&a);
+        let prio = a.priority.to_string();
+        let abs = ws.abs_path(&a.loc(LineSpan::line(1)));
+        if let Some(reason) = not_collected.get(&a.id) {
+            uncollected += 1;
             let entry = abs.as_deref().and_then(|p| {
-                let p = p.to_string_lossy();
-                dynamic.iter().find(|d| glob_match(&d.pattern, &p))
+                collection
+                    .inactive_dynamic
+                    .iter()
+                    .find(|(q, _)| q == p)
+                    .and_then(|(_, i)| collection.dynamic.get(*i))
             });
-            match entry {
-                Some(d) if collections.contains(d.collection.as_str()) == d.invert => {
-                    uncollected += 1;
-                    let why = if d.invert {
-                        format!(
-                            "not collected (BBFILES_DYNAMIC `!{c}`: layer `{c}` is present)",
-                            c = d.collection
-                        )
-                    } else {
-                        format!(
-                            "not collected (dynamic layer `{}` not present)",
-                            d.collection
-                        )
-                    };
-                    t.row(&[&label, &prio, "-", &why]);
-                }
-                Some(_) => {
-                    // Collected by BitBake; match it the way BitBake does (by file name).
-                    let all = match &recipes {
-                        Some(r) => r,
-                        None => recipes.insert(query::files_by_kind(index, &[FileKind::Recipe])?),
-                    };
-                    let hits: Vec<&FileRow> = all
-                        .iter()
-                        .filter(|r| resolve::append_matches(&a.path, &r.path))
-                        .collect();
-                    if hits.is_empty() {
-                        orphans += 1;
-                        t.row(&[&label, &prio, "-", "no-match (BBFILES_DYNAMIC)"]);
-                    }
-                    for r in hits {
-                        t.row(&[&label, &prio, &file_label(r), "applies (BBFILES_DYNAMIC)"]);
-                    }
-                }
-                None => {
-                    uncollected += 1;
-                    t.row(&[&label, &prio, "-", "not collected (no BBFILES glob)"]);
-                }
-            }
+            let why = match (reason.as_str(), entry) {
+                (NOT_COLLECTED_DYNAMIC, Some(d)) if d.invert => format!(
+                    "not collected (BBFILES_DYNAMIC `!{c}`: layer `{c}` is present)",
+                    c = d.collection
+                ),
+                (NOT_COLLECTED_DYNAMIC, Some(d)) => format!(
+                    "not collected (dynamic layer `{}` not present)",
+                    d.collection
+                ),
+                (NOT_COLLECTED_BBMASK, _) => "not collected (masked by BBMASK)".to_string(),
+                _ => "not collected (no BBFILES glob)".to_string(),
+            };
+            t.row(&[&label, &prio, "-", &why]);
             continue;
         }
+        let dynamic = abs
+            .as_deref()
+            .is_some_and(|p| collection.via_dynamic.contains(p));
+        let suffix = if dynamic { " (BBFILES_DYNAMIC)" } else { "" };
+        let matched: Vec<FileRow> = query::edges_from(index, a.id)?
+            .into_iter()
+            .filter(|e| e.kind == "bbappend")
+            .filter_map(|e| e.target)
+            .collect();
         if matched.is_empty() {
             orphans += 1;
-            t.row(&[&file_label(&a), &a.priority.to_string(), "-", "no-match"]);
+            t.row(&[&label, &prio, "-", &format!("no-match{suffix}")]);
             continue;
         }
         for r in matched {
-            t.row(&[
-                &file_label(&a),
-                &a.priority.to_string(),
-                &file_label(&r),
-                "applies",
-            ]);
+            t.row(&[&label, &prio, &file_label(&r), &format!("applies{suffix}")]);
         }
     }
     if orphans > 0 {
@@ -533,127 +512,4 @@ fn appends(index: &Index, ws: &Workspace) -> Result<Table> {
         ));
     }
     Ok(t)
-}
-
-/// One `BBFILES_DYNAMIC` entry `{!}<collection>:<glob>` with `${LAYERDIR}` replaced by the
-/// root of the layer whose file sets it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DynamicEntry {
-    collection: String,
-    /// `!<collection>`: the glob is added when the collection is absent.
-    invert: bool,
-    /// Absolute glob.
-    pattern: String,
-}
-
-/// The `BBFILES_DYNAMIC` entries of the layers' `conf/layer.conf` files. BitBake
-/// (`cookerdata.py` `CookerDataBuilder.parseConfigurationFiles`, 2.18 `6e260eb6`) splits
-/// the value on whitespace, each word on its first `:` into a collection (a leading `!`
-/// inverts it) and a pattern, and appends the pattern to `BBFILES` when the collection is
-/// in `BBFILE_COLLECTIONS` (or, inverted, when it is not). Words with another `${...}` than
-/// `${LAYERDIR}`, and `:remove` assignments, are left out.
-fn dynamic_entries(index: &Index, ws: &Workspace) -> Result<Vec<DynamicEntry>> {
-    let scope = StatementFilter {
-        kinds: vec!["assign".into()],
-        ..StatementFilter::default()
-    };
-    let mut out = Vec::new();
-    for s in query::statements_by_base(index, "BBFILES_DYNAMIC", &scope)? {
-        if s.flag.is_some() || s.overrides.iter().any(|o| o == "remove") {
-            continue;
-        }
-        let Some(layer) = ws.layers.iter().find(|l| l.name == s.loc.layer) else {
-            continue;
-        };
-        let root = layer.root.to_string_lossy();
-        for word in s.value.as_deref().unwrap_or("").split_whitespace() {
-            let Some((coll, pattern)) = word.split_once(':') else {
-                continue;
-            };
-            let pattern = pattern.replace("${LAYERDIR}", &root);
-            if pattern.contains("${") || coll.is_empty() {
-                continue;
-            }
-            let (collection, invert) = match coll.strip_prefix('!') {
-                Some(c) => (c.to_string(), true),
-                None => (coll.to_string(), false),
-            };
-            out.push(DynamicEntry {
-                collection,
-                invert,
-                pattern,
-            });
-        }
-    }
-    Ok(out)
-}
-
-/// Whether `path` matches the glob `pattern` as Python's `glob.glob` would find it: compared
-/// component by component (`*` and `?` do not cross `/`; `[...]` is a character class).
-fn glob_match(pattern: &str, path: &str) -> bool {
-    let p: Vec<&str> = pattern.split('/').filter(|c| !c.is_empty()).collect();
-    let f: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
-    p.len() == f.len()
-        && p.iter()
-            .zip(&f)
-            .all(|(p, f)| fnmatch(p.as_bytes(), f.as_bytes()))
-}
-
-/// `fnmatch` for one path component: `*`, `?`, `[abc]`, `[a-z]`, `[!abc]`.
-fn fnmatch(p: &[u8], s: &[u8]) -> bool {
-    match p.split_first() {
-        None => s.is_empty(),
-        Some((b'*', rest)) => (0..=s.len()).any(|i| fnmatch(rest, &s[i..])),
-        Some((b'?', rest)) => !s.is_empty() && fnmatch(rest, &s[1..]),
-        Some((b'[', rest)) => {
-            let Some(end) = rest.iter().skip(1).position(|&c| c == b']').map(|i| i + 1) else {
-                return s.first() == Some(&b'[') && fnmatch(rest, &s[1..]);
-            };
-            let Some((&c, tail)) = s.split_first() else {
-                return false;
-            };
-            let (negate, class) = match rest[..end].split_first() {
-                Some((b'!', cls)) => (true, cls),
-                _ => (false, &rest[..end]),
-            };
-            let mut hit = false;
-            let mut i = 0;
-            while i < class.len() {
-                if i + 2 < class.len() && class[i + 1] == b'-' {
-                    hit |= class[i] <= c && c <= class[i + 2];
-                    i += 3;
-                } else {
-                    hit |= class[i] == c;
-                    i += 1;
-                }
-            }
-            hit != negate && fnmatch(&rest[end + 1..], tail)
-        }
-        Some((&c, rest)) => s.first() == Some(&c) && fnmatch(rest, &s[1..]),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn globs() {
-        let p = "/l/dynamic-layers/meta-tpm2/*/*/*.bbappend";
-        assert!(glob_match(
-            p,
-            "/l/dynamic-layers/meta-tpm2/recipes-tpm/t/t_5.7.bbappend"
-        ));
-        assert!(!glob_match(
-            p,
-            "/l/dynamic-layers/meta-tpm2/recipes-tpm/t/u/t.bbappend"
-        ));
-        assert!(!glob_match(
-            p,
-            "/l/dynamic-layers/meta-tpm2/recipes-tpm/t/t.bb"
-        ));
-        assert!(fnmatch(b"recipes-[a-c]*", b"recipes-bsp"));
-        assert!(!fnmatch(b"recipes-[!a-c]*", b"recipes-bsp"));
-        assert!(fnmatch(b"x?.bb", b"x1.bb"));
-    }
 }

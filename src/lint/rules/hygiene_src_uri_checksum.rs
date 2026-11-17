@@ -23,6 +23,7 @@
 use crate::eval::{DataStore, OpStatus};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
+use crate::parse::words;
 use crate::types::{LineSpan, Loc};
 
 pub struct HygieneSrcUriChecksum;
@@ -60,9 +61,8 @@ fn origin(data: &DataStore, entry: &str) -> Option<Loc> {
         .rev()
         .filter(|(_, st)| *st == OpStatus::Applied)
         .find(|(op, _)| {
-            data.expand(&op.value)
-                .text
-                .split_whitespace()
+            words::words(&data.expand(&op.value).text)
+                .into_iter()
                 .any(|w| w == entry)
         })
         .map(|(op, _)| op.loc)
@@ -92,7 +92,7 @@ impl Rule for HygieneSrcUriChecksum {
         if src_uri.unevaluated_python {
             return;
         }
-        for entry in src_uri.text.split_whitespace() {
+        for entry in words::words(&src_uri.text) {
             if entry.contains("${") {
                 continue;
             }

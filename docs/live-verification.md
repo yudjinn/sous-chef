@@ -558,7 +558,7 @@ included, and the lint numbers were re-measured on the kas build without running
 |---|---|---|
 | B1 | data files marked in the index (`files.not_collected = 'data'`), left out of search and lint; uncollected recipe files noted | fixed; `hygiene/parse-error` with `--all` 422 -> 3. Left: the 3 are in `meta:conf/ccache.conf` (ccache's own file, but in `conf/`, so taken as metadata), and lint still checks `meta:lib/bblayers/templates/example.bb` (no `BBFILES` glob collects it; 2 `org/recipe-path` findings) |
 | B2 | glob matches sorted as Python strings (`resolve::py_str_cmp`) | fixed; bbappend order agrees for all recipes of the bitbake-setup build (differential.md) |
-| B3 | `layers show=appends` evaluates `BBFILES_DYNAMIC` | fixed for the view; the index still does not fold `BBFILES_DYNAMIC` into `BBFILES` |
+| B3 | `layers show=appends` evaluates `BBFILES_DYNAMIC` | fixed for the view; since w6 the index folds `BBFILES_DYNAMIC` into `BBFILES` (`resolve::collect`) and the view reads the index |
 | B4 | one tokeniser for list values (`parse::words`): python entries of `OVERRIDES` kept whole, never override names | fixed |
 | B5 | a reference whose text expands completely but whose value is uncertain is followed and flagged | fixed; flagged values listing `TCOVERRIDE` 156 -> 0 (differential.md) |
 | B6 | the same tokeniser in `deps` and the static `PROVIDES` | fixed |

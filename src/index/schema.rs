@@ -31,10 +31,12 @@ pub const BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 ///   release the edges were resolved for ([`META_RELEASE`]); `Index::refresh` recomputes the
 ///   edges when it differs from the workspace's (schema version 2).
 /// - `files.not_collected` (schema version 3): for a `.bb` / `.bbappend` that BitBake does
-///   not collect, why ([`NOT_COLLECTED_BBFILES`]: no layer's `BBFILES` glob matches it);
+///   not collect, why ([`NOT_COLLECTED_BBFILES`]: no layer's `BBFILES` glob matches it;
+///   [`NOT_COLLECTED_DYNAMIC`]: only an inactive `BBFILES_DYNAMIC` glob does;
+///   [`NOT_COLLECTED_BBMASK`]: a static `BBMASK` masks it);
 ///   NULL for a collected one and for every other kind. Set with the edges. Such a file
 ///   stays indexed (`item`, `search` show it) but is never a recipe for a name, a provider
-///   or an append. A `BBMASK` reason would be another value of the same column. The value
+///   or an append. The value
 ///   [`NOT_COLLECTED_DATA`] marks a `.conf` / `.inc` / `.bbclass` that is not BitBake
 ///   metadata (a data file); `meta.edges` ([`META_EDGES`]) records the version of the edge
 ///   step, so an index built before data files were marked gets its marks without a schema
@@ -157,6 +159,22 @@ CREATE TABLE IF NOT EXISTS meta(
 /// `files.not_collected` of a `.bb` / `.bbappend` that no layer's `BBFILES` glob matches.
 pub const NOT_COLLECTED_BBFILES: &str = "bbfiles";
 
+/// `files.not_collected` of a `.bb` / `.bbappend` that only a `BBFILES_DYNAMIC` glob matches,
+/// whose condition does not hold (the named collection is absent, or for `!<collection>`
+/// present), so BitBake does not add the glob to `BBFILES`.
+pub const NOT_COLLECTED_DYNAMIC: &str = "dynamic";
+
+/// `files.not_collected` of a `.bb` / `.bbappend` a `BBFILES` glob collects but a `BBMASK`
+/// regex masks (`cooker.py` `collect_bbfiles`).
+pub const NOT_COLLECTED_BBMASK: &str = "bbmask";
+
+/// The `files.not_collected` values of a `.bb` / `.bbappend` BitBake does not collect.
+pub const NOT_COLLECTED_RECIPE_REASONS: &[&str] = &[
+    NOT_COLLECTED_BBFILES,
+    NOT_COLLECTED_DYNAMIC,
+    NOT_COLLECTED_BBMASK,
+];
+
 /// `files.not_collected` of a `.conf`, `.inc` or `.bbclass` that is not BitBake metadata: a
 /// data file (`wpa_supplicant.conf` in a recipe's `<pn>/` directory, `files/wic/*.wks.inc`),
 /// see `scan.rs` ("Data files").
@@ -168,7 +186,10 @@ pub const META_EDGES: &str = "edges";
 
 /// Bumped when what the edge step computes changes (it also sets `files.not_collected`).
 /// `data-files-1`: data files are marked (w5-fix-eval2).
-pub const EDGES_VERSION: &str = "data-files-1";
+/// `dynamic-1`: `BBFILES_DYNAMIC` folded into the collection, `not_collected = 'dynamic'`
+/// (w6). `conf-data-1`: an unreferenced `.conf` under `conf/` that does not parse is data.
+/// `bbmask-1`: a static `BBMASK` is applied (`not_collected = 'bbmask'`).
+pub const EDGES_VERSION: &str = "bbmask-1";
 
 /// The `meta` key holding the codename of the release the edges were resolved for.
 pub const META_RELEASE: &str = "release";

@@ -42,6 +42,7 @@ use std::collections::HashSet;
 use crate::index::{Index, query};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
+use crate::parse::words;
 use crate::parse::{ParsedFile, StatementKind};
 use crate::types::{AssignOp, FileKind, LineSpan, VarRef};
 
@@ -124,7 +125,9 @@ fn class_without_packages(cx: &LintContext<'_>, file: &ParsedFile) -> bool {
     let mut emptied = false;
     for s in &file.statements {
         match &s.kind {
-            StatementKind::Inherit { classes, .. } if classes.split_whitespace().any(empties) => {
+            StatementKind::Inherit { classes, .. }
+                if words::words(classes).into_iter().any(empties) =>
+            {
                 return true;
             }
             StatementKind::Assign { var, op, value, .. }

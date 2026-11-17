@@ -247,6 +247,9 @@ pub fn refresh(index: &mut Index, ws: &Workspace) -> Result<RefreshReport> {
             Ok(())
         })?;
     }
+    if rebuild {
+        apply_bbmask(index, ws)?;
+    }
 
     Ok(RefreshReport {
         scanned: found.len() as u32,
@@ -325,6 +328,7 @@ pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<Fil
     let rebuild_all = |index: &mut Index| -> Result<()> {
         if stale_release {
             index.write(|tx| rebuild_edges(tx, ws))?;
+            apply_bbmask(index, ws)?;
         }
         Ok(())
     };
@@ -334,6 +338,7 @@ pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<Fil
             tx.execute("DELETE FROM files WHERE id = ?1", [id])?;
             rebuild_edges(tx, ws)
         })?;
+        apply_bbmask(index, ws)?;
         Ok(FileRefresh::Removed(loc.clone()))
     };
 
@@ -383,6 +388,14 @@ pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<Fil
                     _ => rebuild_edges(tx, ws),
                 }
             })?;
+            // A full rebuild drops the BBMASK marks, and a configuration file may set it.
+            if existing.is_none()
+                || layer_conf
+                || stale_release
+                || FileKind::from_path(abs) == Some(FileKind::Conf)
+            {
+                apply_bbmask(index, ws)?;
+            }
             Ok(FileRefresh::Reindexed(Loc {
                 lines: LineSpan::new(1, lines),
                 ..loc.clone()
@@ -1158,16 +1171,75 @@ struct EdgeCtx {
     corebase: Option<String>,
 }
 
+/// The `bbappend` edges and the `files.not_collected` marks from the `BBFILES` collection
+/// (`resolve::collect_masked`): collected files get edges, the rest of the `.bb` /
+/// `.bbappend` files a reason (`bbfiles`, `dynamic`, `bbmask`), then the data files are
+/// marked. Expects no `bbappend` edge in the table.
+fn apply_collection(
+    tx: &Transaction<'_>,
+    ws: &Workspace,
+    ecx: &EdgeCtx,
+    mask: Option<&regex::Regex>,
+) -> Result<()> {
+    let collection = resolve::collect_masked(ws, mask);
+    let collected = collected_ids(&collection.files, ecx);
+    let inactive = collected_ids(
+        &collection
+            .inactive_dynamic
+            .iter()
+            .map(|(p, _)| p.clone())
+            .collect::<Vec<_>>(),
+        ecx,
+    );
+    let masked = collected_ids(&collection.masked, ecx);
+    insert_append_edges(tx, &collected)?;
+    mark_collected(tx, &collected, &inactive)?;
+    let mut st = tx.prepare_cached("UPDATE files SET not_collected = ?1 WHERE id = ?2")?;
+    for (id, _) in &masked {
+        st.execute(params![super::schema::NOT_COLLECTED_BBMASK, id])?;
+    }
+    mark_data(tx)
+}
+
+/// `BBMASK` from the evaluated configuration (default machine and distro), applied to the
+/// index when it is static ([`crate::eval::bbmask`]): the collection is recomputed with it,
+/// so masked files are `not_collected = 'bbmask'` and take part in no `bbappend` edge. A
+/// value sous-chef cannot apply leaves the collection unmasked (the evaluation notes say so).
+/// Runs after every full edge rebuild and after a `.conf` is reindexed; a configuration that
+/// cannot be evaluated changes nothing.
+fn apply_bbmask(index: &mut Index, ws: &Workspace) -> Result<()> {
+    let cfg = crate::eval::evaluate_with(
+        &crate::eval::ConfigCache::new(),
+        index,
+        ws,
+        &crate::eval::Target::default(),
+    );
+    let mask = match cfg.as_ref().map(crate::eval::bbmask) {
+        Ok(crate::eval::BbMask::Static(re)) => Some(re),
+        _ => None,
+    };
+    let marked: i64 = index.conn().query_row(
+        "SELECT count(*) FROM files WHERE not_collected = ?1",
+        [super::schema::NOT_COLLECTED_BBMASK],
+        |r| r.get(0),
+    )?;
+    if mask.is_none() && marked == 0 {
+        return Ok(());
+    }
+    index.write(|tx| {
+        tx.execute("DELETE FROM edges WHERE kind = 'bbappend'", [])?;
+        let ecx = edge_ctx(tx, ws)?;
+        apply_collection(tx, ws, &ecx, mask.as_ref())
+    })
+}
+
 /// Recomputes every edge from the indexed statements and files.
 /// Records the workspace's release as the one the edges were resolved for.
 fn rebuild_edges(tx: &Transaction<'_>, ws: &Workspace) -> Result<()> {
     tx.execute("DELETE FROM edges", [])?;
     let ecx = edge_ctx(tx, ws)?;
     insert_ref_edges(tx, ws, &ecx, None)?;
-    let collected = collected_ids(ws, &ecx);
-    insert_append_edges(tx, &collected)?;
-    mark_collected(tx, &collected)?;
-    mark_data(tx)?;
+    apply_collection(tx, ws, &ecx, None)?;
     for (k, v) in [
         (super::schema::META_RELEASE, ws.release.release.codename()),
         (super::schema::META_EDGES, super::schema::EDGES_VERSION),
@@ -1342,10 +1414,10 @@ fn insert_ref_edges(
     Ok(())
 }
 
-/// The indexed files BitBake collects (`resolve::recipe_files`, the `BBFILES` globs), in
-/// collection order.
-fn collected_ids(ws: &Workspace, ecx: &EdgeCtx) -> Vec<(i64, PathBuf)> {
-    resolve::recipe_files(ws)
+/// The indexed files among `files` (from `resolve::collect`: the `BBFILES` globs and the
+/// active `BBFILES_DYNAMIC` ones), in that order.
+fn collected_ids(files: &[PathBuf], ecx: &EdgeCtx) -> Vec<(i64, PathBuf)> {
+    files
         .iter()
         .filter_map(|p| {
             let n = normalize(p);
@@ -1354,9 +1426,14 @@ fn collected_ids(ws: &Workspace, ecx: &EdgeCtx) -> Vec<(i64, PathBuf)> {
         .collect()
 }
 
-/// `files.not_collected`: `bbfiles` for every `.bb` / `.bbappend` not in `collected`, NULL
+/// `files.not_collected`: `bbfiles` for every `.bb` / `.bbappend` not in `collected`,
+/// `dynamic` for those only an inactive `BBFILES_DYNAMIC` glob matches (`inactive`), NULL
 /// for the others (see `schema.rs`).
-fn mark_collected(tx: &Transaction<'_>, collected: &[(i64, PathBuf)]) -> Result<()> {
+fn mark_collected(
+    tx: &Transaction<'_>,
+    collected: &[(i64, PathBuf)],
+    inactive: &[(i64, PathBuf)],
+) -> Result<()> {
     tx.execute(
         "UPDATE files SET not_collected = CASE WHEN kind IN ('bb', 'bbappend') THEN ?1 END",
         [super::schema::NOT_COLLECTED_BBFILES],
@@ -1364,6 +1441,10 @@ fn mark_collected(tx: &Transaction<'_>, collected: &[(i64, PathBuf)]) -> Result<
     let mut st = tx.prepare_cached("UPDATE files SET not_collected = NULL WHERE id = ?1")?;
     for (id, _) in collected {
         st.execute([id])?;
+    }
+    let mut st = tx.prepare_cached("UPDATE files SET not_collected = ?1 WHERE id = ?2")?;
+    for (id, _) in inactive {
+        st.execute(params![super::schema::NOT_COLLECTED_DYNAMIC, id])?;
     }
     Ok(())
 }
@@ -1465,6 +1546,17 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
             names.insert(pn);
         }
     }
+    // Files with a line BitBake's configuration parser rejects ("unparsed line": anything
+    // but assignments, `include` / `require` / `include_all`, `export`, `unset`,
+    // `addfragments`, `addpylib`, comments; so also functions, `inherit`, `addtask`).
+    let unparsable: HashSet<i64> = {
+        let mut st = tx.prepare_cached(
+            "SELECT DISTINCT file_id FROM statements WHERE kind IN ('unknown', 'function', \
+             'pydef', 'inherit', 'addtask', 'deltask', 'addhandler', 'export_functions')",
+        )?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
     let mut up = tx.prepare_cached("UPDATE files SET not_collected = ?1 WHERE id = ?2")?;
     for f in &files {
         if !matches!(f.kind.as_str(), "conf" | "inc" | "bbclass") {
@@ -1472,7 +1564,13 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
         }
         let comps: Vec<&str> = f.path.split('/').collect();
         let dirs = &comps[..comps.len().saturating_sub(1)];
-        let metadata_place = comps.first() == Some(&"conf")
+        let in_conf = comps.first() == Some(&"conf");
+        // In `conf/`, a `.conf` is metadata when BitBake or OE-core reads it by convention, or
+        // when it parses as configuration (it may be included in a way the index cannot see);
+        // one nothing references that does not parse is data (`conf/ccache.conf`).
+        let conf_data =
+            in_conf && f.kind == "conf" && !conventional_conf(&comps) && unparsable.contains(&f.id);
+        let metadata_place = (in_conf && !conf_data)
             || (f.kind == "bbclass" && dirs.first().is_some_and(|d| d.starts_with("classes")));
         let dir = dirs.join("/");
         let maybe_target = patterns.iter().any(|(p, layer, src_dir)| {
@@ -1494,11 +1592,45 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
                 .get(&(f.layer, parent))
                 .is_some_and(|names| names.contains(dirs[i]) || dirs[i] == "files")
         });
-        if in_recipe_dir || dirs.iter().any(|d| DATA_DIRS.contains(d)) {
+        if conf_data || in_recipe_dir || dirs.iter().any(|d| DATA_DIRS.contains(d)) {
             up.execute(params![super::schema::NOT_COLLECTED_DATA, f.id])?;
         }
     }
     Ok(())
+}
+
+/// A `.conf` under a layer's (or the build directory's) `conf/` that BitBake or OE-core reads
+/// by convention, whatever includes it: BitBake 2.18.0 `cookerdata.py`
+/// `parseConfigurationFiles` reads `conf/bblayers.conf`, each layer's `conf/layer.conf` and
+/// `conf/bitbake.conf`; OE-core's `bitbake.conf` (Wrynose, lines 813-833) includes
+/// `conf/site.conf`, `conf/auto.conf`, `conf/toolcfg.conf`, `conf/local.conf`,
+/// `conf/multiconfig/${BB_CURRENT_MC}.conf`, `conf/machine/${MACHINE}.conf`,
+/// `conf/machine-sdk/${SDKMACHINE}.conf`, `conf/distro/${DISTRO}.conf` and, through
+/// `addfragments`, `conf/fragments/...`; `conf/templates/` holds the build configuration
+/// templates (`bitbake-setup`, `oe-setup-builddir`).
+fn conventional_conf(comps: &[&str]) -> bool {
+    const NAMES: &[&str] = &[
+        "layer.conf",
+        "bitbake.conf",
+        "local.conf",
+        "site.conf",
+        "auto.conf",
+        "toolcfg.conf",
+        "bblayers.conf",
+    ];
+    const DIRS: &[&str] = &[
+        "machine",
+        "machine-sdk",
+        "distro",
+        "multiconfig",
+        "fragments",
+        "templates",
+    ];
+    match comps {
+        ["conf", name] => NAMES.contains(name),
+        ["conf", dir, _, ..] => DIRS.contains(dir),
+        _ => false,
+    }
 }
 
 /// The path components of an unresolved reference's text, each a glob where `${...}` stands

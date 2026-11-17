@@ -370,7 +370,8 @@ async fn layers_appends_with_bbfiles_dynamic() {
         !out.contains("tpm2-tools_5.7.bbappend\t10\t-\tno-match"),
         "{out}"
     );
-    // The lint rule agrees: only bbappends that BBFILES collects count.
+    // The lint rule agrees with the view: the bbappends BitBake collects count, those an
+    // active BBFILES_DYNAMIC entry adds included (w6: the index folds them into BBFILES).
     let report = sous_chef::lint::run_with(
         &f.ctx.workspace,
         &*f.ctx.index.lock().await,
@@ -384,7 +385,10 @@ async fn layers_appends_with_bbfiles_dynamic() {
     let found: Vec<String> = report.findings.iter().map(|f| f.loc.to_string()).collect();
     assert_eq!(
         found,
-        ["meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1"]
+        [
+            "meta-mine:dynamic-layers/core/recipes-core/nothing/nothing_1.0.bbappend:1",
+            "meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1"
+        ]
     );
 }
 

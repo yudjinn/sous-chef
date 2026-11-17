@@ -17,11 +17,22 @@
 //!   ([`helpers::image_class`]: `image`, `core-image`, `*-image`) or `packagegroup`, which
 //!   are conventionally unversioned.
 //! - **PN** (warning): upper-case letters (OE-core's `uppercase-pn` QA check).
+//!
+//! A `.bb` BitBake does not collect because no `BBFILES` glob of any layer matches it
+//! (`files.not_collected = 'bbfiles'`) gets exactly one finding instead of the checks
+//! above, naming the layer's globs: **info** when it sits in a directory that is clearly no
+//! recipe tree (a `lib/`, `scripts/`, `files/`, `wic/` or `templates/` component, or a
+//! recipe's own `<pn>/` / `<pn>-<pv>/` directory next to a collected `.bb`), else
+//! **warning** (under `recipes-*/` or anywhere else, it looks like a recipe someone expects
+//! to build). A `.bb` not collected for another reason (an inactive `BBFILES_DYNAMIC` entry,
+//! `BBMASK`) is left alone: that is what the configuration asks for. The engine runs no
+//! other rule on such a file (`lint::run_with`).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path};
 
 use crate::index::query;
+use crate::index::schema::NOT_COLLECTED_BBFILES;
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::types::{FileKind, LineSpan};
@@ -75,6 +86,87 @@ fn recipe_kind(cx: &LintContext<'_>, file: &query::FileRow, pn: &str) -> Kind {
     }
 }
 
+/// Directory names under which a `.bb` is clearly not a recipe meant to be built.
+const NOT_RECIPE_DIRS: &[&str] = &["lib", "scripts", "files", "wic", "templates"];
+
+impl OrgRecipePath {
+    /// The one finding for a `.bb` no `BBFILES` glob matches.
+    fn not_collected(
+        &self,
+        cx: &LintContext<'_>,
+        layer: &str,
+        f: &query::FileRow,
+        files: &[query::FileRow],
+    ) -> Finding {
+        let comps = components(&f.path);
+        let dirs = &comps[..comps.len().saturating_sub(1)];
+        // A recipe's own `<pn>/` or `<pn>-<pv>/` directory, next to a collected `.bb`.
+        let in_recipe_dir = (0..dirs.len()).any(|i| {
+            let parent: std::path::PathBuf = dirs[..i].iter().collect();
+            files.iter().any(|o| {
+                o.id != f.id
+                    && o.kind == FileKind::Recipe
+                    && o.path.parent() == Some(parent.as_path())
+                    && o.pn.as_deref().is_some_and(|pn| {
+                        dirs[i] == pn
+                            || o.pv
+                                .as_deref()
+                                .is_some_and(|pv| dirs[i] == format!("{pn}-{pv}"))
+                    })
+            })
+        });
+        let data_place = in_recipe_dir
+            || dirs
+                .iter()
+                .any(|d| NOT_RECIPE_DIRS.contains(&d.as_str()) || d.ends_with("-templates"));
+        let globs: Vec<String> = cx
+            .ws
+            .layer(layer)
+            .map(|l| {
+                let root = l.root.to_string_lossy();
+                l.bbfiles
+                    .iter()
+                    .map(|g| g.replacen(root.as_ref(), "${LAYERDIR}", 1))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let globs = if globs.is_empty() {
+            "it sets none".to_string()
+        } else {
+            globs.join(" ")
+        };
+        let file_name = comps.last().map(String::as_str).unwrap_or("");
+        let pn = f.pn.as_deref().unwrap_or("<pn>");
+        let (severity, advice) = if data_place {
+            (
+                Severity::Info,
+                "it is in a directory that holds no recipes, so this is expected if it is a \
+                 template or data; otherwise move it under recipes-<category>/<pn>/"
+                    .to_string(),
+            )
+        } else {
+            (
+                Severity::Warning,
+                format!(
+                    "move it to recipes-<category>/{pn}/{file_name} or add a glob that matches \
+                     it to BBFILES in conf/layer.conf"
+                ),
+            )
+        };
+        Finding {
+            rule: self.id(),
+            severity,
+            loc: f.loc(LineSpan::line(1)),
+            message: format!(
+                "BitBake does not collect {}: no BBFILES glob of layer {layer} matches it \
+                 (BBFILES: {globs}), so it is never parsed or built and no other check runs on \
+                 it; {advice}",
+                f.path.display()
+            ),
+        }
+    }
+}
+
 impl Rule for OrgRecipePath {
     fn id(&self) -> &'static str {
         "org/recipe-path"
@@ -93,10 +185,23 @@ impl Rule for OrgRecipePath {
         let Ok(files) = query::files_in_layer(cx.index, layer) else {
             return;
         };
-        let recipes: Vec<&query::FileRow> = files
+        let uncollected: HashMap<i64, String> = query::uncollected_recipe_files(cx.index)
+            .map(|v| v.into_iter().map(|(f, r)| (f.id, r)).collect())
+            .unwrap_or_default();
+        let all_recipes: Vec<&query::FileRow> = files
             .iter()
             .filter(|f| f.kind == FileKind::Recipe)
             .collect();
+        let mut recipes: Vec<&query::FileRow> = Vec::new();
+        for f in all_recipes {
+            match uncollected.get(&f.id).map(String::as_str) {
+                None => recipes.push(f),
+                Some(NOT_COLLECTED_BBFILES) => {
+                    out.push(self.not_collected(cx, layer, f, &files));
+                }
+                Some(_) => {}
+            }
+        }
         // PNs per directory.
         let mut by_dir: HashMap<&Path, HashSet<&str>> = HashMap::new();
         for f in &recipes {

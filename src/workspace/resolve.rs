@@ -416,49 +416,274 @@ fn expand_depth(text: &str, vars: &dyn Fn(&str) -> Option<String>, depth: usize)
     Some(out)
 }
 
-/// Expands every layer's `BBFILES` globs into recipe and append files, in BitBake's
-/// collection order (see the module documentation). Only `.bb` and `.bbappend` files
-/// inside the workspace are returned.
+/// Expands every layer's `BBFILES` globs, and the `BBFILES_DYNAMIC` globs whose condition
+/// holds, into recipe and append files, in BitBake's collection order (see the module
+/// documentation). Only `.bb` and `.bbappend` files inside the workspace are returned.
 pub fn recipe_files(ws: &Workspace) -> Vec<PathBuf> {
-    let mut globs: Vec<(i32, &str)> = Vec::new();
+    collect(ws).files
+}
+
+/// One `BBFILES_DYNAMIC` entry `{!}<collection>:<glob>` (`cookerdata.py`
+/// `parseConfigurationFiles`), with `${LAYERDIR}` replaced by the root of the layer whose
+/// `conf/layer.conf` wrote it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DynamicEntry {
+    /// The layer whose `layer.conf` sets it.
+    pub layer: String,
+    pub collection: String,
+    /// `!<collection>`: the glob is added when the collection is absent.
+    pub invert: bool,
+    /// Absolute glob.
+    pub pattern: String,
+    /// Whether BitBake adds the glob to `BBFILES`: the collection is in some layer's
+    /// `BBFILE_COLLECTIONS` (absent, for `invert`).
+    pub active: bool,
+}
+
+impl DynamicEntry {
+    /// Whether the glob matches `path` (component by component, as `glob.glob` finds it).
+    pub fn matches(&self, path: &Path) -> bool {
+        let p: Vec<&str> = self.pattern.split('/').filter(|c| !c.is_empty()).collect();
+        let s = path.to_string_lossy();
+        let f: Vec<&str> = s.split('/').filter(|c| !c.is_empty()).collect();
+        p.len() == f.len()
+            && p.iter().zip(&f).all(|(p, f)| {
+                (!f.starts_with('.') || p.starts_with('.') || !has_magic(p)) && fnmatch(f, p)
+            })
+    }
+}
+
+/// What [`collect`] returns.
+#[derive(Debug, Clone, Default)]
+pub struct Collection {
+    /// The collected `.bb` / `.bbappend` files, in collection order ([`recipe_files`]).
+    pub files: Vec<PathBuf>,
+    /// The `BBFILES_DYNAMIC` entries of the layers, in order.
+    pub dynamic: Vec<DynamicEntry>,
+    /// Files that only an inactive `BBFILES_DYNAMIC` glob matches (BitBake does not collect
+    /// them), with the index of that entry in `dynamic`.
+    pub inactive_dynamic: Vec<(PathBuf, usize)>,
+    /// Collected files that no layer's `BBFILES` glob matches, only an active
+    /// `BBFILES_DYNAMIC` one.
+    pub via_dynamic: HashSet<PathBuf>,
+    /// `BBFILES_DYNAMIC` words BitBake stops on ("BBFILES_DYNAMIC entries must be of the form
+    /// {!}<collection name>:<filename pattern>") and words that cannot be expanded
+    /// statically; both are left out.
+    pub unusable: Vec<String>,
+    /// Files the globs gave that the `BBMASK` regex masks ([`collect_masked`]); not in
+    /// `files`.
+    pub masked: Vec<PathBuf>,
+}
+
+/// [`recipe_files`] with what the `BBFILES_DYNAMIC` entries did. `BBMASK` is not applied.
+pub fn collect(ws: &Workspace) -> Collection {
+    collect_masked(ws, None)
+}
+
+/// [`collect`], then `BBMASK` (`cooker.py` `collect_bbfiles`: the combined regex is
+/// `re.search`ed in each path the globs gave; a match is dropped). The paths searched are the
+/// workspace's (canonical layer roots), not the `BBLAYERS` spelling BitBake globs with.
+pub fn collect_masked(ws: &Workspace, mask: Option<&regex::Regex>) -> Collection {
+    let mut c = collect_unmasked(ws);
+    if let Some(re) = mask {
+        let (masked, kept): (Vec<PathBuf>, Vec<PathBuf>) = c
+            .files
+            .into_iter()
+            .partition(|p| re.is_match(&p.to_string_lossy()));
+        c.files = kept;
+        for p in &masked {
+            c.via_dynamic.remove(p);
+        }
+        c.masked = masked;
+    }
+    c
+}
+
+fn collect_unmasked(ws: &Workspace) -> Collection {
+    let (dynamic, unusable) = bbfiles_dynamic(ws);
+    let mut globs: Vec<(i32, &str, bool)> = Vec::new();
     for l in &ws.layers {
         for g in &l.bbfiles {
-            globs.push((l.priority, g.as_str()));
+            globs.push((l.priority, g.as_str(), false));
         }
     }
-    globs.sort_by_key(|(p, _)| *p);
+    // `data.appendVar("BBFILES", " " + f)` after every layer.conf. `collect_bbfiles` sorts
+    // by the priority of the collection whose BBFILE_PATTERN matches the glob: here, as for
+    // the static globs, the layer that wrote it.
+    for d in dynamic.iter().filter(|d| d.active) {
+        let prio = ws.layer(&d.layer).map(|l| l.priority).unwrap_or(0);
+        globs.push((prio, d.pattern.as_str(), true));
+    }
+    globs.sort_by_key(|(p, _, _)| *p);
     let mut out: Vec<PathBuf> = Vec::new();
     let mut seen: HashSet<PathBuf> = HashSet::new();
-    let mut add = |p: PathBuf, out: &mut Vec<PathBuf>| {
-        let is_recipe = p.extension().is_some_and(|e| e == "bb" || e == "bbappend");
-        if is_recipe && ws.confine(&p).is_ok() && seen.insert(p.clone()) {
-            out.push(p);
-        }
-    };
-    for (_, g) in globs {
-        let gp = Path::new(g);
-        if !gp.is_absolute() {
-            continue;
-        }
-        // `collect_bbfiles`: a directory is walked; anything else is globbed, the matches
-        // sorted as Python sorts strings, and a pattern that matches nothing but exists as
-        // a path is used as is.
-        if gp.is_dir() {
-            for f in walk_recipes(ws, gp) {
-                add(f, &mut out);
+    let mut via_dynamic: HashSet<PathBuf> = HashSet::new();
+    for (_, g, dynamic_glob) in globs {
+        for p in expand_bbfiles_word(ws, g) {
+            if seen.insert(p.clone()) {
+                if dynamic_glob {
+                    via_dynamic.insert(p.clone());
+                }
+                out.push(p);
+            } else if !dynamic_glob {
+                via_dynamic.remove(&p);
             }
-            continue;
-        }
-        let mut matched = glob(ws, g);
-        if matched.is_empty() && fs::symlink_metadata(gp).is_ok() {
-            matched.push(gp.to_path_buf());
-        }
-        matched.sort_by(|a, b| py_str_cmp(a, b));
-        for m in matched {
-            add(m, &mut out);
         }
     }
-    out
+    let mut inactive_dynamic: Vec<(PathBuf, usize)> = Vec::new();
+    for (i, d) in dynamic.iter().enumerate().filter(|(_, d)| !d.active) {
+        for p in expand_bbfiles_word(ws, &d.pattern) {
+            if !seen.contains(&p) && !inactive_dynamic.iter().any(|(q, _)| *q == p) {
+                inactive_dynamic.push((p, i));
+            }
+        }
+    }
+    Collection {
+        files: out,
+        dynamic,
+        inactive_dynamic,
+        via_dynamic,
+        unusable,
+        masked: Vec::new(),
+    }
+}
+
+/// One `BBFILES` word as `collect_bbfiles` takes it: a directory is walked; anything else is
+/// globbed, the matches sorted as Python sorts strings, and a pattern that matches nothing
+/// but exists as a path is used as is. Only `.bb` / `.bbappend` files inside the workspace
+/// are kept; a relative word gives nothing.
+fn expand_bbfiles_word(ws: &Workspace, g: &str) -> Vec<PathBuf> {
+    let gp = Path::new(g);
+    if !gp.is_absolute() {
+        return Vec::new();
+    }
+    let mut matched = if gp.is_dir() {
+        walk_recipes(ws, gp)
+    } else {
+        let mut m = glob(ws, g);
+        if m.is_empty() && fs::symlink_metadata(gp).is_ok() {
+            m.push(gp.to_path_buf());
+        }
+        m.sort_by(|a, b| py_str_cmp(a, b));
+        m
+    };
+    matched.retain(|p| {
+        p.extension().is_some_and(|e| e == "bb" || e == "bbappend") && ws.confine(p).is_ok()
+    });
+    matched
+}
+
+/// The `BBFILES_DYNAMIC` entries of the layers' `conf/layer.conf` files, in `BBLAYERS`
+/// order, and the words that cannot be used.
+///
+/// BitBake (2.18.0 `lib/bb/cookerdata.py` `CookerDataBuilder.parseConfigurationFiles`; the
+/// same code on branch `2.0`) reads `BBFILES_DYNAMIC` once every layer.conf has been parsed
+/// (each layer's `${LAYERDIR}` was replaced in every variable right after its file,
+/// `expandVarref('LAYERDIR')`), splits it on whitespace, splits each word on its first `:`
+/// (no `:` is fatal), and a leading `!` inverts the test; the glob is appended to `BBFILES`
+/// when the collection is in `BBFILE_COLLECTIONS` (absent, inverted). Here each layer.conf
+/// is parsed and its assignments to `BBFILES_DYNAMIC` applied in order (`=` / `:=` replace,
+/// `?=` / `??=` only while unset, `+=` / `.=` add at the end, `=+` / `=.` at the start;
+/// `:append` / `:prepend` after all of them, `:remove` drops words); `include` /
+/// `require` in a layer.conf and conditional (override) assignments are not followed. A
+/// word with `${...}` other than `${LAYERDIR}` cannot be expanded and is left out (listed
+/// as unusable).
+pub fn bbfiles_dynamic(ws: &Workspace) -> (Vec<DynamicEntry>, Vec<String>) {
+    use crate::parse::StatementKind;
+    use crate::types::AssignOp;
+    const LAYERDIR_REF: &str = "${LAYERDIR}";
+    // (word, layer that wrote it)
+    let mut words: Option<Vec<(String, String)>> = None;
+    let mut removes: Vec<String> = Vec::new();
+    let mut appends: Vec<(String, String)> = Vec::new();
+    let mut prepends: Vec<(String, String)> = Vec::new();
+    for l in &ws.layers {
+        let Ok(text) = fs::read(l.root.join("conf/layer.conf")) else {
+            continue;
+        };
+        let root = l.root.to_string_lossy();
+        let parsed = crate::parse::parse_bytes(&text);
+        for st in &parsed.statements {
+            let StatementKind::Assign { var, op, value, .. } = &st.kind else {
+                continue;
+            };
+            if var.base != "BBFILES_DYNAMIC" || var.flag.is_some() || var.legacy_syntax {
+                continue;
+            }
+            let new: Vec<(String, String)> = crate::parse::words::words(value)
+                .into_iter()
+                .map(|w| (w.replace(LAYERDIR_REF, &root), l.name.clone()))
+                .collect();
+            match var.overrides.as_slice() {
+                [] => {}
+                [k] if k == "append" => {
+                    appends.extend(new);
+                    continue;
+                }
+                [k] if k == "prepend" => {
+                    let mut n = new;
+                    n.append(&mut prepends);
+                    prepends = n;
+                    continue;
+                }
+                [k] if k == "remove" => {
+                    removes.extend(new.into_iter().map(|(w, _)| w));
+                    continue;
+                }
+                _ => continue,
+            }
+            let cur = words.get_or_insert_with(Vec::new);
+            match op {
+                AssignOp::Set | AssignOp::Immediate => *cur = new,
+                AssignOp::Default | AssignOp::WeakDefault => {
+                    if cur.is_empty() {
+                        *cur = new;
+                    }
+                }
+                AssignOp::Append | AssignOp::AppendDot => cur.extend(new),
+                AssignOp::Prepend | AssignOp::PrependDot => {
+                    let mut n = new;
+                    n.append(cur);
+                    *cur = n;
+                }
+            }
+        }
+    }
+    let mut all = prepends;
+    all.extend(words.unwrap_or_default());
+    all.extend(appends);
+    let collections: HashSet<&str> = ws
+        .layers
+        .iter()
+        .flat_map(|l| l.collections.iter().map(String::as_str))
+        .collect();
+    let mut out = Vec::new();
+    let mut unusable = Vec::new();
+    for (word, layer) in all {
+        if removes.contains(&word) {
+            continue;
+        }
+        let Some((coll, pattern)) = word.split_once(':') else {
+            unusable.push(word);
+            continue;
+        };
+        let (collection, invert) = match coll.strip_prefix('!') {
+            Some(c) => (c, true),
+            None => (coll, false),
+        };
+        if collection.is_empty() || pattern.contains("${") || collection.contains("${") {
+            unusable.push(word);
+            continue;
+        }
+        out.push(DynamicEntry {
+            layer,
+            collection: collection.to_string(),
+            invert,
+            pattern: pattern.to_string(),
+            active: collections.contains(collection) != invert,
+        });
+    }
+    (out, unusable)
 }
 
 /// `cooker.find_bbfiles`: every `.bb` / `.bbappend` under `dir` (sorted as strings for
@@ -645,6 +870,29 @@ fn normalize(p: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dynamic_entry_globs() {
+        // Moved from the `layers` tool, whose private matcher this replaces.
+        let e = |p: &str| DynamicEntry {
+            layer: "l".into(),
+            collection: "tpm2".into(),
+            invert: false,
+            pattern: p.into(),
+            active: true,
+        };
+        let d = e("/l/dynamic-layers/meta-tpm2/*/*/*.bbappend");
+        assert!(d.matches(Path::new(
+            "/l/dynamic-layers/meta-tpm2/recipes-tpm/t/t_5.7.bbappend"
+        )));
+        assert!(!d.matches(Path::new(
+            "/l/dynamic-layers/meta-tpm2/recipes-tpm/t/u/t.bbappend"
+        )));
+        assert!(!d.matches(Path::new("/l/dynamic-layers/meta-tpm2/recipes-tpm/t/t.bb")));
+        assert!(e("/l/recipes-[a-c]*/x.bb").matches(Path::new("/l/recipes-bsp/x.bb")));
+        assert!(!e("/l/recipes-[!a-c]*/x.bb").matches(Path::new("/l/recipes-bsp/x.bb")));
+        assert!(e("/l/x?.bb").matches(Path::new("/l/x1.bb")));
+    }
 
     #[test]
     fn fnmatch_like_python() {

@@ -532,10 +532,7 @@ const OVERRIDE_VARS: &[&str] = &[
 /// Words of an `OVERRIDES`-like value, python included: runs of `[a-z0-9_+.-]` (the lint
 /// rule's `tokens`; OE-core's tune files add `armv7a` to `MACHINEOVERRIDES` from python).
 fn override_tokens(value: &str) -> impl Iterator<Item = String> + '_ {
-    value
-        .split(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || "-_+.".contains(c)))
-        .filter(|w| !w.is_empty())
-        .map(str::to_string)
+    crate::lint::helpers::override_words(value).into_iter()
 }
 
 /// What an override element may legitimately be: the definition of the lint rule

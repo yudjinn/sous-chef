@@ -44,7 +44,7 @@ use std::process::Command;
 use sous_chef::bitbake::envdump::{self, Agreement, EnvDump};
 use sous_chef::config::Config;
 use sous_chef::eval::providers::Providers;
-use sous_chef::eval::{self, DataStore, OpStatus, Target, Value};
+use sous_chef::eval::{self, DataStore, OpKind, OpStatus, Target, Value};
 use sous_chef::index::Index;
 use sous_chef::types::FileKind;
 use sous_chef::workspace::Workspace;
@@ -499,7 +499,9 @@ fn history_files(
     let s: std::collections::BTreeSet<String> = ds
         .history(name)
         .iter()
-        .filter(|(op, _)| op.var.flag.is_none())
+        // BitBake's own rewrite after parsing is a python operation on its side
+        // (`[handleVirtRecipeProviders]` at `ast.py`), which is left out there too.
+        .filter(|(op, _)| op.var.flag.is_none() && op.kind == OpKind::Statement)
         .filter_map(|(op, _)| {
             ws.layers
                 .iter()

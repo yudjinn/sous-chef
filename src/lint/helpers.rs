@@ -14,6 +14,7 @@ use crate::error::Result;
 use crate::eval::DataStore;
 use crate::index::{Index, query};
 use crate::lint::{Finding, LintContext, Rule};
+use crate::parse::words;
 use crate::parse::{ParsedFile, Statement};
 use crate::release::{Feature, Release};
 use crate::types::{FileKind, LineSpan, Loc, VarRef};
@@ -613,6 +614,23 @@ pub fn is_package_only(base: &str) -> bool {
     PACKAGE_ONLY_VARS.contains(&base)
 }
 
+/// The names an `*OVERRIDES`-like value may put in `OVERRIDES`, for `override/dead`'s known
+/// set (and the `overrides` tool's dead view, which uses the same definition): runs of
+/// `[a-z0-9_+.-]` in the text [`words::visible_text`] keeps, that is outside `${...}` and,
+/// inside a `${@...}` expression, only in its quoted strings (the values python may add:
+/// OE-core's tune files add `armv7a` through `bb.utils.contains('TUNE_FEATURES', 'armv7a',
+/// 'armv7a:', '', d)`), never the python code itself (`bb`, `utils`, `d`).
+pub fn override_words(value: &str) -> Vec<String> {
+    words::visible_text(value)
+        .into_iter()
+        .flat_map(|t| {
+            t.split(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || "-_+.".contains(c)))
+        })
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Whether `base` may take a package override ([`PACKAGE_VARS`]).
 pub fn is_package_var(base: &str) -> bool {
     PACKAGE_VARS.contains(&base)
@@ -719,7 +737,7 @@ impl KnownOverrides {
         for base in ["OVERRIDES", "MACHINEOVERRIDES", "DISTROOVERRIDES"] {
             for s in query::statements_by_base(index, base, &scope)? {
                 let value = s.value.unwrap_or_default();
-                for w in value.split(':').map(str::trim) {
+                for w in words::colon_parts(&value).into_iter().map(str::trim) {
                     if !w.is_empty() && !w.contains("${") && !w.contains(char::is_whitespace) {
                         out.declared.insert(w.to_string());
                     }
@@ -727,7 +745,7 @@ impl KnownOverrides {
             }
         }
         for s in query::statements_by_base(index, "BBCLASSEXTEND", &scope)? {
-            for w in s.value.unwrap_or_default().split_whitespace() {
+            for w in words::words(&s.value.unwrap_or_default()) {
                 if !w.contains("${") {
                     let variant = w.split(':').next().unwrap_or(w);
                     out.declared.insert(format!("class-{variant}"));

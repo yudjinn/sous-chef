@@ -3,7 +3,7 @@
 //! `docs/milestones/M3-evaluator.md`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use sous_chef::eval::{DataStore, OpStatus, VarOp};
+use sous_chef::eval::{DataStore, OpKind, OpStatus, VarOp};
 use sous_chef::parse::split_var;
 use sous_chef::types::{AssignOp, LineSpan, Loc};
 
@@ -28,6 +28,7 @@ fn op(ds: &mut DataStore, name: &str, op: &str, value: &str, line: u32) {
         value: value.into(),
         loc: loc(line),
         via: vec![],
+        kind: OpKind::Statement,
     });
 }
 

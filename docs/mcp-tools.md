@@ -11,8 +11,9 @@ Common to every tool:
   workspace (performance.md), which is most of a lookup tool's time. Freshness is reported
   only if something changed.
 - Files BitBake never parses stay indexed but are marked: a `.bb` / `.bbappend` that no
-  layer's `BBFILES` glob matches is no recipe, no provider and no bbappend, and a tool that
-  shows one says so in a note; a data file (a `.conf` / `.inc` / `.bbclass` a recipe
+  layer's `BBFILES` glob matches (or only an inactive `BBFILES_DYNAMIC` entry does, or a
+  static `BBMASK` masks) is no recipe, no provider and no bbappend, and a tool that shows one
+  says so in a note; a data file (a `.conf` / `.inc` / `.bbclass` a recipe
   installs, bitbake-semantics.md "Data files") is shown by `item` with a note and left out of
   `search`, file listings and lint.
 - Recipe arguments accept `pn`, `pn_pv` or a pointer. A name that is no recipe's exact `pn`
@@ -21,6 +22,18 @@ Common to every tool:
   names the file BitBake would use, through provider selection (`PREFERRED_VERSION`,
   `DEFAULT_PREFERENCE`, layer priority, version; see "Providers and versions" in
   bitbake-semantics.md).
+- Provider gaps, said in the output (bitbake-semantics.md "What the static evaluator cannot
+  do"): a name that is no recipe but has the form of a class-extended variant of one whose
+  `BBCLASSEXTEND` lists the class (`<pn>-native`, `nativesdk-<pn>`, `<variant>-<pn>` for
+  `multilib:<variant>`) is an error saying so ("`curl-native` is the `native` variant of
+  `curl`, which `BBCLASSEXTEND` provides ...; sous-chef does not evaluate class-extended
+  variants; `recipe curl` shows the base recipe"), in every tool that resolves a recipe name
+  and in lint's target; a `BBMASK` the evaluator cannot apply (python, undefined variables, a
+  regular expression Rust cannot compile) gives `note: BBMASK is set but sous-chef does not
+  apply it (...)` in every evaluated view; a recipe that `SKIP_RECIPE[<pn>]`,
+  `COMPATIBLE_MACHINE` or `COMPATIBLE_HOST` makes BitBake skip, when that is decided from
+  static values, gives `note: BitBake would skip this recipe: ...`; nothing is hidden, and an
+  undecidable check says nothing.
 - `machine` and `distro`, where a tool takes them, default to what the evaluated
   configuration sets (`local.conf`, and OE configuration fragments such as bitbake-setup's
   `OE_FRAGMENTS` in `conf/toolcfg.conf`). In a kas project whose build directory does not
@@ -196,6 +209,10 @@ Output: one row per operation on the variable and its override variants, in pars
   `shadowed` (overwritten, lost to another variant, or a default that did not take effect)
   or `removed` (every word it added was removed again).
 - `op`: the operator; `unset` statements are rows with op `unset` (status `applied`).
+  BitBake's rewrite of the virtual providers in `DEPENDS` at the end of parsing
+  (`BB_RECIPE_VIRTUAL_PROVIDERS`) is a row with op `rewrite` (status `applied`, located at
+  the `PREFERRED_PROVIDER_*` used, snippet `DEPENDS rewritten after parsing ... to "..."`);
+  it replaces nothing, so the rows before it keep their status.
 - `override`: the overrides as written (`append:boardx`), `-` for none; a flag operation
   shows `[flag]` (`append[flag]` with overrides).
 - A function is a variable too: each definition is a row with snippet `name() { ... }`, and
@@ -496,13 +513,15 @@ note: global class: ranked as INHERIT finds it (classes-global/, then classes/)
 - `"appends"`: one row per bbappend and recipe it applies to (`bbappend priority matches
   status`), status `applies`; a bbappend that `BBFILES` collects and that matches nothing is
   one row with `matches` `-` and status `no-match`, and a note (BitBake stops on these). A
-  bbappend no `BBFILES` glob collects is looked up in the layers' `BBFILES_DYNAMIC`
+  collection comes from the index, which folds the layers' active `BBFILES_DYNAMIC` entries
   (`{!}<collection>:<glob>`, added to `BBFILES` when the collection is present, or absent
-  with `!`): when the entry is not active the status is `not collected (dynamic layer
-  `<name>` not present)` (or `(BBFILES_DYNAMIC `!<name>`: layer `<name>` is present)`);
-  when it is active, the append is matched by file name (`applies (BBFILES_DYNAMIC)` or
-  `no-match (BBFILES_DYNAMIC)`; sous-chef's evaluation does not apply it); with no entry,
-  `not collected (no BBFILES glob)`. A note counts the bbappends BitBake never reads.
+  with `!`) into `BBFILES`: a bbappend only an active entry collects is matched and
+  evaluated like any other, its status followed by `(BBFILES_DYNAMIC)` (`applies
+  (BBFILES_DYNAMIC)`, `no-match (BBFILES_DYNAMIC)`); one only an inactive entry matches is
+  `not collected (dynamic layer `<name>` not present)` (or `(BBFILES_DYNAMIC `!<name>`:
+  layer `<name>` is present)`); one `BBMASK` masks is `not collected (masked by BBMASK)`;
+  one no glob matches, `not collected (no BBFILES glob)`. A note counts the bbappends
+  BitBake never reads.
 - `"compat"`: rows `layer check result detail loc`, per layer in `BBLAYERS` order. First a
   `compat` row: what `LAYERSERIES_COMPAT_<c>` claims against the workspace release and the
   core layer's `LAYERSERIES_CORENAMES` (`result` `ok`, or the worst severity of the
@@ -560,7 +579,8 @@ the flags of the selected options, with a note.
 - `build`: rows `depth dep provider source loc`: the words of the evaluated `DEPENDS`, each
   with the assignment that adds it (a class's `DEPENDS:prepend` points into the class) and
   the recipe that provides it (provider selection; `-` when no recipe of the workspace
-  does: `BBCLASSEXTEND` variants such as `-native` are not resolved), then the build
+  does: `BBCLASSEXTEND` variants such as `-native` are not resolved as providers; asked for
+  by name they are an error naming the base recipe), then the build
   dependencies of the selected `PACKAGECONFIG` options. `depth` follows the selected
   providers.
 - `runtime`: rows `package dep source loc`: per package of `PACKAGES`, the words of

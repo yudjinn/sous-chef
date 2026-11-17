@@ -348,10 +348,11 @@ impl FileSet {
             ));
         }
         if self.uncollected_recipes {
-            keep.push(format!(
-                "f.not_collected = '{}'",
-                super::schema::NOT_COLLECTED_BBFILES
-            ));
+            let reasons: Vec<String> = super::schema::NOT_COLLECTED_RECIPE_REASONS
+                .iter()
+                .map(|r| format!("'{r}'"))
+                .collect();
+            keep.push(format!("f.not_collected IN ({})", reasons.join(", ")));
         }
         if self.data && self.uncollected_recipes {
             return "1".into();
@@ -427,12 +428,35 @@ pub fn not_collected(index: &Index, id: i64) -> Result<Option<String>> {
     Ok(reason.flatten().map(|r| match r.as_str() {
         super::schema::NOT_COLLECTED_BBFILES => "not matched by any layer's BBFILES".to_string(),
         super::schema::NOT_COLLECTED_DATA => {
-            "not BitBake metadata: a data file (in a directory a recipe takes files from, or \
-             under lib/, scripts/ or wic/, and nothing includes it); BitBake never parses it"
-                .to_string()
+            "not BitBake metadata: a data file (in a directory a recipe takes files from, under \
+             lib/, scripts/ or wic/, or a conf/ file that is not BitBake syntax and that \
+             BitBake does not read by convention; nothing includes it); BitBake never parses \
+             it"
+            .to_string()
         }
+        super::schema::NOT_COLLECTED_DYNAMIC => {
+            "matched only by a BBFILES_DYNAMIC glob whose layer condition does not hold".to_string()
+        }
+        super::schema::NOT_COLLECTED_BBMASK => "masked by BBMASK".to_string(),
         other => format!("not collected by BitBake ({other})"),
     }))
+}
+
+/// The `.bb` / `.bbappend` files BitBake does not collect, with the raw
+/// `files.not_collected` value (`bbfiles`, `dynamic`, `bbmask`; see `schema.rs`), by layer
+/// row id then path.
+pub fn uncollected_recipe_files(index: &Index) -> Result<Vec<(FileRow, String)>> {
+    let reasons: Vec<String> = super::schema::NOT_COLLECTED_RECIPE_REASONS
+        .iter()
+        .map(|r| format!("'{r}'"))
+        .collect();
+    let sql = format!(
+        "SELECT {FILE_COLS}, f.not_collected FROM {FILE_FROM} \
+         WHERE f.kind IN ('bb', 'bbappend') AND f.not_collected IN ({}) ORDER BY l.id, f.path",
+        reasons.join(", ")
+    );
+    let n = FILE_COLS.split(',').count();
+    collect(index, &sql, &[], |r| Ok((file_row(r, 0)?, r.get(n)?)))
 }
 
 /// `%` / `_` / `\` escaped for a `LIKE ... ESCAPE '\'` pattern.
