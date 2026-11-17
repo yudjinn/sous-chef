@@ -1,0 +1,12 @@
+---
+source: tests/eval_tools.rs
+expression: b2
+---
+depth	dep	provider	source	loc
+1	libfoo	libfoo 2.0	DEPENDS	meta-mine:recipes-app/app/app_0.1.bb:4
+2	autoconf-native	-	DEPENDS	meta-core:classes-recipe/autotoolsish.bbclass:11
+2	automake-native	-	DEPENDS	meta-core:classes-recipe/autotoolsish.bbclass:11
+2	zlib	-	PACKAGECONFIG[zlib]	meta-core:recipes-core/libfoo/libfoo_2.0.bb:15
+note: PACKAGECONFIG rows: OE-Core's base.bbclass adds the build (field 3) and runtime (field 4) dependencies of the selected options with anonymous python, which is not run; they are listed from the flags
+note: provider - means no recipe in the workspace provides the name (BBCLASSEXTEND variants such as -native are not resolved)
+note: 1 anonymous python function was not run (none changes DEPENDS by name)

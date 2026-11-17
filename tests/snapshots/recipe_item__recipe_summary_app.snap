@@ -8,6 +8,7 @@ layer	meta-mine (priority 10)	-
 version	0.1 (preferred by layer priority and version)	meta-mine:recipes-app/app/app_0.1.bb
 SUMMARY	Example application using python and fakeroot	meta-mine:recipes-app/app/app_0.1.bb:1
 LICENSE	CLOSED	meta-mine:recipes-app/app/app_0.1.bb:2
-SRC_URI	1 entry in 1 statement	-
-DEPENDS	1 entry in 1 statement	-
-note: key values come from direct statements only, not evaluated (no overrides, expansion or python; base.bbclass and INHERIT classes not included); use var for the full history
+SRC_URI	1 entry from 1 applied operation	-
+DEPENDS	1 entry from 1 applied operation	-
+note: key values are evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run); use var for the full history
+note: 1 anonymous python function was not run; values it changes may differ

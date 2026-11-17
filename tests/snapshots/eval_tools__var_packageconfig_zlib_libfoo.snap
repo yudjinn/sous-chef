@@ -1,0 +1,7 @@
+---
+source: tests/eval_tools.rs
+expression: one
+---
+status	op	override	loc	snippet
+applied	=	[zlib]	meta-core:recipes-core/libfoo/libfoo_2.0.bb:15	PACKAGECONFIG[zlib] = "--with-zlib,--without-zlib,zlib,zlib"
+final[zlib]: "--with-zlib,--without-zlib,zlib,zlib"

@@ -1,0 +1,8 @@
+---
+source: tests/eval_tools.rs
+expression: files
+---
+status	op	override	loc	snippet
+applied	=	${PN}	meta-core:conf/bitbake.conf:27	FILES:${PN} = "${bindir}/* ${sbindir}/* ${libdir}/lib*.so.*"
+applied	+=	${PN}	meta-core:recipes-core/hello/hello.inc:20	FILES:${PN} += "${sysconfdir}/hello.conf"
+final: "/usr/bin/* /usr/sbin/* /usr/lib/lib*.so.* /etc/hello.conf"

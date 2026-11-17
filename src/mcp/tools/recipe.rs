@@ -1,10 +1,11 @@
 //! Tool `recipe`: resolve a recipe and show its shape. See docs/mcp-tools.md.
 //!
-//! - `summary`: the recipe file and layer, every version (and which one is preferred by
-//!   layer priority and version), the bbappends in application order, the classes inherited
-//!   and a few key values (`SUMMARY`, `LICENSE`, `SRC_URI` and `DEPENDS` counts). Until the
-//!   replay (M3) exists the key values are read from direct statements only, and the output
-//!   says so.
+//! - `summary`: the recipe file and layer, every version (and which one BitBake uses:
+//!   `eval::providers`, so `PREFERRED_VERSION` and `DEFAULT_PREFERENCE` count for a bare
+//!   `pn`), the bbappends in application order, the classes inherited (static walk) and a
+//!   few key values (`SUMMARY`, `LICENSE`, `SRC_URI` and `DEPENDS` word counts) evaluated by
+//!   `eval::evaluate` for the default machine and distro, with a note when a value depends
+//!   on python that was not evaluated.
 //! - `tree`: the files of the recipe in parse order: the `.bb` and what it pulls in, then
 //!   each bbappend and what it pulls in, then deferred inherits. One row per file with the
 //!   statement that pulled it in. Unresolved targets are rows too.
@@ -46,11 +47,13 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
+use crate::eval::{self, DataStore, OpStatus, Target, providers};
 use crate::index::Index;
 use crate::index::query::{self, EdgeRow, FileRow, RecipeRow, StatementFilter, StatementRow};
 use crate::mcp::Ctx;
 use crate::render::{self, Format, Table};
 use crate::types::{FileKind, LineSpan, Loc};
+use crate::workspace::Workspace;
 
 /// What to show.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -83,9 +86,28 @@ pub struct Args {
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let mut index = ctx.index.lock().await;
     let report = index.refresh(&ctx.workspace)?;
-    let recipe = resolve_recipe(&index, &args.name, args.version.as_deref())?;
+    let mut recipe = resolve_recipe(&index, &args.name, args.version.as_deref())?;
+    // A bare `pn` without a version: the file BitBake uses (PREFERRED_VERSION,
+    // DEFAULT_PREFERENCE, layer priority, version), not layer priority and version alone.
+    let mut chosen: Option<String> = None;
+    let name = args.name.trim();
+    if args.version.is_none()
+        && !name.contains(':')
+        && name == recipe.pn
+        && let Some(sel) =
+            providers::preferred_recipe(&index, &ctx.workspace, name, None, None, None)?
+    {
+        chosen = Some(sel.describe());
+        recipe = sel.recipe;
+    }
     let mut table = match args.show {
-        Show::Summary => summary(&index, &recipe, args.version.as_deref())?,
+        Show::Summary => summary(
+            &index,
+            &ctx.workspace,
+            &recipe,
+            args.version.as_deref(),
+            chosen,
+        )?,
         Show::Tree => tree_table(&index, &recipe)?,
         Show::Outline => outline(&index, &recipe)?,
     };
@@ -398,7 +420,13 @@ impl Walker<'_> {
 
 // ---- show=summary ----
 
-fn summary(index: &Index, recipe: &RecipeRow, version: Option<&str>) -> Result<Table> {
+fn summary(
+    index: &Index,
+    ws: &Workspace,
+    recipe: &RecipeRow,
+    version: Option<&str>,
+    chosen: Option<String>,
+) -> Result<Table> {
     let walk = walk_recipe(index, recipe)?;
     let mut t = Table::new(&["field", "value", "loc"]);
     t.row(&[
@@ -411,9 +439,10 @@ fn summary(index: &Index, recipe: &RecipeRow, version: Option<&str>) -> Result<T
         &format!("{} (priority {})", recipe.file.layer, recipe.file.priority),
         "-",
     ]);
-    let chosen = match version {
-        Some(v) => format!("selected by version={v}"),
-        None => "preferred by layer priority and version".into(),
+    let chosen = match (version, chosen) {
+        (Some(v), _) => format!("selected by version={v}"),
+        (None, Some(c)) => c,
+        (None, None) => "preferred by layer priority and version".into(),
     };
     for r in query::find_recipes(index, &recipe.pn)? {
         let v = if r.file.id == recipe.file.id {
@@ -447,52 +476,99 @@ fn summary(index: &Index, recipe: &RecipeRow, version: Option<&str>) -> Result<T
         let via = n.via.as_ref().map_or("-".into(), Loc::to_string);
         t.row(&["inherit", &v, &via]);
     }
+
+    // Key values, evaluated (configuration, the recipe, its bbappends; default machine and
+    // distro).
+    let target = Target {
+        recipe: Some(file_label(&recipe.file)),
+        version: None,
+        machine: None,
+        distro: None,
+    };
+    let ds = eval::evaluate(index, ws, &target)?;
     let mut python = 0;
     for var in ["SUMMARY", "LICENSE"] {
-        let (value, loc, conditional) = last_value(&walk.statements, var);
-        let mut v = match &value {
-            Some(v) => render::truncate_value(v, 100, None),
-            None => "(not set)".into(),
+        let (mut v, loc) = match ds.value(var) {
+            Some(val) => {
+                let mut s = render::truncate_value(&val.text, 100, None);
+                if val.unevaluated_python {
+                    python += 1;
+                    s.push_str(" (depends on python, not evaluated)");
+                }
+                (s, last_applied(&ds, var))
+            }
+            None => ("(not set)".to_string(), None),
         };
-        if value.as_deref().is_some_and(|v| v.contains("${@")) {
-            python += 1;
-        }
-        if conditional > 0 {
-            v.push_str(&format!(
-                " (+{conditional} conditional {} not applied)",
-                plural(conditional, "statement")
-            ));
+        if v.is_empty() {
+            v = "(empty)".into();
         }
         t.row(&[var, &v, &loc.map_or("-".into(), |l| l.to_string())]);
     }
     for var in ["SRC_URI", "DEPENDS"] {
-        let c = count_words(&walk.statements, var);
+        let (words, py) = ds
+            .value(var)
+            .map(|val| (val.text.split_whitespace().count(), val.unevaluated_python))
+            .unwrap_or((0, false));
+        if py {
+            python += 1;
+        }
+        let history = ds.history(var);
+        let applied = history
+            .iter()
+            .filter(|(_, s)| *s == OpStatus::Applied)
+            .count();
+        let inactive = history
+            .iter()
+            .filter(|(_, s)| *s == OpStatus::InactiveOverride)
+            .count();
         let mut v = format!(
-            "{} {} in {} {}",
-            c.words,
-            plural(c.words, "entry"),
-            c.statements,
-            plural(c.statements, "statement")
+            "{words} {} from {applied} applied {}",
+            plural(words, "entry"),
+            plural(applied, "operation")
         );
-        if c.conditional > 0 {
+        if inactive > 0 {
             v.push_str(&format!(
-                "; {} conditional {} not counted",
-                c.conditional,
-                plural(c.conditional, "statement")
+                "; {inactive} inactive {} (override not active)",
+                plural(inactive, "operation")
             ));
         }
-        python += c.python;
+        if py {
+            v.push_str("; depends on python, not evaluated");
+        }
         t.row(&[var, &v, "-"]);
     }
-    t.note(
-        "note: key values come from direct statements only, not evaluated (no overrides, \
-         expansion or python; base.bbclass and INHERIT classes not included); use var for the \
-         full history",
-    );
+    let machine = ds.value("MACHINE").map(|v| v.text).unwrap_or_default();
+    let distro = ds.value("DISTRO").map(|v| v.text).unwrap_or_default();
+    t.note(&format!(
+        "note: key values are evaluated for MACHINE={machine} DISTRO={distro} (static replay of the configuration, classes, recipe and bbappends; python not run); use var for the full history"
+    ));
+    let anon = &ds.replay().anonymous;
+    if anon.iter().any(|a| a.opaque) {
+        t.note("warning: anonymous python changes variables through computed names; any key value may differ");
+    } else if !anon.is_empty() {
+        t.note(&format!(
+            "note: {} anonymous python {} not run; values it changes may differ",
+            anon.len(),
+            if anon.len() == 1 {
+                "function was"
+            } else {
+                "functions were"
+            }
+        ));
+    }
     if let Some(n) = render::python_note(python) {
         t.note(&n);
     }
     Ok(t)
+}
+
+/// The last applied assignment to `var` (no flag).
+fn last_applied(ds: &DataStore, var: &str) -> Option<Loc> {
+    ds.history(var)
+        .into_iter()
+        .rev()
+        .find(|(op, s)| *s == OpStatus::Applied && op.var.flag.is_none())
+        .map(|(op, _)| op.loc)
 }
 
 fn plural(n: usize, word: &str) -> String {
@@ -501,116 +577,6 @@ fn plural(n: usize, word: &str) -> String {
         (_, "entry") => "entries".into(),
         (_, w) => format!("{w}s"),
     }
-}
-
-/// Assignments to `var` with no flag. `None` for an override condition other than
-/// `append` / `prepend` / `remove` (a conditional statement), else the operation suffix.
-fn plain_assigns<'a>(
-    stmts: &'a [StatementRow],
-    var: &'a str,
-) -> impl Iterator<Item = (&'a StatementRow, Option<Option<&'a str>>)> + 'a {
-    stmts
-        .iter()
-        .filter(move |s| s.kind == "assign" && s.base.as_deref() == Some(var) && s.flag.is_none())
-        .map(|s| {
-            let ops = ["append", "prepend", "remove"];
-            let cond = s.overrides.iter().any(|o| !ops.contains(&o.as_str()));
-            let suffix = s
-                .overrides
-                .iter()
-                .find(|o| ops.contains(&o.as_str()))
-                .map(String::as_str);
-            (s, (!cond).then_some(suffix))
-        })
-}
-
-/// The value of `var` from unconditional `=` / `:=` / `?=` / `??=` statements in parse
-/// order (last `=` wins, else the first `?=`, else the last `??=`), its pointer, and how
-/// many conditional statements were left out.
-fn last_value(stmts: &[StatementRow], var: &str) -> (Option<String>, Option<Loc>, usize) {
-    let mut set: Option<&StatementRow> = None;
-    let mut default: Option<&StatementRow> = None;
-    let mut weak: Option<&StatementRow> = None;
-    let mut conditional = 0;
-    for (s, kind) in plain_assigns(stmts, var) {
-        match kind {
-            None => conditional += 1,
-            Some(Some(_)) => {}
-            Some(None) => match s.op.as_deref() {
-                Some("=") | Some(":=") => set = Some(s),
-                Some("?=") if set.is_none() && default.is_none() => default = Some(s),
-                Some("??=") => weak = Some(s),
-                _ => {}
-            },
-        }
-    }
-    let pick = set.or(default).or(weak);
-    (
-        pick.and_then(|s| s.value.clone()),
-        pick.map(|s| s.loc.clone()),
-        conditional,
-    )
-}
-
-struct WordCount {
-    words: usize,
-    statements: usize,
-    conditional: usize,
-    python: usize,
-}
-
-/// Counts the words `var` ends up with from its unconditional statements: `=` / `:=`
-/// replace, `?=` sets when unset, `??=` only when nothing else set it, `+=` / `=+` / `.=`
-/// / `=.` add; `:append` / `:prepend` are added and `:remove` removes at the end.
-fn count_words(stmts: &[StatementRow], var: &str) -> WordCount {
-    let mut words: Vec<String> = Vec::new();
-    let mut set = false;
-    let mut weak: Option<Vec<String>> = None;
-    let mut late: Vec<String> = Vec::new();
-    let mut removes: Vec<String> = Vec::new();
-    let mut c = WordCount {
-        words: 0,
-        statements: 0,
-        conditional: 0,
-        python: 0,
-    };
-    for (s, kind) in plain_assigns(stmts, var) {
-        c.statements += 1;
-        let value = s.value.clone().unwrap_or_default();
-        if value.contains("${@") {
-            c.python += 1;
-        }
-        let w: Vec<String> = value.split_whitespace().map(str::to_string).collect();
-        match kind {
-            None => c.conditional += 1,
-            Some(Some("remove")) => removes.extend(w),
-            Some(Some(_)) => late.extend(w),
-            Some(None) => match s.op.as_deref() {
-                Some("=") | Some(":=") => {
-                    words = w;
-                    set = true;
-                }
-                Some("?=") => {
-                    if !set {
-                        words = w;
-                        set = true;
-                    }
-                }
-                Some("??=") => weak = Some(w),
-                _ => {
-                    words.extend(w);
-                    set = true;
-                }
-            },
-        }
-    }
-    if !set && let Some(w) = weak {
-        words = w;
-    }
-    words.extend(late);
-    words.retain(|w| !removes.contains(w));
-    c.words = words.len();
-    c
 }
 
 // ---- show=tree ----

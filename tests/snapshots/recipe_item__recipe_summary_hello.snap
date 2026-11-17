@@ -12,6 +12,6 @@ bbappend	meta-mine (priority 10)	meta-mine:recipes-core/hello/hello_1.1.bbappend
 inherit	autotoolsish	meta-core:recipes-core/hello/hello.inc:11
 SUMMARY	GNU Hello stand-in	meta-core:recipes-core/hello/hello.inc:1
 LICENSE	MIT	meta-core:recipes-core/hello/hello.inc:5
-SRC_URI	4 entries in 5 statements; 1 conditional statement not counted	-
-DEPENDS	3 entries in 2 statements	-
-note: key values come from direct statements only, not evaluated (no overrides, expansion or python; base.bbclass and INHERIT classes not included); use var for the full history
+SRC_URI	4 entries from 4 applied operations; 1 inactive operation (override not active)	-
+DEPENDS	3 entries from 2 applied operations	-
+note: key values are evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run); use var for the full history

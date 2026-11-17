@@ -1,0 +1,10 @@
+---
+source: tests/eval_tools.rs
+expression: func
+---
+status	op	override	loc	snippet
+shadowed	=	-	meta-core:classes/base.bbclass:54	do_install() { ... }
+applied	=	-	meta-core:classes-recipe/autotoolsish.bbclass:30	do_install() { ... }
+applied	=	append	meta-core:recipes-core/hello/hello.inc:15-18	do_install:append() { ... }
+applied	=	append	meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	do_install:append() { ... }
+final: function do_install, 3 pieces in order: meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_install, meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10
