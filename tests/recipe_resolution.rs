@@ -128,7 +128,10 @@ async fn preferred_version_is_honoured_everywhere() {
     )
     .await
     .unwrap();
-    assert!(hits.starts_with("loc\tkind\titem\tsnippet\nno hits"), "{hits}");
+    assert!(
+        hits.starts_with("loc\tkind\titem\tsnippet\nno hits"),
+        "{hits}"
+    );
 
     // The bbappend generator: an exact-version append names hello_1.0, and meta-mine's
     // existing hello_1.1.bbappend is not the one modified.

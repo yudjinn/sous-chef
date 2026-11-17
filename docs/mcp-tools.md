@@ -305,6 +305,38 @@ note: global class: ranked as INHERIT finds it (classes-global/, then classes/)
 - `"appends"`: one row per bbappend and recipe it applies to (`bbappend priority matches
   status`), status `applies`; a bbappend that matches nothing is one row with `matches` `-`
   and status `no-match`, and a note.
+- `"compat"`: rows `layer check result detail loc`, per layer in `BBLAYERS` order. First a
+  `compat` row: what `LAYERSERIES_COMPAT_<c>` claims against the workspace release and the
+  core layer's `LAYERSERIES_CORENAMES` (`result` `ok`, or the worst severity of the
+  layer's compat problems). Then one row per problem `org/layer-conf` finds in the compat
+  series (`compat`) and in `LAYERDEPENDS` (`depends`: a collection no layer adds, or a class
+  inherited from a layer that `LAYERDEPENDS` does not reach), with the rule's severity and
+  message: the view calls the rule's checks, so the two agree. Last, `order` rows: a layer
+  listed in `BBLAYERS` before a layer whose collection its `LAYERDEPENDS` names. BitBake does
+  not need dependencies first (`LAYERDEPENDS` is checked against every enabled layer and
+  priority does not come from the order); the row says what the order changes: when
+  `BBPATH` lists the dependent layer first, the classes, `.inc` and conf files both layers
+  have at the same path (`warning`, listed), or none (`info`). Without a build directory
+  there is no `BBLAYERS` and no order row.
+
+```
+layer	check	result	detail	loc
+meta-mine	compat	ok	LAYERSERIES_COMPAT_mine = "kirkstone scarthgap wrynose": names wrynose (the workspace release); shares wrynose with LAYERSERIES_CORENAMES "wrynose"	meta-mine:conf/layer.conf:11
+meta-vendor	compat	error	LAYERSERIES_COMPAT_vendor = "scarthgap": does not name wrynose (the workspace release); shares no name with LAYERSERIES_CORENAMES "wrynose"	meta-vendor:conf/layer.conf:11
+meta-vendor	compat	error	LAYERSERIES_COMPAT_vendor = "scarthgap" names none of the core layer's releases (LAYERSERIES_CORENAMES "wrynose"), so BitBake stops with "Layer vendor is not compatible with the core layer"; add wrynose once the layer works with it	meta-vendor:conf/layer.conf:11
+meta-vendor	depends	warning	meta-vendor:recipes-vendor/libfoo-alt/libfoo-alt_1.0.bb:11 inherits a class from meta-mine (collection `mine`), but LAYERDEPENDS_vendor does not name `mine`; add it: LAYERDEPENDS_vendor += "mine"	meta-vendor:conf/layer.conf:10
+meta-core	compat	ok	LAYERSERIES_COMPAT_core = "wrynose": names wrynose (the workspace release); shares wrynose with LAYERSERIES_CORENAMES "wrynose"	meta-core:conf/layer.conf:13
+meta-core	depends	warning	meta-core:recipes-core/hello/hello.inc:11 inherits a class from meta-mine (collection `mine`), but LAYERDEPENDS_core does not name `mine`; add it: LAYERDEPENDS_core += "mine"	meta-core:conf/layer.conf:1
+meta-mine	order	warning	meta-mine comes before meta-core in BBLAYERS, though LAYERDEPENDS_mine names `core` (added by meta-core). BitBake does not need dependencies first: LAYERDEPENDS is checked against every enabled layer and priority does not come from the order; BBPATH lists meta-mine first, so its classes-recipe/autotoolsish.bbclass is found instead of meta-core's by include/require, inherit and conf lookups; list meta-core first if that is not intended	build:conf/bblayers.conf:10-14
+meta-vendor	order	info	meta-vendor comes before meta-core in BBLAYERS, though LAYERDEPENDS_vendor names `core` (added by meta-core). BitBake does not need dependencies first: LAYERDEPENDS is checked against every enabled layer and priority does not come from the order; BBPATH lists meta-vendor first, but no class, include or conf file is at the same path in both layers, so no lookup is affected today	build:conf/bblayers.conf:10-14
+note: 1 error, 3 warning, 1 info; the compat and depends checks are org/layer-conf's (lint shows the same findings)
+release: wrynose (LAYERSERIES_CORENAMES)
+```
+
+The sample is a copy of the fixture with `meta-mine` listed first in `BBLAYERS`, a copy of
+`autotoolsish.bbclass` in `meta-mine`, and `meta-vendor` claiming only `scarthgap`
+(`tests/layers_compat.rs`); the class copy is what moves hello's and libfoo-alt's inherit
+into `meta-mine`. On the fixture itself every layer is `ok`.
 
 ```
 bbappend	priority	matches	status

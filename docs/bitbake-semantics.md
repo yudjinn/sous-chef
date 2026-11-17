@@ -458,6 +458,33 @@ and `lib/bb/cooker.py` `handleCollections`, master and branches `2.0` and `2.8`,
 The replay does not reproduce these checks (it never stops on them); `org/layer-conf`
 reports them.
 
+**What the `BBLAYERS` order decides** (verified, T8.3, against BitBake master `5495a54`
+`lib/bb/cookerdata.py` `parseConfigurationFiles` and `lib/bb/cooker.py`
+`handleCollections`):
+
+- Dependencies need not be listed first. `LAYERDEPENDS_<c>` (and `LAYERRECOMMENDS_<c>`) are
+  checked in `handleCollections` against the whole `BBFILE_COLLECTIONS` list (`dep in
+  collection_list`), after every `layer.conf` was read; a version constraint is compared with
+  `LAYERVERSION_<dep>`. Priorities come from `BBFILE_PRIORITY_<c>` or, when unset, from the
+  dependencies' priorities (`calc_layer_priority`), never from the position.
+- The layer confs are parsed in `BBLAYERS` order into one datastore, so the order is the
+  order of `BBPATH .= ":${LAYERDIR}"`, and `BBPATH` decides which file an `include` /
+  `require`, an `inherit` and a conf lookup (`conf/machine/...`, `conf/distro/...`) find
+  first (see "Finding files"). That is the only effect sous-chef reports
+  (`layers show=compat`, `order` rows).
+- `LAYERSERIES_CORENAMES` is taken from the first `layer.conf` (in `BBLAYERS` order) after
+  which it is set, then deleted; `LAYERSERIES_COMPAT_<c>` of each collection the layer adds
+  is read and deleted right after that layer's `layer.conf`, and every compat check runs
+  after the last layer.
+- **A copied `LAYERSERIES_COMPAT`** (`LAYERSERIES_COMPAT_x = "${LAYERSERIES_COMPAT_core}"`):
+  the referenced variable has been deleted (or not set yet), and an undefined reference is
+  left as written by expansion (`data_smart.py` `VariableParse.var_sub`), so the layer
+  claims the literal text `${LAYERSERIES_COMPAT_core}`, which names no release: BitBake
+  stops with "Layer x is not compatible with the core layer" when a core layer sets
+  `LAYERSERIES_CORENAMES`. (`org/layer-conf` reports this case as a warning saying the
+  value expands to nothing; the severity is lower than BitBake's behaviour. Not changed in
+  T8.3, which only made the rule's checks callable.)
+
 ## Parse order
 
 Configuration, once:

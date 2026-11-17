@@ -1,0 +1,10 @@
+---
+source: tests/layers_compat.rs
+expression: out
+---
+layer	check	result	detail	loc
+meta-core	compat	ok	LAYERSERIES_COMPAT_core = "wrynose": names wrynose (the workspace release); shares wrynose with LAYERSERIES_CORENAMES "wrynose"	meta-core:conf/layer.conf:13
+meta-vendor	compat	ok	LAYERSERIES_COMPAT_vendor = "scarthgap wrynose": names wrynose (the workspace release); shares wrynose with LAYERSERIES_CORENAMES "wrynose"	meta-vendor:conf/layer.conf:11
+meta-mine	compat	ok	LAYERSERIES_COMPAT_mine = "kirkstone scarthgap wrynose": names wrynose (the workspace release); shares wrynose with LAYERSERIES_CORENAMES "wrynose"	meta-mine:conf/layer.conf:11
+note: 0 error, 0 warning, 0 info; the compat and depends checks are org/layer-conf's (lint shows the same findings)
+release: wrynose (LAYERSERIES_CORENAMES)

@@ -1,0 +1,15 @@
+---
+source: tests/layers_compat.rs
+expression: out
+---
+layer	check	result	detail	loc
+meta-mine	compat	ok	LAYERSERIES_COMPAT_mine = "kirkstone scarthgap wrynose": names wrynose (the workspace release); shares wrynose with LAYERSERIES_CORENAMES "wrynose"	meta-mine:conf/layer.conf:11
+meta-vendor	compat	error	LAYERSERIES_COMPAT_vendor = "scarthgap": does not name wrynose (the workspace release); shares no name with LAYERSERIES_CORENAMES "wrynose"	meta-vendor:conf/layer.conf:11
+meta-vendor	compat	error	LAYERSERIES_COMPAT_vendor = "scarthgap" names none of the core layer's releases (LAYERSERIES_CORENAMES "wrynose"), so BitBake stops with "Layer vendor is not compatible with the core layer"; add wrynose once the layer works with it	meta-vendor:conf/layer.conf:11
+meta-vendor	depends	warning	meta-vendor:recipes-vendor/libfoo-alt/libfoo-alt_1.0.bb:11 inherits a class from meta-mine (collection `mine`), but LAYERDEPENDS_vendor does not name `mine`; add it: LAYERDEPENDS_vendor += "mine"	meta-vendor:conf/layer.conf:10
+meta-core	compat	ok	LAYERSERIES_COMPAT_core = "wrynose": names wrynose (the workspace release); shares wrynose with LAYERSERIES_CORENAMES "wrynose"	meta-core:conf/layer.conf:13
+meta-core	depends	warning	meta-core:recipes-core/hello/hello.inc:11 inherits a class from meta-mine (collection `mine`), but LAYERDEPENDS_core does not name `mine`; add it: LAYERDEPENDS_core += "mine"	meta-core:conf/layer.conf:1
+meta-mine	order	warning	meta-mine comes before meta-core in BBLAYERS, though LAYERDEPENDS_mine names `core` (added by meta-core). BitBake does not need dependencies first: LAYERDEPENDS is checked against every enabled layer and priority does not come from the order; BBPATH lists meta-mine first, so its classes-recipe/autotoolsish.bbclass is found instead of meta-core's by include/require, inherit and conf lookups; list meta-core first if that is not intended	build:conf/bblayers.conf:10-14
+meta-vendor	order	info	meta-vendor comes before meta-core in BBLAYERS, though LAYERDEPENDS_vendor names `core` (added by meta-core). BitBake does not need dependencies first: LAYERDEPENDS is checked against every enabled layer and priority does not come from the order; BBPATH lists meta-vendor first, but no class, include or conf file is at the same path in both layers, so no lookup is affected today	build:conf/bblayers.conf:10-14
+note: 1 error, 3 warning, 1 info; the compat and depends checks are org/layer-conf's (lint shows the same findings)
+release: wrynose (LAYERSERIES_CORENAMES)

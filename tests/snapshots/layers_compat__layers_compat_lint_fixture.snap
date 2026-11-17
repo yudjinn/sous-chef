@@ -1,0 +1,20 @@
+---
+source: tests/layers_compat.rs
+expression: out
+---
+layer	check	result	detail	loc
+core-layer	compat	ok	LAYERSERIES_COMPAT_core = "wrynose": names wrynose (the workspace release); shares wrynose with LAYERSERIES_CORENAMES "wrynose"	core-layer:conf/layer.conf:10
+bad-layer	compat	warning	LAYERSERIES_COMPAT_bad is not set	bad-layer:conf/layer.conf:1
+bad-layer	compat	warning	LAYERSERIES_COMPAT_bad is not set, so BitBake warns on every run and cannot tell which releases the layer supports; add LAYERSERIES_COMPAT_bad = "wrynose" (the releases you test it with)	bad-layer:conf/layer.conf:1
+bad-layer	depends	error	LAYERDEPENDS_bad names `other`, which no layer of the workspace adds, so BitBake stops with "Layer 'bad' depends on layer 'other', but this layer is not enabled"; add that layer to BBLAYERS or drop `other`	bad-layer:conf/layer.conf:8
+bad-layer	depends	warning	bad-layer:recipes-app/b/b_1.0.bb:3 inherits a class from core-layer (collection `core`), but LAYERDEPENDS_bad does not name `core`; add it: LAYERDEPENDS_bad += "core"	bad-layer:conf/layer.conf:8
+incompat-layer	compat	error	LAYERSERIES_COMPAT_incompat = "dunfell scarthgapp": does not name wrynose (the workspace release); shares no name with LAYERSERIES_CORENAMES "wrynose"	incompat-layer:conf/layer.conf:11
+incompat-layer	compat	error	LAYERSERIES_COMPAT_incompat = "dunfell scarthgapp" names none of the core layer's releases (LAYERSERIES_CORENAMES "wrynose"), so BitBake stops with "Layer incompat is not compatible with the core layer"; add wrynose once the layer works with it	incompat-layer:conf/layer.conf:11
+incompat-layer	compat	info	LAYERSERIES_COMPAT_incompat names dunfell, which is older than kirkstone, the oldest release sous-chef checks: lint does not check the layer against it; drop dunfell if the layer no longer supports it	incompat-layer:conf/layer.conf:11
+incompat-layer	compat	info	LAYERSERIES_COMPAT_incompat names scarthgapp, which is not a Yocto release name sous-chef knows (kirkstone to wrynose, or an older one); check the spelling	incompat-layer:conf/layer.conf:11
+copy-layer	compat	warning	LAYERSERIES_COMPAT_copy = "${LAYERSERIES_COMPAT_core}" copies another layer's value; BitBake deletes each layer's LAYERSERIES_COMPAT after reading its layer.conf, so the reference is left unexpanded and names no release	copy-layer:conf/layer.conf:11
+copy-layer	compat	warning	LAYERSERIES_COMPAT_copy copies another layer's LAYERSERIES_COMPAT, which BitBake deletes once that layer.conf is read, so it expands to nothing; list the release names this layer supports, e.g. LAYERSERIES_COMPAT_copy = "wrynose"	copy-layer:conf/layer.conf:11
+good-layer	compat	ok	LAYERSERIES_COMPAT_good = "scarthgap wrynose": names wrynose (the workspace release); shares wrynose with LAYERSERIES_CORENAMES "wrynose"	good-layer:conf/layer.conf:11
+note: 2 error, 3 warning, 2 info; the compat and depends checks are org/layer-conf's (lint shows the same findings)
+release: wrynose (LAYERSERIES_CORENAMES)
+note: no build directory, so no BBLAYERS order to check; layers are in discovery order
