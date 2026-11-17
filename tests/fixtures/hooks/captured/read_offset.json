@@ -1,0 +1,29 @@
+{
+  "session_id": "299e0d6d-46f0-450b-9e83-3c71dca2abd2",
+  "transcript_path": "/home/user/.claude/projects/-ws/299e0d6d-46f0-450b-9e83-3c71dca2abd2.jsonl",
+  "cwd": "{{WS}}",
+  "prompt_id": "434f6f36-788a-4808-950c-963d7c9de6c4",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "{{WS}}/meta-core/recipes-core/hello/hello.inc",
+    "offset": 10,
+    "limit": 6
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "meta-core/recipes-core/hello/hello.inc",
+      "content": "\ninherit autotoolsish\n\nEXTRA_OECONF = \"--disable-nls\"\n\ndo_install:append() {",
+      "numLines": 6,
+      "startLine": 10,
+      "totalLines": 21
+    }
+  },
+  "tool_use_id": "toolu_01YR7PjPVxDmLcHX2sfuRRaZ",
+  "duration_ms": 5
+}

@@ -1,0 +1,27 @@
+{
+  "session_id": "299e0d6d-46f0-450b-9e83-3c71dca2abd2",
+  "transcript_path": "/home/user/.claude/projects/-ws/299e0d6d-46f0-450b-9e83-3c71dca2abd2.jsonl",
+  "cwd": "{{WS}}",
+  "prompt_id": "434f6f36-788a-4808-950c-963d7c9de6c4",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Read",
+  "tool_input": {
+    "file_path": "{{WS}}/meta-core/recipes-core/hello/hello_1.1.bb"
+  },
+  "tool_response": {
+    "type": "text",
+    "file": {
+      "filePath": "meta-core/recipes-core/hello/hello_1.1.bb",
+      "content": "require hello.inc\n\nLIC_FILES_CHKSUM = \"file://COPYING;md5=0835ade698e0bcf8506ecda2f7b4f302\"\n\nSRC_URI += \"file://hello.patch\"\nSRC_URI[sha256sum] = \"2222222222222222222222222222222222222222222222222222222222222222\"\n\nPACKAGECONFIG ??= \"greeting\"\nPACKAGECONFIG[greeting] = \"--enable-greeting,--disable-greeting\"\n",
+      "numLines": 10,
+      "startLine": 1,
+      "totalLines": 10
+    }
+  },
+  "tool_use_id": "toolu_01Y9MtKojAZxJhkS2nftLYcv",
+  "duration_ms": 3
+}

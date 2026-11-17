@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Grep|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v sous-chef >/dev/null 2>&1 || exit 0; exec sous-chef hook",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v sous-chef >/dev/null 2>&1 || exit 0; exec sous-chef hook",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v sous-chef >/dev/null 2>&1 || exit 0; exec sous-chef hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

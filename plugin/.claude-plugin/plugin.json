@@ -1,0 +1,10 @@
+{
+  "name": "sous-chef",
+  "displayName": "sous-chef",
+  "version": "0.1.0",
+  "description": "Yocto / OpenEmbedded layers for Claude: an MCP server that answers with pointers and models the include, bbappend and override chains, plus hooks that annotate Grep and Read, digest large bitbake output and lint edited files. Needs the sous-chef binary on PATH.",
+  "author": {
+    "name": "sous-chef contributors"
+  },
+  "keywords": ["yocto", "openembedded", "bitbake", "mcp", "lint"]
+}

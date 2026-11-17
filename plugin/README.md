@@ -1,8 +1,165 @@
 # sous-chef Claude Code plugin
 
-Packaging (manifest, `hooks/hooks.json`, the MCP server entry, the agent instructions) is
-T7.5 and not written yet. This file records the hook wire format `sous-chef hook` is built
-against (T7.1, T7.2).
+This directory is a Claude Code plugin (T7.5) and a one-plugin marketplace that serves it.
+It bundles the MCP server, the three `PostToolUse` hooks and a skill. Installation is in the
+top-level [README](../README.md#install). This file records what the packaging rests on, the
+hook wire format `sous-chef hook` is built against (T7.1 to T7.4), and what was checked
+against a real Claude Code.
+
+## Layout
+
+| File | What it is |
+|---|---|
+| `.claude-plugin/plugin.json` | The manifest: name `sous-chef`, version (kept equal to `Cargo.toml`), description. No component paths: everything is in the default locations |
+| `.claude-plugin/marketplace.json` | A marketplace named `sous-chef` whose one plugin has source `./`, this directory. `claude plugin marketplace add ./plugin` registers it from a clone |
+| `.mcp.json` | The MCP server `sous-chef` (`plugin:sous-chef:sous-chef` in `/mcp`): `sh -c 'cd "$CLAUDE_PROJECT_DIR" 2>/dev/null; exec sous-chef serve'` |
+| `hooks/hooks.json` | `PostToolUse` hooks on `Grep\|Read`, `Bash` and `Edit\|Write\|MultiEdit`, each `command -v sous-chef >/dev/null 2>&1 \|\| exit 0; exec sous-chef hook`, timeout 10 s |
+| `skills/yocto-layers/SKILL.md` | The skill `sous-chef:yocto-layers`: which tool to use instead of Grep and Read, pointers and handles, static values, writing, releases, hooks, kas |
+
+`tests/plugin_packaging.rs` keeps this honest without Claude Code: the JSON files parse and
+agree with each other and with `Cargo.toml`; every command they run is a real subcommand
+(`sous-chef <sub> --help`); every matcher names only tools with a handler in
+`hook::HANDLERS` and every handled tool has a matcher; each hook command, run with `sh -c`
+as Claude Code runs it, reaches its handler when `sous-chef` is on `PATH` and exits 0 with
+no output when it is not; the MCP command, started outside the project, serves the
+workspace in `$CLAUDE_PROJECT_DIR` and lists the registry's 14 tools; the events captured
+from a real session give the expected context; the skill's tool names are all registered.
+
+### Decisions
+
+- **The binary comes from `PATH`.** A plugin can ship executables in `bin/`, but that
+  directory is only put on the Bash tool's `PATH`, a source checkout has no built binary to
+  ship, and claude.ai and Cowork refuse to install a plugin that has `bin/`. So the user
+  installs `sous-chef` with `cargo install --path .` (into `~/.cargo/bin`), and the plugin
+  runs it by name. A binary elsewhere: put it, or a symlink to it, on `PATH`.
+- **Fail open when the binary is missing.** The documentation says a command hook that
+  cannot start (missing executable, exit 127 from the shell) is a non-blocking error: the
+  tool call goes ahead, and Claude Code shows a `hook error` notice. The hooks are written in
+  shell form and test `command -v sous-chef` first, so a missing binary is a silent exit 0
+  instead of a notice on every Grep, Read, Bash and Edit. Confirmed with `sh -c` in the
+  tests. Without the binary the MCP server fails to connect (`claude mcp list`:
+  `✘ Failed to connect — CONNECTION_CLOSED`, observed), which affects nothing else.
+- **Shell form, not exec form.** Exec form (`args` set) would spawn `sous-chef` directly
+  and fail to start when it is missing. Shell form runs through `sh -c` on Linux and macOS;
+  on Windows it would need Git Bash, which is acceptable for a Yocto tool.
+- **The server starts in the project directory.** The documentation does not say which
+  working directory a plugin's stdio server gets (for a `headersHelper` of a plugin server
+  it is the plugin's root), and advises servers to read `CLAUDE_PROJECT_DIR`, which Claude
+  Code exports to plugin MCP processes. `sous-chef serve` finds `sous-chef.toml` and the
+  build directory from its working directory, so the command changes to
+  `$CLAUDE_PROJECT_DIR` first (written `$VAR`, not `${VAR}`, so the shell expands it rather
+  than Claude Code's substitution). The hooks need no `cd`: `sous-chef hook` uses the
+  event's `cwd`.
+- **`MultiEdit` is kept in the matcher.** The current tools reference lists `Edit`,
+  `Write` and `NotebookEdit`, not `MultiEdit`. A matcher of letters and `|` compares exact
+  names, so the extra name never matches on a current client and costs nothing, and the edit
+  handler still handles it for an older client.
+- **Every hook is `PostToolUse`.** The Grep / Read and edit hooks add `additionalContext`;
+  the Bash hook replaces the output with `updatedToolOutput` (see below).
+- **No `license` in the manifest.** The repository has no license yet; `claude plugin
+  validate` passes, but its directory-submission check reports `LICENSE_MISSING`. Set
+  `license` (or add a `LICENSE`) when one is chosen. No icon either (a directory warning
+  only).
+
+### Plugin format (confirmed)
+
+Checked on **2026-11-17** against the documentation for **Claude Code 2.1.326** (the
+installed `claude --version`). Pages (each also as `.md`):
+
+- Plugins overview: <https://code.claude.com/docs/en/plugins>
+- Manifest reference: <https://code.claude.com/docs/en/plugins-reference> (fields, path
+  rules, standard layout, `${CLAUDE_PLUGIN_ROOT}` and the other variables)
+- Components: <https://code.claude.com/docs/en/plugins/components> (hooks, MCP servers,
+  skills, `bin/`)
+- Marketplace reference: <https://code.claude.com/docs/en/plugins/marketplace-reference>
+- Installing: <https://code.claude.com/docs/en/plugins/install>; loading:
+  <https://code.claude.com/docs/en/plugins/loading>
+- MCP, "Plugin-provided MCP servers": <https://code.claude.com/docs/en/mcp>
+- Hooks, command hook fields, exec and shell form, failure handling:
+  <https://code.claude.com/docs/en/hooks>
+- Skills, frontmatter: <https://code.claude.com/docs/en/skills>
+- Tools reference (tool names; Grep and Glob absent by default on Linux and macOS):
+  <https://code.claude.com/docs/en/tools-reference>
+
+What the layout rests on:
+
+- The manifest is `.claude-plugin/plugin.json`; only `name` is required. Every other file
+  sits at the plugin root. Default locations: `hooks/hooks.json` (the event map under a
+  top-level `"hooks"` key, the shape of `hooks` in `settings.json`), `.mcp.json` (an
+  `mcpServers` map), `skills/<name>/SKILL.md`. Plugin hooks fire from session start, not
+  only when a skill is used.
+- A plugin MCP server is named `plugin:<plugin>:<server>`; its tools are
+  `mcp__plugin_<plugin>_<server>__<tool>` (here `mcp__plugin_sous-chef_sous-chef__var`, and
+  so on), the names for permission rules and hook matchers.
+- `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR` are exported to hook
+  and stdio MCP processes; `${...}` references are substituted in hook `command` / `args`
+  and MCP `command` / `args` / `env`.
+- A skill's `SKILL.md` has YAML frontmatter; `description` is the field Claude uses to
+  decide when to load it (description plus `when_to_use` truncated at 1,536 characters in the
+  listing); once loaded, the body stays in context.
+- A marketplace is `.claude-plugin/marketplace.json` (`name`, `owner`, `plugins`); a
+  relative plugin `source` resolves from the marketplace root, and `"./"` names the root
+  itself. A marketplace added from a local path is read in place, so a `git pull` updates
+  the plugin.
+- `claude plugin validate ./plugin` (and `--strict`) reports `✔ Validation passed` for this
+  directory, listing the three hooks, the `sous-chef` stdio server and the skill
+  `sous-chef:yocto-layers`.
+
+### Checked with Claude Code 2.1.326 (2026-11-17)
+
+On a copy of `tests/fixtures/ws`, indexed with `sous-chef index`, `sous-chef` (release
+build) on `PATH`:
+
+- `claude -p ... --plugin-dir ./plugin --tools Read,Grep` (model haiku): the debug log
+  shows the plugin loaded with its hooks and one skill, `MCP server
+  "plugin:sous-chef:sous-chef": Successfully connected (transport: stdio)` with tools and
+  resources, the `status` tool called and answering `release wrynose
+  (LAYERSERIES_CORENAMES)` for the project directory, and the plugin hook running on one
+  Grep and two Reads (`finished with status 0`, 5 to 7 ms, `provided additionalContext`);
+  `hook.log` has `grep_read 1 ms: context added` for each.
+- In a scratch `CLAUDE_CONFIG_DIR`: `claude plugin marketplace add ./plugin` (`Successfully
+  added marketplace: sous-chef`), `claude plugin install sous-chef@sous-chef`
+  (`Successfully installed`, read in place from `plugin/`), `claude mcp list` in the
+  workspace: `plugin:sous-chef:sous-chef: ... ✔ Connected`; with `sous-chef` off `PATH`:
+  `✘ Failed to connect`.
+- **Not checked live:** the Bash and edit hooks. A second run that would have edited a file
+  in the scratch copy and run a fake `bitbake` script there was refused by the permission
+  classifier of the session doing the check, and was not retried another way. Both are
+  covered by `tests/plugin_packaging.rs` through the plugin's own hook command, and by the
+  handler tests, against the hand-written events.
+- The server's start-up line on stderr (`sous-chef: serving 14 tools on stdio for 3
+  layers`) appears in Claude Code's debug log at `[ERROR]` level: Claude Code logs all server
+  stderr that way. Harmless.
+
+### Real events
+
+Captured in the run above by a project hook that appended its stdin to a file; stored in
+`tests/fixtures/hooks/captured/` (scratch path replaced by `{{WS}}`). Differences from the
+hand-written events in `tests/fixtures/hooks/`:
+
+- **Grep, `content` mode** (`path: "."`, `-n: true`): `content` is one line per hit,
+  `<path>:<line>:<text>`, as assumed. The paths are **relative to the session's `cwd`**
+  when `path` is relative (`meta-core/recipes-core/hello/hello.inc:16:\tinstall -d ...`); the
+  hand-written event has absolute paths. Hits come in ripgrep's order, not sorted.
+  `numFiles` is **0** in content mode (the hand-written event has 4) and `filenames` is
+  empty (as assumed); there is an extra field `totalLines` (equal to `numLines`). Context
+  lines (`-A`/`-B`/`-C`) were not captured, so their format is still unverified.
+- **Read, `startLine`**: with `offset: 10` the content starts with line 10 and
+  `startLine` is 10: **1-based, confirmed**.
+- **Read, `file.filePath`** is **relative to `cwd`** (`meta-core/recipes-core/hello/hello.inc`)
+  while `tool_input.file_path` is absolute. The hand-written events have an absolute
+  `filePath`. The handler takes `filePath` and resolves a relative one against the event's
+  `cwd` (`Event::abs_path`), so it worked; it would not if the session's `cwd` changed
+  between the tool call and the hook (not seen).
+- **Read of a file that ends in a newline**: `content` keeps the final `\n`, and `numLines`
+  and `totalLines` count the empty line after it (10 for the 9-line `hello_1.1.bb`, 21 for
+  the 20-line `hello.inc`). The hand-written events have no final newline and count 9 and
+  20. Effect seen: the whole-recipe note says `read of ...hello_1.1.bb:1-10`, one line past
+  the end; the note is otherwise right.
+- Common fields: the same set as the hand-written events (`session_id`, `prompt_id`,
+  `transcript_path`, `cwd`, `permission_mode`, `effort`, `hook_event_name`, `tool_name`,
+  `tool_input`, `tool_response`, `tool_use_id`, `duration_ms`); no `scratchpad_dir` in this
+  `-p` session.
 
 ## Hook wire format (confirmed)
 
@@ -76,9 +233,16 @@ A command hook gets one JSON object on stdin. Common fields: `session_id`, `prom
 
 `matcher` on tool events matches `tool_name`. Letters, digits, `_`, `-`, spaces, `,` and
 `|` only: exact names (`Grep|Read`); anything else is an unanchored JavaScript regular
-expression. T7.5 should register `Grep|Read`, `Bash`, and `Edit|Write|MultiEdit` (the
-docs list `Edit` and `Write`; `MultiEdit` is not in the current tool list and is kept in
-the handler only so an older client still works).
+expression. T7.5 registers `Grep|Read`, `Bash`, and `Edit|Write|MultiEdit` (the docs list
+`Edit` and `Write`; `MultiEdit` is not in the current tool list and is kept only so an
+older client still works).
+
+**Grep is not in the default tool set on Linux, macOS and WSL** (tools reference, checked
+for 2.1.326): Claude searches with `grep` and `find` through the Bash tool (embedded `ugrep`
+and `bfs`), and those calls reach hooks as `Bash`. Grep comes back when `--tools` or
+`--allowedTools` names it, when Bash is removed, or in a subagent that lists Grep without
+Bash. So in a default session the `Grep|Read` hook fires for Read only, and a `grep -n` run
+through Bash gets no annotation: the Bash handler acts on bitbake commands only.
 
 ### MCP tool hooks (`type: "mcp_tool"`)
 
@@ -123,14 +287,12 @@ more layers to discover; not measured yet (M8 scale check).
 
 ## Not verified
 
-- The exact text of `Grep`'s `content` in `content` mode is not documented. Assumed: one
-  ripgrep line per hit, `<path>:<line>:<text>` with `-n` (context lines
-  `<path>-<line>-<text>`), and `<line>:<text>` when `path` is a single file. Paths are
-  taken as absolute or relative to the `path` argument or `cwd`. Whether `filenames` is
-  filled in `content` mode is not documented (the parser does not rely on it).
-- `startLine` of `Read` is taken as the 1-based number of the first line returned.
-- The recorded events under `tests/fixtures/hooks/` were written from the documented shapes,
-  not captured from a live session (capturing needs a Claude Code session with a logging
-  hook; see T7.5's manual check).
+- The format of Grep's context lines (`-A`, `-B`, `-C`) in `content` mode. Assumed: ripgrep's
+  `<path>-<line>-<text>`. Hit lines (`<path>:<line>:<text>`, paths relative to `cwd` for a
+  relative `path`) and the empty `filenames` were confirmed by the captured event (see
+  "Real events"); `<line>:<text>` when `path` is a single file was not captured.
+- The Bash and Edit / Write events have not been captured from a live session; their
+  recorded events under `tests/fixtures/hooks/` are still the hand-written ones. Read's
+  `startLine` is now confirmed 1-based.
 - Whether an `mcp_tool` hook can pass the whole `tool_response` object. If it can, a hidden
   `hook` MCP tool would save a process start per event; not needed for the budget today.

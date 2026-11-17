@@ -1,0 +1,14 @@
+{
+  "name": "sous-chef",
+  "description": "The sous-chef plugin, served from this directory so it installs from a local clone.",
+  "owner": {
+    "name": "sous-chef contributors"
+  },
+  "plugins": [
+    {
+      "name": "sous-chef",
+      "source": "./",
+      "description": "MCP server and hooks for Yocto / OpenEmbedded layers"
+    }
+  ]
+}

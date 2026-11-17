@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sous-chef": {
+      "command": "sh",
+      "args": ["-c", "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null; exec sous-chef serve"]
+    }
+  }
+}
