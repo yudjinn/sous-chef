@@ -1,0 +1,14 @@
+---
+source: tests/scaffold_recipe.rs
+expression: text
+---
+--- create meta-mine:recipes-app/tool/tool_0.1.bb
+SUMMARY = "Local tool"
+LICENSE = "CLOSED"
+
+SRC_URI = "file://tool.c;subdir=${BP} \
+           file://Makefile;subdir=${BP} \
+           "
+note: the layer claims releases with UNPACKDIR (wrynose) and without it (kirkstone scarthgap): the local files unpack into ${BP} (subdir=${BP}), which is the default S on all of them
+note: put the local files (tool.c, Makefile) in meta-mine:recipes-app/tool/files/ (or in tool/ or tool-0.1/ beside it)
+note: build `none`: no class is inherited; add do_compile / do_install as needed

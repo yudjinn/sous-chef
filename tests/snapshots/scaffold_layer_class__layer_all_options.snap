@@ -1,0 +1,71 @@
+---
+source: tests/scaffold_layer_class.rs
+expression: text
+---
+--- create meta-board:conf/layer.conf
+# We have a conf and classes directory, add to BBPATH
+BBPATH .= ":${LAYERDIR}"
+
+# We have recipes-* directories, add to BBFILES
+BBFILES += "${LAYERDIR}/recipes-*/*/*.bb \
+            ${LAYERDIR}/recipes-*/*/*.bbappend"
+
+BBFILE_COLLECTIONS += "meta-board"
+BBFILE_PATTERN_meta-board = "^${LAYERDIR}/"
+BBFILE_PRIORITY_meta-board = "12"
+
+LAYERDEPENDS_meta-board = "core vendor"
+LAYERSERIES_COMPAT_meta-board = "scarthgap wrynose"
+--- create meta-board:README.md
+# meta-board
+
+Compatible with the Yocto Project series: scarthgap, wrynose.
+
+## Dependencies
+
+- `core`
+- `vendor`
+
+## Adding the layer to a build
+
+Run `bitbake-layers add-layer <path to meta-board>`, or add its path to `BBLAYERS` in
+`conf/bblayers.conf`.
+--- create meta-board:COPYING.MIT
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+--- create meta-board:recipes-example/.gitkeep
+--- modify build:conf/bblayers.conf
+# POKY_BBLAYERS_CONF_VERSION is increased each time build/conf/bblayers.conf
+# changes incompatibly
+POKY_BBLAYERS_CONF_VERSION = "2"
+
+BBPATH = "${TOPDIR}"
+BBFILES ?= ""
+
+LAYERS_ROOT = "${TOPDIR}/.."
+
+BBLAYERS ?= " \
+  ${LAYERS_ROOT}/meta-core \
+  ${TOPDIR}/../meta-vendor \
+  ${TOPDIR}/../meta-mine \
+  ${TOPDIR}/../meta-board \
+  "
+note: the layer is created in <ws>: a new layer must go in a directory that already holds a workspace layer (or the one `path` names), outside every existing layer
+note: BBLAYERS in build:conf/bblayers.conf gets the new layer (a separate change in this plan)
+note: to scaffold into meta-board later, list it in writable_layers in sous-chef.toml; sous-chef sees the layer once the workspace is discovered again (restart the server)
+note: the new layer's files are not linted after the write: the layer is not part of the loaded workspace yet

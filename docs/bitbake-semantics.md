@@ -739,6 +739,96 @@ Details:
   rather than WORKDIR/", and recipes that reference `SRC_URI` files through `WORKDIR`
   "likely need changing to UNPACKDIR".
 
+### Scaffold: sources, `S` and build-system classes (verified, T6.2)
+
+Checked 2026-11-17 against the Yocto migration guides for 5.1 and 5.3, OE-core
+`meta/conf/bitbake.conf` on the branches `kirkstone`, `styhead`, `walnascar`, `whinlatter`,
+`wrynose` and `master`, `meta/classes-global/base.bbclass` (`styhead`), `go.bbclass`
+(`kirkstone`, `wrynose`), and BitBake `lib/bb/fetch2/__init__.py` and `git.py` (branch `2.0`).
+`src/scaffold/recipe.rs` follows this.
+
+| Release | default `S` | `UNPACKDIR` | git unpack directory (no `destsuffix`) |
+|---|---|---|---|
+| kirkstone .. scarthgap | `${WORKDIR}/${BP}` | absent | `git/` under `WORKDIR` |
+| styhead, walnascar | `${WORKDIR}/${BP}` | `??= "${WORKDIR}/sources-unpack"` | `git/` under `UNPACKDIR` |
+| whinlatter, wrynose, master | `${UNPACKDIR}/${BP}` | `??= "${WORKDIR}/sources"` | `${BB_GIT_DEFAULT_DESTSUFFIX}` = `${BP}` |
+
+- **Styhead move.** `base_do_unpack` (styhead): when `S` is under `WORKDIR` but not under
+  `UNPACKDIR`, the first path component of `S` below `WORKDIR` is removed from `WORKDIR`
+  before unpacking and, if it exists under `UNPACKDIR` afterwards, moved to `WORKDIR`. So
+  `S = "${WORKDIR}/git"` and the default `${WORKDIR}/${BP}` keep working on styhead and
+  walnascar (5.1 guide: "`S = "${WORKDIR}/${BP}"`, `S = "${WORKDIR}/git"` and also deeper
+  paths continue to work as expected without changes").
+- **5.1:** `S = "${WORKDIR}"` is an error; a recipe with only `file://` sources should set
+  `S = "${UNPACKDIR}"` (the guide's recommended pattern). Go recipes add
+  `destsuffix=${GO_SRCURI_DESTSUFFIX}` to `SRC_URI`.
+- **5.3:** "If a recipe has S set to be `${WORKDIR}/something`, this is no longer supported,
+  and an error will be issued"; the git fetcher unpacks into `BB_GIT_DEFAULT_DESTSUFFIX`
+  (= `${BP}`), matching the default `S`, so `S = "${WORKDIR}/git"` should be removed.
+- **Fetcher parameters** (BitBake 2.0, unchanged in meaning later): `subdir=<rel>` unpacks a
+  URL into `<unpack root>/<rel>` (any fetcher); git's `destsuffix` defaults to `git/` and
+  the checkout goes to `<unpack root>/<destsuffix>`.
+- **Go:** `go.bbclass` on kirkstone has no `GO_SRCURI_DESTSUFFIX`; its `go_do_unpack` sets a
+  missing `destsuffix` to `<basename of S>/src/${GO_IMPORT}/`. On wrynose
+  `GO_SRCURI_DESTSUFFIX = "${@os.path.join(os.path.basename(d.getVar('S')), 'src', d.getVar('GO_IMPORT')) + '/'}"`
+  and `GO_IMPORT` must be set. No single `SRC_URI` serves both, so a go recipe follows the
+  workspace release when the layer claims releases on both sides of Styhead.
+
+Consequences used by the generator:
+
+- **git:** `destsuffix=${BP}` with no `S` line works on every supported release (kirkstone:
+  `${WORKDIR}/${BP}` = `S`; styhead/walnascar: unpacked to `${UNPACKDIR}/${BP}`, then moved to
+  `${WORKDIR}/${BP}` = `S`; whinlatter on: `${UNPACKDIR}/${BP}` = `S`). `sous-chef` has no
+  `Feature` for the 5.3 git change, so it always writes this form.
+- **local `file://` only:** `S = "${UNPACKDIR}"` when every release the layer is checked
+  against has `UnpackDir`; `S = "${WORKDIR}"` when every one has `WorkdirAsSourceDir`;
+  otherwise `subdir=${BP}` on each entry and the default `S` (the same reasoning as for git).
+- **tarball:** the default `S` (`${BP}` under the unpack root) on every release, when the
+  tarball's top directory is `<pn>-<pv>`.
+
+Build-system classes, by file listing of OE-core `meta/classes` (`kirkstone`) and
+`meta/classes-recipe` (`scarthgap`, `wrynose`): `autotools`, `cmake`, `meson`, `cargo`,
+`go`, `module` (external kernel modules), `setuptools3`, `python_setuptools_build_meta`,
+`python_flit_core`, `python_poetry_core` exist on all three; `python_hatchling` exists on
+scarthgap and wrynose, not on kirkstone; `cargo-update-recipe-crates` is not on kirkstone. No
+class used by the generator was renamed between kirkstone and wrynose (`distutils3` became
+`setuptools3` before kirkstone). OE-core's `meta-skeleton` `hello-mod_0.1.bb` (wrynose) uses
+`inherit module` and `RPROVIDES:${PN} += "kernel-module-hello"`.
+
+A git URL without `branch` (and without `nobranch=1`): BitBake 2.0 `fetch2/git.py`
+`urldata_init` warns ("does not set any branch parameter. The future default branch used by
+tools and repositories is uncertain") and falls back to `master`. The generator asks for a
+branch instead of relying on that.
+
+### Scaffold: layers and classes (verified, T6.3)
+
+Checked 2026-11-17 against OE-core `wrynose` (`meta/lib/bblayers/create.py`,
+`meta/lib/bblayers/templates/layer.conf`, `meta/classes-global/base.bbclass`) and BitBake
+`master` (`lib/bb/parse/ast.py`). `src/scaffold/layer.rs` and `class.rs` follow this.
+
+- **`bitbake-layers create-layer`:** the layer name is the basename of the directory and is
+  also the collection (`--layerid` overrides it); default priority 6; `LAYERSERIES_COMPAT`
+  is filled from `LAYERSERIES_CORENAMES`; the `layer.conf` template extends `BBPATH` with
+  `${LAYERDIR}`, adds `recipes-*/*/*.bb` and `.bbappend` to `BBFILES`, sets
+  `BBFILE_COLLECTIONS`, `BBFILE_PATTERN_<id> = "^${LAYERDIR}/"`, `BBFILE_PRIORITY_<id>`,
+  `LAYERDEPENDS_<id> = "core"` and `LAYERSERIES_COMPAT_<id>`; it writes `README` and
+  `COPYING.MIT` and an example recipe. The generator differs where M6 says so: compat from
+  the core layer's own `LAYERSERIES_COMPAT` (equal to `LAYERSERIES_CORENAMES` in OE-core),
+  `README.md`, `COPYING.MIT` and `recipes-example/` only when asked. It adds the new path inside
+  the last plain `BBLAYERS` assignment of `bblayers.conf` (as `${TOPDIR}/../<dir>` when the
+  layer is beside the build directory's parent), falling back to an appended
+  `BBLAYERS += "<path>"`; how `bitbake-layers add-layer` edits the file was not checked.
+- **Tasks a class may override without `addtask`:** `base.bbclass` has `addtask fetch`,
+  `unpack after do_fetch`, `configure after do_patch`, `compile after do_configure`,
+  `install after do_compile`, `build after do_populate_sysroot` (and others), and
+  `EXPORT_FUNCTIONS do_fetch do_unpack do_configure do_compile do_install`; `do_patch` comes
+  from `meta/classes-global/patch.bbclass` (`addtask patch after do_unpack`,
+  `EXPORT_FUNCTIONS do_patch`, implemented by python `patch_do_patch`). Any other task a class defines needs `addtask`.
+- **`EXPORT_FUNCTIONS`** (`ExportFuncsNode`): in class `c`, `do_x` becomes a stub calling
+  `c_do_x` (the function is named `<classname>_<func>`); a class name containing `-` with a
+  shell function is fatal ("contains a dash character and is calling an sh function"), so
+  the generator refuses `-` in the name of a class with tasks.
+
 *Verify* (open, not used by any code): whether Wrynose changes how the build environment is
 initialised, which matters to `src/bitbake/env.rs` (it sources `oe-init-build-env` or uses an
 environment that is already set up). Checked 2026-11-17: the 6.0 migration guide only says

@@ -1,0 +1,12 @@
+---
+source: tests/scaffold_append.rs
+expression: text
+---
+--- create meta-mine:recipes-core/libfoo/libfoo_2.0.bbappend
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+
+SRC_URI:append = " file://0001-fix-build.patch file://defaults.cfg"
+--- create meta-mine:recipes-core/libfoo/libfoo/defaults.cfg
+key=value
+note: version: exact (patches usually fit one version); pass `version` to choose exact, wildcard or a prefix such as 1.%
+note: copy 0001-fix-build.patch to meta-mine:recipes-core/libfoo/libfoo/0001-fix-build.patch

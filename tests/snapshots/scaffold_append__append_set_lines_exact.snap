@@ -1,0 +1,9 @@
+---
+source: tests/scaffold_append.rs
+expression: text
+---
+--- create meta-mine:recipes-core/libfoo/libfoo_2.0.bbappend
+EXTRA_OECONF += "--with-x"
+RDEPENDS:${PN}:append = " bash"
+MYVAR ?= "1"
+do_install[depends] += "foo:do_populate_sysroot"

@@ -1,0 +1,8 @@
+---
+source: tests/scaffold_append.rs
+expression: text
+---
+--- create meta-mine:recipes-core/libfoo/libfoo_%.bbappend
+EXTRA_OECONF:append = " --enable-bar"
+PACKAGECONFIG:append = " ssl"
+note: version: wildcard (no version-specific data); pass `version` to choose exact, wildcard or a prefix such as 1.%
