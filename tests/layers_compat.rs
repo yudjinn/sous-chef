@@ -97,6 +97,16 @@ async fn lint_fixture_layers_agree_with_the_rule() {
     let f = fixture_with(config);
     let out = compat(&f, None).await;
     insta::assert_snapshot!("layers_compat_lint_fixture", out);
+    // A copied LAYERSERIES_COMPAT makes BitBake 2.4+ stop: the view says error, as the rule.
+    let copy_rows: Vec<&str> = out
+        .lines()
+        .filter(|l| l.starts_with("copy-layer\tcompat\t"))
+        .collect();
+    assert_eq!(copy_rows.len(), 2, "{out}");
+    assert!(
+        copy_rows.iter().all(|l| l.contains("\tcompat\terror\t")),
+        "{out}"
+    );
 
     // Every compat / depends finding of org/layer-conf is a row, with the same message.
     let index = f.ctx.index.lock().await;
