@@ -6,6 +6,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;
+mod kas_support;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -199,4 +200,70 @@ fn depends_is_normalised_and_unset_depends_becomes_empty() {
     let ds = eval(&fx, &target("app"));
     assert_eq!(ds.value("DEPENDS").unwrap().text, "libfoo");
     assert!(!ds.replay().var_notes.contains_key("DEPENDS"));
+}
+
+// ---------------------------------------------------------------------------------------
+// Item 3: kas defaults where bitbake.conf includes conf/local.conf
+// ---------------------------------------------------------------------------------------
+
+/// The kas project before `kas checkout` (no build directory), with a `bitbake.conf` in
+/// its own layer holding `text`.
+fn kas_eval(bitbake_conf: &str) -> DataStore {
+    let p = kas_support::Project::before();
+    write(&p.root, "meta-proj/conf/bitbake.conf", bitbake_conf);
+    let ws = p.ws();
+    assert_eq!(ws.build_dir, None);
+    let cache = tempfile::tempdir().unwrap();
+    let mut idx = Index::open_in(cache.path(), &ws).unwrap();
+    idx.refresh(&ws).unwrap();
+    eval::evaluate_with(&ConfigCache::new(), &idx, &ws, &Target::default()).unwrap()
+}
+
+#[test]
+fn kas_defaults_apply_where_bitbake_conf_includes_local_conf() {
+    // kas writes `MACHINE ??= "board1"` into local.conf: a `??=` before the include loses
+    // to it, a `??=` after it wins, and nothing before the include sees the kas value.
+    let ds = kas_eval(
+        "MACHINE ??= \"fromconf\"\n\
+         EARLY := \"m-${MACHINE}\"\n\
+         DISTRO_EARLY := \"d-${DISTRO}\"\n\
+         include conf/local.conf\n\
+         LATE := \"m-${MACHINE}\"\n\
+         DISTRO ??= \"laterdistro\"\n",
+    );
+    let text = |n: &str| ds.value(n).map(|v| v.text);
+    assert_eq!(text("MACHINE").as_deref(), Some("board1"));
+    assert_eq!(text("EARLY").as_deref(), Some("m-fromconf"));
+    // `:=` before local.conf: DISTRO was unset there, the reference stays as written.
+    assert_eq!(ds.raw("DISTRO_EARLY").as_deref(), Some("d-${DISTRO}"));
+    assert_eq!(text("LATE").as_deref(), Some("m-board1"));
+    assert_eq!(text("DISTRO").as_deref(), Some("laterdistro"));
+    let notes = &ds.replay().target_notes;
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("MACHINE = \"board1\" from the kas file kas/board.yaml:5")),
+        "{notes:?}"
+    );
+    // DISTRO's final value is not kas's: no note claims it is.
+    assert!(
+        !notes.iter().any(|n| n.starts_with("note: DISTRO =")),
+        "{notes:?}"
+    );
+
+    // A `?=` in the configuration before local.conf beats kas's `??=`.
+    let ds = kas_eval("MACHINE ?= \"strong\"\ninclude conf/local.conf\n");
+    assert_eq!(ds.value("MACHINE").unwrap().text, "strong");
+
+    // A bitbake.conf that never includes local.conf: kas's local.conf is not read.
+    let ds = kas_eval("X = \"1\"\n");
+    assert_eq!(ds.value("MACHINE"), None);
+    assert!(
+        ds.replay()
+            .target_notes
+            .iter()
+            .any(|n| n.contains("no MACHINE is set")),
+        "{:?}",
+        ds.replay().target_notes
+    );
 }

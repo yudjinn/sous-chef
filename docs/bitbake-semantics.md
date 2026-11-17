@@ -1528,15 +1528,21 @@ file name, the layer order. `src/workspace/kas.rs` implements what follows.
 - The build directory gets `CACHEDIR.TAG`, whose last line is `# kas build directory`
   (observed; the other lines are the cache-directory-tag signature and comments).
 - **Before the first checkout** (no build directory, so no `local.conf`) the evaluator
-  stands in for these two lines: after the layer
-  confs and before `conf/bitbake.conf` it gives `MACHINE` and `DISTRO` the weak defaults
-  `KasProject::machine_or_default` / `distro_or_default` (no history entry), so any value
-  the configuration sets wins, as over kas's `??=`; when the final value is that default,
-  the evaluation says so (`ReplayNotes::target_notes`: `MACHINE = "board1" from the kas file
-  kas/board.yaml:5 ...`). Placing it before `bitbake.conf` instead of at `local.conf`'s
-  place differs from kas only when a `??=` for them comes between the layer confs and
-  `local.conf` (a later `??=` beats an earlier one). With a build directory nothing is
-  added: kas wrote `local.conf`.
+  stands in for the `MACHINE ??=` and `DISTRO ??=` lines (kas 5.5 `libcmds.py`
+  `WriteBBConfig._write_local_conf`: the `local_conf_header` entries, then `MACHINE ??=
+  "{get_machine()}"`, `DISTRO ??= "{get_distro()}"`, `BBMULTICONFIG ?= "..."`): where
+  `conf/bitbake.conf` includes `conf/local.conf` (OE-core Wrynose `bitbake.conf:817`
+  `include conf/local.conf`; kas's build directory is first on `BBPATH`, so the generated
+  file is the one found), the replay gives `MACHINE` and `DISTRO` the weak defaults
+  `KasProject::machine_or_default` / `distro_or_default` (no history entry: there is no
+  file), with `??=` semantics: an earlier `??=` loses to them, a later one beats them, any
+  other assignment wins, and nothing parsed before the include sees them. When the final
+  value is that default, the evaluation says so (`ReplayNotes::target_notes`: `MACHINE =
+  "board1" from the kas file kas/board.yaml:5 ...`). When `conf/bitbake.conf` is not found
+  at all (before the checkout OE-core is not there) they are applied where it would have
+  been parsed; a `bitbake.conf` that never includes `conf/local.conf` gets nothing (BitBake
+  would not read kas's file). Not stood in for: the `local_conf_header` entries and
+  `BBMULTICONFIG ?=`. With a build directory nothing is added: kas wrote `local.conf`.
 
 **Directories and environment** (environment-variables page; `context.py`).
 

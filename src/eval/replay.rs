@@ -679,16 +679,11 @@ fn config_pass(
     remove_var(&mut r.ds, "LAYERDIR");
 
     // A kas project without a build directory: kas would write `MACHINE ??=` and
-    // `DISTRO ??=` from its files into the `local.conf` it generates, so they hold unless
-    // the configuration sets the variables.
+    // `DISTRO ??=` from its files into the `local.conf` it generates (kas 5.5 `libcmds.py`
+    // `WriteBBConfig._write_local_conf`), so they are applied where `bitbake.conf`
+    // includes `conf/local.conf` (`Replay::include_words`), with that operator.
     let kas = kas_defaults(ws);
-    for (name, value, _) in &kas {
-        r.ds.var_mut(name).default = Some(Content {
-            text: value.clone(),
-            src: Vec::new(),
-        });
-        r.ds.ovr_cache = OnceLock::new();
-    }
+    r.kas_local = kas.clone();
 
     // conf/bitbake.conf on BBPATH (ConfHandler.resolve_file: BBPATH only).
     let bitbake_conf = r
@@ -698,14 +693,25 @@ fn config_pass(
         .find(|p| r.exists(p));
     match bitbake_conf {
         Some(p) => r.visit(&p, FileKind::Conf, Vec::new(), true)?,
-        None => r.issue(
-            None,
-            &[],
-            "conf",
-            "conf/bitbake.conf",
-            RefProblem::NotFound("conf/bitbake.conf".into()),
-        ),
+        None => {
+            r.issue(
+                None,
+                &[],
+                "conf",
+                "conf/bitbake.conf",
+                RefProblem::NotFound("conf/bitbake.conf".into()),
+            );
+            // Nothing to include local.conf (before `kas checkout` OE-core is not there):
+            // the kas values are still the best answer for the machine and distro.
+            r.apply_kas_local();
+        }
     }
+    // A bitbake.conf that never includes conf/local.conf: kas's local.conf is not read.
+    let kas: Vec<(String, String, String)> = if r.kas_local.is_empty() {
+        kas
+    } else {
+        Vec::new()
+    };
 
     // ["base"] + INHERIT, as global classes.
     let inherit = r.ds.value("INHERIT").map(|v| v.text).unwrap_or_default();
@@ -1391,6 +1397,9 @@ struct Replay<'a> {
     taint: Vec<Taint>,
     /// Files replaced in memory (see [`Overlay`]).
     overlay: Option<&'a Overlay>,
+    /// `(variable, value, origin)` kas would write into `local.conf` as `VAR ??= "value"`,
+    /// still to be applied (a kas project without a build directory; see `config_pass`).
+    kas_local: Vec<(String, String, String)>,
 }
 
 impl<'a> Replay<'a> {
@@ -1415,6 +1424,20 @@ impl<'a> Replay<'a> {
             resolver: None,
             taint: Vec::new(),
             overlay: None,
+            kas_local: Vec::new(),
+        }
+    }
+
+    /// The `MACHINE ??=` / `DISTRO ??=` lines of the `local.conf` kas would generate,
+    /// applied now (a weak default: the last `??=` wins, any other assignment beats it).
+    /// Not recorded in the history: there is no file to point at.
+    fn apply_kas_local(&mut self) {
+        for (name, value, _) in std::mem::take(&mut self.kas_local) {
+            self.ds.var_mut(&name).default = Some(Content {
+                text: value,
+                src: Vec::new(),
+            });
+            self.ds.ovr_cache = OnceLock::new();
         }
     }
 
@@ -2085,6 +2108,12 @@ impl<'a> Replay<'a> {
         let mut child_via = via.to_vec();
         child_via.push(st.loc.clone());
         for word in words {
+            if word == "conf/local.conf" && !self.kas_local.is_empty() {
+                // kas's build directory, which is first on BBPATH, would hold the
+                // generated local.conf; it does not exist yet.
+                self.apply_kas_local();
+                continue;
+            }
             let ws = self.ws;
             let targets: Vec<PathBuf> = if mode == "include_all" {
                 self.resolver().include_all(ws, &word)
