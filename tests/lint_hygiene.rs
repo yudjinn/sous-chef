@@ -180,6 +180,16 @@ fn continuation_bad_and_good() {
 
 #[test]
 fn host_path_bad_and_good() {
+    assert_eq!(
+        check(
+            &HygieneHostPath,
+            "host-path",
+            "good.bbclass",
+            "classes/mytool.bbclass",
+            &[]
+        ),
+        []
+    );
     let bad = check(&HygieneHostPath, "host-path", "bad.bb", "x_1.0.bb", &[]);
     assert_eq!(lines(&bad), [4, 5, 6, 7, 11], "{bad:#?}");
     assert!(

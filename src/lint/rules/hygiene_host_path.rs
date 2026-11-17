@@ -15,9 +15,11 @@
 //! start of a word, so it is not reported.
 //!
 //! `do_install` (a whole definition, not `:append` / `:prepend`) that never mentions `${D}`
-//! or `$D` is reported unless it calls something that installs on its behalf (a
-//! `*_do_install` function from a class, `oe_runmake`, or anything setting `DESTDIR`), or
-//! has no command at all (`:` only, or empty).
+//! or `$D` is reported only when it runs a command that puts files somewhere (`install`,
+//! `cp`, `mkdir`, `ln`, `mv`, `rsync`, `tar`, `touch`, `cat`, `echo` as the first word of a
+//! line), and not when it calls something that installs on its behalf (a `*_do_install`
+//! function from a class, `oe_runmake`, or anything setting `DESTDIR`). A body that only
+//! calls other functions, or is `:` or empty, is not reported.
 
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
@@ -46,6 +48,12 @@ const HOST_DIRS: &[(&str, &str)] = &[
     ("/home", "${S}, ${B} or ${WORKDIR}"),
     ("/root", "${S}, ${B} or ${WORKDIR}"),
     ("/srv", "${D}/srv"),
+];
+
+/// Commands that put files somewhere: a `do_install` that runs one of them without `${D}`
+/// is reported. A body that only calls other functions is not (they may use `${D}`).
+const WRITERS: &[&str] = &[
+    "install", "cp", "mkdir", "ln", "mv", "rsync", "tar", "touch", "cat", "echo",
 ];
 
 /// The host directory `word` starts with (exactly, or followed by `/`).
@@ -177,7 +185,8 @@ impl Rule for HygieneHostPath {
                 if code.trim().is_empty() {
                     continue;
                 }
-                if code.trim() != ":" {
+                let first = code.split_whitespace().next().unwrap_or("");
+                if WRITERS.contains(&first) {
                     commands += 1;
                 }
                 mentions_d |= code.contains("${D}") || code.contains("$D");
