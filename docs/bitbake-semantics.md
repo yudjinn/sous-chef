@@ -2071,7 +2071,13 @@ in the live environment:
   `MACHINEOVERRIDES` entry is a match (nothing said). On yocto-kiss `MACHINEOVERRIDES` is
   `${@...}...${@...}dogbonedark` (the `soc-family.inc` and `arch-arm*.inc` `=.` python
   glued to the machine name, no `:` outside the python), so no entry is known statically.
-  `SKIP_RECIPE` is said only when its flag is static.
+  `SKIP_RECIPE` is said only when its flag is static. (w10) The two matches are public as
+  `eval::compatible_machine(need, entries)` and `eval::compatible_host(need, host_sys)` so
+  they can be run with given values (`tests/skip_live.rs` runs them with BitBake's).
+  Skips the notes do not model: OE-core `base_eventhandler` on `RecipeParsed` skips a
+  recipe that provides a `virtual/` name (not in `BB_MULTI_PROVIDER_ALLOWED`) whose
+  `PREFERRED_PROVIDER_` names another `PN` ("PREFERRED_PROVIDER_x set to y, not z");
+  `features_check.bbclass` skips on `REQUIRED_DISTRO_FEATURES` and the like.
 - **`INCOMPATIBLE_LICENSE`** (OE-core Wrynose `33a6bd6c`, `classes-global/base.bbclass`
   anonymous python lines 591-621, only when neither `SOURCE_MIRROR_FETCH` nor
   `PARSE_ALL_RECIPES` is true; `lib/oe/license.py` `skip_incompatible_package_licenses`,
@@ -2118,9 +2124,14 @@ against BitBake's behaviour or output:
   (the live environment ran only `kas checkout`, `kas dump` and `kas shell -c`); the kas
   keys sous-chef does not read (`env`, `patches`, ...) were not looked at.
 - The skip and license notes ("Skipped recipes", `INCOMPATIBLE_LICENSE`, the `BBMASK`
-  difference note): from the BitBake and OE-core source and fixture tests; none fires on
-  yocto-kiss (its `MACHINEOVERRIDES` holds python, `INCOMPATIBLE_LICENSE` is unset), so no
-  note was compared with a real BitBake skip.
+  difference note): from the BitBake and OE-core source and fixture tests. No "would skip"
+  note fires on yocto-kiss (its `MACHINEOVERRIDES` holds python, `INCOMPATIBLE_LICENSE` is
+  unset). (w10) The machine and host checks themselves were compared with BitBake by
+  running them with the `MACHINEOVERRIDES` / `HOST_SYS` from the `bitbake -e` dumps
+  (differential.md, "Workspace-level comparisons", skip checks): 83 recipes judged skipped,
+  none of them one BitBake parsed, 16 of 24 `show-appends` verdicts the same and the other
+  8 skipped by BitBake for values or checks outside them. The license check and a "would
+  skip" note on real static values remain uncompared.
 - The class type of an `inherit` in an `.inc` that a `.conf` or a global class reaches
   ("Which handler parses an included file"): from the source and tests; no such `inherit`
   exists on yocto-kiss (every `inherit` in an `.inc` there is reached from recipes only).

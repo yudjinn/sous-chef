@@ -1139,7 +1139,9 @@ seen). A rewrite replaces nothing: earlier operations keep their status, and
 (`ReplayNotes::target_notes`), each a `note: ...` line every evaluated view shows:
 `BitBake would skip this recipe: ...` (`SKIP_RECIPE[<pn>]`, `COMPATIBLE_MACHINE`,
 `COMPATIBLE_HOST`, `INCOMPATIBLE_LICENSE`, decided on static values;
-`replay::skip_reasons`, `license_skip`), `BitBake may skip this recipe: ...` (the check
+`replay::skip_reasons`, `license_skip`; since w10 the two matches are public,
+`eval::compatible_machine(need, entries) -> Option<bool>` and `eval::compatible_host(need,
+host_sys) -> Option<bool>`, `None` for a regular expression Rust cannot compile), `BitBake may skip this recipe: ...` (the check
 fails on what is known but unknown values could still decide it; names them), `BitBake
 would stop parsing this recipe: ...` (the license check's fatal cases), `BBMASK is set but
 sous-chef does not apply it (...)`, and, for an evaluation with an explicit `machine` or

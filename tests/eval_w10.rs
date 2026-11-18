@@ -608,3 +608,74 @@ fn the_per_machine_bbmask_note_fires_for_recipe_and_variant_evaluations() {
     // The index keeps the default machine's mask: app stays a recipe.
     assert!(app_is_recipe(&fx));
 }
+
+// ---------------------------------------------------------------------------------------
+// Item 4: the skip checks, callable with given values
+// ---------------------------------------------------------------------------------------
+
+#[test]
+fn compatible_machine_and_host_match_as_base_bbclass_does() {
+    // re.match: anchored at the start only, any entry of MACHINEOVERRIDES.split(":").
+    let mo = "armv7a:ti-soc:ti33x:dogbonedark";
+    assert_eq!(
+        eval::compatible_machine("ti33x|beagle", mo.split(':')),
+        Some(true)
+    );
+    assert_eq!(eval::compatible_machine("ti", mo.split(':')), Some(true));
+    assert_eq!(eval::compatible_machine("33x", mo.split(':')), Some(false));
+    assert_eq!(
+        eval::compatible_machine("^qemu.*$", mo.split(':')),
+        Some(false)
+    );
+    assert_eq!(
+        eval::compatible_machine("invalid", "".split(':')),
+        Some(false)
+    );
+    assert_eq!(eval::compatible_machine("(?<=a)b", mo.split(':')), None);
+    let host = "arm-oe-linux-gnueabi";
+    assert_eq!(
+        eval::compatible_host("(arm|aarch64).*-linux", host),
+        Some(true)
+    );
+    assert_eq!(eval::compatible_host("aarch64.*-linux", host), Some(false));
+    assert_eq!(eval::compatible_host(".*-musl.*", host), Some(false));
+    assert_eq!(eval::compatible_host("^(?!riscv32).*", host), None);
+}
+
+#[test]
+fn the_skip_notes_use_the_same_checks() {
+    // A static MACHINEOVERRIDES (the fixture's is `${MACHINE}`) and HOST_SYS: the notes say
+    // "would skip" exactly when the checks with those values fail.
+    let fx = modified(|r| {
+        append_to(
+            r,
+            "meta-core/conf/bitbake.conf",
+            "HOST_SYS = \"arm-oe-linux-gnueabi\"\n",
+        );
+        append_to(
+            r,
+            "meta-mine/recipes-app/app/app_0.1.bb",
+            "COMPATIBLE_MACHINE = \"qemu\"\nCOMPATIBLE_HOST = \"aarch64.*-linux\"\n",
+        );
+    });
+    let ds = eval(&fx, "app");
+    let mo = text(&ds, "MACHINEOVERRIDES");
+    assert_eq!(eval::compatible_machine("qemu", mo.split(':')), Some(true));
+    assert_eq!(
+        eval::compatible_host("aarch64.*-linux", &text(&ds, "HOST_SYS")),
+        Some(false)
+    );
+    let notes = &ds.replay().target_notes;
+    assert!(
+        !notes
+            .iter()
+            .any(|n| n.contains("incompatible with machine")),
+        "{notes:?}"
+    );
+    assert!(
+        notes.iter().any(|n| n.starts_with(
+            "note: BitBake would skip this recipe: incompatible with host arm-oe-linux-gnueabi"
+        )),
+        "{notes:?}"
+    );
+}

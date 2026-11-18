@@ -453,6 +453,33 @@ static value is a pointer list; the test recognises functions by the value's sha
   as BitBake. Without an explicit machine, `virtual/kernel` is wrong (bug 1).
 - **Recipe files**: 1034 on both sides once the `BBFILES` globs are applied; the index
   holds one more (bug 4).
+- **Skip checks** (w10, `tests/skip_live.rs`, ignored without `SOUS_CHEF_LIVE`; no BitBake
+  run): the `COMPATIBLE_MACHINE` / `COMPATIBLE_HOST` / `SKIP_RECIPE` checks the skip notes
+  make (`eval::compatible_machine`, `eval::compatible_host`) run on every collected recipe
+  (evaluated statically for `dogbonedark` / `kiss`) with the `MACHINEOVERRIDES` and
+  `HOST_SYS` BitBake computed, taken from the dumps as a check, not as an input: `curl`'s
+  (`armv7a:ti-soc:ti33x:dogbonedark`, `arm-oe-linux-gnueabi`) for target recipes,
+  `gmp-native`'s (`""`, `x86_64-linux`) for those that inherit `native`,
+  `nativesdk-zlib`'s (`""`, `x86_64-oesdk-linux`) for `nativesdk`; the 20 cross recipes are
+  left out (no dump has their values). Of 1014 recipes, **83 would be skipped** (65 by
+  `COMPATIBLE_HOST`, 18 by `COMPATIBLE_MACHINE`, none by `SKIP_RECIPE`), 30 cannot be
+  decided statically (`COMPATIBLE_MACHINE` / `COMPATIBLE_HOST` with python or override
+  variants on python `OVERRIDES`; two lookahead expressions Rust's `regex` cannot compile,
+  `gn`, `ghostscript`). Against BitBake: **no recipe judged skipped was parsed by BitBake**
+  (the 20 recipe files with a target `bitbake -e` dump), and of the 24 recipe files
+  `show-appends` lists, 16 agree (`trusted-firmware-a` x4, `libts`, `ts-sp-smm-gateway`,
+  `linux-yocto-rt`, `linux-yocto-tiny` skipped on both sides; `linux-kiss`, `base-files`,
+  `busybox`, `systemd-boot`, ... parsed on both sides). The other 8 BitBake skipped where
+  these checks do not: 5 have a `COMPATIBLE_MACHINE` that is not static here
+  (`linux-yocto`, `linux-yocto-dev`, `edk2-firmware`, `optee-os` x2), and 3 are skipped by
+  checks the notes do not model: `u-boot_2026.01.bb` and `musl_git.bb` provide
+  `virtual/bootloader` / `virtual/libc` whose `PREFERRED_PROVIDER` names another recipe
+  (OE-core `base_eventhandler` on `RecipeParsed` skips such providers), `systemd_259.5.bb`
+  has `REQUIRED_DISTRO_FEATURES` (`features_check.bbclass`); the source names these causes,
+  they were not confirmed recipe by recipe. BitBake's total, 435 skipped, counts variants
+  and every reason, so it is not comparable with the 83. The notes as they stand (static
+  values only, `MACHINEOVERRIDES` holding python): "would skip" on no recipe, "may skip" on
+  124, among them all 83; no recipe the real values skip lacks a note.
 
 ## How far to trust static mode
 

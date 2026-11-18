@@ -1082,7 +1082,6 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
         ));
     }
     const MAY: &str = "note: BitBake may skip this recipe:";
-    let anchored = |re: &str| regex::Regex::new(&format!("^(?:{re})")).ok();
     let parse_all = static_bool(ds, "PARSE_ALL_RECIPES");
     match static_value(ds, "COMPATIBLE_MACHINE") {
         _ if parse_all == Some(true) => {}
@@ -1092,21 +1091,21 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
             "{MAY} COMPATIBLE_MACHINE is set but not known statically ({}), so whether it matches MACHINEOVERRIDES cannot be told",
             unknown_why(ds, "COMPATIBLE_MACHINE")
         )),
-        Some(Some(need)) => match anchored(&need) {
+        Some(Some(need)) => {
+            let mo = ds.value("MACHINEOVERRIDES").unwrap_or_default();
+            let entries = pwords::colon_parts(&mo.text);
+            let known: Vec<&str> = entries
+                .iter()
+                .copied()
+                .filter(|e| !pwords::is_unevaluated(e))
+                .collect();
+            match compatible_machine(&need, known.iter().copied()) {
             None => out.push(format!(
                 "{MAY} COMPATIBLE_MACHINE = \"{need}\" is a regular expression sous-chef cannot compile, so whether it matches MACHINEOVERRIDES cannot be told"
             )),
-            Some(re) => {
-                let mo = ds.value("MACHINEOVERRIDES").unwrap_or_default();
-                let entries = pwords::colon_parts(&mo.text);
-                let known: Vec<&str> = entries
-                    .iter()
-                    .copied()
-                    .filter(|e| !pwords::is_unevaluated(e))
-                    .collect();
+            Some(hit) => {
                 let unknown = entries.len() - known.len();
                 let by_python = ds.replay().python_vars.contains("MACHINEOVERRIDES");
-                let hit = known.iter().any(|e| re.is_match(e));
                 if hit {
                     // A match on a known entry is a match: not skipped.
                 } else if unknown > 0 || by_python || parse_all.is_none() {
@@ -1141,7 +1140,8 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
                     ));
                 }
             }
-        },
+            }
+        }
     }
     let mirror = static_bool(ds, "SOURCE_MIRROR_FETCH");
     let host_checked = match (parse_all, mirror) {
@@ -1175,8 +1175,8 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
             (Some(_), Some(None)) => out.push(format!(
                 "{MAY} COMPATIBLE_HOST = \"{need}\"; HOST_SYS is not set (BitBake's re.match would raise)"
             )),
-            (Some(re), Some(Some(host))) => {
-                if !re.is_match(&host) {
+            (Some(_), Some(Some(host))) => {
+                if compatible_host(&need, &host) == Some(false) {
                     if host_checked.is_none() {
                         out.push(format!(
                             "{MAY} COMPATIBLE_HOST = \"{need}\" does not match HOST_SYS = \"{host}\"{unsure_check}"
@@ -1192,6 +1192,32 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
     }
     out.extend(license_skip(ds, host_checked.is_none()));
     out
+}
+
+/// `re.match(need, ...)`: the regular expression anchored at the start only; `None` when
+/// Rust's `regex` cannot compile it (Python's `re` may: lookaround, backreferences).
+fn anchored(need: &str) -> Option<Regex> {
+    Regex::new(&format!("^(?:{need})")).ok()
+}
+
+/// OE-core `classes-global/base.bbclass` (Wrynose `33a6bd6c`, anonymous python): a non-empty
+/// `COMPATIBLE_MACHINE` is compatible when `re.match(COMPATIBLE_MACHINE, m)` for some entry
+/// `m` of `MACHINEOVERRIDES.split(":")` (given here as `entries`). `None` when the regular
+/// expression cannot be compiled. The check the skip notes make, callable with given values.
+pub fn compatible_machine<'a>(
+    need: &str,
+    entries: impl IntoIterator<Item = &'a str>,
+) -> Option<bool> {
+    let re = anchored(need)?;
+    Some(entries.into_iter().any(|e| re.is_match(e)))
+}
+
+/// OE-core `classes-global/base.bbclass` (Wrynose `33a6bd6c`, anonymous python): a non-empty
+/// `COMPATIBLE_HOST` is compatible when `re.match(COMPATIBLE_HOST, HOST_SYS)`. `None` when
+/// the regular expression cannot be compiled. The check the skip notes make, callable with
+/// given values.
+pub fn compatible_host(need: &str, host_sys: &str) -> Option<bool> {
+    Some(anchored(need)?.is_match(host_sys))
 }
 
 /// Why `name`'s value is not static, for a note.
