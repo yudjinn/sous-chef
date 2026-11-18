@@ -56,8 +56,9 @@ linted against kirkstone, scarthgap and wrynose (`Layer::lint_releases`); the ot
 against wrynose alone. `meta-legacy` deliberately claims `dunfell`, older than the floor.
 The recipes were written before the release was set and are not all Wrynose-clean: for
 example `libfoo_2.0.bb` sets `S = "${WORKDIR}/git"` and `app_0.1.bb` reads
-`${WORKDIR}/app.c`, where Styhead and later unpack into `UNPACKDIR`. No test depends on
-that yet; release-aware lint rules (wave 3) may use them as findings.
+`${WORKDIR}/app.c`, where Styhead and later unpack into `UNPACKDIR`. The second is a
+finding (`hygiene/release-syntax`, `app_0.1.bb:22`) in `sous-chef lint` on `ws/` and in the
+audit snapshots.
 
 `meta-legacy` exists only for legacy-syntax tests and the "no build dir" fallback: discovery
 without a build directory (every `conf/layer.conf` under `ws/`) finds **four** layers;
@@ -223,12 +224,15 @@ Names with `_` that must **not** be flagged: `SRCREV_machine`, `do_install()`,
 ### Known lint hits in `ws/` (non-exhaustive; M4 writes the exact expected file)
 
 `org/recipe-change-in-local-conf` (local.conf:9), `override/plus-equals-on-default`
-(local.conf:13), `org/class-location` (meta-core/classes/base.bbclass), `override/dead`
-(vendor append line 9), `org/append-no-match` (orphan append), everything in meta-legacy.
-`hygiene/missing-metadata` info for `app` (no `HOMEPAGE`). The exact list `sous-chef lint`
-gives on `ws/` (default and `--all`) is in docs/lint-rules.md, "Findings on the fixture
-workspace"; `tests/audit.rs` audits `ws/` itself (`meta-legacy` is its layer present but not
-enabled).
+(local.conf:13), `hygiene/release-syntax` (app_0.1.bb:22), `org/append-no-match` (orphan
+append); with `--all` also `org/class-location` (meta-core/classes/base.bbclass),
+`org/append-wildcard-broad` (vendor append line 4) and `override/dead` (vendor append line
+9). `meta-legacy` is not in `BBLAYERS`, so it is no workspace layer and lint does not check it
+(a path in it as the target is refused as outside the workspace layers).
+`app` gets no `hygiene/missing-metadata` finding: its only source is a `file://` entry, so
+no `HOMEPAGE` is asked of it. The exact list `sous-chef lint` gives on `ws/` (default and
+`--all`) is in docs/lint-rules.md, "Findings on the fixture workspace"; `tests/audit.rs`
+audits `ws/` itself (`meta-legacy` is its layer present but not enabled).
 
 Not under `fixtures/`: the release diff tests (`tests/release_diff.rs`) build their git
 repository (an upstream layer with two commits and a tag `v1`, and a writable layer with

@@ -6,5 +6,6 @@
   "author": {
     "name": "sous-chef contributors"
   },
+  "license": "MIT",
   "keywords": ["yocto", "openembedded", "bitbake", "mcp", "lint"]
 }

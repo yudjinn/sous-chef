@@ -78,10 +78,10 @@ from a real session give the expected context; the skill's tool names are all re
   `bash_grep`) follows **`grep_read`**, because it is the Grep annotation; the BitBake
   digest (handler `bash`) follows `bash`. A `sous-chef.toml` that does not load (an
   unknown key, say) switches nothing off; the handlers then fail open on it.
-- **No `license` in the manifest.** The repository has no license yet; `claude plugin
-  validate` passes, but its directory-submission check reports `LICENSE_MISSING`. Set
-  `license` (or add a `LICENSE`) when one is chosen. No icon either (a directory warning
-  only).
+- **`license: "MIT"`** in `plugin.json` and in the marketplace entry (a display field both
+  accept), matching [`LICENSE`](../LICENSE) at the repository root. `claude plugin validate
+  ./plugin` (Claude Code 2.1.327) passes, and its directory-submission checks report one
+  warning only: `ICON_MISSING` (the plugin has no icon).
 
 ### Plugin format (confirmed)
 
@@ -341,8 +341,10 @@ The last row was measured later (same machine, 2026-11-17, median of 50 whole-pr
 runs, after the grep-through-Bash handler was added); the handler itself logged 24 ms in
 the debug build. `tests/hook_bash_grep.rs` runs it against the 150 ms budget.
 
-The handler itself (as logged in `hook.log`) takes 0 to 4 ms. A real poky workspace has
-more layers to discover; not measured yet (M8 scale check).
+The handler itself (as logged in `hook.log`) takes 0 to 4 ms. On the 1784-file live
+workspace (OE-core, meta-arm and two product layers) the Grep, Read and Edit hooks took
+4.6, 3.5 and 9.2 ms of process wall time (docs/performance.md, "After the later rounds");
+meta-openembedded scale was not measured.
 
 ## Not verified
 

@@ -1,9 +1,11 @@
-# sous-chef planning docs
+# sous-chef documentation
 
 `sous-chef` is a stdio MCP server, written in Rust, that helps an AI agent work on Yocto /
 OpenEmbedded layers. It indexes the layers and answers questions with **pointers**
 (`layer:path:A-B` plus a short snippet) instead of file contents, and it models the
-include/inherit chain, bbappends and the override chain correctly.
+include/inherit chain, bbappends and the override chain correctly. What it is for, how to
+install and use it: the top-level [README](../README.md). These documents are the design,
+the contracts, the measurements and the project's history.
 
 ## Reading order
 
@@ -56,8 +58,8 @@ Wave 5   T5.5 envdump + authoritative var | T7.5 plugin | M8
 M9       T9.1 live environment | T9.2 live verification | T9.3 kas; then fix rounds on the
          bugs found (eval, lint, hooks)
            |
-w6-w9    T8.6 audit | T8.4 release diff | fix rounds on the open items; w9 final
-         documentation pass
+w6-w12   T8.6 audit | T8.4 release diff | fix rounds on the open items; w9 and w12
+         final passes (orchestration.md, "Rounds 7 to 12 (closed)")
 ```
 
 Each task's own *Depends on* line is the authority; the waves are a suggested grouping.

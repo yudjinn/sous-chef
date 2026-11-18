@@ -8,7 +8,8 @@
     {
       "name": "sous-chef",
       "source": "./",
-      "description": "MCP server and hooks for Yocto / OpenEmbedded layers"
+      "description": "MCP server and hooks for Yocto / OpenEmbedded layers",
+      "license": "MIT"
     }
   ]
 }
