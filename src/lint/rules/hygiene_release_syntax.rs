@@ -9,6 +9,9 @@
 //! - `inherit_defer` (`Feature::InheritDefer`), error. Not in a `.conf` file, where
 //!   `hygiene/parse-error` already reports it on every release.
 //! - `include_all` (`Feature::IncludeAll`), error.
+//! - `addfragments` (`Feature::AddFragments`), error; and its three-argument form on a
+//!   release with `Feature::BuiltinFragments` (BitBake 2.16's regular expression needs four
+//!   groups, so the line is unparsed there), error.
 //! - A class file in `classes-recipe/` or `classes-global/` (`Feature::SplitClassDirs`,
 //!   classified by `workspace::resolve::class_dir`), error on line 1: BitBake before 2.2
 //!   never searches those directories, so `inherit` of the class fails there.
@@ -16,8 +19,9 @@
 //!   before Styhead (checked: `meta/conf/bitbake.conf` on the `kirkstone` and `scarthgap`
 //!   branches has no `UNPACKDIR`, and `base_do_unpack` there unpacks into `WORKDIR`; on
 //!   `styhead` `UNPACKDIR ??= "${WORKDIR}/sources-unpack"`), so the reference stays
-//!   unexpanded. Not reported when any indexed file in the workspace assigns `UNPACKDIR`
-//!   (a layer may define it for older releases).
+//!   unexpanded. Not reported when an indexed file of the same layer, or of a layer other
+//!   than the core layer, assigns `UNPACKDIR` (a layer may define it for older releases);
+//!   the core layer's own assignment comes with the workspace's release.
 //! - The other direction of the same change, warning: `${WORKDIR}/<file>` where `<file>` is a
 //!   `file://` entry of `SRC_URI` in the same file without a `subdir=` parameter. From
 //!   Styhead on such files are unpacked into `UNPACKDIR`, not `WORKDIR` (5.1 migration guide:
@@ -98,15 +102,28 @@ fn workdir_ref<'a>(text: &str, files: &'a BTreeSet<String>) -> Option<&'a str> {
     None
 }
 
-/// Whether any indexed file assigns `UNPACKDIR`. An index error counts as "yes": when it
+/// Whether an indexed file assigns `UNPACKDIR` in the file's own layer or in a layer that
+/// is not the core layer (collection `core`). The core layer's assignment comes with the
+/// workspace's release (OE-core's `bitbake.conf` from Styhead on) and says nothing about an
+/// older release the layer is checked against (`--as-release`, a migration report), so it
+/// counts only for the core layer's own files. An index error counts as "yes": when it
 /// cannot tell, the rule stays silent.
 fn unpackdir_defined(cx: &LintContext<'_>) -> bool {
     let filter = query::StatementFilter {
         kinds: vec!["assign".into()],
         ..query::StatementFilter::default()
     };
+    let core: Vec<&str> = cx
+        .ws
+        .layers
+        .iter()
+        .filter(|l| l.collections.iter().any(|c| c == "core"))
+        .map(|l| l.name.as_str())
+        .collect();
     match query::statements_by_base(cx.index, "UNPACKDIR", &filter) {
-        Ok(rows) => !rows.is_empty(),
+        Ok(rows) => rows
+            .iter()
+            .any(|r| r.loc.layer == cx.loc.layer || !core.contains(&r.loc.layer.as_str())),
         Err(_) => true,
     }
 }
@@ -196,6 +213,37 @@ impl Rule for HygieneReleaseSyntax {
                          one path while the layer claims that release",
                         out,
                     );
+                }
+                StatementKind::AddFragments { .. } => {
+                    self.lacking(
+                        cx,
+                        Feature::AddFragments,
+                        line,
+                        "`addfragments`",
+                        "BitBake fails to parse the file there (\"unparsed line\"); set the \
+                         fragment's variables directly while the layer claims that release",
+                        out,
+                    );
+                    // From BitBake 2.16 the directive takes four arguments; with three the
+                    // four-group regular expression does not match: "unparsed line".
+                    let three = s.add_fragments().is_some_and(|a| a.groups(4).is_none());
+                    let strict: Vec<Release> =
+                        helpers::releases_having(cx, Feature::BuiltinFragments);
+                    if three && !strict.is_empty() {
+                        out.push(helpers::finding(
+                            self,
+                            cx,
+                            LineSpan::line(line),
+                            format!(
+                                "`addfragments` with three arguments: from {} on it takes a \
+                                 fourth, the built-in fragments variable, and the three-argument \
+                                 form is an unparsed line, and this layer is checked against {}; \
+                                 add the variable (OE-core: `OE_FRAGMENTS_BUILTIN`)",
+                                Feature::BuiltinFragments.first().codename(),
+                                helpers::release_list(&strict)
+                            ),
+                        ));
+                    }
                 }
                 _ => {}
             }

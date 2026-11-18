@@ -45,9 +45,13 @@
 //! each one becomes a note in the report, so a typo is visible without making every lint run
 //! fail. Unknown ids in [`Options::rules`] are an error (the caller typed them just now).
 
+pub mod baseline;
+pub mod ci;
 pub mod fix;
 pub mod helpers;
+pub mod migrate;
 pub mod rules;
+pub mod sarif;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -436,6 +440,12 @@ pub struct Options {
     pub min_severity: Option<Severity>,
     /// Include layers that are not writable when linting the whole workspace.
     pub all: bool,
+    /// `--as-release`: check every unit against this release as well, as if its layer also
+    /// claimed it in `LAYERSERIES_COMPAT` (see [`releases_with_options`]).
+    pub as_release: Option<Release>,
+    /// `--only-release`: with [`Options::as_release`], check against that release alone
+    /// instead of in addition to the layer's own releases.
+    pub only_release: bool,
 }
 
 /// Produces the [`DataStore`] for recipe-scope rules. A seam: tests supply their own.
@@ -552,7 +562,7 @@ pub fn run_with_progress(
         Target::Workspace => LintReach::Sweep,
         Target::Layer(_) | Target::Recipe { .. } | Target::Files { .. } => LintReach::Target,
     };
-    let releases_of = ReleaseCache::new(ws, reach);
+    let releases_of = ReleaseCache::new(ws, reach).with_options(options);
     let mut raw: Vec<Finding> = Vec::new();
     let mut sources = SourceCache::default();
     let mut eval_unavailable = false;
@@ -1025,19 +1035,56 @@ fn files_plan(ws: &Workspace, files: Vec<PathBuf>, lines: Option<LineSpan>) -> P
 struct ReleaseCache<'a> {
     ws: &'a Workspace,
     reach: LintReach,
+    as_release: Option<Release>,
+    only_release: bool,
 }
 
 impl<'a> ReleaseCache<'a> {
     fn new(ws: &'a Workspace, reach: LintReach) -> Self {
-        ReleaseCache { ws, reach }
+        ReleaseCache {
+            ws,
+            reach,
+            as_release: None,
+            only_release: false,
+        }
+    }
+
+    /// The same with [`Options::as_release`] and [`Options::only_release`] applied.
+    fn with_options(self, options: &Options) -> Self {
+        ReleaseCache {
+            as_release: options.as_release,
+            only_release: options.only_release,
+            ..self
+        }
     }
 
     /// The releases a layer is linted against; the workspace release alone for the build
     /// directory or anything that is not a layer.
     fn get(&self, layer: &str) -> Vec<Release> {
-        match self.ws.layer(layer) {
+        let own = match self.ws.layer(layer) {
             Some(l) => l.lint_releases_as(self.ws, self.reach),
             None => vec![self.ws.release.release],
+        };
+        releases_with_options(own, self.as_release, self.only_release)
+    }
+}
+
+/// A unit's releases with `--as-release` applied: `own` plus `as_release` (sorted,
+/// de-duplicated), or `as_release` alone with `only`. Without `as_release`, `own`.
+pub fn releases_with_options(
+    own: Vec<Release>,
+    as_release: Option<Release>,
+    only: bool,
+) -> Vec<Release> {
+    match as_release {
+        None => own,
+        Some(r) if only => vec![r],
+        Some(r) => {
+            let mut v = own;
+            v.push(r);
+            v.sort();
+            v.dedup();
+            v
         }
     }
 }
@@ -1255,8 +1302,9 @@ pub struct LintCliArgs {
     /// Minimum severity to report.
     #[arg(long, value_enum)]
     pub severity: Option<Severity>,
-    /// Output format.
-    #[arg(long, value_enum)]
+    /// Output format (text or json) for library callers; the command line's `--format` is
+    /// [`LintCliArgs::output`].
+    #[arg(skip)]
     pub format: Option<Format>,
     /// Exit with status 1 if any finding is at or above this severity (default: error).
     #[arg(long, value_enum)]
@@ -1274,6 +1322,28 @@ pub struct LintCliArgs {
     /// With --fix: write the fixes into the writable layers, then lint the changed files.
     #[arg(long)]
     pub write: bool,
+    /// Also check against this release, as if each layer claimed it in LAYERSERIES_COMPAT.
+    #[arg(long, value_name = "CODENAME")]
+    pub as_release: Option<String>,
+    /// With --as-release: check against that release only, not the layers' own releases.
+    #[arg(long, requires = "as_release")]
+    pub only_release: bool,
+    /// Migration report: what holds for this release and not for the releases the target
+    /// layers claim now, the features they use that it changed, and their
+    /// LAYERSERIES_COMPAT. Exit status 1 for a new finding at or above --fail-on.
+    #[arg(long, value_name = "CODENAME", conflicts_with_all = ["as_release", "baseline", "write_baseline"])]
+    pub migrate_to: Option<String>,
+    /// Output format: text (default), json, sarif (SARIF 2.1.0) or github (workflow
+    /// command annotations).
+    #[arg(long = "format", value_enum, value_name = "FORMAT")]
+    pub output: Option<ci::OutputFormat>,
+    /// Report, and fail on, only the findings that are not in this baseline file; say how
+    /// many baseline entries matched and how many are stale.
+    #[arg(long, value_name = "FILE", conflicts_with = "write_baseline")]
+    pub baseline: Option<PathBuf>,
+    /// Write the current findings to this baseline file (JSON) and exit 0.
+    #[arg(long, value_name = "FILE")]
+    pub write_baseline: Option<PathBuf>,
 }
 
 /// Runs `sous-chef lint`, printing the report to stdout. Returns the process exit code: 1 if
@@ -1310,7 +1380,12 @@ pub fn cli_with(
         rules: args.rules.clone(),
         min_severity: args.severity,
         all: args.all,
+        as_release: cli_as_release(args)?,
+        only_release: args.only_release,
     };
+    if let Some(code) = ci::dispatch(ws, index, cfg, args, &target, &options, out)? {
+        return Ok(code);
+    }
     let report = run(ws, index, cfg, &target, &options)?;
     let text = render_report(&report, args.format.unwrap_or_default(), usize::MAX);
     out.write_all(text.as_bytes())?;
@@ -1343,15 +1418,34 @@ pub fn cli_fix_with(
         rules: args.rules.clone(),
         min_severity: args.severity,
         all: args.all,
+        as_release: cli_as_release(args)?,
+        only_release: args.only_release,
     };
     let fix_options = fix::FixOptions {
         suggested: args.fix_suggested,
         write: args.write,
     };
+    // `--format` on the command line is `args.output`; tests set `args.format` directly.
+    let json = match (args.output, args.format) {
+        (Some(ci::OutputFormat::Sarif | ci::OutputFormat::Github), _) => {
+            return Err(Error::Invalid {
+                msg: "--fix prints a diff: use --format text or json with it".into(),
+            });
+        }
+        (Some(ci::OutputFormat::Json), _) | (None, Some(Format::Json)) => true,
+        _ => false,
+    };
+    if args.migrate_to.is_some() || args.baseline.is_some() || args.write_baseline.is_some() {
+        return Err(Error::Invalid {
+            msg: "--fix cannot be combined with --migrate-to, --baseline or --write-baseline"
+                .into(),
+        });
+    }
     let report = fix::run(ws, index, cfg, &target, &options, &fix_options)?;
-    let text = match args.format.unwrap_or_default() {
-        Format::Text => fix::render_text(&report),
-        Format::Json => serde_json::to_string(&report).unwrap_or_else(|_| "{}".into()),
+    let text = if json {
+        serde_json::to_string(&report).unwrap_or_else(|_| "{}".into())
+    } else {
+        fix::render_text(&report)
     };
     out.write_all(text.as_bytes())?;
     if !text.ends_with('\n') {
@@ -1361,6 +1455,14 @@ pub fn cli_fix_with(
         &report.final_findings(),
         args.fail_on.unwrap_or(Severity::Error),
     ))
+}
+
+/// `--as-release` parsed ([`Release::parse_arg`]).
+fn cli_as_release(args: &LintCliArgs) -> Result<Option<Release>> {
+    args.as_release
+        .as_deref()
+        .map(|s| Release::parse_arg(s, "--as-release"))
+        .transpose()
 }
 
 #[cfg(test)]

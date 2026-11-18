@@ -79,6 +79,7 @@ fn lint_all(fx: &Fx, rules: &[&str]) -> Vec<Finding> {
         rules: rules.iter().map(|r| r.to_string()).collect(),
         min_severity: None,
         all: true,
+        ..lint::Options::default()
     };
     lint::run(&fx.ws, &fx.idx, &fx.config, &lint::Target::Workspace, &opts)
         .unwrap()

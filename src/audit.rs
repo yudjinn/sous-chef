@@ -82,6 +82,9 @@ pub struct Options {
     pub progress: Option<fn(&str)>,
     /// Per-file progress of the lint stage, `(done, total)` ([`lint::Progress`]).
     pub lint_progress: Option<fn(usize, usize)>,
+    /// `--migrate-to`: add a migration report of the writable layers to this release
+    /// ([`lint::migrate`]) as section 7.
+    pub migrate_to: Option<Release>,
 }
 
 impl Options {
@@ -91,6 +94,7 @@ impl Options {
             generated: None,
             progress: None,
             lint_progress: None,
+            migrate_to: None,
         }
     }
 
@@ -119,6 +123,9 @@ pub struct Audit {
     pub lint: LintSection,
     pub parse: ParseSection,
     pub not_checked: NotChecked,
+    /// Section 7, with `--migrate-to` only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migration: Option<lint::migrate::Migration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -546,6 +553,7 @@ fn assemble(
     opts.say("collecting parse and resolution problems");
     let parse = parse_section(ws, index, &own)?;
     let not_checked = not_checked(ws, index, cfg, &inventory)?;
+    let migration = migration_section(ws, index, cfg, opts)?;
     let summary = summary(
         ws,
         index,
@@ -571,9 +579,33 @@ fn assemble(
         lint,
         parse,
         not_checked,
+        migration,
     };
     scrub_audit(&mut audit, &paths);
     Ok(audit)
+}
+
+/// Section 7: the migration report of the writable layers (every layer when none is) to
+/// `opts.migrate_to`, as `sous-chef lint --migrate-to` gives it.
+fn migration_section(
+    ws: &Workspace,
+    index: &Index,
+    cfg: &Config,
+    opts: &Options,
+) -> Result<Option<lint::migrate::Migration>> {
+    let Some(to) = opts.migrate_to else {
+        return Ok(None);
+    };
+    opts.say(&format!("migration report to {to}"));
+    lint::migrate::report(
+        ws,
+        index,
+        cfg,
+        &lint::Target::Workspace,
+        &lint::Options::default(),
+        to,
+    )
+    .map(Some)
 }
 
 // ---- paths
@@ -2146,6 +2178,9 @@ pub fn render_markdown(a: &Audit) -> String {
     render_lint(&mut md, &a.lint);
     render_parse(&mut md, &a.parse);
     render_not_checked(&mut md, &a.not_checked);
+    if let Some(m) = &a.migration {
+        render_migration(&mut md, m);
+    }
     let mut out = md.out;
     while out.ends_with("\n\n") {
         out.pop();
@@ -2759,6 +2794,117 @@ fn render_not_checked(md: &mut Md, n: &NotChecked) {
     }
 }
 
+/// Section 7, the migration report: the summary, each layer's LAYERSERIES_COMPAT, the new
+/// findings, the findings that already hold (counted by rule), the features with their
+/// uses, and what the report cannot tell.
+fn render_migration(md: &mut Md, m: &lint::migrate::Migration) {
+    md.blank();
+    md.line(&format!("## 7. Migration to {} ({})", m.to, m.to_version));
+    md.blank();
+    md.line(&inline(&m.summary));
+    md.blank();
+    md.line("### LAYERSERIES_COMPAT");
+    let rows: Vec<Vec<String>> = m
+        .layers
+        .iter()
+        .map(|l| {
+            vec![
+                l.layer.clone(),
+                if l.compat.is_empty() {
+                    "-".into()
+                } else {
+                    l.compat.join(" ")
+                },
+                l.pointer.clone().unwrap_or_else(|| "-".into()),
+                l.advice.clone(),
+            ]
+        })
+        .collect();
+    md.table(&["layer", "compat now", "pointer", "change"], &rows);
+    md.line(&format!(
+        "### New with {} ({})",
+        m.to,
+        count(m.new_findings.len(), "finding", "findings")
+    ));
+    if !m.new_findings.is_empty() {
+        let rows: Vec<Vec<String>> = m
+            .new_findings
+            .iter()
+            .map(|f| {
+                vec![
+                    f.severity.as_str().to_string(),
+                    f.rule.to_string(),
+                    format!("`{}`", f.loc),
+                    f.message.clone(),
+                ]
+            })
+            .collect();
+        md.table(&["severity", "rule", "pointer", "message"], &rows);
+    }
+    md.blank();
+    let mut by_rule: BTreeMap<&str, usize> = BTreeMap::new();
+    for f in &m.existing_findings {
+        *by_rule.entry(f.rule).or_default() += 1;
+    }
+    md.line(&format!(
+        "### Already hold ({}){}",
+        count(m.existing_findings.len(), "finding", "findings"),
+        if by_rule.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ": {} (section 4 lists them)",
+                by_rule
+                    .iter()
+                    .map(|(r, n)| format!("{r} {n}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
+    ));
+    md.blank();
+    md.line(&format!(
+        "### Features {} changed that the layers use ({})",
+        m.to,
+        m.features.len()
+    ));
+    md.blank();
+    for f in &m.features {
+        md.line(&format!("- `{}`: {}", f.feature, inline(&f.instruction)));
+        for g in &f.groups {
+            let instead = if g.instead.is_empty() {
+                String::new()
+            } else {
+                format!("; {}", inline(&g.instead))
+            };
+            let shown: Vec<String> = g
+                .pointers
+                .iter()
+                .take(lint::migrate::MAX_POINTERS)
+                .map(|p| format!("`{p}`"))
+                .collect();
+            let more = g.pointers.len().saturating_sub(lint::migrate::MAX_POINTERS);
+            md.line(&format!(
+                "  - {} ({}){instead}: {}{}",
+                inline(&g.what),
+                count(g.pointers.len(), "use", "uses"),
+                shown.join(", "),
+                if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                }
+            ));
+        }
+    }
+    md.blank();
+    md.line("### Not told by this report");
+    md.blank();
+    for c in &m.cannot_tell {
+        md.line(&format!("- {}", inline(c)));
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 // CLI
 
@@ -2783,6 +2929,9 @@ pub struct AuditCliArgs {
     /// Write the report to FILE instead of stdout.
     #[arg(long, value_name = "FILE")]
     pub output: Option<PathBuf>,
+    /// Add section 7: the migration report of the writable layers to this release.
+    #[arg(long, value_name = "CODENAME")]
+    pub migrate_to: Option<String>,
 }
 
 fn progress_to_stderr(msg: &str) {
@@ -2805,6 +2954,11 @@ pub fn cli(cfg: &Config, args: &AuditCliArgs) -> Result<i32> {
         .build()?;
     let opts = Options {
         progress: Some(progress_to_stderr),
+        migrate_to: args
+            .migrate_to
+            .as_deref()
+            .map(|s| Release::parse_arg(s, "--migrate-to"))
+            .transpose()?,
         ..Options::new(&root)
     };
     let audit = rt.block_on(build(&ctx, &opts))?;

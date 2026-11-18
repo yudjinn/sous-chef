@@ -10,7 +10,7 @@ Paths are relative to the audited root; pointers are `layer:path:line`, the path
 
 ## Summary
 
-workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled; 21 indexed files; findings in own layers: 0 error, 3 warning, 1 info; in upstream layers: 0 error, 1 warning, 2 info; 3 items worth attention
+workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled; 21 indexed files; findings in own layers: 0 error, 3 warning, 1 info; in upstream layers: 1 error, 1 warning, 2 info; 3 items worth attention
 
 |  | value |
 |---|---|
@@ -20,7 +20,7 @@ workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled;
 | layers | 3 enabled (1 own, 2 upstream), 1 present but not enabled |
 | files | 21 (5 bb, 3 bbappend, 3 bbclass, 9 conf, 1 inc) |
 | findings, own layers | 0 error, 3 warning, 1 info |
-| findings, upstream layers | 0 error, 1 warning, 2 info |
+| findings, upstream layers | 1 error, 1 warning, 2 info |
 
 ### Most worth attention
 
@@ -87,7 +87,7 @@ None: no recipe or class file name is provided by more than one layer.
 
 ## 4. Lint findings
 
-7 findings in 21 files: own layers and build directory 4 (0 error, 3 warning, 1 info); upstream layers 3 (0 error, 1 warning, 2 info)
+8 findings in 21 files: own layers and build directory 4 (0 error, 3 warning, 1 info); upstream layers 4 (1 error, 1 warning, 2 info)
 
 Every enabled rule over every layer, as `sous-chef lint --all`: upstream layers are checked against the workspace release alone, own layers against every release they claim. Commands below assume the global flags this audit was run with (`--config`, `--build-dir`), run from the root.
 
@@ -115,10 +115,13 @@ Per rule: the count and the first 3 findings; the command after them lists every
 
 | layer | error | warning | info | most frequent rules |
 |---|---|---|---|---|
-| meta-core | 0 | 0 | 1 | org/class-location 1 |
+| meta-core | 1 | 0 | 1 | hygiene/release-removed 1, org/class-location 1 |
 | meta-vendor | 0 | 1 | 1 | org/append-wildcard-broad 1, override/dead 1 |
 
-#### meta-core (1 finding: 0 error, 0 warning, 1 info)
+#### meta-core (2 findings: 1 error, 0 warning, 1 info)
+
+- `hygiene/release-removed` (error, 1)
+  - `meta-core:recipes-core/libfoo/libfoo_2.0.bb:10`: `S = "${WORKDIR}/git"`: from whinlatter on OE-core's do_qa_unpack stops on it, and this layer is checked against wrynose; remove the assignment: the git fetcher unpacks into `${UNPACKDIR}/${BP}` there, which the default S names
 
 - `org/class-location` (info, 1)
   - `meta-core:classes/base.bbclass:1`: class base is in classes/, but every release this layer is checked against (wrynose) searches classes-recipe/ and classes-global/ first; move it to classes-global/ (it is used through INHERIT) and keep the name

@@ -1,0 +1,37 @@
+---
+source: tests/migrate.rs
+expression: text
+---
+migration to wrynose (6.0): 4 findings new with wrynose, 2 already hold; 3 features the layers use that wrynose changed (4 uses)
+
+LAYERSERIES_COMPAT:
+  meta-mine: LAYERSERIES_COMPAT_mine = "scarthgap" (meta-mine:conf/layer.conf:11); write LAYERSERIES_COMPAT_mine = "scarthgap wrynose" once the layer works with wrynose (drop a release when you stop testing with it)
+
+new with wrynose (4 findings):
+severity	rule	pointer	message
+warning	hygiene/release-syntax	meta-mine:recipes-app/app/app_0.1.bb:22	`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
+error	hygiene/workdir-s	meta-mine:recipes-app/old/old_1.0.bb:4	`S = "${WORKDIR}"` is rejected with an error in wrynose, which this layer is checked against; point S at the unpacked sources instead, e.g. `S = "${UNPACKDIR}"` (the variable exists from styhead on)
+warning	hygiene/release-removed	meta-mine:recipes-app/old/old_1.0.bb:6	no whitespace around the assignment operator: from whinlatter on BitBake warns ("has a lack of whitespace around the assignment"), and this layer is checked against wrynose; write `NAME = "value"` with a space on each side
+warning	hygiene/release-syntax	meta-mine:recipes-app/old/old_1.0.bb:8	`${WORKDIR}/old.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/old.c` (or `${S}/old.c` with S = "${UNPACKDIR}")
+
+already hold (2 findings):
+severity	rule	pointer	message
+warning	hygiene/release-removed	meta-mine:recipes-app/old/old_1.0.bb:5	`SERIAL_CONSOLE`: OE-core no longer reads it from mickledore on, so setting it has no effect there, and this layer is checked against wrynose; write `SERIAL_CONSOLES`
+warning	org/append-no-match	meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1	orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer
+
+features wrynose changed that the layers use (3):
+- UnpackDir: from styhead on `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}: change `${WORKDIR}/<file>` to `${UNPACKDIR}/<file>` (5.1 guide, "WORKDIR references in recipes")
+  - ${WORKDIR}/<file> for a file:// source (2 uses)
+    meta-mine:recipes-app/app/app_0.1.bb:22
+    meta-mine:recipes-app/old/old_1.0.bb:8
+- WorkdirAsSourceDir: `S = "${WORKDIR}"` is an error from styhead on: write `S = "${UNPACKDIR}"` (5.1 guide)
+  - S = "${WORKDIR}" (1 use)
+    meta-mine:recipes-app/old/old_1.0.bb:4
+- AssignmentWhitespaceWarning: from whinlatter on BitBake warns about an assignment without whitespace around its operator (5.3 guide, "Space around equal assignment")
+  - assignments without whitespace around the operator (1 use); write `NAME = "value"`
+    meta-mine:recipes-app/old/old_1.0.bb:6
+
+not told by this report:
+- anything that needs a build: QA checks that run in tasks (do_qa_unpack on the unpacked tree, buildpaths, patch fuzz), fetch and unpack results, task signatures, and recipes or classes that the target release's OE-core and the other upstream layers removed or renamed (a DEPENDS on a recipe that is gone)
+- values computed by python (`${@...}`, anonymous python) are not evaluated, so a removed name built by python is not seen
+- only the changes in sous-chef's release table (bitbake-semantics.md, "Releases"; lint-rules.md, "Release removals" lists the migration-guide changes it does not detect)

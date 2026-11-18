@@ -55,15 +55,20 @@ use std::path::{Path, PathBuf};
 use crate::index::{Index, query};
 use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
-use crate::release::{Release, ReleaseSource};
+use crate::release::{Feature, Release, ReleaseSource};
 use crate::types::{FileKind, LineSpan, Loc};
 use crate::workspace::{Layer, Workspace, layers, resolve};
 
 pub struct OrgLayerConf;
 
 /// The first release whose BitBake (2.4) deletes each layer's `LAYERSERIES_COMPAT_<c>`
-/// after its `layer.conf` (BitBake commit 6709aedcc; not in its `2.0` or `2.2` branches).
-pub const COMPAT_DELETED_FROM: Release = Release::Mickledore;
+/// after its `layer.conf` (BitBake commit 6709aedcc; not in its `2.0` or `2.2` branches):
+/// the first release without `Feature::KeptUntilLangdale`.
+pub fn compat_deleted_from() -> Release {
+    Feature::KeptUntilLangdale
+        .removed_in()
+        .unwrap_or(Release::Mickledore)
+}
 
 /// Which check of `org/layer-conf` found a problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -128,6 +133,18 @@ pub struct LayerProblem {
 /// (collections, compat, depends, bbfiles, bbpath). Empty for a layer the workspace does
 /// not have. The index must be refreshed.
 pub fn layer_problems(ws: &Workspace, index: &Index, name: &str) -> Vec<LayerProblem> {
+    layer_problems_for(ws, index, name, &[ws.release.release])
+}
+
+/// [`layer_problems`] for a layer checked against `releases` (the rule passes
+/// [`LintContext::releases`], so `--as-release` and the layer's own claims count): the
+/// copied-`LAYERSERIES_COMPAT` check is an error when one of them deletes the copied value.
+pub fn layer_problems_for(
+    ws: &Workspace,
+    index: &Index,
+    name: &str,
+    releases: &[Release],
+) -> Vec<LayerProblem> {
     let Some(layer) = ws.layer(name) else {
         return Vec::new();
     };
@@ -141,6 +158,11 @@ pub fn layer_problems(ws: &Workspace, index: &Index, name: &str) -> Vec<LayerPro
         index,
         layer,
         stmts,
+        releases: if releases.is_empty() {
+            vec![ws.release.release]
+        } else {
+            releases.to_vec()
+        },
     };
     let mut out = Vec::new();
     conf.collections(&mut out);
@@ -156,6 +178,8 @@ struct Conf<'a> {
     index: &'a Index,
     layer: &'a Layer,
     stmts: Vec<query::StatementRow>,
+    /// The releases the layer is checked against (never empty).
+    releases: Vec<Release>,
 }
 
 impl Conf<'_> {
@@ -256,7 +280,18 @@ impl Conf<'_> {
             } else {
                 format!("\"Layer {c} is not compatible with the core layer\"")
             };
-            let (severity, effect) = if self.ws.release.release >= COMPAT_DELETED_FROM {
+            // The layer's own claims come from the copy here, so they say nothing: the
+            // workspace release counts, and any other release the layer is checked against
+            // (`--as-release`).
+            let deleting = std::iter::once(self.ws.release.release)
+                .chain(
+                    self.releases
+                        .iter()
+                        .copied()
+                        .filter(|r| !layer.compat.iter().any(|c| c == r.codename())),
+                )
+                .any(|r| !r.has(Feature::KeptUntilLangdale));
+            let (severity, effect) = if deleting {
                 (
                     Severity::Error,
                     format!(
@@ -275,7 +310,7 @@ impl Conf<'_> {
                          LAYERSERIES_COMPAT_<collection> after reading its layer.conf, so there \
                          the reference stays literal, names no release, and BitBake stops with \
                          {stop}",
-                        COMPAT_DELETED_FROM.codename()
+                        compat_deleted_from().codename()
                     ),
                 )
             };
@@ -590,7 +625,7 @@ impl Rule for OrgLayerConf {
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
         let Some(name) = cx.layer else { return };
-        for p in layer_problems(cx.ws, cx.index, name) {
+        for p in layer_problems_for(cx.ws, cx.index, name, cx.releases) {
             out.push(Finding {
                 rule: self.id(),
                 severity: p.severity,

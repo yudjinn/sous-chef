@@ -310,6 +310,21 @@ Who reads it:
   setups, not releases: a Wrynose bitbake-setup build has its own `init-build-env` (the
   `bitbake-setup` mode of the runner); see "Build environments" in bitbake-semantics.md.
 
+### Migration report and CI output (branch x2-migrate)
+
+`lint::Options` carries `as_release: Option<Release>` and `only_release: bool`; the
+engine applies them to every unit's releases (`lint::releases_with_options`), so a rule
+sees the extra release in `LintContext::releases` and nothing else changes.
+`lint::migrate::report` runs `lint::run` twice (the layers' own releases, then the target
+release alone) and compares rule and pointer pairs, scans the target's files for uses of
+each `Feature` the target changed, and reads each layer's `LAYERSERIES_COMPAT`; the audit
+calls it for its optional section 7. `hygiene/release-removed` holds the removal table
+(`KeptUntil*` features). The CLI-only options live in `lint::ci::dispatch`, called by
+`lint::cli_with`: `--format sarif` (`lint::sarif`), `--format github`, and the baseline
+(`lint::baseline`: fingerprints hash rule, file and statement text). `LintCliArgs::format`
+stays the library's `render::Format`; the command line's `--format` is
+`LintCliArgs::output`. See docs/ci.md.
+
 ## Index contract (`src/index`)
 
 Location: `$XDG_CACHE_HOME/sous-chef/<sha256 of workspace roots, 16 hex>/index.sqlite`.

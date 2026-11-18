@@ -201,6 +201,7 @@ fn lint_all_reports_no_parse_error_in_data_files() {
             rules: vec!["hygiene/parse-error".into()],
             min_severity: None,
             all: true,
+            ..lint::Options::default()
         },
     )
     .unwrap();

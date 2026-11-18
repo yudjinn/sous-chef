@@ -1,0 +1,8 @@
+---
+source: tests/ci.rs
+expression: out
+---
+::notice file=build/conf/local.conf,line=9,endLine=9,title=org/recipe-change-in-local-conf::`EXTRA_OECONF:append:pn-hello` in local.conf changes only recipe hello, and only in this build directory; move it to a hello_%25.bbappend in your layer as `EXTRA_OECONF:append`, or to your distro conf if it is policy
+::warning file=build/conf/local.conf,line=13,endLine=13,title=override/plus-equals-on-default::`DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = " wayland"`
+::warning file=meta-mine/recipes-app/app/app_0.1.bb,line=22,endLine=22,title=hygiene/release-syntax::`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
+::warning file=meta-mine/recipes-app/orphan/orphan_9.%25.bbappend,line=1,endLine=1,title=org/append-no-match::orphan_9.%25.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer

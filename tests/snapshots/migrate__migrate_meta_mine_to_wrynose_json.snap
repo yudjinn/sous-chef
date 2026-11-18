@@ -1,0 +1,162 @@
+---
+source: tests/migrate.rs
+expression: json
+---
+{
+  "schema": "sous-chef-migration/1",
+  "to": "wrynose",
+  "to_version": "6.0",
+  "summary": "migration to wrynose (6.0): 4 findings new with wrynose, 2 already hold; 3 features the layers use that wrynose changed (4 uses)",
+  "layers": [
+    {
+      "layer": "meta-mine",
+      "variable": "LAYERSERIES_COMPAT_mine",
+      "pointer": "meta-mine:conf/layer.conf:11",
+      "compat": [
+        "scarthgap"
+      ],
+      "releases": [
+        "scarthgap"
+      ],
+      "claims_target": false,
+      "advice": "write LAYERSERIES_COMPAT_mine = \"scarthgap wrynose\" once the layer works with wrynose (drop a release when you stop testing with it)"
+    }
+  ],
+  "new_findings": [
+    {
+      "rule": "hygiene/release-syntax",
+      "severity": "warning",
+      "loc": {
+        "layer": "meta-mine",
+        "path": "recipes-app/app/app_0.1.bb",
+        "lines": {
+          "start": 22,
+          "end": 22
+        }
+      },
+      "message": "`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = \"${UNPACKDIR}\")"
+    },
+    {
+      "rule": "hygiene/workdir-s",
+      "severity": "error",
+      "loc": {
+        "layer": "meta-mine",
+        "path": "recipes-app/old/old_1.0.bb",
+        "lines": {
+          "start": 4,
+          "end": 4
+        }
+      },
+      "message": "`S = \"${WORKDIR}\"` is rejected with an error in wrynose, which this layer is checked against; point S at the unpacked sources instead, e.g. `S = \"${UNPACKDIR}\"` (the variable exists from styhead on)"
+    },
+    {
+      "rule": "hygiene/release-removed",
+      "severity": "warning",
+      "loc": {
+        "layer": "meta-mine",
+        "path": "recipes-app/old/old_1.0.bb",
+        "lines": {
+          "start": 6,
+          "end": 6
+        }
+      },
+      "message": "no whitespace around the assignment operator: from whinlatter on BitBake warns (\"has a lack of whitespace around the assignment\"), and this layer is checked against wrynose; write `NAME = \"value\"` with a space on each side"
+    },
+    {
+      "rule": "hygiene/release-syntax",
+      "severity": "warning",
+      "loc": {
+        "layer": "meta-mine",
+        "path": "recipes-app/old/old_1.0.bb",
+        "lines": {
+          "start": 8,
+          "end": 8
+        }
+      },
+      "message": "`${WORKDIR}/old.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/old.c` (or `${S}/old.c` with S = \"${UNPACKDIR}\")"
+    }
+  ],
+  "existing_findings": [
+    {
+      "rule": "hygiene/release-removed",
+      "severity": "warning",
+      "loc": {
+        "layer": "meta-mine",
+        "path": "recipes-app/old/old_1.0.bb",
+        "lines": {
+          "start": 5,
+          "end": 5
+        }
+      },
+      "message": "`SERIAL_CONSOLE`: OE-core no longer reads it from mickledore on, so setting it has no effect there, and this layer is checked against wrynose; write `SERIAL_CONSOLES`"
+    },
+    {
+      "rule": "org/append-no-match",
+      "severity": "warning",
+      "loc": {
+        "layer": "meta-mine",
+        "path": "recipes-app/orphan/orphan_9.%.bbappend",
+        "lines": {
+          "start": 1,
+          "end": 1
+        }
+      },
+      "message": "orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error (\"No recipes available for\"); there is no orphan recipe; remove the append or add its layer"
+    }
+  ],
+  "features": [
+    {
+      "feature": "UnpackDir",
+      "now": false,
+      "target": true,
+      "instruction": "from styhead on `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}: change `${WORKDIR}/<file>` to `${UNPACKDIR}/<file>` (5.1 guide, \"WORKDIR references in recipes\")",
+      "groups": [
+        {
+          "what": "${WORKDIR}/<file> for a file:// source",
+          "instead": "",
+          "pointers": [
+            "meta-mine:recipes-app/app/app_0.1.bb:22",
+            "meta-mine:recipes-app/old/old_1.0.bb:8"
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "WorkdirAsSourceDir",
+      "now": true,
+      "target": false,
+      "instruction": "`S = \"${WORKDIR}\"` is an error from styhead on: write `S = \"${UNPACKDIR}\"` (5.1 guide)",
+      "groups": [
+        {
+          "what": "S = \"${WORKDIR}\"",
+          "instead": "",
+          "pointers": [
+            "meta-mine:recipes-app/old/old_1.0.bb:4"
+          ]
+        }
+      ]
+    },
+    {
+      "feature": "AssignmentWhitespaceWarning",
+      "now": false,
+      "target": true,
+      "instruction": "from whinlatter on BitBake warns about an assignment without whitespace around its operator (5.3 guide, \"Space around equal assignment\")",
+      "groups": [
+        {
+          "what": "assignments without whitespace around the operator",
+          "instead": "write `NAME = \"value\"`",
+          "pointers": [
+            "meta-mine:recipes-app/old/old_1.0.bb:6"
+          ]
+        }
+      ]
+    }
+  ],
+  "cannot_tell": [
+    "anything that needs a build: QA checks that run in tasks (do_qa_unpack on the unpacked tree, buildpaths, patch fuzz), fetch and unpack results, task signatures, and recipes or classes that the target release's OE-core and the other upstream layers removed or renamed (a DEPENDS on a recipe that is gone)",
+    "values computed by python (`${@...}`, anonymous python) are not evaluated, so a removed name built by python is not seen",
+    "only the changes in sous-chef's release table (bitbake-semantics.md, \"Releases\"; lint-rules.md, \"Release removals\" lists the migration-guide changes it does not detect)"
+  ],
+  "notes": [],
+  "files": 5
+}

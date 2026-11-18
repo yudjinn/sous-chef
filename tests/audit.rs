@@ -158,8 +158,9 @@ async fn fixture_workspace_markdown_and_json() {
     // The fixture is no repository of its own: git facts are unknown, and the enclosing
     // sous-chef checkout is not reported.
     assert!(a.inventory.repositories.is_empty());
-    // lint --all on the fixture: 7 findings (docs/lint-rules.md).
-    assert_eq!(a.lint.own_total.total() + a.lint.upstream_total.total(), 7);
+    // lint --all on the fixture: 8 findings (docs/lint-rules.md); the eighth is
+    // hygiene/release-removed on meta-core's `S = "${WORKDIR}/git"`.
+    assert_eq!(a.lint.own_total.total() + a.lint.upstream_total.total(), 8);
     // No absolute path in either format.
     let root_text = fs::canonicalize(&root).unwrap().display().to_string();
     assert!(!md.contains(&root_text));
@@ -448,6 +449,7 @@ async fn tool_digest_fits_the_budget_and_slice_returns_the_report() {
             root: None,
             budget_tokens: Some(600),
             format: None,
+            ..audit_tool::Args::default()
         },
     )
     .await
@@ -502,6 +504,7 @@ async fn tool_digest_fits_the_budget_and_slice_returns_the_report() {
             root: None,
             budget_tokens: Some(600),
             format: Some(Format::Json),
+            ..audit_tool::Args::default()
         },
     )
     .await
@@ -520,6 +523,7 @@ async fn tool_digest_keeps_the_hint_on_a_tiny_budget() {
             root: None,
             budget_tokens: Some(150),
             format: None,
+            ..audit_tool::Args::default()
         },
     )
     .await

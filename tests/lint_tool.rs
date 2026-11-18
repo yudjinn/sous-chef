@@ -68,6 +68,7 @@ fn args(target: Option<&str>) -> Args {
         fix: None,
         fix_suggested: None,
         write: None,
+        ..Args::default()
     }
 }
 

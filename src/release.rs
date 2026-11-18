@@ -120,6 +120,38 @@ impl Release {
         self >= f.first() && f.last().is_none_or(|last| self <= last)
     }
 
+    /// The release after this one; `None` for the newest.
+    pub fn next(self) -> Option<Release> {
+        let i = Release::ALL.iter().position(|r| *r == self)?;
+        Release::ALL.get(i + 1).copied()
+    }
+
+    /// A release named on the command line or in a tool argument (`--as-release`,
+    /// `--migrate-to`): a supported codename (any case). A codename older than the floor is
+    /// refused, and anything else is an error listing the supported names.
+    pub fn parse_arg(s: &str, what: &str) -> Result<Release> {
+        if let Some(r) = Release::from_codename(s) {
+            return Ok(r);
+        }
+        let known: Vec<&str> = Release::ALL.iter().map(|r| r.codename()).collect();
+        let msg = if Release::is_older_than_floor(s) {
+            format!(
+                "{what}: release {:?} is older than {} ({}), the oldest release sous-chef supports; supported releases: {}",
+                s.trim(),
+                Release::FLOOR,
+                Release::FLOOR.version(),
+                known.join(", ")
+            )
+        } else {
+            format!(
+                "{what}: unknown release {:?}; supported releases: {}",
+                s.trim(),
+                known.join(", ")
+            )
+        };
+        Err(Error::Invalid { msg })
+    }
+
     /// A codename that names a release older than the floor.
     pub fn is_older_than_floor(codename: &str) -> bool {
         let c = codename.trim();
@@ -168,10 +200,49 @@ pub enum Feature {
     /// `RecipePreDeferredInherits` when `native`, `nativesdk`, `crosssdk` or `cross` is among
     /// the deferred inherits, so their override applies while the deferred classes are parsed.
     DeferredInheritsClassOverride,
+    /// The metadata the 4.1 (Langdale) migration guide lists as removed is still there
+    /// (`PEP517_BUILD_API`). One of the `KeptUntil*` features behind `hygiene/release-removed`
+    /// (`src/lint/rules/hygiene_release_removed.rs` lists what each one covers).
+    KeptUntilKirkstone,
+    /// What the 4.2 (Mickledore) guide removes is still there: `SERIAL_CONSOLE`,
+    /// `PACKAGEBUILDPKGD`, the classes `rust-bin` and `package_tar`, the `OEBasic` signature
+    /// handler; and BitBake (before 2.4)
+    /// keeps each layer's `LAYERSERIES_COMPAT_<c>` and `LAYERSERIES_CORENAMES` while the
+    /// other `layer.conf` files are read, so copying them works.
+    KeptUntilLangdale,
+    /// What the 4.3 (Nanbield) guide removes is still there: `PERLARCH`, `PERLVERSION`,
+    /// `QEMU_USE_SLIRP`, `SERIAL_CONSOLES_CHECK`, the class `glide`.
+    KeptUntilMickledore,
+    /// What the 5.0 (Scarthgap) guide removes is still there: `DEPLOY_DIR_TAR`,
+    /// `oldincludedir`.
+    KeptUntilNanbield,
+    /// What the 5.1 (Styhead) guide removes is still there: `TCLIBCAPPEND`,
+    /// `VOLATILE_LOG_DIR` and `VOLATILE_TMP_DIR` (renamed variables from Styhead on), the class
+    /// `siteconfig`, the QA check name `license-incompatible`; and `obsolete-license` is a
+    /// warning (`WARN_QA`), not an error.
+    KeptUntilScarthgap,
+    /// What the 5.2 (Walnascar) guide removes is still there: `BB_DANGLINGAPPENDS_WARNONLY`,
+    /// `PACKAGE_SNAP_LIB_SYMLINKS`, `ACLOCALDIR`, `ACLOCALEXTRAPATH`, the class
+    /// `migrate_localcount`, the image feature
+    /// `debug-tweaks`, the `virtual/${TARGET_PREFIX}gcc`-style toolchain providers; and a git
+    /// URL without `branch=` (BitBake before 2.12) is a warning, not an error.
+    KeptUntilStyhead,
+    /// What the 5.3 (Whinlatter) guide removes is still there: `GPE_MIRROR`,
+    /// `BUILDHISTORY_RESET`, the classes `kernel-fitimage` and `icecc`; and `S` may name a
+    /// directory below `${WORKDIR}` (and `S = "${UNPACKDIR}/git"` is accepted).
+    KeptUntilWalnascar,
+    /// What the 6.0 (Wrynose) guide removes is still there: `DISTRO_FEATURES_BACKFILL` and the
+    /// other feature backfill variables (renamed variables from Wrynose on),
+    /// `CVE_CHECK_SHOW_WARNINGS`, the classes `create-spdx-2.2`, `cve-check` and `oelint`, the
+    /// `bzr`, `osc` and `cvs` fetchers, and the `npm` / `npmsw` fetchers are enabled.
+    KeptUntilWhinlatter,
+    /// BitBake warns about an assignment without whitespace around the operator
+    /// (`FOO="bar"`: "has a lack of whitespace around the assignment").
+    AssignmentWhitespaceWarning,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 12] = [
+    pub const ALL: [Feature; 21] = [
         Feature::SplitClassDirs,
         Feature::InheritDefer,
         Feature::IncludeAll,
@@ -184,6 +255,15 @@ impl Feature {
         Feature::AddPyLib,
         Feature::ClassExtendDeferred,
         Feature::DeferredInheritsClassOverride,
+        Feature::KeptUntilKirkstone,
+        Feature::KeptUntilLangdale,
+        Feature::KeptUntilMickledore,
+        Feature::KeptUntilNanbield,
+        Feature::KeptUntilScarthgap,
+        Feature::KeptUntilStyhead,
+        Feature::KeptUntilWalnascar,
+        Feature::KeptUntilWhinlatter,
+        Feature::AssignmentWhitespaceWarning,
     ];
 
     /// The first supported release that has the feature.
@@ -197,9 +277,19 @@ impl Feature {
             }
             Feature::BuiltinFragments
             | Feature::ClassExtendDeferred
-            | Feature::DeferredInheritsClassOverride => Release::Whinlatter,
+            | Feature::DeferredInheritsClassOverride
+            | Feature::AssignmentWhitespaceWarning => Release::Whinlatter,
             Feature::UnpackDir => Release::Styhead,
-            Feature::WorkdirAsSourceDir | Feature::PrInWorkdir => Release::FLOOR,
+            Feature::WorkdirAsSourceDir
+            | Feature::PrInWorkdir
+            | Feature::KeptUntilKirkstone
+            | Feature::KeptUntilLangdale
+            | Feature::KeptUntilMickledore
+            | Feature::KeptUntilNanbield
+            | Feature::KeptUntilScarthgap
+            | Feature::KeptUntilStyhead
+            | Feature::KeptUntilWalnascar
+            | Feature::KeptUntilWhinlatter => Release::FLOOR,
         }
     }
 
@@ -208,6 +298,14 @@ impl Feature {
         match self {
             Feature::WorkdirAsSourceDir => Some(Release::Scarthgap),
             Feature::PrInWorkdir => Some(Release::Mickledore),
+            Feature::KeptUntilKirkstone => Some(Release::Kirkstone),
+            Feature::KeptUntilLangdale => Some(Release::Langdale),
+            Feature::KeptUntilMickledore => Some(Release::Mickledore),
+            Feature::KeptUntilNanbield => Some(Release::Nanbield),
+            Feature::KeptUntilScarthgap => Some(Release::Scarthgap),
+            Feature::KeptUntilStyhead => Some(Release::Styhead),
+            Feature::KeptUntilWalnascar => Some(Release::Walnascar),
+            Feature::KeptUntilWhinlatter => Some(Release::Whinlatter),
             _ => None,
         }
     }
@@ -229,8 +327,23 @@ impl Feature {
             | Feature::RecipeVirtualProviders
             | Feature::AddPyLib
             | Feature::ClassExtendDeferred
-            | Feature::DeferredInheritsClassOverride => true,
+            | Feature::DeferredInheritsClassOverride
+            | Feature::KeptUntilKirkstone
+            | Feature::KeptUntilLangdale
+            | Feature::KeptUntilMickledore
+            | Feature::KeptUntilNanbield
+            | Feature::KeptUntilScarthgap
+            | Feature::KeptUntilStyhead
+            | Feature::KeptUntilWalnascar
+            | Feature::KeptUntilWhinlatter
+            | Feature::AssignmentWhitespaceWarning => true,
         }
+    }
+
+    /// The first release without the feature, for a feature that ends (`last()` is set and
+    /// is not the newest release).
+    pub fn removed_in(self) -> Option<Release> {
+        self.last().and_then(Release::next)
     }
 }
 
@@ -624,6 +737,15 @@ mod tests {
             (AddPyLib, false, true, true),
             (ClassExtendDeferred, false, false, true),
             (DeferredInheritsClassOverride, false, false, true),
+            (KeptUntilKirkstone, true, false, false),
+            (KeptUntilLangdale, true, false, false),
+            (KeptUntilMickledore, true, false, false),
+            (KeptUntilNanbield, true, false, false),
+            (KeptUntilScarthgap, true, true, false),
+            (KeptUntilStyhead, true, true, false),
+            (KeptUntilWalnascar, true, true, false),
+            (KeptUntilWhinlatter, true, true, false),
+            (AssignmentWhitespaceWarning, false, false, true),
         ];
         assert_eq!(table.len(), Feature::ALL.len());
         for (f, k, s, w) in table {
@@ -653,6 +775,33 @@ mod tests {
         assert!(!Release::Walnascar.has(DeferredInheritsClassOverride));
         assert!(Release::Whinlatter.has(DeferredInheritsClassOverride));
         assert!(Feature::ALL.iter().all(|f| f.verified()));
+        assert!(Release::Walnascar.has(KeptUntilWalnascar));
+        assert!(!Release::Whinlatter.has(KeptUntilWalnascar));
+        assert!(!Release::Walnascar.has(AssignmentWhitespaceWarning));
+        assert_eq!(KeptUntilStyhead.removed_in(), Some(Release::Walnascar));
+        assert_eq!(KeptUntilWhinlatter.removed_in(), Some(Release::Wrynose));
+        assert_eq!(InheritDefer.removed_in(), None);
+        assert_eq!(Release::Wrynose.next(), None);
+        assert_eq!(Release::Kirkstone.next(), Some(Release::Langdale));
+    }
+
+    #[test]
+    fn release_arguments() {
+        assert_eq!(
+            Release::parse_arg("Wrynose", "--as-release").unwrap(),
+            Release::Wrynose
+        );
+        let e = Release::parse_arg("wrynoes", "--as-release")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("unknown release") && e.contains("kirkstone, langdale"),
+            "{e}"
+        );
+        let e = Release::parse_arg("dunfell", "--migrate-to")
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("older than kirkstone"), "{e}");
     }
 
     #[test]
