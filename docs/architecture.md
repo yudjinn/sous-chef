@@ -1357,8 +1357,9 @@ what to do next (for example, list the candidates for an ambiguous recipe name).
 
 ## Configuration (`sous-chef.toml`, optional)
 
-Looked up in the working directory, then given by `--config`. Unknown keys are an error.
-Relative paths are relative to the file's directory.
+`--config FILE` (which must exist), else `sous-chef.toml` in the working directory if
+present, else the defaults. Unknown keys are an error. Relative paths are relative to the
+file's directory; the flags `--build-dir` and `--layer` replace `build_dir` and `layers`.
 
 ```toml
 build_dir = "build"                       # where conf/bblayers.conf lives; optional

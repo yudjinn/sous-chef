@@ -516,7 +516,11 @@ static value is a pointer list; the test recognises functions by the value's sha
 
 ## How far to trust static mode
 
-On this workspace, with the machine and distro given:
+On this workspace, with the machine and distro given. The counts in this section are the
+23-target sample after the w5 fixes; the current totals, with the two `BBCLASSEXTEND`
+variants and the later rounds ("After w12-final"), are 1090 values compared, 702 equal
+(64%), 357 flagged, 31 known gap (29 path spellings, 2 `FILE_LAYERNAME` of a variant) and
+0 bug, and those are the numbers the README quotes.
 
 - **Nothing was wrong without a warning.** 1019 values compared, 0 bugs: every value that
   differed from BitBake either carried `unevaluated_python` / `unresolved` (336) or was a

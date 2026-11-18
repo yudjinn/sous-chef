@@ -152,9 +152,9 @@ files configured took 15.4 s (lint 15.0 s of it).
 
 ## Against the targets
 
-- **Full index under 30 s: met** (1.3 s). Not checked at meta-openembedded scale.
-- **No-change refresh under 150 ms: met** (104 ms median, 110 ms worst), with about 45 ms of
-  headroom. A refresh walks and stats every file (it was not profiled further), so its time
+- **Full index under 30 s: met** (1.3 s; 1.2 s at w9-final). Not checked at meta-openembedded scale.
+- **No-change refresh under 150 ms: met** (104 ms median, 110 ms worst at `67909a3`, with
+  about 45 ms of headroom; 19 ms since w5-fix-eval2, 19.4 ms at w9-final). A refresh walks and stats every file (it was not profiled further), so its time
   grows with the number of files, and a workspace with meta-openembedded (several thousand more files) would likely exceed
   150 ms. The fallbacks the milestone lists (directory mtimes, at most one refresh per N
   seconds, a watcher) were **not** implemented: the target is met here, and this task may
