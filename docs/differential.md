@@ -99,6 +99,7 @@ statically"):
 |---|---|---|---|---|---|---|---|
 | before (w12-final) | 1090 | 702 | 147 | 332 | 25 | 31 | 0 |
 | after | 1090 | 950 | 148 | 74 | 35 | 31 | 0 |
+| x7-cleanup (same dumps, `runs/x7-cleanup/diff/`) | 1090 | 950 | 148 | 74 | 35 | 31 | 0 |
 
 248 values moved from flagged to equal; **no value is unflagged and different** (0 bug,
 and no new known gap). What made it: `MACHINEOVERRIDES` (`soc-family.inc`'s list

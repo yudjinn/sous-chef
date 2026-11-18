@@ -1466,7 +1466,7 @@ code under `src/`.
   marks the six always-loaded tools with Claude Code's `_meta["anthropic/alwaysLoad"] =
   true` (`ALWAYS_LOAD_META_KEY`; `sous-chef/loading`, which no client read, is gone);
   `help_text` uses the full schema and lists each enum value with its doc.
-  `tests/tools_budget.rs` pins `tools/list` under 15,000 bytes (31,539 before x7, 14,088
+  `tests/tools_budget.rs` pins `tools/list` under 15,000 bytes (31,539 before x7, 14,102
   after), the server instructions under 800 and the skill under 3,000.
 - *Rendering.* The budget marker names the budget that returns every row
   (`Table::budget_for_all`; JSON `budget_for_all`, only when rows were dropped).

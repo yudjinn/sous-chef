@@ -114,7 +114,7 @@ without per-value docs, `Option<T>` as `T`, no integer `format`/`minimum`, the s
 long form is this document and `sous-chef://help`, which is generated from the full schema
 and lists every enum value with its doc. Measured with `cargo test --test tools_budget --
 --nocapture`: `tools/list` was 31,539 bytes (about 7,900 tokens at 4 bytes a token) for the
-18 tools before x7 and is 14,088 bytes (about 3,500 tokens) after; the test fails above
+18 tools before x7 and is 14,102 bytes (about 3,500 tokens) after; the test fails above
 15,000 bytes, above 800 bytes of server instructions, or above 3,000 bytes of the skill.
 
 ## Always loaded
