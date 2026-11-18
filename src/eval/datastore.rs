@@ -79,7 +79,9 @@ pub enum OpKind {
     /// A value an OE-core event handler sets while the recipe is finalised, reproduced by the
     /// replay (`base_eventhandler`'s `CLASSOVERRIDE`, `nativesdk_virtclass_handler`'s `PN`
     /// and `MLPREFIX`, `multilib_virtclass_handler`'s `PN`, `MLPREFIX`, `OVERRIDES`): a
-    /// plain `setVar`, `loc` the handler.
+    /// plain `setVar`, `loc` the handler. Also a `PROVIDES` filter of a class-extension
+    /// class computed on the static value (`native_filter`, `suffix_filter`; `loc` the
+    /// handler or `nativesdk.bbclass`'s anonymous python).
     EventHandler,
 }
 

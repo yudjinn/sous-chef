@@ -1113,7 +1113,8 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
     `PACKAGES`, `PACKAGES_DYNAMIC`, renames `<VAR>:<pkg>`), `map_packagevars` (`RDEPENDS`,
     `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RREPLACES`, `RCONFLICTS`, `PKG`),
     `LIBCEXTENSION` / `ABIEXTENSION`. Anonymous python is not run (it is opaque: it hands
-    `d` to `ClassExtender`), so those values may differ and the tools warn.
+    `d` to `ClassExtender`), so those values may differ and the tools warn; except (w12)
+    the `PROVIDES` filter, computed on a static value (see "Providers and versions").
   - `multilib.bbclass`: `multilib_virtclass_handler` (`RecipePreFinalise`, when
     `BBEXTENDCURR == "multilib"`): skips (`SkipRecipe`) a recipe that provides
     `virtual/kernel`, inherits `module-base` or `kernel-fit-image`, or whose `BPN` is in
@@ -1129,7 +1130,8 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
     are set from other values. `multilib_virtclass_handler_postkeyexp`
     (`RecipePostKeyExpansion`): `ClassExtender` filters and renames as for nativesdk, plus
     `INITSCRIPT_PACKAGES`, `USERADD_PACKAGES`, `SYSTEMD_PACKAGES`, `UPDATERCPN` and the
-    `ALTERNATIVE_PRIORITY*` reset.
+    `ALTERNATIVE_PRIORITY*` reset; flagged, except (w12) the `PROVIDES` filter (see
+    "Providers and versions").
 
 sous-chef (w10, `eval::variant`, `replay::recipe_pass` with `Replay::extend_variant`,
 `Replay::finalize`, `Replay::class_extend_handlers`): a target naming a variant (by name,
@@ -1227,16 +1229,47 @@ variant candidates through `variant::provides_forms` (the base words the class c
 into the name: `x` and `x-native` for `x-native`, `a-cross-b` for `a-native-b`,
 `virtual/x` and the passed-through words for `virtual/nativesdk-x` / `nativesdk-x`),
 evaluates each variant and confirms it as for a real recipe; multilib variants are found
-by their `PN` only, and only when nothing else provides the name. The variant's `PROVIDES`:
+by their `PN` only, and only when nothing else provides the name (w11; since w12 also
+through `PROVIDES`, below). The variant's `PROVIDES`:
 for `native`, `native_virtclass_handler` sets `native_filter` (OE-core Wrynose
 `lib/oe/classextend.py`) on it, which BitBake applies to the expanded value on every read
 (`data_smart.getVarFlag` -> `bb.filter.apply_filters`, only for a non-empty value); the
 replay computes it when the value is static and no anonymous python sets `PROVIDES` by name
 (and `BPN` is static when a word holds the variant's `PN`), recorded as a `handler` row with
 a note, else flags it. For `nativesdk` the filter is set by the class's anonymous python
-(`ClassExtender.set_filter("PROVIDES")`, `suffix_filter` / `add_suffix`) and for multilib
-by `multilib_virtclass_handler_postkeyexp`: not computed, so such a variant is listed as an
-uncertain provider (`python`) with a note saying its `PROVIDES` goes through python.
+and for multilib by `multilib_virtclass_handler_postkeyexp`, both through
+`ClassExtender(extname, prefixes, d).set_filter("PROVIDES", deps=False)`, which installs
+`suffix_filter(val, extname, prefixes)`: `add_suffix` on each word of `val.split()`,
+joined with one space (OE-core Wrynose `lib/oe/classextend.py`, read). `add_suffix(val,
+extname, prefixes)`, in order: a word starting with `<extname>-` stays; one ending in
+`-native` or `-native-runtime`, or holding `nativesdk-`, `-cross-` or `-crosssdk-` stays;
+one starting with `<p>-` for a `p` in `prefixes` stays; `kernel-*` and `virtual/kernel`
+stay; `rtld*` and `*-crosssdk` stay; a trailing `-<extname>` is removed (`str.replace`,
+every occurrence); `virtual/x` becomes `virtual/<extname>-x` unless `x` starts with
+`extname` or the word has three or more `-` and ends in `-go`; an absolute path or a
+whole `${...}` stays; anything else not starting with `extname` gets `<extname>-` in
+front. `nativesdk.bbclass` (read): `pn = d.getVar("PN")`, `if not
+pn.startswith("nativesdk-"): return`, then `ClassExtender("nativesdk", [], d)`, so the
+prefixes are empty. `multilib.bbclass` (read): for a non-`image` recipe with
+`BBEXTENDCURR == "multilib"`, `prefixes = (d.getVar("MULTILIB_VARIANTS") or
+"").split()` and `ClassExtender(variant, prefixes, d)`, `variant = BBEXTENDVARIANT`, also
+for `cross-canadian` (its return comes after the `PROVIDES` filter). OE-core's
+`conf/multilib.conf` sets `MULTILIB_VARIANTS = "${@extend_variants(d,'MULTILIBS','multilib')}"`
+(python) and `BBCLASSEXTEND:append = " ${MULTILIBS}"`. **sous-chef (w12)** computes both
+like the `native` one, when the value is static and no other python sets `PROVIDES` by
+name: `nativesdk` when the anonymous function is the one read (the `ClassExtender` line
+with `[]` and the `set_filter("PROVIDES", deps=False)` at the function's top level, and
+`PROVIDES` named nowhere else in it) and `PN` starts with `nativesdk-` (a `PN` not known
+statically flags it); multilib when the handler is the one read and the variant is known,
+with the prefixes from a static `MULTILIB_VARIANTS`; when that holds python (as in
+OE-core), a word is still computed when the prefixes cannot touch it (no `-` in it, or
+decided before the prefix test), and otherwise `PROVIDES` is flagged with a note naming
+the word and `MULTILIB_VARIANTS`. A variant whose `PROVIDES` stays flagged is listed as an
+uncertain provider (`python`). `Providers::providers` also finds multilib variants through
+their rewritten `PROVIDES` (`variant::multilib_provides_forms`: `<v>-x` from `x` and
+`x-<v>`, `virtual/<v>-x` from `virtual/x`, and the words `add_suffix` passes through), for
+the variants `v` the configuration's `BBCLASSEXTEND` lists as `multilib:<v>`; other
+multilib variants by `PN` only, as before.
 (w10) `PREFERRED_PROVIDERS` is read as above (`Providers::preference`,
 `ProviderReason::PreferredProviders`): from the configuration's value, its static words
 only (a value with python adds a note that an entry may be missing); a malformed word
@@ -1765,7 +1798,19 @@ file name, the layer order. `src/workspace/kas.rs` implements what follows.
   `BUILDDIR` and `BBPATH` (the build directory), a minimal `PATH`, `PYTHONPATH`,
   `OE_ADDED_PATHS`, `BB_ENV_PASSTHROUGH_ADDITIONS`, and `HOME` to a temporary directory
   (observed). So sous-chef can only use `KAS_*` from the environment it was started in, and
-  only when that names a directory containing, or inside, its working directory.
+  only when that names a directory containing, or inside, its working directory, the
+  configured build directory or a configured kas file.
+- Read in kas 5.5 `context.py` (`Context.__init__`): `work_dir =
+  os.environ.get('KAS_WORK_DIR', os.getcwd())`, `build_dir =
+  os.environ.get('KAS_BUILD_DIR', os.path.join(work_dir, 'build'))`, both made absolute.
+  So the work directory is wherever the user runs kas, which sous-chef cannot know. What it
+  can see is what kas left: a build directory with kas's `CACHEDIR.TAG` (`# kas build
+  directory`) is `<work dir>/build` unless `KAS_BUILD_DIR` was used, so sous-chef takes
+  `KAS_WORK_DIR`, else the parent of such a build directory (the configured one,
+  `KAS_BUILD_DIR`, `build/` next to sous-chef.toml or in its working directory), else
+  the directory of sous-chef.toml (marked as a guess), else its working directory (a
+  guess). With a guessed work directory, where the remote repositories are cloned is a
+  guess too, and `org/generated-conf-edit` does not judge `BBLAYERS` entries (w12).
 - kas refuses to start when `NETRC_FILE` names a file that does not exist (observed).
 
 **Running a command** (`plugins/shell.py`). `kas shell <files> -c <cmd>` runs
@@ -2067,7 +2112,8 @@ in the live environment:
 - `inherit` / `require` whose argument depends on any of the above
 - **class-extended variants** (`BBCLASSEXTEND`): evaluated since w10 (see "Class-extended
   variants" under "Parse order"). What stays out: the filters and package-variable renames
-  of the class-extension handlers and of `nativesdk.bbclass`'s anonymous python (flagged);
+  of the class-extension handlers and of `nativesdk.bbclass`'s anonymous python (flagged;
+  the `PROVIDES` filters are computed on static values since w11 / w12);
   a variant whose `BBCLASSEXTEND` word only python or a global `BBCLASSEXTEND:append`
   (multilib configuration) adds is not found **by name** (the tools' name test reads the
   static words of the recipe's files first), though the pointer
@@ -2138,7 +2184,23 @@ in the live environment:
     note adds that BitBake may give that reason instead), "may skip" naming the list that is
     not known (python, undefined variables, a value anonymous python or a handler changes),
     nothing when every check passes on known words. Message word order: Python joins a
-    `set`; here the words are sorted.
+    `set`; here the words are sorted. (w12) "Known words" are taken as present only when
+    they are certain (`skips::Words::certain`, from `DataStore::history`): every word of a
+    value that is not flagged; for a flagged value, a word some operation contributed that
+    is `Applied` with no uncertain override decision on it (no override condition, or
+    every element of it written in `OVERRIDES`, or `OVERRIDES` itself certain), taken from
+    the operation's expanded text when that is certain and else from its literal words, and
+    that no `:remove` whose condition is not certain can take out. No word is certain when
+    an override variant of the value that is inactive may be active (it would replace the
+    whole value), when a `:remove` with python or undefined variables may apply, or when a
+    statement the replay could not apply, or a file reached through an uncertain
+    reference, may set it. A check whose outcome depends on a word that is only possibly
+    present (in the features or in the `REQUIRED_` / `CONFLICT_` / `ANY_OF_` lists) gives
+    "may skip" naming it ("'x11' only possibly in DISTRO_FEATURES (an override decision on
+    it depends on OVERRIDES, which is not known statically)"), never "would skip" and never
+    silence. A value flagged only because it holds inline python keeps its literal words as
+    certain, as before. The `RecipeParsed` check below decides on the certain `virtual/`
+    words of `PROVIDES` and `BB_MULTI_PROVIDER_ALLOWED` the same way.
   - **`base_eventhandler` on `RecipeParsed`** (OE-core Wrynose `classes-global/base.bbclass`;
     Kirkstone and Scarthgap the same code with `SOURCE_MIRROR_FETCH` tested as a plain
     string): unless `SOURCE_MIRROR_FETCH` is true, for each word `p` of the recipe's final
@@ -2158,7 +2220,10 @@ in the live environment:
   newlib, picolibc, mesa-gl, linux-dummy, linux-yocto-dev, linux-yocto-rt, linux-yocto-tiny
   for their virtual providers; systemd for `CONFLICT_DISTRO_FEATURES = "sysvinit"`), none of
   them one BitBake parsed; most `features_check` notes are "may skip" because the static
-  `DISTRO_FEATURES` there holds python.
+  `DISTRO_FEATURES` there holds python. (w12) With the certain-words rule the counts there
+  are unchanged (13 "would skip", 274 "may skip"): the words those notes decide on come from
+  operations applied with no uncertain override decision, and no uncertain `:remove` or
+  override variant of the `*_FEATURES` values applies.
 - **`INCOMPATIBLE_LICENSE`** (OE-core Wrynose `33a6bd6c`, `classes-global/base.bbclass`
   anonymous python lines 591-621, only when neither `SOURCE_MIRROR_FETCH` nor
   `PARSE_ALL_RECIPES` is true; `lib/oe/license.py` `skip_incompatible_package_licenses`,
@@ -2221,7 +2286,11 @@ against BitBake's behaviour or output:
 - The variant class order on Scarthgap ("Class-extended variants") and the `native`
   `PROVIDES` filter: from the BitBake / OE-core source and fixture tests; the filter's
   result matched `bitbake -e gmp-native` (`PROVIDES`, differential.md "After w11-final");
-  no Scarthgap workspace was run.
+  no Scarthgap workspace was run. (w12) The `nativesdk` and multilib `PROVIDES` filters:
+  from the OE-core source (`lib/oe/classextend.py`, `nativesdk.bbclass`,
+  `multilib.bbclass`) and fixture tests; the `nativesdk` result matched `bitbake -e
+  nativesdk-zlib` (differential.md "After w12-final"); the multilib one was not compared
+  (the live workspace has no multilib configuration).
 - The class type of an `inherit` in an `.inc` that a `.conf` or a global class reaches
   ("Which handler parses an included file"): from the source and tests; no such `inherit`
   exists on yocto-kiss (every `inherit` in an `.inc` there is reached from recipes only).

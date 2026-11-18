@@ -169,6 +169,12 @@ pub struct ReplayNotes {
     /// the variable by `expand_keys`. See [`DataStore::is_function`].
     #[serde(skip)]
     pub(crate) functions: BTreeSet<String>,
+    /// `nativesdk.bbclass`'s anonymous python, recognised as installing the `PROVIDES`
+    /// filter ([`nativesdk_provides_filter`]): where, and whether it does so only for a
+    /// `PN` starting with `nativesdk-` (its guard). Kept here, not on the replay, so a
+    /// datastore copy (`multi_finalize`'s `safe_d`) carries it. Taken by finalisation.
+    #[serde(skip)]
+    pub(crate) nativesdk_anon: Option<(Loc, bool)>,
 }
 
 /// One anonymous python function.
@@ -1061,11 +1067,13 @@ fn static_value(ds: &DataStore, name: &str) -> Option<Option<String>> {
 
 /// What is known of the list value `name` ([`skips::Words`]): unset is empty and known; a
 /// value anonymous python or a handler changes by name is not known at all; otherwise its
-/// known words, complete when it holds no python and no undefined variable.
+/// known words, complete when it holds no python and no undefined variable, and the ones
+/// certainly in it ([`certain_words`]).
 fn words_of(ds: &DataStore, name: &str) -> skips::Words {
     if ds.replay().python_vars.contains(name) {
         return skips::Words {
             known: BTreeSet::new(),
+            certain: BTreeSet::new(),
             complete: false,
             why: Some(unknown_why(ds, name)),
         };
@@ -1082,11 +1090,91 @@ fn words_of(ds: &DataStore, name: &str) -> skips::Words {
     let complete = !v.unevaluated_python
         && v.unresolved.is_empty()
         && all.iter().all(|w| !pwords::is_unevaluated(w));
+    let certain = if complete {
+        known.clone()
+    } else {
+        certain_words(ds, name, &known)
+    };
     skips::Words {
         known,
+        certain,
         complete,
         why: (!complete).then(|| unknown_why(ds, name)),
     }
+}
+
+/// The words of `known` (the known words of the flagged value `name`) that are certainly in
+/// it, read from its history: a word some operation contributed that is `Applied` with no
+/// uncertain override decision on it (no override condition, `OVERRIDES` itself is certain,
+/// or every element of the condition is written in `OVERRIDES`), taken from the operation's
+/// expanded text when that is certain, else from its
+/// literal words; less the words a `:remove` whose decision or text is not certain may take
+/// out. None at all when a statement the replay could not apply, or an uncertain reference,
+/// may set it (`unresolved_vars`, `uncertain_vars`), when an override variant of it that is
+/// inactive may be active and replace the value, or when an uncertain `:remove`'s text is
+/// not known.
+fn certain_words(ds: &DataStore, name: &str, known: &BTreeSet<String>) -> BTreeSet<String> {
+    let notes = ds.replay();
+    if notes.uncertain_vars.contains(name) || notes.unresolved_vars.contains_key(name) {
+        return BTreeSet::new();
+    }
+    let ovr = ds.value("OVERRIDES").unwrap_or_default();
+    let ovr_certain = !ovr.unevaluated_python && ovr.unresolved.is_empty();
+    // Entries written in OVERRIDES are in it whatever its python adds.
+    let present: BTreeSet<&str> = pwords::colon_parts(&ovr.text)
+        .into_iter()
+        .filter(|e| !e.is_empty() && !pwords::is_unevaluated(e))
+        .collect();
+    let keyword = |o: &str| matches!(o, "append" | "prepend" | "remove");
+    let mut certain = BTreeSet::new();
+    let mut removable = BTreeSet::new();
+    for (op, st) in ds.history(name) {
+        if op.var.flag.is_some() || op.var.legacy_syntax {
+            continue;
+        }
+        let remove = op.var.overrides.iter().any(|o| o == "remove");
+        let has_keyword = op.var.overrides.iter().any(|o| keyword(o));
+        let conditional = op.var.overrides.iter().any(|o| !keyword(o));
+        // The override decision is certain: no condition, OVERRIDES is certain, or every
+        // element of the condition is written in OVERRIDES (so active for sure).
+        let decided = !conditional
+            || ovr_certain
+            || op
+                .var
+                .overrides
+                .iter()
+                .filter(|o| !keyword(o))
+                .flat_map(|o| o.split(':'))
+                .all(|e| present.contains(e));
+        let e = ds.expand(&op.value);
+        let e_certain = !e.unevaluated_python && e.unresolved.is_empty();
+        if remove {
+            // An applied, certain remove took its words out already; one whose decision or
+            // text is not certain may take words out.
+            if decided && st == OpStatus::InactiveOverride {
+                continue;
+            }
+            if !e_certain {
+                return BTreeSet::new();
+            }
+            if !decided {
+                removable.extend(pwords::known_words(&e.text).into_iter().map(str::to_string));
+            }
+            continue;
+        }
+        if conditional && !has_keyword && st == OpStatus::InactiveOverride && !decided {
+            return BTreeSet::new();
+        }
+        if st == OpStatus::Applied && decided {
+            let text = if e_certain { e.text } else { op.value.clone() };
+            certain.extend(pwords::known_words(&text).into_iter().map(str::to_string));
+        }
+    }
+    certain
+        .intersection(known)
+        .filter(|w| !removable.contains(*w))
+        .cloned()
+        .collect()
 }
 
 /// The reasons BitBake would, or may, skip the recipe, as `note:` lines. OE-core
@@ -1264,8 +1352,14 @@ fn unknown_why(ds: &DataStore, name: &str) -> String {
     if ds.replay().python_vars.contains(name) {
         return "anonymous python sets it".into();
     }
+    if ds.replay().uncertain_vars.contains(name) {
+        return "a file reached through a reference that is not certain sets it".into();
+    }
     match ds.value(name) {
-        Some(v) if v.unevaluated_python => "it holds python".into(),
+        Some(v) if v.unevaluated_python && v.text.contains("${@") => "it holds python".into(),
+        Some(v) if v.unevaluated_python => {
+            "an override decision on it depends on OVERRIDES, which is not known statically".into()
+        }
         Some(v) if !v.unresolved.is_empty() => {
             format!("it uses undefined variables: {}", v.unresolved.join(", "))
         }
@@ -1958,9 +2052,51 @@ struct Replay<'a> {
     /// `(variable, value, origin)` kas would write into `local.conf` as `VAR ??= "value"`,
     /// still to be applied (a kas project without a build directory; see `config_pass`).
     kas_local: Vec<(String, String, String)>,
-    /// `native_virtclass_handler` set its `native_filter` on `PROVIDES`: `(pn, bpn, where)`
-    /// as the handler captured them (`bpn` `None` when not known statically).
-    native_provides: Option<(String, Option<String>, Loc)>,
+    /// The filter a class-extension class set on `PROVIDES`, and where (the last one set
+    /// wins, as `setVarFilter` replaces), applied at the end of finalisation.
+    provides_filter: Option<(ProvidesFilter, Loc)>,
+}
+
+/// A filter OE-core's class-extension classes put on `PROVIDES` (`d.setVarFilter`, through
+/// `oe.classextend`; OE-core Wrynose `lib/oe/classextend.py`).
+#[derive(Debug, Clone)]
+enum ProvidesFilter {
+    /// `native_virtclass_handler` (`classes-recipe/native.bbclass`): `native_filter(val, pn,
+    /// bpn)` with `pn` and `bpn` as the handler captured them (`bpn` `None` when not known
+    /// statically).
+    Native { pn: String, bpn: Option<String> },
+    /// `nativesdk.bbclass`'s anonymous python: `ClassExtender("nativesdk", [], d)`,
+    /// `set_filter("PROVIDES", deps=False)`, so `suffix_filter(val, 'nativesdk', [])`.
+    NativeSdk,
+    /// `multilib_virtclass_handler_postkeyexp` (`classes/multilib.bbclass`):
+    /// `ClassExtender(variant, prefixes, d)` with `prefixes` the words of
+    /// `MULTILIB_VARIANTS` when the handler ran (`None`: not known statically), then
+    /// `set_filter("PROVIDES", deps=False)`.
+    Multilib {
+        variant: String,
+        prefixes: Option<Vec<String>>,
+    },
+}
+
+impl ProvidesFilter {
+    /// Who installs it, for the notes.
+    fn who(&self) -> &'static str {
+        match self {
+            ProvidesFilter::Native { .. } => "native_virtclass_handler (an OE-core event handler",
+            ProvidesFilter::NativeSdk => "the anonymous python of nativesdk.bbclass (OE-core",
+            ProvidesFilter::Multilib { .. } => {
+                "multilib_virtclass_handler_postkeyexp (an OE-core event handler"
+            }
+        }
+    }
+
+    /// The filter function's name in `lib/oe/classextend.py`.
+    fn function(&self) -> &'static str {
+        match self {
+            ProvidesFilter::Native { .. } => "native_filter",
+            _ => "suffix_filter",
+        }
+    }
 }
 
 impl<'a> Replay<'a> {
@@ -1986,7 +2122,7 @@ impl<'a> Replay<'a> {
             taint: Vec::new(),
             overlay: None,
             kas_local: Vec::new(),
-            native_provides: None,
+            provides_filter: None,
         }
     }
 
@@ -2424,7 +2560,23 @@ impl<'a> Replay<'a> {
         {
             bases.extend(pwords::known_words(&v.text).into_iter().map(str::to_string));
         }
+        // nativesdk.bbclass's `set_filter("PROVIDES", ...)`: BitBake applies the filter when
+        // the value is read, so finalisation computes it (`apply_provides_filter`) or flags
+        // `PROVIDES` then; until this function runs the value is the unfiltered one.
+        let sdk = st
+            .loc
+            .path
+            .file_name()
+            .is_some_and(|f| f == "nativesdk.bbclass")
+            .then(|| body.as_deref().and_then(nativesdk_provides_filter))
+            .flatten();
+        if sdk.is_some() {
+            bases.retain(|b| b != "PROVIDES");
+        }
         let notes = Arc::make_mut(&mut self.ds.notes);
+        if let Some(guard) = sdk {
+            notes.nativesdk_anon = Some((st.loc.clone(), guard));
+        }
         notes.python_vars.extend(bases);
         notes.anonymous.push(AnonPython {
             loc: st.loc.clone(),
@@ -3239,11 +3391,13 @@ impl Replay<'_> {
         let incomplete = self.ds.expand_keys();
         Arc::make_mut(&mut self.ds.notes).incomplete_keys = incomplete;
         self.multilib_postkeyexp(recipe);
-        // (BitBake runs anonymous python here, which the replay does not.)
+        // (BitBake runs anonymous python here, which the replay does not, except for the
+        // PROVIDES filter nativesdk.bbclass's installs.)
+        self.nativesdk_anonymous_filter();
         if self.ws.release.release.has(Feature::RecipeVirtualProviders) {
             virtual_recipe_providers(&mut self.ds, recipe);
         }
-        self.apply_native_provides_filter();
+        self.apply_provides_filter();
         let mut skip = skip_reasons(&self.ds);
         skip.extend(self.features_check_notes());
         skip.extend(self.virtual_provider_notes());
@@ -3384,33 +3538,119 @@ impl Replay<'_> {
             .any(|p| p.file_name().is_some_and(|f| f.to_string_lossy() == needle))
     }
 
-    /// `native_virtclass_handler`'s `d.setVarFilter("PROVIDES", "native_filter(val, pn,
-    /// bpn)")`: BitBake applies the filter to the expanded value on every `getVar` (BitBake
-    /// 2.18.0 `data_smart.getVarFlag`, `bb.filter.apply_filters`, only for a non-empty
-    /// value), so the final `PROVIDES`, the one `bb.cache.CoreRecipeInfo` registers for the
-    /// variant, is `native_filter(<final expanded value>)`. Computed here when that value is
-    /// static and no anonymous python sets `PROVIDES` by name; then recorded as a handler
-    /// operation with a note. Otherwise `PROVIDES` is flagged, as before w11.
-    fn apply_native_provides_filter(&mut self) {
-        const NATIVE: &str = "native_virtclass_handler";
-        let Some((pn, bpn, loc)) = self.native_provides.take() else {
+    /// `nativesdk.bbclass`'s anonymous python (recorded by [`Replay::anonymous`] when it
+    /// installs the `PROVIDES` filter), at the point BitBake runs anonymous python: the
+    /// filter is set when `PN` starts with `nativesdk-` (or the function has no such guard);
+    /// when `PN` is not known statically, `PROVIDES` is flagged.
+    fn nativesdk_anonymous_filter(&mut self) {
+        if self.ds.notes.nativesdk_anon.is_none() {
+            return;
+        }
+        let Some((loc, guard)) = Arc::make_mut(&mut self.ds.notes).nativesdk_anon.take() else {
+            return;
+        };
+        let applies = if guard {
+            match static_value(&self.ds, "PN") {
+                Some(Some(pn)) => Some(pn.starts_with("nativesdk-")),
+                _ => None,
+            }
+        } else {
+            Some(true)
+        };
+        match applies {
+            Some(true) => self.provides_filter = Some((ProvidesFilter::NativeSdk, loc)),
+            Some(false) => {}
+            None => self.flag_provides_filter(
+                &ProvidesFilter::NativeSdk,
+                &loc,
+                "PN is not known statically, so whether it applies is not known",
+            ),
+        }
+    }
+
+    /// `PROVIDES` flagged: `filter` (installed at `loc`) may change it, and `why` it was not
+    /// computed.
+    fn flag_provides_filter(&mut self, filter: &ProvidesFilter, loc: &Loc, why: &str) {
+        if let ProvidesFilter::Native { .. } = filter {
+            // As before w12 (the handler's other filters are flagged the same way).
+            self.handler_flags(
+                "native_virtclass_handler",
+                loc,
+                &strings(&["PROVIDES"]),
+                "filters",
+            );
+            return;
+        }
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        notes.python_vars.insert("PROVIDES".into());
+        let line = format!(
+            "note: {} at {loc}) filters PROVIDES with {} (OE-core lib/oe/classextend.py), which BitBake applies when the value is read; {why}, so the value shown is the one before the filter",
+            filter.who(),
+            filter.function()
+        );
+        let e = notes.var_notes.entry("PROVIDES".into()).or_default();
+        if !e.contains(&line) {
+            e.push(line);
+        }
+        self.ds.ovr_cache = OnceLock::new();
+    }
+
+    /// The `PROVIDES` filter of a class-extension class ([`ProvidesFilter`]):
+    /// `native_virtclass_handler`'s `native_filter`, `nativesdk.bbclass`'s and
+    /// `multilib_virtclass_handler_postkeyexp`'s `suffix_filter` (`ClassExtender.set_filter
+    /// ("PROVIDES", deps=False)`). BitBake applies a filter to the expanded value on every
+    /// `getVar` (BitBake 2.18.0 `data_smart.getVarFlag`, `bb.filter.apply_filters`, only for
+    /// a non-empty value), so the final `PROVIDES`, the one `bb.cache.CoreRecipeInfo`
+    /// registers for the variant, is the filter of the final expanded value. Computed here
+    /// when that value is static, no other python sets `PROVIDES` by name and the filter's
+    /// own inputs are known (`pn`, `bpn`; the multilib prefixes, `MULTILIB_VARIANTS`, when a
+    /// word could depend on them); then recorded as a handler operation with a note.
+    /// Otherwise `PROVIDES` is flagged, saying why.
+    fn apply_provides_filter(&mut self) {
+        let Some((filter, loc)) = self.provides_filter.take() else {
             return;
         };
         let v = self.ds.value("PROVIDES").unwrap_or_default();
         let by_python = self.ds.notes.python_vars.contains("PROVIDES");
-        let computed = if by_python || v.unevaluated_python || !v.unresolved.is_empty() {
-            None
-        } else {
-            match super::variant::native_filter(&v.text, &pn, bpn.as_deref()) {
-                None => return,
-                Some(Ok(t)) => Some(t),
-                Some(Err(())) => None,
+        if by_python || v.unevaluated_python || !v.unresolved.is_empty() {
+            let why = if by_python || v.unevaluated_python {
+                "the value depends on python that was not run".to_string()
+            } else {
+                format!("the value needs {}", v.unresolved.join(", "))
+            };
+            self.flag_provides_filter(&filter, &loc, &why);
+            return;
+        }
+        let computed = match &filter {
+            ProvidesFilter::Native { pn, bpn } => {
+                super::variant::native_filter(&v.text, pn, bpn.as_deref()).map(|r| {
+                    r.map_err(|()| format!("BPN is not known statically and a word contains {pn}"))
+                })
+            }
+            ProvidesFilter::NativeSdk => {
+                super::variant::suffix_filter(&v.text, "nativesdk", Some(&[]))
+                    .map(|r| r.map_err(|w| format!("the word {w} depends on prefixes")))
+            }
+            ProvidesFilter::Multilib { variant, prefixes } => {
+                let p: Option<Vec<&str>> = prefixes
+                    .as_ref()
+                    .map(|p| p.iter().map(String::as_str).collect());
+                super::variant::suffix_filter(&v.text, variant, p.as_deref()).map(|r| {
+                    r.map_err(|w| {
+                        format!(
+                            "MULTILIB_VARIANTS (the prefixes it leaves alone) is not known statically and decides what becomes of {w}"
+                        )
+                    })
+                })
             }
         };
         match computed {
-            Some(t) => {
+            None => {}
+            Some(Ok(t)) => {
                 let note = format!(
-                    "note: {NATIVE} (an OE-core event handler at {loc}) filters PROVIDES with native_filter (OE-core lib/oe/classextend.py), which BitBake applies when the value is read: \"{}\" becomes \"{t}\" (computed from the static value)",
+                    "note: {} at {loc}) filters PROVIDES with {} (OE-core lib/oe/classextend.py), which BitBake applies when the value is read: \"{}\" becomes \"{t}\" (computed from the static value)",
+                    filter.who(),
+                    filter.function(),
                     v.text
                 );
                 self.ds
@@ -3422,8 +3662,18 @@ impl Replay<'_> {
                     .or_default()
                     .push(note);
             }
-            None => self.handler_flags(NATIVE, &loc, &strings(&["PROVIDES"]), "filters"),
+            Some(Err(why)) => self.flag_provides_filter(&filter, &loc, &why),
         }
+    }
+
+    /// The text of the python function `name` (its pieces, in order), read from disk.
+    fn function_body(&self, name: &str) -> Option<String> {
+        let pieces = self.ds.function(name)?;
+        let mut out = Vec::new();
+        for p in pieces {
+            out.push(self.body_text(&p.loc)?);
+        }
+        Some(out.join("\n"))
     }
 
     /// The text of the anonymous python function defined in class `<class>.bbclass`.
@@ -3554,7 +3804,7 @@ impl Replay<'_> {
         let pn = static_value(&self.ds, "PN").flatten();
         let mut unknown = Vec::new();
         for p in provides.known.iter().filter(|p| p.starts_with("virtual/")) {
-            if allowed.known.contains(p) {
+            if allowed.certain.contains(p) {
                 continue;
             }
             let pref_name = format!("PREFERRED_PROVIDER_{p}");
@@ -3581,7 +3831,13 @@ impl Replay<'_> {
                 continue;
             };
             let mut why = Vec::new();
-            if !allowed.complete {
+            if !provides.certain.contains(p) {
+                why.push(format!(
+                    "{p} is only possibly in PROVIDES ({})",
+                    provides.why.as_deref().unwrap_or("not certain")
+                ));
+            }
+            if !allowed.complete || allowed.known.contains(p) {
                 why.push(format!(
                     "BB_MULTI_PROVIDER_ALLOWED is not known statically ({}), and could list {p}",
                     allowed.why.as_deref().unwrap_or("not evaluated")
@@ -3663,7 +3919,7 @@ impl Replay<'_> {
                     let unsure = ce.unevaluated_python || !ce.unresolved.is_empty();
                     if ce.text.contains("native") || unsure || pn.is_none() {
                         // The PROVIDES filter is computed at the end of finalisation
-                        // ([`Replay::apply_native_provides_filter`]) when PN is known and
+                        // ([`Replay::apply_provides_filter`]) when PN is known and
                         // the filter certainly applies; otherwise flagged with the rest.
                         let certain = !unsure && ce.text.contains("native");
                         match (&pn, certain) {
@@ -3675,7 +3931,10 @@ impl Replay<'_> {
                                         .filter(|v| **v != "PROVIDES")
                                         .map(|v| v.to_string()),
                                 );
-                                self.native_provides = Some((p.clone(), bpn, loc.clone()));
+                                self.provides_filter = Some((
+                                    ProvidesFilter::Native { pn: p.clone(), bpn },
+                                    loc.clone(),
+                                ));
                             }
                             _ => vars.extend(strings(NATIVE_FILTERED)),
                         }
@@ -3938,7 +4197,24 @@ impl Replay<'_> {
             return;
         }
         let loc = self.handler_loc(H, recipe);
-        let mut vars = strings(&["DEPENDS", "PACKAGE_WRITE_DEPS", "PROVIDES"]);
+        let mut vars = strings(&["DEPENDS", "PACKAGE_WRITE_DEPS"]);
+        // The PROVIDES filter is computed at the end of finalisation
+        // ([`Replay::apply_provides_filter`]) when the variant is known and the handler is
+        // the one read in OE-core; otherwise flagged with the rest.
+        let body = self.function_body(H);
+        match (self.multilib_variant(), body.as_deref()) {
+            (Ok(Some(variant)), Some(b)) if multilib_provides_filter(b) => {
+                let prefixes = static_value(&self.ds, "MULTILIB_VARIANTS").map(|v| {
+                    v.unwrap_or_default()
+                        .split_whitespace()
+                        .map(str::to_string)
+                        .collect()
+                });
+                self.provides_filter =
+                    Some((ProvidesFilter::Multilib { variant, prefixes }, loc.clone()));
+            }
+            _ => vars.push("PROVIDES".into()),
+        }
         if !self.inherits_class("cross-canadian") {
             vars.extend(strings(&["PACKAGES", "PACKAGES_DYNAMIC"]));
             if let Some(v) = self.ds.value("PACKAGEVARS") {
@@ -3991,6 +4267,71 @@ fn is_exported(st: &StatementRow) -> bool {
 
 /// Variables a python body changes: literal first arguments of the `d.setVar` family, and
 /// whether it also writes through a computed name or hands `d` to other code.
+/// Whether a python function `body` (its `python ... {` line and closing `}` included)
+/// creates `<ident> = oe.classextend.ClassExtender(<args>)` (`args` as given, spaces
+/// ignored) and then calls `<ident>.set_filter("PROVIDES", deps=False)` at the function's
+/// top level (not under an `if`), and names `PROVIDES` nowhere else.
+fn sets_provides_filter(body: &str, args: &str) -> bool {
+    let lines: Vec<&str> = body
+        .lines()
+        .skip(1)
+        .filter(|l| !l.trim().is_empty() && l.trim() != "}")
+        .collect();
+    let indent = |l: &str| l.len() - l.trim_start().len();
+    let Some(top) = lines.iter().map(|l| indent(l)).min() else {
+        return false;
+    };
+    let squash = |s: &str| s.split_whitespace().collect::<String>();
+    let want_new = squash(&format!("= oe.classextend.ClassExtender({args})"));
+    let mut ident: Option<String> = None;
+    let mut filter = false;
+    for l in &lines {
+        let t = squash(l);
+        if let Some(name) = t.strip_suffix(want_new.as_str())
+            && !name.is_empty()
+            && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            ident = Some(name.to_string());
+            continue;
+        }
+        if let Some(id) = &ident
+            && indent(l) == top
+            && (t == format!("{id}.set_filter(\"PROVIDES\",deps=False)")
+                || t == format!("{id}.set_filter('PROVIDES',deps=False)"))
+        {
+            filter = true;
+        }
+    }
+    filter && body.matches("PROVIDES").count() == 1
+}
+
+/// OE-core's `nativesdk.bbclass` anonymous python (Wrynose): `pn = d.getVar("PN")`, `if
+/// not pn.startswith("nativesdk-"): return`, then `clsextend =
+/// oe.classextend.ClassExtender("nativesdk", [], d)` and, among others,
+/// `clsextend.set_filter("PROVIDES", deps=False)`. `Some(guard)` when `body` installs that
+/// filter ([`sets_provides_filter`]); `guard`: only for a `PN` starting with `nativesdk-`.
+fn nativesdk_provides_filter(body: &str) -> Option<bool> {
+    let quoted = ["\"nativesdk\", [], d", "'nativesdk', [], d"];
+    if !quoted.iter().any(|a| sets_provides_filter(body, a)) {
+        return None;
+    }
+    let squashed: String = body.split_whitespace().collect();
+    let guard = squashed.contains("pn=d.getVar(\"PN\")ifnotpn.startswith(\"nativesdk-\"):return")
+        || squashed.contains("pn=d.getVar('PN')ifnotpn.startswith('nativesdk-'):return");
+    Some(guard)
+}
+
+/// OE-core's `multilib_virtclass_handler_postkeyexp` (Wrynose `classes/multilib.bbclass`):
+/// `prefixes = (d.getVar("MULTILIB_VARIANTS") or "").split()`, `clsextend =
+/// oe.classextend.ClassExtender(variant, prefixes, d)`, `clsextend.set_filter("PROVIDES",
+/// deps=False)`.
+fn multilib_provides_filter(body: &str) -> bool {
+    let squashed: String = body.split_whitespace().collect();
+    (squashed.contains("prefixes=(d.getVar(\"MULTILIB_VARIANTS\")or\"\").split()")
+        || squashed.contains("prefixes=(d.getVar('MULTILIB_VARIANTS')or'').split()"))
+        && sets_provides_filter(body, "variant, prefixes, d")
+}
+
 fn python_writes(body: &str) -> (Vec<String>, bool) {
     static WRITE: LazyLock<Option<Regex>> = LazyLock::new(|| {
         Regex::new(
@@ -4099,6 +4440,28 @@ mod tests {
         for n in ["DEPENDS", "PROVIDES", "RDEPENDS", "PKG", "PACKAGES", "X"] {
             assert!(sets.iter().any(|s| s == n), "{n}: {sets:?}");
         }
+    }
+
+    #[test]
+    fn the_class_extender_provides_filters_are_recognised() {
+        let real = "python () {\n    pn = d.getVar(\"PN\")\n    if not pn.startswith(\"nativesdk-\"):\n        return\n\n    import oe.classextend\n\n    clsextend = oe.classextend.ClassExtender(\"nativesdk\", [], d)\n    clsextend.set_filter(\"DEPENDS\", deps=True)\n    clsextend.set_filter(\"PROVIDES\", deps=False)\n}";
+        assert_eq!(nativesdk_provides_filter(real), Some(true));
+        let unguarded = "python () {\n    clsextend = oe.classextend.ClassExtender(\"nativesdk\", [], d)\n    clsextend.set_filter(\"PROVIDES\", deps=False)\n}";
+        assert_eq!(nativesdk_provides_filter(unguarded), Some(false));
+        // Under a condition, with other prefixes, or with PROVIDES named again: not ours.
+        for body in [
+            "python () {\n    clsextend = oe.classextend.ClassExtender(\"nativesdk\", [], d)\n    if x:\n        clsextend.set_filter(\"PROVIDES\", deps=False)\n}",
+            "python () {\n    clsextend = oe.classextend.ClassExtender(\"nativesdk\", [\"a\"], d)\n    clsextend.set_filter(\"PROVIDES\", deps=False)\n}",
+            "python () {\n    clsextend = oe.classextend.ClassExtender(\"nativesdk\", [], d)\n    clsextend.set_filter(\"PROVIDES\", deps=False)\n    d.appendVar(\"PROVIDES\", \" x\")\n}",
+            "python () {\n    other.set_filter(\"PROVIDES\", deps=False)\n}",
+        ] {
+            assert_eq!(nativesdk_provides_filter(body), None, "{body}");
+        }
+        let ml = "python multilib_virtclass_handler_postkeyexp () {\n    prefixes = (d.getVar(\"MULTILIB_VARIANTS\") or \"\").split()\n    clsextend = oe.classextend.ClassExtender(variant, prefixes, d)\n    clsextend.set_filter(\"PROVIDES\", deps=False)\n}";
+        assert!(multilib_provides_filter(ml));
+        assert!(!multilib_provides_filter(
+            "python multilib_virtclass_handler_postkeyexp () {\n    cls = d.getVar(\"BBEXTENDCURR\")\n}"
+        ));
     }
 
     #[test]

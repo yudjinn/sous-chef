@@ -88,6 +88,19 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After w12-final
+
+Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/w12-final/`, release build) after the `nativesdk` and
+multilib `PROVIDES` filters (bitbake-semantics.md, "Providers and versions"): 1090 values
+compared, 702 equal (+0 after whitespace), 357 flagged (25 literal differs), 31 known gap,
+0 bug. One row moved: `nativesdk-zlib` `PROVIDES`, equal after normalising whitespace
+(and flagged) before, is now equal and not flagged: `nativesdk.bbclass`'s `suffix_filter`
+is computed on the static value and joins the words with one space, as BitBake's does. Of
+the equal values 147 carry a flag (148 before). Every other row of `classes.tsv` is
+unchanged. (The workspace has no multilib configuration, so the multilib filter is not
+exercised there.)
+
 ## After w11-final
 
 Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,

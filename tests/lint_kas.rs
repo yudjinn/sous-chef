@@ -267,3 +267,93 @@ fn recipe_change_in_local_conf_points_at_the_kas_file() {
         found[0].message
     );
 }
+
+/// When the kas work directory can only be guessed (the build directory has kas's
+/// `bblayers.conf` lines but neither kas's `CACHEDIR.TAG` nor kas's `local.conf`, and
+/// sous-chef.toml is elsewhere), where the remote repositories are is a guess too: no
+/// `BBLAYERS` entry is judged, while a statement kas does not write still is.
+#[test]
+fn generated_conf_edit_does_not_judge_bblayers_under_a_guessed_work_dir() {
+    let p = Project::after();
+    fs::remove_file(p.path("build/CACHEDIR.TAG")).unwrap();
+    fs::write(p.path("build/conf/local.conf"), "CONF_VERSION = \"2\"\n").unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let cfg = sous_chef::config::Config {
+        build_dir: Some(p.path("build")),
+        work_dir: elsewhere.path().to_path_buf(),
+        config_dir: Some(elsewhere.path().to_path_buf()),
+        ..p.config()
+    };
+    let ws = Workspace::discover_in(&cfg, &sous_chef::workspace::kas::KasEnv::default()).unwrap();
+    assert!(
+        ws.kas
+            .as_ref()
+            .is_some_and(|k| k.work_dir_source.is_guess())
+    );
+    let cache = tempfile::tempdir().unwrap();
+    let mut index = Index::open_in(cache.path(), &ws).unwrap();
+    index.refresh(&ws).unwrap();
+    let e = Env {
+        p,
+        ws,
+        index,
+        _cache: cache,
+    };
+    let found = check(
+        &e,
+        &OrgGeneratedConfEdit,
+        "bad-bblayers.conf",
+        "conf/bblayers.conf",
+    );
+    let lines: Vec<String> = found.iter().map(|f| f.loc.lines.to_string()).collect();
+    assert_eq!(lines, ["13"]);
+}
+
+/// The CLI run from a directory outside the kas project, with a configuration file in a
+/// third directory naming the kas files and the kas build directory: the kas work directory
+/// is the build directory's parent (kas's default build directory is `<work dir>/build`),
+/// not the directory sous-chef runs in, so the downloaded repositories' layers in
+/// `BBLAYERS` are kas layers and nothing is reported.
+#[test]
+fn generated_conf_edit_does_not_depend_on_the_current_directory() {
+    let p = Project::after();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let etc = elsewhere.path().join("etc");
+    let cwd = elsewhere.path().join("cwd");
+    fs::create_dir_all(&etc).unwrap();
+    fs::create_dir_all(&cwd).unwrap();
+    fs::write(
+        etc.join("sous-chef.toml"),
+        format!(
+            "build_dir = {:?}\nkas = [{:?}, {:?}]\n[bitbake]\nenabled = false\n",
+            p.path("build").display().to_string(),
+            p.path("kas/base.yaml").display().to_string(),
+            p.path("kas/board.yaml").display().to_string(),
+        ),
+    )
+    .unwrap();
+    for dir in [cwd.as_path(), p.root.as_path(), etc.as_path()] {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sous-chef"))
+            .arg("--config")
+            .arg(etc.join("sous-chef.toml"))
+            .args(["lint", "--rule", "org/generated-conf-edit", "build"])
+            .env("XDG_CACHE_HOME", elsewhere.path().join("cache"))
+            .env_remove("KAS_WORK_DIR")
+            .env_remove("KAS_BUILD_DIR")
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "from {}: {out:?}",
+            dir.display()
+        );
+        assert!(
+            stdout.starts_with("no findings"),
+            "from {}: {stdout}",
+            dir.display()
+        );
+    }
+}

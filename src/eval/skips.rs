@@ -22,6 +22,11 @@
 //! three variables set is passed over, which only matters for the class's "doesn't use it"
 //! warning: empty lists check nothing.
 //!
+//! On static values (w12) a word counts as present only when it is certain
+//! ([`Words::certain`]: the value is certain, or the word comes from an operation applied
+//! with no uncertain override decision on it and no uncertain `:remove` can take it out);
+//! a check whose outcome depends on a word that is only possibly present is undecided.
+//!
 //! **`base_eventhandler` on `RecipeParsed`** (same file and release; the same code on
 //! Kirkstone and Scarthgap except that `SOURCE_MIRROR_FETCH` is tested as a plain string
 //! there): unless `SOURCE_MIRROR_FETCH` is true, for each word `p` of the recipe's
@@ -33,12 +38,16 @@
 
 use std::collections::BTreeSet;
 
-/// What is known of a list value: its known words and whether they are all of it (no
-/// python, no undefined variable, nothing that changes it unseen). `why` says what is not
-/// known, for a note.
+/// What is known of a list value: its known words, the ones among them that are certainly
+/// in it, and whether the known words are all of it (no python, no undefined variable,
+/// nothing that changes it unseen). A known word that is not certain is "possibly present"
+/// (it comes from an operation whose override decision is not certain, or a `:remove` that
+/// is not certain may take it out). `why` says what is not known, for a note.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Words {
     pub known: BTreeSet<String>,
+    /// The known words certainly in the value; all of `known` when `complete`.
+    pub certain: BTreeSet<String>,
     pub complete: bool,
     pub why: Option<String>,
 }
@@ -53,8 +62,10 @@ impl Default for Words {
 impl Words {
     /// A value known completely (split on whitespace).
     pub fn of(text: &str) -> Words {
+        let known: BTreeSet<String> = text.split_whitespace().map(str::to_string).collect();
         Words {
-            known: text.split_whitespace().map(str::to_string).collect(),
+            certain: known.clone(),
+            known,
             complete: true,
             why: None,
         }
@@ -62,6 +73,11 @@ impl Words {
 
     fn is_empty_known(&self) -> bool {
         self.known.is_empty() && self.complete
+    }
+
+    /// The known words that are only possibly in the value.
+    fn possible(&self) -> BTreeSet<String> {
+        self.known.difference(&self.certain).cloned().collect()
     }
 }
 
@@ -104,8 +120,23 @@ fn unknown(what: &str, w: &Words) -> String {
     )
 }
 
+/// `'a b' possibly in <what> (<why>)`, or nothing for no words.
+fn possibly(words: &BTreeSet<String>, what: &str, w: &Words) -> Option<String> {
+    (!words.is_empty()).then(|| {
+        format!(
+            "'{}' only possibly in {what} ({})",
+            joined(words),
+            w.why.as_deref().unwrap_or("not certain")
+        )
+    })
+}
+
 /// The checks of one kind, in the class's order; stops at the first [`Check::Skip`].
 /// `distro_message`: the release words the `DISTRO` message with the distro name.
+///
+/// A word counts as present only when it is certain ([`Words::certain`]); a decision that
+/// depends on a word that is only possibly present (in the features or in the lists) is
+/// [`Check::Unknown`], naming it, never a skip and never a pass.
 pub fn features_kind(kind: &str, l: &KindLists, distro_message: bool) -> Vec<Check> {
     let fv = format!("{kind}_FEATURES");
     let mut out = Vec::new();
@@ -114,9 +145,9 @@ pub fn features_kind(kind: &str, l: &KindLists, distro_message: bool) -> Vec<Che
     let a = &l.any_of;
     let any_name = format!("ANY_OF_{kind}_FEATURES");
     if !a.is_empty_known() {
-        if a.known.iter().any(|w| f.known.contains(w)) {
+        if a.certain.iter().any(|w| f.certain.contains(w)) {
             out.push(Check::Pass);
-        } else if a.complete && f.complete {
+        } else if a.complete && f.complete && a.known.is_disjoint(&f.known) {
             out.push(Check::Skip(format!(
                 "one of '{}' needs to be in {fv}",
                 joined(&a.known)
@@ -124,6 +155,17 @@ pub fn features_kind(kind: &str, l: &KindLists, distro_message: bool) -> Vec<Che
             return out;
         } else {
             let mut why = Vec::new();
+            let shared: BTreeSet<String> = a.known.intersection(&f.known).cloned().collect();
+            why.extend(possibly(
+                &shared.intersection(&f.possible()).cloned().collect(),
+                &fv,
+                f,
+            ));
+            why.extend(possibly(
+                &shared.intersection(&a.possible()).cloned().collect(),
+                &any_name,
+                a,
+            ));
             if !a.complete {
                 why.push(unknown(&any_name, a));
             }
@@ -142,7 +184,8 @@ pub fn features_kind(kind: &str, l: &KindLists, distro_message: bool) -> Vec<Che
     let r = &l.required;
     let req_name = format!("REQUIRED_{kind}_FEATURES");
     if !r.is_empty_known() {
-        let missing: BTreeSet<String> = r.known.difference(&f.known).cloned().collect();
+        // Certainly required and not even possibly present.
+        let missing: BTreeSet<String> = r.certain.difference(&f.known).cloned().collect();
         if !missing.is_empty() && f.complete {
             let m = joined(&missing);
             out.push(Check::Skip(if kind == "DISTRO" && distro_message {
@@ -158,7 +201,7 @@ pub fn features_kind(kind: &str, l: &KindLists, distro_message: bool) -> Vec<Che
                 )
             }));
             return out;
-        } else if missing.is_empty() && r.complete {
+        } else if r.complete && r.known.is_subset(&f.certain) {
             out.push(Check::Pass);
         } else {
             let mut why = Vec::new();
@@ -169,6 +212,18 @@ pub fn features_kind(kind: &str, l: &KindLists, distro_message: bool) -> Vec<Che
                     unknown(&fv, f)
                 ));
             }
+            // Required (certainly or possibly) and only possibly present.
+            why.extend(possibly(
+                &r.known.intersection(&f.possible()).cloned().collect(),
+                &fv,
+                f,
+            ));
+            // Only possibly required, and not certainly present.
+            why.extend(possibly(
+                &r.possible().difference(&f.certain).cloned().collect(),
+                &req_name,
+                r,
+            ));
             if !r.complete {
                 why.push(unknown(&req_name, r));
             }
@@ -183,7 +238,8 @@ pub fn features_kind(kind: &str, l: &KindLists, distro_message: bool) -> Vec<Che
     let c = &l.conflict;
     let conf_name = format!("CONFLICT_{kind}_FEATURES");
     if !c.is_empty_known() {
-        let hits: BTreeSet<String> = c.known.intersection(&f.known).cloned().collect();
+        let hits: BTreeSet<String> = c.certain.intersection(&f.certain).cloned().collect();
+        let maybe: BTreeSet<String> = c.known.intersection(&f.known).cloned().collect();
         if !hits.is_empty() {
             out.push(Check::Skip(format!(
                 "conflicting {} feature{} '{}' (in {fv})",
@@ -192,10 +248,20 @@ pub fn features_kind(kind: &str, l: &KindLists, distro_message: bool) -> Vec<Che
                 joined(&hits)
             )));
             return out;
-        } else if c.complete && f.complete {
+        } else if c.complete && f.complete && maybe.is_empty() {
             out.push(Check::Pass);
         } else {
             let mut why = Vec::new();
+            why.extend(possibly(
+                &maybe.intersection(&f.possible()).cloned().collect(),
+                &fv,
+                f,
+            ));
+            why.extend(possibly(
+                &maybe.intersection(&c.possible()).cloned().collect(),
+                &conf_name,
+                c,
+            ));
             if !c.complete {
                 why.push(unknown(&conf_name, c));
             }
@@ -203,7 +269,7 @@ pub fn features_kind(kind: &str, l: &KindLists, distro_message: bool) -> Vec<Che
                 why.push(unknown(&fv, f));
             }
             out.push(Check::Unknown(format!(
-                "features_check: {conf_name} = '{}' matches none of the known words of {fv}; {}",
+                "features_check: {conf_name} = '{}' matches none of the words certainly in {fv}; {}",
                 joined(&c.known),
                 why.join("; ")
             )));
@@ -259,6 +325,87 @@ mod tests {
             why: Some("it holds python".into()),
             ..Words::of(known)
         }
+    }
+
+    /// Flagged for an uncertain override decision: `certain` are certain, `possible` only
+    /// possibly present, and nothing else.
+    fn possible_words(certain: &str, possible: &str) -> Words {
+        let c = Words::of(certain);
+        Words {
+            known: c
+                .known
+                .iter()
+                .cloned()
+                .chain(possible.split_whitespace().map(str::to_string))
+                .collect(),
+            certain: c.known,
+            complete: false,
+            why: Some("an override decision is not certain".into()),
+        }
+    }
+
+    #[test]
+    fn possibly_present_words_never_decide() {
+        // A conflict with a word only possibly present: may skip, naming it.
+        let l = KindLists {
+            conflict: Words::of("x11"),
+            features: possible_words("acl", "x11"),
+            ..KindLists::default()
+        };
+        assert!(
+            matches!(
+                features_kind("DISTRO", &l, true).as_slice(),
+                [Check::Unknown(m)] if m.contains("'x11' only possibly in DISTRO_FEATURES (an override decision is not certain)")
+            ),
+            "{:?}",
+            features_kind("DISTRO", &l, true)
+        );
+        // A required word only possibly present: may skip, not a pass.
+        let l = KindLists {
+            required: Words::of("systemd"),
+            features: possible_words("acl", "systemd"),
+            ..KindLists::default()
+        };
+        assert!(matches!(
+            features_kind("DISTRO", &l, true).as_slice(),
+            [Check::Unknown(m)] if m.contains("'systemd' only possibly in DISTRO_FEATURES")
+        ));
+        // ANY_OF satisfied only by a possible word: may skip.
+        let l = KindLists {
+            any_of: Words::of("x11 wayland"),
+            features: possible_words("acl", "wayland"),
+            ..KindLists::default()
+        };
+        assert!(matches!(
+            features_kind("DISTRO", &l, true).as_slice(),
+            [Check::Unknown(m)] if m.contains("'wayland' only possibly in DISTRO_FEATURES")
+        ));
+        // A required word only possibly required, missing from complete features: may skip.
+        let l = KindLists {
+            required: possible_words("", "systemd"),
+            features: Words::of("acl"),
+            ..KindLists::default()
+        };
+        assert!(matches!(
+            features_kind("DISTRO", &l, true).as_slice(),
+            [Check::Unknown(m)] if m.contains("'systemd' only possibly in REQUIRED_DISTRO_FEATURES")
+        ));
+        // Certain words still decide.
+        let l = KindLists {
+            conflict: Words::of("acl"),
+            features: possible_words("acl", "x11"),
+            ..KindLists::default()
+        };
+        assert!(matches!(
+            features_kind("DISTRO", &l, true).as_slice(),
+            [Check::Skip(_)]
+        ));
+        let l = KindLists {
+            required: Words::of("acl"),
+            features: possible_words("acl", "x11"),
+            ..KindLists::default()
+        };
+        assert_eq!(features_kind("DISTRO", &l, true), [Check::Pass]);
     }
 
     #[test]

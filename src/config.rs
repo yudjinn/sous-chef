@@ -38,6 +38,9 @@ pub struct Config {
     /// normally the process working directory).
     #[serde(skip)]
     pub work_dir: PathBuf,
+    /// The directory of the configuration file read, if any (not read from the file).
+    #[serde(skip)]
+    pub config_dir: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -55,6 +58,7 @@ impl Default for Config {
             hooks: HooksConfig::default(),
             handles: HandlesConfig::default(),
             work_dir: PathBuf::from("."),
+            config_dir: None,
         }
     }
 }
@@ -270,7 +274,8 @@ impl Config {
     /// Parses the TOML text of a config file (no flag merge). `origin` is the file's path;
     /// relative paths in the file (`build_dir`, `layers`, `init_script`) are taken relative
     /// to its directory (to `origin` itself if it is a directory). `work_dir` is set to that
-    /// directory too; `load` replaces it with the real working directory.
+    /// directory too (`load` replaces it with the real working directory), and so is
+    /// `config_dir`.
     pub fn from_toml(text: &str, origin: &Path) -> Result<Config> {
         let mut cfg: Config = toml::from_str(text).map_err(|e| Error::Config {
             msg: format!(
@@ -301,6 +306,7 @@ impl Config {
         if let Some(s) = &cfg.init_script {
             cfg.init_script = Some(base.join(s));
         }
+        cfg.config_dir = Some(base.clone());
         cfg.work_dir = base;
         Ok(cfg)
     }

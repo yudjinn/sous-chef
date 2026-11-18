@@ -60,7 +60,12 @@ fn missing_explicit_config_is_an_error() {
 fn fixture_file_matches_fixture_config() {
     let root = fixture_ws_root();
     let cfg = Config::load(&cli(root.clone())).unwrap();
-    assert_eq!(cfg, fixture_config());
+    // Loading a file also records its directory.
+    let want = Config {
+        config_dir: Some(root.clone()),
+        ..fixture_config()
+    };
+    assert_eq!(cfg, want);
     let ws = Workspace::discover(&cfg).unwrap();
     cfg.validate(&ws).unwrap();
 }
@@ -128,6 +133,7 @@ max_age_days = 7
                 max_age_days: 7,
             },
             work_dir: tmp.path().to_path_buf(),
+            config_dir: Some(dir.clone()),
         }
     );
 }

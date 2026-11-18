@@ -520,3 +520,46 @@ fn repo_root_follows_kas() {
     fs::write(top.join("sub/.git"), "gitdir: /x/.git/worktrees/sub\n").unwrap();
     assert_eq!(kas::repo_root(&top.join("sub/kas")), Some(top.join("sub")));
 }
+
+/// With `kas` and a kas build directory configured, the kas work directory is the build
+/// directory's parent wherever sous-chef runs; without a kas build directory it is the
+/// directory of sous-chef.toml, and that is marked as a guess.
+#[test]
+fn work_dir_comes_from_the_configuration_not_the_current_directory() {
+    use sous_chef::workspace::kas::WorkDirSource;
+    let p = Project::after();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let cfg = Config {
+        build_dir: Some(p.path("build")),
+        work_dir: elsewhere.path().to_path_buf(),
+        config_dir: Some(elsewhere.path().join("etc")),
+        ..p.config()
+    };
+    let k = kas::detect(&cfg, &KasEnv::default()).unwrap().unwrap();
+    assert_eq!(k.work_dir, p.root);
+    assert_eq!(k.work_dir_source, WorkDirSource::BuildDirParent);
+    assert!(!k.work_dir_source.is_guess());
+
+    // `KAS_WORK_DIR` wins, and counts when it is related to the configured files even
+    // though sous-chef runs elsewhere.
+    let env = KasEnv {
+        work_dir: Some(p.root.clone()),
+        ..KasEnv::default()
+    };
+    let k = kas::detect(&cfg, &env).unwrap().unwrap();
+    assert_eq!(k.work_dir_source, WorkDirSource::Env);
+    assert_eq!(k.work_dir, p.root);
+
+    // No kas build directory anywhere: the directory of sous-chef.toml, a guess.
+    let p = Project::before();
+    let etc = elsewhere.path().join("etc");
+    let cfg = Config {
+        work_dir: elsewhere.path().to_path_buf(),
+        config_dir: Some(etc.clone()),
+        ..p.config()
+    };
+    let k = kas::detect(&cfg, &KasEnv::default()).unwrap().unwrap();
+    assert_eq!(k.work_dir_source, WorkDirSource::ConfigFile);
+    assert!(k.work_dir_source.is_guess());
+    assert_eq!(k.work_dir, etc);
+}

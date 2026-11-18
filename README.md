@@ -243,8 +243,8 @@ edit = false       # the reindex and lint after an edit
   them are marked (`depends on python, not evaluated`), and anonymous python that changes a
   variable is named in a warning. Measured against `bitbake -e` on a real Wrynose workspace
   (25 recipes, two of them `BBCLASSEXTEND` variants, 1090 values,
-  [docs/differential.md](docs/differential.md)): 701 (64%) were exactly BitBake's, 1 more
-  after normalising whitespace; the other 388 differed and said so (357 flagged as depending
+  [docs/differential.md](docs/differential.md)): 702 (64%) were exactly BitBake's; the
+  other 388 differed and said so (357 flagged as depending
   on python or unresolved references) or were a documented gap (29 path spellings, 2
   `FILE_LAYERNAME` of a variant, which `bitbake -e` shows differently from a build); no
   value differed without a flag or a documented cause.
@@ -257,8 +257,10 @@ edit = false       # the reindex and lint after an edit
 - **Partly modelled.** `BBCLASSEXTEND` variants such as
   `gmp-native` are evaluated as BitBake makes them, but what OE-core's class-extension
   handlers and anonymous python filter (`DEPENDS`, `PACKAGES`, ...) is flagged, not
-  computed, except the `native` variant's `PROVIDES` (computed on a static value, so
-  `virtual/x-native` finds its provider); a static `BBMASK`
+  computed, except the variants' `PROVIDES` (`native`, `nativesdk` and multilib, computed
+  on a static value, so `virtual/x-native` or `virtual/nativesdk-x` finds its provider; a
+  multilib word that depends on a `MULTILIB_VARIANTS` computed by python stays flagged);
+  a static `BBMASK`
   marks the files it masks (with the default machine and distro; an evaluation for another
   machine or distro says which files its own mask would treat differently), and
   `SKIP_RECIPE`, `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST`, `INCOMPATIBLE_LICENSE`,
