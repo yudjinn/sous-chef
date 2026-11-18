@@ -54,6 +54,8 @@ BitBake's parse order, layer priority and override chain, which a grep does not.
   changes; while a build runs it answers from that cache or says it cannot run now.
 - A note `no MACHINE is set` means machine-specific values were not applied: pass
   `machine`.
+- Multiconfig (`status` lists them): pass `mc` or write the recipe `mc:<name>:<recipe>` to
+  `var`, `overrides`, `deps`, `recipe`; lint and the audit are the default configuration only.
 
 ## Writing
 

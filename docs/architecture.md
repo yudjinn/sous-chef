@@ -415,6 +415,7 @@ pub struct Target {
     pub version: Option<String>,
     pub machine: Option<String>,     // None = as set in local.conf
     pub distro: Option<String>,
+    pub mc: Option<String>,          // x5: multiconfig; None or "" = the default configuration
 }
 
 pub fn evaluate(index: &Index, ws: &Workspace, target: &Target) -> Result<DataStore>;
@@ -1344,6 +1345,32 @@ devtool job it is refused at once) and `wait_with`; the `bitbake` tool's `wait` 
 
 Hooks: unchanged since wave 5: four handlers (`GrepRead`, `BashDigest`, `BashGrep`,
 `EditFollowUp`) and the `[hooks]` switches `grep_read`, `bash`, `edit`.
+
+Multiconfig (x5, `eval::multiconfig`; rules in bitbake-semantics.md "Multiconfig"):
+`Target::mc` (serialised only when set); `multiconfig::{split_mc, normalize_target,
+list, list_with, check, oe_require_words, pass_note, mcdepends, PREFIX, OLD_PREFIX}`,
+`Multiconfigs { source: Source { Configuration, Kas }, value, setting, uncertain, enabled,
+present, problems }` (`is_empty`, `known`), `Multiconfig { name, file }`, `McDepend { task,
+entry, from, to, recipe, dep_task, applies, uncertain, locs }`. `replay::evaluate_inner`
+normalises the target first (a recipe `mc:<name>:<recipe>` sets `mc`; an empty `mc` is
+`None`) and checks the name (`check`: `NotFound` listing the known names, `Invalid` for a
+listed name without a file); `config_pass` sets `BB_CURRENT_MC` before `bblayers.conf`
+when `mc` is set and adds the target note; `Replay::include` resolves OE-core's Wrynose
+python `require` through `oe_require_words` (only when `BB_CURRENT_MC` has a static value,
+so never in the default configuration); the `ConfigCache` key has `mc` as its fifth
+element; the `BBMASK` difference note is computed for an `mc` evaluation too. The default
+configuration's replay is unchanged. Providers: `Providers::new_in(index, ws, machine,
+distro, mc)`, `preferred_recipe_in(..., mc)`; `with_config` and `target_for` carry
+`target.mc`. kas: `KasProject::{multiconfigs, multiconfig_headers}`. Index: the build
+directory's `conf/multiconfig/*.conf` are indexed too (`scan::walk_build_conf`,
+`walk_would_index`); no schema change. Tools: `var::recipe_target_in(index, recipe,
+machine, distro, mc)` and `var::mc_notes(ds)`; `var`, `overrides`, `deps` (new kind
+`mcdepends`), `recipe` take `mc` (`recipe::resolve_selected_variant_in`); `status` has
+`Report::multiconfig: Option<MulticonfigStatus>`; `bitbake::env::validate_target` accepts
+exactly `mc:<name>:<target>` beside a plain name, and `validate_arg` accepts what it
+accepts, so `BbEnv::command` passes such a target (`mcp::tools::bitbake` uses it for
+`build`, `task`, `env`, `clean`). Lint (`lint::run`), the index's `BBMASK` marks and the
+audit stay in the default configuration.
 
 ## Errors
 

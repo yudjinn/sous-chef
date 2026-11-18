@@ -812,7 +812,8 @@ Configuration, once:
 3. `conf/bitbake.conf` (found on `BBPATH`), which itself includes, in the order written in
    that file: `conf/site.conf`, `conf/auto.conf`, `conf/toolcfg.conf` (Wrynose),
    `conf/local.conf`, the `addfragments` directive (Walnascar and later; see "Configuration
-   fragments"), the machine conf `conf/machine/${MACHINE}.conf`, the distro conf
+   fragments"), `conf/multiconfig/${BB_CURRENT_MC}.conf` (in a multiconfig only on
+   Wrynose; see "Multiconfig"), the machine conf `conf/machine/${MACHINE}.conf`, the distro conf
    `conf/distro/${DISTRO}.conf`, and others.
    **Follow the includes as written; do not hard-code the list.**
 4. classes named in `INHERIT`, plus `base.bbclass`
@@ -1150,6 +1151,139 @@ multilib skips are skip notes. A name is matched with OE-core's naming; when the
 variant only by the evaluated `PN`. Only the words `native`, `nativesdk` and
 `multilib:<variant>` are resolved by name. Checked against `bitbake -e gmp-native` and
 `bitbake -e nativesdk-zlib` (differential, w10): no unflagged difference.
+
+### Multiconfig
+
+Read for x5 in BitBake **2.18.0** (`yocto-kiss/bitbake`, branch `2.18`) and, read-only from
+the same repository, the `2.0` (Kirkstone) and `2.8` (Scarthgap) branches; OE-core
+`wrynose`, `scarthgap` and `kirkstone`; kas **5.5**. Not checked against a running BitBake:
+the live workspace has no multiconfig and no BitBake was run for this (see "Not yet
+verified").
+
+**Reading `BBMULTICONFIG`, and one parse per configuration** (`lib/bb/cookerdata.py`
+`CookerDataBuilder.parseBaseConfiguration`, the same on 2.0, 2.8 and 2.18):
+
+- The default configuration is parsed first (`parseConfigurationFiles(prefiles,
+  postfiles)`), then `multiconfig = (self.data.getVar("BBMULTICONFIG") or "").split()` is
+  read from **that** datastore. For each word: a name whose first character is a digit is
+  `bb.fatal("Multiconfig name '%s' is invalid as multiconfigs cannot start with a digit")`;
+  otherwise `parseConfigurationFiles(prefiles, postfiles, config)` parses the whole
+  configuration again and `ConfigParsed` is fired on the new datastore. With any
+  multiconfig, `MultiConfigParsed(mcdata)` is fired on the default one (OE-core's
+  `base_eventhandler` then sets the default datastore's `SIGGEN_EXCLUDE_SAFE_RECIPE_DEPS`
+  from every configuration's value: not reproduced).
+- `parseConfigurationFiles(self, prefiles, postfiles, mc = "")` starts from
+  `bb.data.createCopy(self.basedata)` (the environment datastore, **not** a copy of the
+  finished default configuration) and does `data.setVar("BB_CURRENT_MC", mc)` before any
+  file is read; then `bblayers.conf`, the layer confs, `conf/bitbake.conf` and `INHERIT`,
+  exactly as for the default configuration. So a `?=` in the multiconfig file competes with
+  the others in parse order, wherever the file is included.
+- The default name: `mc = ""` on 2.18 (since BitBake `0fa0d8d76`, "cooker/cache: Drop mc
+  'default' string value", 2025-01-24, first released in 2.12 / Walnascar); `mc =
+  "default"` on 2.0 and 2.8.
+- After parsing, every datastore gets `__bbclasstype = "recipe"` and `__depends` renamed to
+  `__base_depends`; each recipe is parsed once per configuration, on a copy of that
+  configuration's datastore (`parseRecipeVariants`: the default, then `mc:<name>:<variant>`
+  for each multiconfig; `_parse_recipe` sets `__BBMULTICONFIG` to the name).
+
+**Where the multiconfig file is read.** BitBake itself never names
+`conf/multiconfig/<name>.conf`: OE-core's `conf/bitbake.conf` requires it, right after
+`include conf/local.conf` (on Wrynose also after the `addfragments` line) and before
+`include conf/machine/${MACHINE}.conf`, `conf/machine-sdk/...`, `conf/distro/${DISTRO}.conf`
+and the weak defaults that follow. So the multiconfig's `MACHINE` decides which machine conf
+is read, and its `?=` win over every later `?=` (the machine conf's, the distro conf's, the
+rest of `bitbake.conf`) but not over those of `local.conf`.
+
+- Wrynose (`meta/conf/bitbake.conf:824`, since OE-core `ff469ab2e8`, "bitbake.conf: Handle
+  empty BB_CURRENT_MC"): `require ${@"conf/multiconfig/${BB_CURRENT_MC}.conf" if
+  "${BB_CURRENT_MC}" != "" else ""}`, which requires nothing for the default configuration.
+- Kirkstone (`bitbake.conf:817`) and Scarthgap (`:828`): `require
+  conf/multiconfig/${BB_CURRENT_MC}.conf`; the default configuration's name `default`
+  makes it `conf/multiconfig/default.conf`, which OE-core ships, empty, in
+  `meta/conf/multiconfig/`.
+- A `require` (`ConfHandler.include_single_file`) looks in the including file's directory,
+  then along `BBPATH`, whose first entry is the build directory: so
+  `<build>/conf/multiconfig/<name>.conf` (where the BitBake manual,
+  `bitbake-user-manual-intro.rst` "Executing a Multiple Configuration Build", puts it) and a
+  layer's `conf/multiconfig/<name>.conf` (OE-core's `meta-selftest` ships `muslmc.conf`)
+  are both found. A missing file is `ParseError("Could not require file
+  conf/multiconfig/<name>.conf")`: the configuration, and so the whole run, fails.
+
+**Targets** (`lib/bb/cooker.py` `buildTaskData`, `checkPackages`; `lib/bb/runqueue.py`
+`split_mc`, `split_tid_mcfn`):
+
+- `mc:<name>:<target>` (`k.startswith("mc:") and k.count(':') >= 2`; the name is
+  `k.split(":")[1]`, the rest is the target); `mc::<target>` is the default configuration;
+  an unknown name is `bb.fatal("Multiconfig dependency %s depends on nonexistent
+  multiconfig configuration named %s")`. `mc:*:<target>` expands to every multiconfig plus
+  the default (2.0 and 2.18).
+- The old spelling `multiconfig:` is still accepted on the command line on 2.0, 2.8 and
+  2.18: `checkPackages` rewrites a target starting with it (`pkg.replace("multiconfig:",
+  "mc:")`). Nothing else (`mcdepends`, file names) knows it.
+- Virtual file names (`lib/bb/cache.py` `realfn2virtual`, `virtualfn2realfn`, the same on
+  2.0): `mc:<name>:` goes outside `virtual:<class>:`, so a native variant in a multiconfig
+  is `mc:<name>:virtual:native:<file>`.
+- Providers are per configuration: `taskdata[mc].add_provider(localdata[mc],
+  self.recipecaches[mc], k)`, with a recipe cache per multiconfig, so each configuration's
+  own `PREFERRED_PROVIDER_*`, `PREFERRED_VERSION_*` and `BBMASK` decide.
+
+**`mcdepends`** (`lib/bb/build.py` `add_tasks`; `lib/bb/taskdata.py` `add_mcdepends`;
+`lib/bb/runqueue.py` `add_mc_dependencies`; the same form on 2.0, 2.8 and 2.18):
+
+- A task flag, `do_x[mcdepends] = "mc:<from>:<to>:<recipe>:<task> ..."`, read expanded
+  (`d.expand(flags[name])`) for each task in `__BBTASKS` and split on whitespace; an entry
+  that does not split into exactly five `:` fields is `bb.msg.fatal("... does not contain
+  exactly four ':' characters ... 'mc:fromMC:toMC:packagename:task'")`. The first field is
+  not checked; `<from>` is empty for the default configuration (OE-core's
+  `multiconfig-image-packager` writes `mc::${MCNAME}:...`).
+- The dependency is added only to the task in the configuration named `<from>` (`if mc ==
+  frommc`); `<recipe>` is resolved with the providers of `<to>` (that configuration's
+  `build_targets[pn]`). A `<to>` that is not enabled is `bb.fatal("Multiconfig '%s' is
+  referenced in multiconfig dependency '%s' but not enabled in BBMULTICONFIG?")` on 2.8 and
+  2.18; 2.0 has no such check (a `KeyError`). A task `<to>` lacks is "Task mcdepends on
+  non-existent task" (2.8, 2.18).
+
+**kas** (kas 5.5 `config.py` `get_multiconfig`, `get_bitbake_targets`; `libcmds.py`
+`WriteBBConfig._write_local_conf`; `schema-kas.json`, `target`): kas has no multiconfig
+key. The generated `local.conf` is the `local_conf_header` entries, then `MACHINE ??=`,
+`DISTRO ??=` and `BBMULTICONFIG ?= "<names>"`, the names being `target.split(':')[1]` of
+every target (`KAS_TARGET`, else the files' `target`) that starts with `multiconfig:` or
+`mc:`, collected in a Python `set` (their order is not defined) and joined with spaces;
+without any it writes `BBMULTICONFIG ?= ""`. A `local_conf_header` line setting
+`BBMULTICONFIG` comes first and so beats the `?=`. kas passes the targets to `bitbake` as
+they are (`plugins/build.py`). The multiconfig files must come from a layer or the build
+directory: kas writes none.
+
+**sous-chef** (`src/eval/multiconfig.rs`, `eval::Target::mc`):
+
+- An evaluation with `mc` replays the configuration from the start with `BB_CURRENT_MC` set
+  before `bblayers.conf`, and follows `bitbake.conf`'s `require` where it is written: the
+  Kirkstone / Scarthgap form expands by itself; OE-core's Wrynose python form is recognised
+  as written (`multiconfig::oe_require_words`, whitespace ignored) and gives
+  `conf/multiconfig/<name>.conf`. A `bitbake.conf` that never requires the file gets a note
+  saying nothing of it was read. `machine` / `distro` arguments are pinned on top, as in the
+  default configuration. The cache key includes the name, so each configuration is a
+  configuration pass of its own. A target note names the configuration and the file.
+- The default configuration is replayed as before: **`BB_CURRENT_MC` is not set** there
+  (BitBake sets `""`, or `default` before 2.12), so the Wrynose `require` is a python
+  reference that is not followed and the Kirkstone / Scarthgap one an undefined reference
+  (OE-core's empty `default.conf` is not read).
+- The workspace's configurations (`multiconfig::list`, shown by `status`): `BBMULTICONFIG`
+  of the default configuration, split as BitBake does (uncertain when python, an
+  unresolved name or an uncertain include may change it), each name with the first
+  `conf/multiconfig/<name>.conf` along the `require`'s search path; a name without a file
+  and a name starting with a digit are problems, not errors; `conf/multiconfig/*.conf` files
+  no name uses are listed as present. In a kas project without a build directory the names
+  are kas's (above). The index reads `<build>/conf/multiconfig/*.conf` as well (before x5
+  only `<build>/conf/*.conf`).
+- An unknown name is an error listing the known ones; a listed name without a file is an
+  error too (BitBake cannot parse it). With an uncertain `BBMULTICONFIG`, a name whose file is
+  present is accepted, with a note.
+- Not reproduced: the `ConfigParsed` / `MultiConfigParsed` handlers of each configuration,
+  `__BBMULTICONFIG`, `mc:*:` wildcards, and the collection per configuration: the index's
+  `BBMASK` marks, so the candidate files of provider selection, the `not_collected` notes
+  and lint, are the default configuration's (an evaluation in a multiconfig whose `BBMASK`
+  differs gets the existing `BBMASK` difference note).
 
 ## Providers and versions
 
@@ -2264,6 +2398,15 @@ These are reported, never silently guessed. Authoritative mode (M5) covers them.
 Statements above that rest on documentation, memory or the source alone, not on a check
 against BitBake's behaviour or output:
 
+- Multiconfig (x5, "Multiconfig"): all of it, from the BitBake 2.0 / 2.8 / 2.18, OE-core and
+  kas 5.5 source and fixture tests (`tests/multiconfig.rs`); the live workspace has no
+  multiconfig and BitBake was not run. A parse-only run on a workspace with two
+  multiconfigs (`bitbake -e mc:<name>:<recipe>` and `bitbake -e mc:<name>`, no task) would
+  confirm: the multiconfig file's place in the include history (after `conf/local.conf`,
+  before the machine conf); `BB_CURRENT_MC`; which `?=` wins between `local.conf`, the
+  multiconfig file and the machine conf; `MACHINE`, `TMPDIR`, a `PREFERRED_PROVIDER_*` and a
+  machine-overridden recipe variable per configuration; a task's expanded `mcdepends`; and
+  BitBake's errors for an unknown name and for a listed name without a file.
 - kas: `layers` null and `{}`, the `KAS_*` overrides, what `kas shell -k` does (before the
   first checkout and with `{repo, file}` includes), the YAML 1.1 rules and `kas-container`
   were settled from the kas 5.5 and PyYAML 6.0.3 source (see "kas"), not by running kas
