@@ -77,3 +77,9 @@ Under `y1-build/`; the same scrubbing as above.
 | `y1-build/sigs/curl_%.bbappend.dict` | the scratch bbappend of the experiment (`{{LIVE}}/scratch/meta-scratch/recipes-test/curl/curl_%.bbappend`, removed afterwards) |
 | `y1-build/sigs/diffsigs-curl-do_{configure,compile,install}.out` | after `bitbake curl` with that bbappend: `$KAS shell ../scratch/kas-scratch.yaml -c 'bitbake-diffsigs -c never -t curl do_configure; ... do_compile; ... do_install'`, split per command, kas's INFO lines removed (stdout and stderr together) |
 | `y1-build/sigs/diffsigs-curl-do_compile-reconnect.out` | the same `do_compile` comparison as sous-chef's `sigs` captured it (the handle's content) when it ran 3 s after the previous `bitbake-diffsigs`: seven `NOTE: Reconnecting` / `Retrying server connection` lines first |
+| `y1-build/log/console-configure-fail.out` | `$KAS shell ../scratch/kas-scratch.yaml -c 'bitbake curl'` with the bbappend `EXTRA_OECONF:append = " --with-libpsl"` (exit 1; kas's INFO lines removed) |
+| `y1-build/log/log.do_configure.1749535`, `run.do_configure.1749535` | that task's log and run file from `${T}` |
+| `y1-build/log/console-compile-fail.out` | the same command with a bbappend whose `do_compile:prepend` echoes a compiler-style error line and runs `false` (exit 1; kas's INFO lines removed) |
+| `y1-build/log/log.do_compile.1757933`, `run.do_compile.1757933` | that task's log and run file |
+| `y1-build/log/log.task_order` | curl's `${T}/log.task_order` after these runs (the fetch of 2026-11-17 first) |
+

@@ -1,0 +1,6 @@
+DEBUG: Executing shell function do_compile
+lib/sous_chef_probe.c:12:5: error: 'probe' undeclared (first use in this function)
+WARNING: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_compile.1757933:148 exit 1 from 'false'
+WARNING: Backtrace (BB generated script): 
+	#1: do_compile, {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_compile.1757933, line 148
+	#2: main, {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_compile.1757933, line 194

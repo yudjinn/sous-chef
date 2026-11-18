@@ -1,0 +1,401 @@
+Loading cache...done.
+Loaded 2086 entries from dependency cache.
+Parsing recipes...done.
+Parsing of 1034 .bb files complete (1033 cached, 1 parsed). 2086 targets, 435 skipped, 0 masked, 0 errors.
+NOTE: Resolving any missing task queue dependencies
+
+Build Configuration:
+BB_VERSION           = "2.18.0"
+BUILD_SYS            = "x86_64-linux"
+NATIVELSBSTRING      = "endeavouros"
+TARGET_SYS           = "arm-oe-linux-gnueabi"
+MACHINE              = "dogbonedark"
+SDKMACHINE           = "x86_64"
+DISTRO               = "kiss"
+DISTRO_VERSION       = "1.0"
+TUNE_FEATURES        = "arm armv7a vfp thumb neon callconvention-hard"
+meta-arm             
+meta-arm-toolchain   = "wrynose:673e8d7c5dcd14de58092eb73e6ecc5eee5c1735"
+meta-kiss            
+meta-kiss-ti         = "wrynose:cc621c5d5725a51af9abb7b0d531cf6f9264a468"
+meta-scratch         = "<unknown>:<unknown>"
+meta                 = "wrynose:33a6bd6cc8a9a976902081642414bd67adc74879"
+
+WARNING: Your host glibc version (2.44) is newer than that in uninative (2.43). Disabling uninative so that sstate is not corrupted.
+Initialising tasks...Sstate summary: Wanted 7 Local 0 Mirrors 0 Missed 7 Current 370 (0% match, 98% complete)
+done.
+Removing 6 stale sstate objects for arch armv7at2hf-neon...done.
+Removing 1 stale sstate objects for arch dogbonedark...done.
+NOTE: Executing Tasks
+NOTE: Running task 841 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_configure)
+NOTE: recipe curl-8.19.0-r0: task do_configure: Started
+ERROR: curl-8.19.0-r0 do_configure: configure failed
+ERROR: curl-8.19.0-r0 do_configure: Execution of '{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_configure.1749535' failed with exit code 1
+ERROR: Logfile of failure stored in: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/log.do_configure.1749535
+Log data follows:
+| DEBUG: Executing python function extend_recipe_sysroot
+| NOTE: Direct dependencies are ['{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-connectivity/openssl/openssl_3.5.9.bb:do_populate_sysroot', '{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-core/glibc/glibc_2.43.bb:do_populate_sysroot', '{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-core/zlib/zlib_1.3.2.bb:do_populate_sysroot', '{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/gcc/gcc-cross_15.3.bb:do_populate_sysroot', '{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/gcc/gcc-runtime_15.3.bb:do_populate_sysroot', '{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/libtool/libtool-cross_2.5.4.bb:do_populate_sysroot', '{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/libtool/libtool-native_2.5.4.bb:do_populate_sysroot', '{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/opkg-utils/opkg-utils_0.7.0.bb:do_populate_sysroot', '{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/quilt/quilt-native_0.69.bb:do_populate_sysroot', '{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-extended/libidn/libidn2_2.3.8.bb:do_populate_sysroot', 'virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/autoconf/autoconf_2.73.bb:do_populate_sysroot', 'virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/automake/automake_1.18.1.bb:do_populate_sysroot', 'virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/patch/patch_2.8.bb:do_populate_sysroot', 'virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/pkgconf/pkgconf_2.5.1.bb:do_populate_sysroot', 'virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/pseudo/pseudo_git.bb:do_populate_sysroot', 'virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-extended/xz/xz_5.8.4.bb:do_populate_sysroot']
+| NOTE: Installed into sysroot: []
+| NOTE: Skipping as already exists in sysroot: ['openssl', 'gettext-minimal-native', 'glibc', 'zlib', 'binutils-cross-arm', 'gcc-cross-arm', 'gcc-runtime', 'libgcc', 'libtool-cross', 'libtool-native', 'm4-native', 'opkg-utils', 'quilt-native', 'libidn2', 'texinfo-dummy-native', 'linux-libc-headers', 'libunistring', 'zlib-native', 'autoconf-native', 'automake-native', 'flex-native', 'gnu-config-native', 'patch-native', 'pkgconf-native', 'pseudo-native', 'xz-native', 'zstd-native', 'attr-native', 'gmp-native', 'libmpc-native', 'mpfr-native', 'sqlite3-native']
+| DEBUG: Python function extend_recipe_sysroot finished
+| DEBUG: Executing shell function autotools_preconfigure
+| Previously configured separate build directory detected, cleaning {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/build
+| DEBUG: Shell function autotools_preconfigure finished
+| DEBUG: Executing python function autotools_sitefiles
+| DEBUG: SITE files ['endian-little', 'bit-32', 'arm-common', 'arm-32', 'common-linux', 'common-glibc', 'arm-linux', 'arm-linux-gnueabi', 'common']
+| DEBUG: Python function autotools_sitefiles finished
+| DEBUG: Executing shell function do_configure
+| NOTE: Executing ACLOCAL="aclocal --aclocal-path={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot/usr/share/aclocal/" autoreconf -Wcross --verbose --install --force --exclude=autopoint
+| autoreconf: export WARNINGS=cross,no-obsolete
+| autoreconf: Entering directory '.'
+| autoreconf: configure.ac: not running autopoint: --exclude autopoint was given
+| autoreconf: running: aclocal --aclocal-path={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot/usr/share/aclocal/ --force -I m4
+| autoreconf: configure.ac: tracing
+| autoreconf: running: libtoolize --copy --force
+| libtoolize: putting auxiliary files in '.'.
+| libtoolize: copying file './ltmain.sh'
+| libtoolize: putting macros in AC_CONFIG_MACRO_DIRS, 'm4'.
+| libtoolize: copying file 'm4/libtool.m4'
+| libtoolize: copying file 'm4/ltoptions.m4'
+| libtoolize: copying file 'm4/ltsugar.m4'
+| libtoolize: copying file 'm4/ltversion.m4'
+| libtoolize: copying file 'm4/lt~obsolete.m4'
+| libtoolize: Remember to add 'LT_INIT' to configure.ac.
+| autoreconf: configure.ac: not using Intltool
+| autoreconf: configure.ac: not using Gtkdoc
+| autoreconf: configure.ac: no need to run autopoint (confirmed)
+| autoreconf: running: aclocal --aclocal-path={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot/usr/share/aclocal/ --force -I m4
+| autoreconf: running: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot-native/usr/bin/autoconf --force
+| configure.ac:603: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| m4/curl-compilers.m4:445: CURL_COMPILER_WORKS_IFELSE is expanded from...
+| m4/curl-compilers.m4:515: CURL_SET_COMPILER_BASIC_OPTS is expanded from...
+| configure.ac:603: the top level
+| configure.ac:605: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| m4/curl-compilers.m4:445: CURL_COMPILER_WORKS_IFELSE is expanded from...
+| m4/curl-compilers.m4:701: CURL_SET_COMPILER_OPTIMIZE_OPTS is expanded from...
+| configure.ac:605: the top level
+| configure.ac:606: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| m4/curl-compilers.m4:445: CURL_COMPILER_WORKS_IFELSE is expanded from...
+| m4/curl-compilers.m4:783: CURL_SET_COMPILER_WARNING_OPTS is expanded from...
+| configure.ac:606: the top level
+| configure.ac:1373: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| acinclude.m4:824: CURL_CHECK_LIBS_CLOCK_GETTIME_MONOTONIC is expanded from...
+| configure.ac:1373: the top level
+| configure.ac:4043: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| acinclude.m4:1043: CURL_VERIFY_RUNTIMELIBS is expanded from...
+| configure.ac:4043: the top level
+| configure.ac:4144: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:1271: CURL_CHECK_FUNC_GETADDRINFO is expanded from...
+| configure.ac:4144: the top level
+| configure.ac:4147: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:1977: CURL_CHECK_FUNC_GETIFADDRS is expanded from...
+| configure.ac:4147: the top level
+| configure.ac:4150: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:2095: CURL_CHECK_FUNC_GMTIME_R is expanded from...
+| configure.ac:4150: the top level
+| configure.ac:4154: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:2215: CURL_CHECK_FUNC_LOCALTIME_R is expanded from...
+| configure.ac:4154: the top level
+| configure.ac:4162: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:3962: CURL_CHECK_FUNC_STRERROR_R is expanded from...
+| configure.ac:4162: the top level
+| configure.ac:4202: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:2335: CURL_CHECK_FUNC_INET_NTOP is expanded from...
+| configure.ac:4202: the top level
+| configure.ac:4203: warning: AC_RUN_IFELSE called without default to allow cross compiling
+| ../sources/autoconf-2.73/lib/autoconf/general.m4:3037: AC_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:4295: CURL_RUN_IFELSE is expanded from...
+| m4/curl-functions.m4:2496: CURL_CHECK_FUNC_INET_PTON is expanded from...
+| configure.ac:4203: the top level
+| autoreconf: running: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot-native/usr/bin/autoheader --force
+| autoreconf: running: automake --add-missing --copy --force-missing
+| configure.ac:130: installing './compile'
+| configure.ac:133: installing './missing'
+| docs/examples/Makefile.am: installing './depcomp'
+| autoreconf: './config.sub' is updated
+| autoreconf: './config.guess' is updated
+| autoreconf: configure.ac: not running make: --make not given
+| autoreconf: Leaving directory '.'
+| NOTE: Running ../sources/curl-8.19.0/configure  --build=x86_64-linux 		  --host=arm-oe-linux-gnueabi 		  --target=arm-oe-linux-gnueabi 		  --prefix=/usr 		  --exec_prefix=/usr 		  --bindir=/usr/bin 		  --sbindir=/usr/sbin 		  --libexecdir=/usr/libexec 		  --datadir=/usr/share 		  --sysconfdir=/etc 		  --sharedstatedir=/com 		  --localstatedir=/var 		  --libdir=/usr/lib 		  --includedir=/usr/include 		  --oldincludedir=/usr/include 		  --infodir=/usr/share/info 		  --mandir=/usr/share/man 		  --disable-silent-rules 		  --disable-dependency-tracking      --disable-libcurl-option     --without-libpsl     --enable-optimize     --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt          WATT_ROOT={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot/usr  --disable-static  --disable-ares --enable-aws --enable-basic-auth --enable-bearer-auth --without-brotli --disable-manual --disable-debug --disable-dict --enable-digest-auth --without-gnutls --disable-gopher --disable-imap --enable-ipfs --enable-ipv6 --disable-kerberos-auth --without-gssapi --disable-ldap --disable-ldaps --without-libgsasl --with-libidn2 --without-libssh2 --without-mbedtls --disable-mqtt --enable-negotiate-auth --without-nghttp2 --with-openssl --disable-pop3 --enable-proxy --without-librtmp --disable-rtsp --without-schannel --disable-smb --disable-smtp --disable-telnet --disable-tftp --enable-threaded-resolver --enable-verbose --disable-websockets --with-zlib --without-zstd --with-libpsl
+| configure: loading site script {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/site/endian-little
+| configure: loading site script {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/site/arm-common
+| configure: loading site script {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/site/arm-32
+| configure: loading site script {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/site/common-linux
+| configure: loading site script {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/site/common-glibc
+| configure: loading site script {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/site/arm-linux
+| configure: loading site script {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/site/common
+| checking whether to enable maintainer-specific portions of Makefiles... no
+| checking whether make supports nested variables... yes
+| checking whether to enable debug build options... no
+| checking whether to enable compiler optimizer... yes
+| checking whether to enable strict compiler warnings... no
+| checking whether to enable compiler warnings as errors... no
+| checking whether to enable hiding of library internal symbols... yes
+| checking whether to enable c-ares for DNS lookups... no
+| checking whether to disable dependency on -lrt... (assumed no)
+| checking whether to enable HTTPSRR support... no
+| checking whether to enable ECH support... no
+| checking whether to enable SSL session export support... no
+| checking for path separator... :
+| checking for sed... (cached) sed
+| checking for grep... {{LIVE}}/yocto-kiss/build/tmp/hosttools/grep
+| checking that grep -E works... yes
+| checking for a BSD-compatible install... {{LIVE}}/yocto-kiss/build/tmp/hosttools/install -c
+| checking for arm-oe-linux-gnueabi-gcc... arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot
+| checking whether the C compiler works... yes
+| checking for C compiler default output file name... a.out
+| checking for suffix of executables...
+| checking whether we are cross compiling... yes
+| checking for suffix of object files... o
+| checking whether the compiler supports GNU C... yes
+| checking whether arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot accepts -g... yes
+| checking for arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot option to enable C23 features... none needed
+| checking whether arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot understands -c and -o together... yes
+| checking how to run the C preprocessor... arm-oe-linux-gnueabi-gcc -E --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security
+| checking for stdio.h... yes
+| checking for stdlib.h... yes
+| checking for string.h... yes
+| checking for inttypes.h... yes
+| checking for stdint.h... yes
+| checking for strings.h... yes
+| checking for sys/stat.h... yes
+| checking for sys/types.h... yes
+| checking for unistd.h... yes
+| checking for stdatomic.h... yes
+| checking if _Atomic is available... yes
+| checking whether sleep supports fractional seconds... yes
+| checking filesystem timestamp resolution... 0.01
+| checking whether build environment is sane... yes
+| checking for arm-oe-linux-gnueabi-strip... arm-oe-linux-gnueabi-strip
+| checking for a race-free mkdir -p... {{LIVE}}/yocto-kiss/build/tmp/hosttools/mkdir -p
+| checking for gawk... gawk
+| checking whether make sets $(MAKE)... yes
+| checking whether make supports the include directive... yes (GNU style)
+| checking xargs -n works... yes
+| checking whether UID '1000' is supported by ustar format... yes
+| checking whether GID '1000' is supported by ustar format... yes
+| checking how to create a ustar tar archive... gnutar
+| checking dependency style of arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot... none
+| checking curl version... 8.19.0
+| checking for perl... {{LIVE}}/yocto-kiss/build/tmp/hosttools/perl
+| checking for httpd... no
+| checking for apache2... no
+| checking for apxs... no
+| configure: httpd/apache2 not in PATH, http tests disabled
+| configure: apxs not in PATH, http tests disabled
+| checking for danted... no
+| checking for danted... no
+| checking for sftp-server... no
+| checking for sftp-server... no
+| checking for nghttpx... no
+| checking for caddy... no
+| checking build system type... x86_64-pc-linux-gnu
+| checking host system type... arm-oe-linux-gnueabi
+| checking for egrep -e... {{LIVE}}/yocto-kiss/build/tmp/hosttools/grep -E
+| checking if OS is AIX (to define _ALL_SOURCE)... no
+| checking if _THREAD_SAFE is already defined... no
+| checking if _THREAD_SAFE is actually needed... no
+| checking if _THREAD_SAFE is onwards defined... no
+| checking if _REENTRANT is already defined... no
+| checking if _REENTRANT is actually needed... no
+| checking if _REENTRANT is onwards defined... no
+| checking for arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot option to support large files... none needed
+| checking how to print strings... printf
+| checking for a sed that does not truncate output... (cached) sed
+| checking for grep that handles long lines and -e... (cached) {{LIVE}}/yocto-kiss/build/tmp/hosttools/grep
+| checking for egrep... {{LIVE}}/yocto-kiss/build/tmp/hosttools/grep -E
+| checking for fgrep... {{LIVE}}/yocto-kiss/build/tmp/hosttools/grep -F
+| checking for ld used by arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot... arm-oe-linux-gnueabi-ld --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot
+| checking if the linker (arm-oe-linux-gnueabi-ld --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot ) is GNU ld... yes
+| checking for BSD- or MS-compatible name lister (nm)... arm-oe-linux-gnueabi-gcc-nm
+| checking the name lister (arm-oe-linux-gnueabi-gcc-nm) interface... BSD nm
+| checking whether ln -s works... yes
+| checking the maximum length of command line arguments... 1572864
+| checking how to convert x86_64-pc-linux-gnu file names to arm-oe-linux-gnueabi format... func_convert_file_noop
+| checking how to convert x86_64-pc-linux-gnu file names to toolchain format... func_convert_file_noop
+| checking for arm-oe-linux-gnueabi-ld --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot  option to reload object files... -r
+| checking for file... file
+| checking for arm-oe-linux-gnueabi-objdump... arm-oe-linux-gnueabi-objdump
+| checking how to recognize dependent libraries... pass_all
+| checking for arm-oe-linux-gnueabi-dlltool... no
+| checking for dlltool... no
+| checking how to associate runtime and link libraries... printf %s\n
+| checking for arm-oe-linux-gnueabi-ranlib... arm-oe-linux-gnueabi-gcc-ranlib
+| checking for arm-oe-linux-gnueabi-ar... arm-oe-linux-gnueabi-gcc-ar
+| checking for archiver @FILE support... @
+| checking for arm-oe-linux-gnueabi-strip... (cached) arm-oe-linux-gnueabi-strip
+| checking command to parse arm-oe-linux-gnueabi-gcc-nm output from arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot object... ok
+| checking for sysroot... {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot
+| checking for a working dd... {{LIVE}}/yocto-kiss/build/tmp/hosttools/dd
+| checking how to truncate binary pipes... {{LIVE}}/yocto-kiss/build/tmp/hosttools/dd bs=4096 count=1
+| checking for arm-oe-linux-gnueabi-mt... no
+| checking for mt... no
+| checking if : is a manifest tool... no
+| checking for dlfcn.h... yes
+| checking for objdir... .libs
+| checking if arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot supports -fno-rtti -fno-exceptions... no
+| checking for arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot option to produce PIC... -fPIC -DPIC
+| checking if arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot PIC flag -fPIC -DPIC works... yes
+| checking if arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot static flag -static works... yes
+| checking if arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot supports -c -o file.o... yes
+| checking if arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot supports -c -o file.o... (cached) yes
+| checking whether the arm-oe-linux-gnueabi-gcc  -march=armv7-a -mthumb -mfpu=neon -mfloat-abi=hard -D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64 -fstack-protector-strong  -O2 -D_FORTIFY_SOURCE=2 -Wformat -Wformat-security -Werror=format-security --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot linker (arm-oe-linux-gnueabi-ld --sysroot={{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot ) supports shared libraries... yes
+| checking whether -lc should be explicitly linked in... no
+| checking dynamic linker characteristics... GNU/Linux ld.so
+| checking how to hardcode library paths into programs... immediate
+| checking whether stripping libraries is possible... yes
+| checking if libtool supports shared libraries... yes
+| checking whether to build shared libraries... yes
+| checking whether to build static libraries... no
+| checking whether to build shared libraries with -version-info... yes
+| checking whether to build shared libraries with -no-undefined... no
+| checking whether to build shared libraries with -mimpure-text... no
+| checking whether to build shared libraries with PIC... yes
+| checking whether to build static libraries with PIC... no
+| checking whether to build shared libraries only... yes
+| checking whether to build static libraries only... no
+| checking for arm-oe-linux-gnueabi-windres... no
+| checking for windres... no
+| checking if cpp -P is needed... yes
+| checking if cpp -P works... yes
+| checking if compiler is DEC/Compaq/HP C... no
+| checking if compiler is HP-UX C... no
+| checking if compiler is IBM C... no
+| checking if compiler is Intel C... no
+| checking if compiler is clang... no
+| checking if compiler is GNU C... yes
+| checking compiler version... gcc '1503' (raw: '15.3.0')
+| checking if compiler is SunPro C... no
+| checking if compiler is Tiny C... no
+| checking for code coverage support... no
+| checking whether build target is a native Windows one... no
+| checking if compiler accepts some basic options... yes
+| configure: compiler options added: -Werror-implicit-function-declaration
+| checking if compiler accepts optimizer enabling options... yes
+| configure: compiler options added: -O2
+| checking if compiler accepts strict warning options... yes
+| configure: compiler options added: -Wno-system-headers
+| checking if compiler halts on compilation errors... yes
+| checking if compiler halts on negative sized arrays... yes
+| checking if compiler halts on function prototype mismatch... yes
+| checking if compiler supports hiding library internal symbols... yes
+| checking whether build target supports Win32 crypto API... no
+| checking whether to build libcurl and curl in "unity" mode... no
+| checking whether to support http... yes
+| checking whether to support ftp... yes
+| checking whether to support file... yes
+| checking whether to support IPFS... yes
+| checking whether to support ldap... no
+| checking whether to support ldaps... no
+| checking whether to support rtsp... no
+| checking whether to support proxies... yes
+| checking whether to support dict... no
+| checking whether to support telnet... no
+| checking whether to support tftp... no
+| checking whether to support pop3... no
+| checking whether to support imap... no
+| checking whether to support smb... no
+| checking whether to support smtp... no
+| checking whether to support gopher... no
+| checking whether to support mqtt... no
+| checking whether to provide built-in manual... no
+| checking whether to build documentation... yes
+| checking whether to enable generation of C code... no
+| checking whether to use libgcc... no
+| checking whether to use libbacktrace... no
+| checking if X/Open network library is required... no
+| checking for gethostbyname... yes
+| checking whether build target is a native Windows one... (cached) no
+| checking for proto/bsdsocket.h... no
+| checking for connect in libraries... yes
+| checking for sys/types.h... (cached) yes
+| checking for monotonic clock_gettime... yes
+| checking for clock_gettime in libraries... no additional lib required
+| checking for sys/types.h... (cached) yes
+| checking for raw monotonic clock_gettime... yes
+| checking for arm-oe-linux-gnueabi-pkg-config... no
+| checking for pkg-config... {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot-native/usr/bin/pkg-config
+| configure: WARNING: using cross tools not prefixed with host triplet
+| checking for zlib options with pkg-config... found
+| checking for zlib.h... yes
+| configure: found both libz and libz.h header
+| checking whether to enable IPv6... yes
+| checking if struct sockaddr_in6 has sin6_scope_id member... yes
+| checking if argv can be written to... no
+| configure: WARNING: the previous check could not be made default was used
+| checking if GSS-API support is requested... no
+| checking whether to enable Windows native SSL/TLS... no
+| checking whether to enable Amiga native SSL/TLS (AmiSSL v5)... no
+| checking for arm-oe-linux-gnueabi-pkg-config... {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot-native/usr/bin/pkg-config
+| checking for openssl options with pkg-config... found
+| configure: pkg-config: SSL_LIBS: "-lssl -lcrypto"
+| configure: pkg-config: SSL_LDFLAGS: ""
+| configure: pkg-config: SSL_CPPFLAGS: ""
+| checking for HMAC_Update in -lcrypto... yes
+| checking for SSL_connect in -lssl... yes
+| checking for openssl/rsa.h... yes
+| checking for openssl/crypto.h... yes
+| checking for openssl/pem.h... yes
+| checking for openssl/ssl.h... yes
+| checking for openssl/err.h... yes
+| checking for BoringSSL... no
+| checking for AWS-LC... no
+| checking for LibreSSL... no
+| checking for OpenSSL >= v3... checking for SSL_set_quic_use_legacy_codepoint... no
+| checking for SSL_set_quic_tls_cbs... yes
+| configure: OpenSSL with QUIC APIv2
+| checking for DES support in OpenSSL... yes
+| checking for SRP support in OpenSSL... yes
+| checking whether to enable Apple OS native certificate validation... no
+| configure: built with one SSL backend
+| checking whether to use native CA store... no
+| checking default CA cert bundle/path... /etc/ssl/certs/ca-certificates.crt
+| checking whether to use OpenSSL's built-in CA store... no
+| checking CA cert bundle path to embed in the curl tool... no
+| checking for arm-oe-linux-gnueabi-pkg-config... (cached) {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/recipe-sysroot-native/usr/bin/pkg-config
+| checking for libpsl options with pkg-config... no
+| checking for psl_builtin in -lpsl... no
+| configure: error: libpsl libs and/or directories were not found where specified!
+| NOTE: The following config.log files may provide further information.
+| NOTE: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/build/config.log
+| ERROR: configure failed
+| WARNING: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_configure.1749535:279 exit 1 from 'exit 1'
+| WARNING: Backtrace (BB generated script):
+| 	#1: bbfatal_log, {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_configure.1749535, line 279
+| 	#2: oe_runconf, {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_configure.1749535, line 255
+| 	#3: autotools_do_configure, {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_configure.1749535, line 228
+| 	#4: do_configure, {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_configure.1749535, line 149
+| 	#5: main, {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_configure.1749535, line 283
+NOTE: recipe curl-8.19.0-r0: task do_configure: Failed
+ERROR: Task ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_configure) failed with exit code '1'
+NOTE: Tasks Summary: Attempted 909 tasks of which 908 didn't need to be rerun and 1 failed.
+
+Summary: 1 task failed:
+  {{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_configure
+    log: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/log.do_configure.1749535
+Summary: There was 1 WARNING message.
+Summary: There were 2 ERROR messages, returning a non-zero exit code.
+2026-11-18 23:04:11 - ERROR    - Shell returned non-zero exit status
+2026-11-18 23:04:11 - ERROR    - Command "/usr/bin/zsh -c 'bitbake curl'" failed with error 1
