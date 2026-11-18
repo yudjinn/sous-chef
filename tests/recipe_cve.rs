@@ -158,6 +158,12 @@ fn append(p: &Path, text: &str) {
 /// A copy of the fixture with the `vuln` recipe and the OE-core CVE pieces; `lib` is the
 /// text of `meta-core/lib/oe/cve_check.py`; `report` adds the recorded JSON.
 fn fixture(lib: Option<&str>, report: bool, extra: &str) -> Fixture {
+    fixture_in(lib, report, extra, None)
+}
+
+/// [`fixture`] with `release` as `release` of sous-chef.toml (since x7 the CVE rules come
+/// from the release table; `lib` is only a cross-check).
+fn fixture_in(lib: Option<&str>, report: bool, extra: &str, release: Option<&str>) -> Fixture {
     let (tmp, root) = common::temp_ws();
     let root = fs::canonicalize(root).unwrap();
     write(&root.join("meta-core/conf/cve-check-map.conf"), MAP);
@@ -183,7 +189,8 @@ fn fixture(lib: Option<&str>, report: bool, extra: &str) -> Fixture {
     if report {
         write(&root.join("build/tmp/deploy/cve/vuln_cve.json"), REPORT);
     }
-    let config = common::ws_config(&root);
+    let mut config = common::ws_config(&root);
+    config.release = release.map(str::to_string);
     let cache = tempfile::tempdir().unwrap();
     let workspace = Workspace::discover(&config).unwrap();
     let mut index = Index::open_in(cache.path(), &workspace).unwrap();
@@ -272,10 +279,13 @@ async fn cve_view_without_report_says_how_to_produce_it() {
 
 #[tokio::test]
 async fn cve_view_kirkstone_rules() {
-    let f = fixture(
+    // x7: the rules come from the release (`release = "kirkstone"`); the Kirkstone
+    // lib/oe/cve_check.py agrees, so no cross-check note.
+    let f = fixture_in(
         Some(LIB_KIRKSTONE),
         false,
         "CVE_CHECK_IGNORE = \"CVE-2020-00001 CVE-2020-00002\"\n",
+        Some("kirkstone"),
     );
     let out = cve(&f).await;
     assert!(
@@ -283,9 +293,16 @@ async fn cve_view_kirkstone_rules() {
         "{out}"
     );
     assert!(
-        out.contains("CVE_STATUS has no effect here (no decode_cve_status in lib/oe/cve_check.py)"),
+        out.contains(
+            "CVE_STATUS has no effect here (kirkstone has no decode_cve_status in lib/oe/cve_check.py)"
+        ),
         "{out}"
     );
+    assert!(
+        out.contains("note: CVE rules of kirkstone: no CVE_STATUS"),
+        "{out}"
+    );
+    assert!(!out.contains("differs from"), "{out}");
     assert!(!out.contains("\nstatus\t"), "{out}");
     // The Kirkstone header rule: `CVE: CVE-a CVE-b` (space separated), anywhere.
     assert!(out.contains("patch\tCVE-2024-33334\tby header"), "{out}");
@@ -293,6 +310,44 @@ async fn cve_view_kirkstone_rules() {
         out.contains("patch headers: the tag CVE: followed by space-separated ids"),
         "{out}"
     );
+}
+
+#[tokio::test]
+async fn cve_rules_follow_the_release_and_the_library_is_a_cross_check() {
+    use sous_chef::bitbake::cve::CveRules;
+    use sous_chef::release::Release;
+    // The release table, checked on OE-core's branches (bitbake-semantics.md, "Releases").
+    let r = |rel| {
+        let c = CveRules::for_release(rel);
+        (c.status, c.cpe, c.line_rule)
+    };
+    assert_eq!(r(Release::Kirkstone), (false, false, false));
+    assert_eq!(r(Release::Mickledore), (false, false, false));
+    assert_eq!(r(Release::Nanbield), (true, false, false));
+    assert_eq!(r(Release::Scarthgap), (true, false, false));
+    assert_eq!(r(Release::Styhead), (true, true, false));
+    assert_eq!(r(Release::Walnascar), (true, true, true));
+    assert_eq!(r(Release::Wrynose), (true, true, true));
+    // A Wrynose workspace whose lib/oe/cve_check.py is Kirkstone's: Wrynose rules, a note.
+    let f = fixture(
+        Some(LIB_KIRKSTONE),
+        false,
+        "CVE_CHECK_IGNORE = \"CVE-2020-00001\"\n",
+    );
+    let out = cve(&f).await;
+    assert!(
+        out.contains("note: CVE rules of wrynose: CVE_STATUS"),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            "note: meta-core:lib/oe/cve_check.py differs from wrynose's OE-core in CVE_STATUS, \
+             the cpe: form of CVE_STATUS, the patch header rule (a backport or a patched \
+             OE-core?); the rules of wrynose were used"
+        ),
+        "{out}"
+    );
+    assert!(out.contains("from CVE_CHECK_IGNORE"), "{out}");
 }
 
 #[tokio::test]

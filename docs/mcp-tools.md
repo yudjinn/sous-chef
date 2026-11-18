@@ -232,9 +232,10 @@ changes variables through computed names).
     missing patch is matched by file name only (a note lists them).
 
   Which rules apply (whether `CVE_STATUS` exists, the `cpe:` form, how patch headers are
-  read) is read from the `lib/oe/cve_check.py` of the first layer that has one, and named
-  in a note; without one, Wrynose's rules are used and the note says so. Ends with the
-  evaluated views' notes. On the fixture copy of `tests/recipe_cve.rs` (cut):
+  read) comes from the workspace's release (since x7, the `release::Feature`s `CveStatus`,
+  `CveStatusCpe`, `CvePatchContentLines`) and is named in a note; the `lib/oe/cve_check.py`
+  of the first layer that has one is read as a cross-check, and a second note says where it
+  differs. Ends with the evaluated views' notes. On the fixture copy of `tests/recipe_cve.rs` (cut):
 
   ```
   kind	cve	value	file	loc

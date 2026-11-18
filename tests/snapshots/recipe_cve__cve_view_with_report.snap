@@ -28,6 +28,6 @@ patch	CVE-2024-33334	by header; Upstream-Status: Submitted [https://example.org/
 patch	CVE-2024-22222	by name; Upstream-Status: Pending	meta-mine:recipes-sec/vuln/files/CVE-2024-22222-and-more.patch	meta-mine:recipes-sec/vuln/vuln_1.0.bb:3-8
 patch	CVE-2025-44444	by name and header; Upstream-Status: Backport [https://example.org/vuln/commit/4]	meta-vendor:recipes-sec/vuln/files/CVE-2025-44444.patch	meta-vendor:recipes-sec/vuln/vuln_%.bbappend:2
 note: what the metadata declares (CVE_PRODUCT, CVE_STATUS, CVE_CHECK_IGNORE, patches in SRC_URI), read as OE-core's CVE check reads it; this is not a scan against the NVD, and nothing was run
-note: rules of meta-core:lib/oe/cve_check.py: CVE_STATUS with CVE_CHECK_STATUSMAP and CVE_STATUS_GROUPS; patch headers: every id on lines starting with CVE:
+note: CVE rules of wrynose: CVE_STATUS with CVE_CHECK_STATUSMAP and CVE_STATUS_GROUPS; patch headers: every id on lines starting with CVE:
 note: 5 patches in SRC_URI scanned (file name and header); patches without a CVE id are not listed (see show=sources)
 note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)

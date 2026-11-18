@@ -1384,8 +1384,9 @@ devtool job it is refused at once) and `wait_with`; the `bitbake` tool's `wait` 
 
 Build views (x4): three read-only views of what a build left, none of which builds:
 `recipe show=cve` (a `views::cve` in `tools/recipe.rs` over `bitbake::cve`; the CVE rules
-are chosen from the workspace's `lib/oe/cve_check.py`, since no `release::Feature` covers
-them), `sigs` (`tools/sigs.rs` over `bitbake::sigs`: signature files are zstd JSON and
+are, since x7, `release::Feature::{CveStatus, CveStatusCpe, CvePatchContentLines}` of the
+workspace release, with its `lib/oe/cve_check.py` read only as a cross-check note), `sigs`
+(`tools/sigs.rs` over `bitbake::sigs`: signature files are zstd JSON and
 sous-chef has no zstd decoder, so it digests `bitbake-diffsigs` output; the runner is the
 `bitbake::sigs::DiffSigs` trait, `EnvDiffSigs` through `BbEnv::output` in production, a
 fake script in tests, and `bitbake-diffsigs` must be in `env::ALLOWED_PROGRAMS` for the

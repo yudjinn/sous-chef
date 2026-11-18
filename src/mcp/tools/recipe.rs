@@ -1927,21 +1927,31 @@ mod views {
         loc: Option<Loc>,
     }
 
-    /// The `lib/oe/cve_check.py` of the first layer (in `BBLAYERS` order) that has one,
-    /// read through `Workspace::confine`, and the rules it implements.
+    /// The CVE rules of the workspace's release (the release table), and a note when the
+    /// `lib/oe/cve_check.py` of the first layer (in `BBLAYERS` order) that has one, read
+    /// through `Workspace::confine`, implements other rules.
     fn cve_rules(ws: &Workspace) -> (crate::bitbake::cve::CveRules, Option<String>) {
+        use crate::bitbake::cve::CveRules;
+        let release = ws.release.release;
+        let rules = CveRules::for_release(release);
         for l in &ws.layers {
             let p = l.root.join("lib/oe/cve_check.py");
             if let Ok(c) = ws.confine(&p)
                 && let Ok(text) = fs::read_to_string(&c)
             {
-                return (
-                    crate::bitbake::cve::CveRules::from_lib(&text),
-                    Some(format!("{}:lib/oe/cve_check.py", l.name)),
-                );
+                let differ = rules.differences(CveRules::from_lib(&text));
+                let note = (!differ.is_empty()).then(|| {
+                    format!(
+                        "note: {}:lib/oe/cve_check.py differs from {release}'s OE-core in {} \
+                         (a backport or a patched OE-core?); the rules of {release} were used",
+                        l.name,
+                        differ.join(", ")
+                    )
+                });
+                return (rules, note);
             }
         }
-        (crate::bitbake::cve::CveRules::NEWEST, None)
+        (rules, None)
     }
 
     /// The last applied operation on `name[flag]`.
@@ -2167,7 +2177,7 @@ mod views {
             for id in ds.flag_names("CVE_STATUS") {
                 facts.push([
                     id.clone(),
-                    "CVE_STATUS has no effect here (no decode_cve_status in lib/oe/cve_check.py); this OE-core reads CVE_CHECK_IGNORE".into(),
+                    format!("CVE_STATUS has no effect here ({} has no decode_cve_status in lib/oe/cve_check.py); this OE-core reads CVE_CHECK_IGNORE", ws.release.release),
                     "-".into(),
                     flag_loc(ds, "CVE_STATUS", &id).map_or("-".into(), |l| l.to_string()),
                 ]);
@@ -2497,25 +2507,23 @@ mod views {
         }
 
         t.note("note: what the metadata declares (CVE_PRODUCT, CVE_STATUS, CVE_CHECK_IGNORE, patches in SRC_URI), read as OE-core's CVE check reads it; this is not a scan against the NVD, and nothing was run");
-        t.note(&match &rules_file {
-            Some(f) => format!(
-                "note: rules of {f}: {}; {}",
-                if rules.status {
-                    "CVE_STATUS with CVE_CHECK_STATUSMAP and CVE_STATUS_GROUPS"
-                } else {
-                    "no CVE_STATUS (CVE_CHECK_IGNORE only)"
-                },
-                if rules.line_rule {
-                    "patch headers: every id on lines starting with CVE:"
-                } else {
-                    "patch headers: the tag CVE: followed by space-separated ids"
-                }
-            ),
-            None => {
-                "note: no lib/oe/cve_check.py in the layers; the newest OE-core rules were used"
-                    .into()
+        t.note(&format!(
+            "note: CVE rules of {}: {}; {}",
+            ws.release.release,
+            if rules.status {
+                "CVE_STATUS with CVE_CHECK_STATUSMAP and CVE_STATUS_GROUPS"
+            } else {
+                "no CVE_STATUS (CVE_CHECK_IGNORE only)"
+            },
+            if rules.line_rule {
+                "patch headers: every id on lines starting with CVE:"
+            } else {
+                "patch headers: the tag CVE: followed by space-separated ids"
             }
-        });
+        ));
+        if let Some(n) = &rules_file {
+            t.note(n);
+        }
         t.note(&format!(
             "note: {scanned} {} in SRC_URI scanned (file name and header); patches without a CVE id are not listed (see show=sources)",
             if scanned == 1 { "patch" } else { "patches" }
