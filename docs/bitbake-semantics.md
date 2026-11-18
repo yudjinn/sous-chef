@@ -302,7 +302,7 @@ the value exactly as before:
   the escapes `\\ \' \" \n \t` (no prefix, no triple quote, no implicit concatenation);
   decimal integers; `True` / `False` / `None`; list displays `[a, b]`; the name `d` (only
   as an argument, or as `d.getVar` / `d.getVarFlag` / `d.expand`); calls of the allowlisted
-  helpers below and of `len`, with positional and keyword arguments bound as python binds
+  helpers below and of `len` and `bool` (positional only, as in python), with positional and keyword arguments bound as python binds
   them to the helper's signature; `a + b` (strings, lists); `a % b` with the conversions
   `%s`, `%d` (of an integer) and `%%` only, `b` a single value or a tuple (needed by OE-core's
   arm tune python, see "Corpus" below); `a if c else b`; `and` / `or` (returning an
@@ -392,13 +392,15 @@ most common calls outside the allowlist: `meson_array` 31, `os.path.relpath` 28,
 `oe.tune.riscv_isa_to_tune` 5. `%` occurs in 28 expressions; it is in the subset because
 the arm tune's `TUNE_PKGARCH` (`('-%s' % d.getVar('TUNE_CCARGS_MFPU').split()[-1]...)`)
 decides `PACKAGE_ARCH` and so every target recipe's `WORKDIR`, `S`, `B`, `T` and the
-`CFLAGS` that hold them.
+`CFLAGS` that hold them; `bool()` likewise for `MACHINE_ARCH` (`bitbake.conf`:
+`[d.getVar('TUNE_PKGARCH'), d.getVar('MACHINE')][bool(d.getVar('MACHINE'))]`), the
+`PACKAGE_ARCH` of machine-specific recipes (kernel, boot loader, images).
 
 **Checked against the real helpers**: `tests/fixtures/pyexpr/oracle.tsv`, written by
 `tests/fixtures/pyexpr/oracle.py` with BitBake 2.18's `lib/bb` and OE-core Wrynose's
-`meta/lib` imported, runs 139 expressions over 114 pairs of values (unset, empty, spaces and
-tabs, `Yes`, `0`, versions, ...): of the 13,572 cases where python succeeds sous-chef
-evaluates 12,997 with the same `str()` and leaves the rest; where python raises (2,274)
+`meta/lib` imported, runs 146 expressions over 114 pairs of values (unset, empty, spaces and
+tabs, `Yes`, `0`, versions, ...): of the 14,062 cases where python succeeds sous-chef
+evaluates 13,601 with the same `str()` and leaves the rest; where python raises (2,582)
 sous-chef never evaluates (`tests/pyexpr_oracle.rs`).
 
 **Where it takes effect**: everything that expands a value: `var`, the `recipe` views,
