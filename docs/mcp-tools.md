@@ -127,7 +127,7 @@ Resolve a recipe and show its shape.
 | `name` | string | required: a `pn`, a `pn_pv`, or a pointer to a `.bb` or a `.bbappend` (a bbappend pointer means the recipe it applies to) |
 | `version` | string? | default: the version BitBake would use (provider selection for the default machine and distro); `%` matches any rest |
 | `show` | `"summary"` \| `"tree"` \| `"outline"` \| `"sources"` \| `"tasks"` \| `"packages"` \| `"cve"` | default `summary` |
-| `mc` | string? | multiconfig (also `name` written `mc:<name>:<recipe>`): the version is chosen and the key values and evaluated views are evaluated there; `tree` and `outline` are static and the same everywhere (a note says so) |
+| `mc` | string? | multiconfig, a name in `BBMULTICONFIG` (common section, "Multiconfig"; also `name` written `mc:<name>:<recipe>`): the version is chosen and the key values and evaluated views are evaluated there; `tree` and `outline` are static and the same everywhere (a note says so) |
 
 An unknown version is an error listing the versions that exist. A `pn_pv` together with a
 different `version` is an error. A bbappend that applies to several recipes is an error
@@ -328,7 +328,7 @@ History and final value of a variable. The main tool.
 | `name` | string | base name, e.g. `SRC_URI`; `FILES:${PN}` allowed (expanded for the recipe first); `VAR[flag]` shows that flag only |
 | `recipe` | string? | omit for global configuration; `mc:<name>:<recipe>` evaluates in that multiconfig |
 | `machine`, `distro` | string? | |
-| `mc` | string? | multiconfig to evaluate in (common section, "Multiconfig"); not with `authoritative` |
+| `mc` | string? | multiconfig, a name in `BBMULTICONFIG` (common section, "Multiconfig"; also `recipe` written `mc:<name>:<recipe>`); not with `authoritative` |
 | `authoritative` | bool | default false; true runs `bitbake -e` (M5) |
 | `flags` | bool | also show `VAR[flag]` operations, per flag, after the value's |
 
@@ -482,7 +482,7 @@ final: function do_install, 3 pieces in order: meta-core:classes-recipe/autotool
 |---|---|---|
 | `recipe` | string? | `mc:<name>:<recipe>` allowed |
 | `machine`, `distro` | string? | |
-| `mc` | string? | multiconfig to evaluate in; the multiconfig note is printed |
+| `mc` | string? | multiconfig, a name in `BBMULTICONFIG` (common section, "Multiconfig"; also `recipe` written `mc:<name>:<recipe>`) |
 | `show` | `"chain"` \| `"conditional"` \| `"dead"` | default `chain` |
 
 - `chain`: rows `priority entry from loc`: the entries of the evaluated `OVERRIDES`,
@@ -718,7 +718,7 @@ note: 1 bbappend matches no recipe; BitBake stops with a fatal error on these (c
 |---|---|
 | `recipe` | required; for `providers`, a provided name such as `virtual/kernel`; `mc:<name>:<recipe>` allowed |
 | `kind` | `"build"` (default), `"runtime"`, `"packageconfig"`, `"reverse"`, `"providers"`, `"mcdepends"` |
-| `mc` | multiconfig to evaluate in, provider selection included (per configuration, as in BitBake) |
+| `mc` | multiconfig, a name in `BBMULTICONFIG` (common section, "Multiconfig"; also `recipe` written `mc:<name>:<recipe>`); provider selection is per configuration, as in BitBake |
 | `depth` | default 1, at most 5; used by `build` and `reverse` only (a note says so otherwise) |
 
 There is no `machine` or `distro` argument: the recipe is evaluated for the configuration's
@@ -832,7 +832,11 @@ those of the default configuration's `BBMASK` (bitbake-semantics.md, "Multiconfi
 pointer with a line range keeps only
 the findings in that range. Output: a summary line first (counts by severity and by rule,
 so a table cut by the budget still gives the totals), then the table
-`severity rule pointer message`, then the notes. JSON:
+`severity rule pointer message`, then the notes, the last of which (since x7) says what was
+checked: `checked N files with R rules: Yocto conventions and release compatibility, not
+whether the recipes build or work`, plus the recipes recipe-scope rules missed because their
+evaluation failed (layers left out have their own `not checked:` note), so that few or no
+findings are not read as a clean bill of health. JSON:
 `{summary, errors, warnings, infos, by_rule, findings}`, where `findings` is the table.
 See [lint-rules.md](lint-rules.md) for the engine.
 
@@ -843,6 +847,7 @@ error	hygiene/parse-error	meta-mine:conf/distro/mine.conf:1	`inherit` in a .conf
 error	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:3	unparsed line; fix the line so BitBake can parse it, or remove it
 warning	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:4	addtask: `before`/`after` groups split by the other keyword are concatenated by BitBake without a space, joining two task names; write all `after` tasks in one group and all `before` tasks in another
 error	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:5-6	function do_broken is never closed: no `}` in column 0 before end of file; close the function with `}` in column 0
+note: checked 6 files with 1 rule: Yocto conventions and release compatibility, not whether the recipes build or work
 ```
 
 Fix mode (lint-rules.md, "Fixes"; the CLI's `--fix`, `--fix-suggested`, `--write`):
@@ -857,7 +862,9 @@ Fix mode (lint-rules.md, "Fixes"; the CLI's `--fix`, `--fix-suggested`, `--write
 (saying whether it is a dry run), the lint summary line, `fixes available: N for M findings
 (S safe, G suggested); by rule: ...`, then per round `applied N fixes in F files` (dry run:
 `would apply`) followed by a unified diff per file (`--- layer:path` / `+++ layer:path`),
-the fixes deferred because they overlap another (dry run: "re-run after applying"), the
+the fixes deferred because they overlap another (dry run: "re-run after applying"; since x7
+a dry run also says that it shows the first round only and a write may apply further fixes
+in up to 5 rounds), the
 files refused (changed since indexed or read, refused by the scaffold checks), the
 suggested fixes not applied (each `pointer rule safety description` with its own diff), the
 fixes in layers that are not writable (never applied), and after a write `after: F files

@@ -310,21 +310,6 @@ Who reads it:
   setups, not releases: a Wrynose bitbake-setup build has its own `init-build-env` (the
   `bitbake-setup` mode of the runner); see "Build environments" in bitbake-semantics.md.
 
-### Migration report and CI output (branch x2-migrate)
-
-`lint::Options` carries `as_release: Option<Release>` and `only_release: bool`; the
-engine applies them to every unit's releases (`lint::releases_with_options`), so a rule
-sees the extra release in `LintContext::releases` and nothing else changes.
-`lint::migrate::report` runs `lint::run` twice (the layers' own releases, then the target
-release alone) and compares rule and pointer pairs, scans the target's files for uses of
-each `Feature` the target changed, and reads each layer's `LAYERSERIES_COMPAT`; the audit
-calls it for its optional section 7. `hygiene/release-removed` holds the removal table
-(`KeptUntil*` features). The CLI-only options live in `lint::ci::dispatch`, called by
-`lint::cli_with`: `--format sarif` (`lint::sarif`), `--format github`, and the baseline
-(`lint::baseline`: fingerprints hash rule, file and statement text). `LintCliArgs::format`
-stays the library's `render::Format`; the command line's `--format` is
-`LintCliArgs::output`. See docs/ci.md.
-
 ## Index contract (`src/index`)
 
 Location: `$XDG_CACHE_HOME/sous-chef/<sha256 of workspace roots, 16 hex>/index.sqlite`.
@@ -804,23 +789,6 @@ configuration, suppression and exit codes are described in lint-rules.md ("Runni
 Lint tool (T4.5, `mcp::tools::lint`): a wrapper over `lint::run` and `render_report`;
 `rules_resource(config)` generates `sous-chef://rules` from the rule registry and the Flags
 column of lint-rules.md (so a row there must keep four cells).
-
-Lint fixes (x3, `lint::fix`; lint-rules.md "Fixes"): `Rule` gains `fixes(&LintContext) ->
-Vec<FixedFinding>` (default none), each a finding exactly as `check` reports it with a
-`Fix { layer, path, sha256, edits: Vec<Edit { bytes, replacement }>, description, safety:
-Safe | Suggested }`; `Finding` is unchanged. Edits are byte ranges of the text the rule
-saw, located with `fix::assign_parts` / `function_name` / `statement_lines`, which read
-the statement's span back and refuse when it does not say what the parser recorded.
-`fix::run(ws, &mut index, config, &Target, &Options, &FixOptions { suggested, write })`
-lints, keeps the fixes of reported findings, and turns the edits of one file into one
-scaffold `PlannedFile` (`Modify { before_sha }`) checked by `scaffold::check_plan` and
-written by `scaffold::apply_plan`: the scaffold engine's guarantees, not a second writer.
-After writing it refreshes the index, lints the changed files and repeats (deferred
-overlaps, findings a fix made visible) up to `MAX_ROUNDS`; `FixReport { report, available,
-rounds, suggested_skipped, not_writable, after: { fixed, remaining, new, revealed } }`.
-`fixes_in_text` / `fix_text` are the in-memory counterparts of `check_text` for fixture
-tests. CLI: `lint::cli_fix_with` (`--fix`, `--fix-suggested`, `--write`); tool: `fix`,
-`fix_suggested`, `write`.
 
 Jobs and the `bitbake` tool (T5.4, `bitbake::jobs`, `mcp::tools::bitbake`): `JobTable`
 (`new`, `start(&BbEnv, JobSpec, dir) -> Result<Started>`, `get`, `running`, `last`, `list`,
@@ -1382,7 +1350,69 @@ running read-only job, `env` or `layers`, then starts; behind a build, task, cle
 devtool job it is refused at once) and `wait_with`; the `bitbake` tool's `wait` argument
 (0 to `MAX_WAIT_SECS` = 300 s) answers once the job has ended, with progress meanwhile.
 
-Build views (x4): three read-only views of what a build left, none of which builds:
+### As implemented in the x batch (x1 to x6, and x7-cleanup)
+
+Six branches built in parallel (x1-python, x2-migrate, x3 lint fixes, x4 build views,
+x5 multiconfig, x6 benchmark), merged at `a76da18`, then one cleanup round (x7-cleanup)
+that reconciled them. One paragraph per part; x7's changes are folded into the part they
+touch.
+
+**Inline python (x1).** `eval/pyexpr.rs` parses and evaluates a strict subset of python
+expressions (literals, `d`, the allowlisted pure helpers, string `+` / `%`, `if else`,
+`and` / `or` / `not`, `==` / `!=` / `in`, list subscripts, a few string methods;
+bitbake-semantics.md, "Inline python evaluated statically"); no interpreter, no new
+dependency. `expand::Expander` runs it after each variable-substitution pass on the
+`${@...}` matches whose code has no `${VAR}` left, through `pyexpr::Env`, which hands out
+only *certain* values (`Source::lookup`, `Source::unset_doubt` for a variable that is unset
+but may be set, `Source::lookup_flag`; the datastore's `Eval` implements all three), and
+records every attempt in `Expander::python_log` (`PyEvent`: code, evaluated, why not).
+`Value` is unchanged: an evaluated expression is replaced by its text and flags nothing; a
+refused one stays and sets `unevaluated_python` as before. `DataStore::python_log(name)`
+(`overrides::PythonLog`: the value's own expressions and, when it consulted an override,
+those of `OVERRIDES`) feeds one note line in `var`, `overrides` and `deps`
+(`var::python_eval_notes`); since x7 the evaluated `recipe` views' note says "only
+allowlisted python helpers evaluated" instead of "python not run". There is no switch in
+`sous-chef.toml`: an evaluated value is exact by construction (`tests/pyexpr_oracle.rs`
+checks it against the real helpers). Anonymous python is still never run.
+
+**Migration report and CI output (x2).** `lint::Options` carries `as_release:
+Option<Release>` and `only_release: bool`; the engine applies them to every unit's
+releases (`lint::releases_with_options`), so a rule sees the extra release in
+`LintContext::releases` and nothing else changes. `lint::migrate::report` runs `lint::run`
+twice (the layers' own releases, then the target release alone) and compares rule and
+pointer pairs, scans the target's files for uses of each `Feature` the target changed
+(`migrate::instruction` has a line per feature, the three CVE features of x7 included),
+and reads each layer's `LAYERSERIES_COMPAT`; the audit calls it for its optional section
+7. `hygiene/release-removed` holds the removal table (`KeptUntil*` features) and, since x7,
+the `${SRCPV}` check and fixes (`PURE_RENAMES`). The CLI-only options live in
+`lint::ci::dispatch`, called by `lint::cli_with`: `--format sarif` (`lint::sarif`; a
+result's `ruleIndex` is the rule's position in the catalogue), `--format github`, and the
+baseline (`lint::baseline`: fingerprints hash rule, file and statement text).
+`LintCliArgs::format` stays the library's `render::Format`; the command line's `--format`
+is `LintCliArgs::output`. See docs/ci.md.
+
+**Lint fixes (x3, `lint::fix`; lint-rules.md "Fixes").** `Rule` gains
+`fixes(&LintContext) -> Vec<FixedFinding>` (default none), each a finding exactly as
+`check` reports it with a `Fix { layer, path, sha256, edits: Vec<Edit { bytes,
+replacement }>, description, safety: Safe | Suggested }`; `Finding` is unchanged. Edits are
+byte ranges of the text the rule saw, located with `fix::assign_parts` / `function_name` /
+`statement_lines`, which read the statement's span back and refuse when it does not say
+what the parser recorded. `fix::run(ws, &mut index, config, &Target, &Options, &FixOptions
+{ suggested, write })` lints, keeps the fixes of reported findings, and turns the edits of
+one file into one scaffold `PlannedFile` (`Modify { before_sha }`) checked by
+`scaffold::check_plan` and written by `scaffold::apply_plan`: the scaffold engine's
+guarantees, not a second writer. After writing it refreshes the index, lints the changed
+files and repeats (deferred overlaps, findings a fix made visible) up to `MAX_ROUNDS`;
+`FixReport { report, available, rounds, suggested_skipped, not_writable, after: { fixed,
+remaining, new, revealed } }`. A dry run is the first round only and says so (x7: an exact
+in-memory replay of the later rounds would need the recipe-scope evaluation of unwritten
+text). `fixes_in_text` / `fix_text` are the in-memory counterparts of `check_text` for
+fixture tests. CLI: `lint::cli_fix_with` (`--fix`, `--fix-suggested`, `--write`); tool:
+`fix`, `fix_suggested`, `write`. Rules with a fix since x7 also include
+`hygiene/workdir-s`, the `${WORKDIR}/<file>` case of `hygiene/release-syntax` and
+`hygiene/release-removed`.
+
+**Build views (x4).** Three read-only views of what a build left, none of which builds:
 `recipe show=cve` (a `views::cve` in `tools/recipe.rs` over `bitbake::cve`; the CVE rules
 are, since x7, `release::Feature::{CveStatus, CveStatusCpe, CvePatchContentLines}` of the
 workspace release, with its `lib/oe/cve_check.py` read only as a cross-check note), `sigs`
@@ -1396,10 +1426,10 @@ with modes: their inputs (a recipe and a task, or a file path and a package) and
 backends (a subprocess digest, a file reader) share nothing but the build directory.
 `TOOLS` now has 18 rows: 6 always loaded, 12 deferred.
 
-Hooks: unchanged since wave 5: four handlers (`GrepRead`, `BashDigest`, `BashGrep`,
+Hooks: unchanged since wave 5 (x7 only moved the 400-hit timing check of `tests/hook_bash_grep.rs` to an ignored test): four handlers (`GrepRead`, `BashDigest`, `BashGrep`,
 `EditFollowUp`) and the `[hooks]` switches `grep_read`, `bash`, `edit`.
 
-Multiconfig (x5, `eval::multiconfig`; rules in bitbake-semantics.md "Multiconfig"):
+**Multiconfig (x5, `eval::multiconfig`; rules in bitbake-semantics.md "Multiconfig").**
 `Target::mc` (serialised only when set); `multiconfig::{split_mc, normalize_target,
 list, list_with, check, oe_require_words, pass_note, mcdepends, PREFIX, OLD_PREFIX}`,
 `Multiconfigs { source: Source { Configuration, Kas }, value, setting, uncertain, enabled,
@@ -1425,22 +1455,33 @@ accepts, so `BbEnv::command` passes such a target (`mcp::tools::bitbake` uses it
 `build`, `task`, `env`, `clean`). Lint (`lint::run`), the index's `BBMASK` marks and the
 audit stay in the default configuration.
 
-Inline python (x1, 2026-11-18): `eval/pyexpr.rs` parses and evaluates a strict subset of
-python expressions (literals, `d`, the allowlisted pure helpers, string `+` / `%`, `if
-else`, `and` / `or` / `not`, `==` / `!=` / `in`, list subscripts, a few string methods;
-bitbake-semantics.md, "Inline python evaluated statically"); no interpreter, no new
-dependency. `expand::Expander` runs it after each variable-substitution pass on the
-`${@...}` matches whose code has no `${VAR}` left, through `pyexpr::Env`, which hands out
-only *certain* values (`Source::lookup`, `Source::unset_doubt` for a variable that is unset
-but may be set, `Source::lookup_flag`; the datastore's `Eval` implements all three), and
-records every attempt in `Expander::python_log` (`PyEvent`: code, evaluated, why not).
-`Value` is unchanged: an evaluated expression is replaced by its text and flags nothing; a
-refused one stays and sets `unevaluated_python` as before. `DataStore::python_log(name)`
-(`overrides::PythonLog`: the value's own expressions and, when it consulted an override,
-those of `OVERRIDES`) feeds one note line in `var`, `overrides` and `deps`
-(`var::python_eval_notes`). There is no switch in `sous-chef.toml`: an evaluated value is
-exact by construction (`tests/pyexpr_oracle.rs` checks it against the real helpers), so
-there is nothing to opt out of.
+**Benchmark (x6).** `bench/` (harness, tasks, scoring, results) and docs/benchmark.md; no
+code under `src/`.
+
+**Cleanup (x7).**
+
+- *Context cost.* `ToolEntry::to_rmcp` sends `mcp::compact_schema` of each argument schema
+  (no `$schema` / `title`, enums in place without per-value docs, `Option<T>` as `T`, no
+  integer `format` / `minimum`, the shared `budget_tokens` / `format` docs left out) and
+  marks the six always-loaded tools with Claude Code's `_meta["anthropic/alwaysLoad"] =
+  true` (`ALWAYS_LOAD_META_KEY`; `sous-chef/loading`, which no client read, is gone);
+  `help_text` uses the full schema and lists each enum value with its doc.
+  `tests/tools_budget.rs` pins `tools/list` under 15,000 bytes (31,539 before x7, 14,088
+  after), the server instructions under 800 and the skill under 3,000.
+- *Rendering.* The budget marker names the budget that returns every row
+  (`Table::budget_for_all`; JSON `budget_for_all`, only when rows were dropped).
+- *Search.* `search::Mode::Text` (literal line search, `regex::escape`), `NAME[flag]` in
+  name mode (`query::search_name_flags`), `layer` as a comma-separated list (several
+  layers become a `StatementFilter::files` list), and `search::DEFAULT_BUDGET` = 1200
+  when `sous-chef.toml` keeps the default budget.
+- *Lint.* `Report::{rules_run, recipes_unevaluated}` (not serialised) and
+  `Report::coverage_note`, the last note of `render_report`; new rules `hygiene/git-pv`
+  (recipe scope) and `hygiene/insane-skip` (file scope), 42 rules;
+  `override/legacy-syntax`'s `SCRIPT_PACKAGE_VARS`; `org/class-export-functions` asks
+  `query::addtask_names` and skips helpers.
+- *Releases.* `Feature::{CveStatus, CveStatusCpe, CvePatchContentLines}`;
+  `bitbake::cve::CveRules::for_release` replaces reading `lib/oe/cve_check.py`, which is now
+  only a cross-check (`CveRules::from_lib`, `differences`).
 
 ## Errors
 

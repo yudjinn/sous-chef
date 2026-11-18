@@ -16,7 +16,7 @@ It needs no build environment for lookups; it uses BitBake only when asked to ru
   and why), bbappends in application order, classes and key values; its file tree,
   functions, sources and patches, tasks and packages, and what its metadata declares about
   CVEs (`recipe`). The exact text of a
-  function or assignment, usable as an Edit string (`item`). Statements by name, regex or
+  function or assignment, usable as an Edit string (`item`). Statements by name, literal text, regex or
   full text, each with its enclosing item (`search`). Which class file wins and who
   inherits it (`class`).
 - **The final value of a variable and where every part comes from.** Every operation in
@@ -27,7 +27,14 @@ It needs no build environment for lookups; it uses BitBake only when asked to ru
   dependencies, which recipe provides `virtual/kernel` and why (`deps`); layers,
   priorities, shadowed recipes, which bbappend applies to what (`layers`).
 - **Lint against Yocto conventions**, each layer against every release its
-  `LAYERSERIES_COMPAT` claims (`lint`, `sous-chef lint`).
+  `LAYERSERIES_COMPAT` claims (`lint`, `sous-chef lint`), with fixes as a diff or written
+  (`--fix`, `--write`), a check against a release the layer does not claim yet
+  (`--as-release`) or a migration report to it (`--migrate-to`), SARIF and GitHub
+  annotations for CI (`--format sarif|github`) and a baseline of accepted findings
+  (`--baseline`). The answer says what it checked: conventions and release compatibility,
+  not whether the build works.
+- **Multiconfig**: `var`, `overrides`, `deps` and `recipe` evaluate in a `BBMULTICONFIG`
+  configuration (`mc`, or `mc:<name>:<recipe>`).
 - **Scaffold** recipes, bbappends, layers, classes and `.inc` splits into a writable layer,
   and say where a change belongs (`scaffold`).
 - **Run BitBake and digest its logs.** `bitbake`, `devtool` and `bitbake-layers` as
@@ -78,8 +85,9 @@ estimated at 4 bytes each.
 - A search answer is about the size of grep's; the gain there is that each hit names the
   item it is in, which saves follow-up reads.
 - The hooks add a few hundred bytes of context to each annotated Grep or Read.
-- A table is cut to `budget_tokens` (600 by default, at 4 bytes a token) with a marker
-  saying how many rows were left out; `item` and `slice` text is capped at 8 KB; long
+- A table is cut to `budget_tokens` (600 by default, 1200 for `search`, at 4 bytes a token)
+  with a marker saying how many rows were left out and the budget that returns them all;
+  `item` and `slice` text is capped at 8 KB; long
   values, logs, diffs and reports go under a handle read with `slice`.
 - These are per-question measurements.
 
@@ -89,7 +97,10 @@ and without the plugin ([docs/benchmark.md](docs/benchmark.md)). Without sous-ch
 sessions used 1.28 times the tokens (1,919,410 against 1,505,217), 199 against 128 turns,
 and scored 0.60 against 0.83 on the reference facts. Per task the ratio ranged from 0.23 to
 2.52: sous-chef used fewer tokens on 8 tasks and more on 6, among them a simple search
-(4.3 times more). The plugin adds 9,356 tokens to every session's context. One run per cell
+(4.3 times more). The plugin added 9,356 tokens to every session's context in the pilot
+(its sessions loaded every tool definition upfront); since then the `tools/list` payload
+was cut from 31.5 KB to 14.1 KB and the six core tools are marked for upfront loading under
+Claude Code's tool search (docs/mcp-tools.md, "Context cost"), not re-measured in a session. One run per cell
 is a pilot: single tasks moved by up to a factor of 2.3 between two runs. Part of the score
 gap comes from the workspace itself: its `.gitignore` lists the upstream layers, and Claude
 Code's Grep and Glob honour it, so three baseline sessions did not find OE-core at all.
@@ -98,11 +109,13 @@ Code's Grep and Glob honour it, so three baseline sessions did not find OE-core 
 
 Static answers were compared with `bitbake -e` on the same workspace (yocto-kiss, Wrynose,
 MACHINE `dogbonedark`, DISTRO `kiss`; 23 recipes and two `BBCLASSEXTEND` variants;
-[docs/differential.md](docs/differential.md), "After w12-final"):
+[docs/differential.md](docs/differential.md); re-measured for x7-cleanup on the same dumps):
 
 | Values compared | Equal to BitBake | Differ, and flagged | Documented gap | Differ without a flag |
 |---|---|---|---|---|
-| 1090 | 702 (64%) | 357 | 31 | 0 |
+| 1090 | 950 (87%) | 109 | 31 | 0 |
+
+(Before x1 evaluated the allowlisted python helpers: 702 equal, 357 flagged.)
 
 A flagged value carries `depends on python, not evaluated` or names an unresolved
 reference; for those, `var` with `authoritative: true` asks BitBake. The 31 gaps are 29
@@ -122,9 +135,13 @@ meta-openembedded scale was not measured.
 
 ### What it does not do
 
-Python is never evaluated statically: `${@...}` expressions, anonymous python and
-`d.setVar` in classes are not run, and an answer that depends on them says so instead of
-guessing. sous-chef never builds anything by itself: BitBake runs only when the `bitbake`
+Python is not run. A `${@...}` expression made only of an allowlist of pure helpers
+(`bb.utils.contains`, `oe.utils.conditional`, `d.getVar`, string methods, ...; the list
+and each helper's source are in docs/bitbake-semantics.md, "Inline python evaluated
+statically") is evaluated by sous-chef's own interpreter with python's semantics, and the
+answer says it was; anything else in `${@...}`, every anonymous python function, python
+tasks and anything that would read the host (files, the environment, the clock) is never
+evaluated, and an answer that depends on it says so instead of guessing. sous-chef never builds anything by itself: BitBake runs only when the `bitbake`
 tool (or authoritative `var`) is called, and the hooks never start it. It writes only to
 the layers you mark writable, runs no arbitrary shell command through MCP, and makes no
 network connection itself (a BitBake build it starts may fetch, as any build does).
@@ -270,6 +287,10 @@ workspace").
 | `sous-chef index` | Refreshes the index and prints what changed |
 | `sous-chef lint [TARGET] [--rule ID]... [--severity S] [--fail-on S] [--format text\|json\|sarif\|github] [--all] [--as-release R [--only-release]] [--migrate-to R] [--baseline FILE \| --write-baseline FILE]` | Lints a recipe, pointer, layer or path; default the writable layers and the build configuration (`--all`: every layer). `--as-release` also checks against a release the layers do not claim; `--migrate-to` prints the migration report; SARIF, annotations and the baseline are for CI ([docs/ci.md](docs/ci.md)). Exit status 0 clean, 1 a finding at or above `--fail-on` (default `error`; with `--baseline`, a new one), 2 lint could not run |
 | `sous-chef audit [ROOT] [--format md\|json] [--output FILE] [--migrate-to R]` | Writes one findings report for a whole build repository: every layer under ROOT (default: the working directory), enabled or not, with git facts, releases, layer structure, lint findings of every layer and parse problems (`--migrate-to`: plus section 7, the migration report of the writable layers). Read-only; takes about as long as `lint --all` (15 s on the live workspace), progress on stderr. Exit status 0 when the report was written, 2 when it could not be |
+| `sous-chef diff LAYER FROM [TO] [--recipe PN] [--all] [--format text\|json] [--output FILE]` | The `diff` tool's whole table (or the whole diff as JSON) between two revisions of the layer's repository; `TO` defaults to the working tree. Read-only (no checkout, no fetch); under a second for every recipe of OE-core. Exit status 0 when the diff was produced, 2 when it could not be |
+| `sous-chef hook` | Claude Code hook: reads one event on stdin, writes nothing or one response object; always exits 0 |
+
+Global flags: `--build-dir DIR`, `--config FILE`, `--layer DIR` (repeatable).
 
 ### Migrating a layer
 
@@ -294,20 +315,20 @@ it, is the "Release removals" table in [docs/lint-rules.md](docs/lint-rules.md).
 github` writes workflow annotations, and `--write-baseline FILE` / `--baseline FILE` keep
 existing findings from failing new changes. Workflow examples (GitHub Actions, GitLab) and
 the exit codes: [docs/ci.md](docs/ci.md).
-| `sous-chef diff LAYER FROM [TO] [--recipe PN] [--all] [--format text\|json] [--output FILE]` | The `diff` tool's whole table (or the whole diff as JSON) between two revisions of the layer's repository; `TO` defaults to the working tree. Read-only (no checkout, no fetch); under a second for every recipe of OE-core. Exit status 0 when the diff was produced, 2 when it could not be |
-| `sous-chef hook` | Claude Code hook: reads one event on stdin, writes nothing or one response object; always exits 0 |
 
-Global flags: `--build-dir DIR`, `--config FILE`, `--layer DIR` (repeatable).
+### Fixing findings
 
-**Fixing findings.** `sous-chef lint --fix [TARGET]` prints, per file, a unified diff of
+ `sous-chef lint --fix [TARGET]` prints, per file, a unified diff of
 the fixes it can make and a summary (fixes available, safe and suggested, by rule); nothing
 is written until `--write`. Safe fixes preserve meaning or are exactly what BitBake requires
 (legacy `_` override names to `:`, the missing space of an `:append`, whitespace after a
-trailing `\`, ...); suggested ones change meaning the way the rule recommends and are
-applied only with `--fix-suggested`. Writing goes through the scaffold engine: writable
-layers only, a file changed since it was read is refused, then the changed files are linted
-again and any new finding is reported. The `lint` tool takes `fix`, `fix_suggested` and
-`write`. Which rules have a fix: [docs/lint-rules.md](docs/lint-rules.md), "Fixes".
+trailing `\`, `S = "${WORKDIR}"` to `S = "${UNPACKDIR}"` and the pure renames of removed
+variables when every release the layer claims has the new form, ...); suggested ones change
+meaning the way the rule recommends and are applied only with `--fix-suggested`. Writing
+goes through the scaffold engine: writable layers only, a file changed since it was read is
+refused, then the changed files are linted again, fixes that became possible are applied in
+further rounds (up to five; the dry run shows the first), and any new finding is reported.
+The `lint` tool takes `fix`, `fix_suggested` and `write`. Which rules have a fix: [docs/lint-rules.md](docs/lint-rules.md), "Fixes".
 
 ### kas projects
 
@@ -394,14 +415,14 @@ starts, and every tool and `status` report the error. Details: "Configuration" i
 | Tool | What it answers |
 |---|---|
 | `recipe` | A recipe's files, versions, bbappends, classes and key values; its file tree; its functions; its sources and patches, tasks in order, packages; its CVE view (`CVE_PRODUCT`, `CVE_STATUS`, CVE patches, inconsistencies, a build's CVE report if there is one) |
-| `var` | The history and final value of a variable for a recipe, machine and distro; with `authoritative`, BitBake's own (`bitbake -e`) |
+| `var` | The history and final value of a variable for a recipe, machine and distro; in a multiconfig with `mc`; with `authoritative`, BitBake's own (`bitbake -e`) |
 | `overrides` | The evaluated `OVERRIDES` chain; conditional operations, active or not; overrides that match nothing |
 | `item` | The text of a pointer or of a named statement |
-| `search` | Statements by name, regex or full text, each with its enclosing item |
+| `search` | Statements by name (also `NAME[flag]`), literal text, regex or full text, in one or several layers, each with its enclosing item |
 | `class` | Which class file wins, its interface and tasks; who inherits it |
 | `layers` | Layers, priorities and compatibility; shadowed recipes and classes; bbappend matches; compatibility, dependency and order problems |
 | `deps` | Build, runtime and `PACKAGECONFIG` dependencies; reverse dependencies; providers; cross-configuration (`mcdepends`) dependencies |
-| `lint` | Convention and syntax findings for a recipe, file, layer or the workspace, with MCP progress per file if the client asks for it |
+| `lint` | Convention, syntax and release findings for a recipe, file, layer or the workspace, and what was checked; fixes (`fix`, `fix_suggested`, `write`), another release (`as_release`, `only_release`), a migration report (`migrate_to`); MCP progress per file if the client asks for it |
 | `scaffold` | A new recipe, bbappend, layer or class, or an `.inc` split, as a dry run or written; or where a change belongs |
 | `bitbake` | Runs bitbake, devtool or bitbake-layers as a background job, in the build environment (init script, bitbake-setup or kas); poll with `op=status`, or pass `wait` to answer when it ends, with MCP progress notifications meanwhile if the client asks for them |
 | `log` | A digest of a failed task's log |
@@ -450,9 +471,10 @@ edit = false       # the reindex and lint after an edit
 ### Limits
 
 - **Static.** The index, `recipe`, `var`, `overrides`, `deps`, `lint` and `scaffold` read the
-  layers themselves and need no build environment. Values that depend on python are marked
-  (`depends on python, not evaluated`), and anonymous python that changes a variable is
-  named in a warning (see [Accuracy](#accuracy)).
+  layers themselves and need no build environment. Inline python of the allowlisted pure
+  helpers is evaluated (and said so); other inline python is marked (`depends on python, not
+  evaluated`), and anonymous python, which is never run, is named in a warning when it
+  changes a variable (see [Accuracy](#accuracy)).
 - **Needs BitBake.** `bitbake`, `log`, and `var` with `authoritative: true` (which runs
   `bitbake -e` as a background job and caches the dump until the metadata changes) need a
   build environment: an OE `oe-init-build-env`, a bitbake-setup `init-build-env`, an

@@ -295,11 +295,11 @@ Notes:
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `hygiene/missing-metadata` | W/I | recipe | No `SUMMARY` or `LICENSE`, or no `LIC_FILES_CHKSUM` when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (W, one finding); no `HOMEPAGE` (I) when the recipe has an upstream: a `SRC_URI` entry that is not `file://`, and not an image or a packagegroup. Configuration defaults do not count as set. Values that depend on python are not reported. |
+| `hygiene/missing-metadata` | W/I | recipe | No `SUMMARY` or `LICENSE`, or no `LIC_FILES_CHKSUM` when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (W, one finding); no `HOMEPAGE` (I) when the recipe has an upstream: a `SRC_URI` entry that is not `file://`, and not an image or a packagegroup. Configuration defaults do not count as set. Values that depend on python are not reported. (Since x1) `LIC_FILES_CHKSUM` is not asked of a recipe the evaluation says BitBake would skip under the configuration evaluated (no license QA runs there). |
 | `hygiene/git-pv` | I | recipe | (since x7) A `<pn>_git.bb` recipe fetching from `git://` or `gitsm://` whose `PV` comes only from `bitbake.conf`'s default, so it is the file name's version part `git` (BitBake's `vars_from_file`; yocto-kiss's `u-boot-kiss`: `PV="git"` in `bitbake -e`). Without a version number or a `+`, `package.bbclass` adds no source revision to `PKGV`, so a new `SRCREV` builds packages of the same version. Info: OE-core itself has three such recipes (`sato-icon-theme_git.bb`, ...). Not reported when python sets `PV`. No fix (the version is not known). |
 | `hygiene/insane-skip` | I | file | (since x7) `INSANE_SKIP` (any override, not `:remove`, not a flag) of `ldflags`, `textrel` or `buildpaths` in a `.bb`, `.bbappend` or `.inc`: QA checks of `ERROR_QA` whose failure usually means the recipe builds wrongly (no distro `LDFLAGS`, text relocations, host paths in the output). Other skips (`dev-so`, `arch`, `already-stripped`, ...) are routine and not reported; nor are classes (`go.bbclass` skips `ldflags` on purpose) or a file that inherits `bin_package`. |
 | `hygiene/autorev` | W | file | `SRCREV` or `SRCREV_<name>` (any operator or override, not a flag) whose value contains `${AUTOREV}`, outside `local.conf` and `auto.conf`. `SRCREV_FORMAT` is not checked. |
-| `hygiene/src-uri-checksum` | W | recipe | Remote download (`http`, `https`, `ftp`) in the evaluated `SRC_URI` without a checksum; `git://` / `gitsm://` URL without a revision, or without `branch=` (or `nobranch=1`) unless a `tag=` is given. E for a recipe checked against Walnascar or later (BitBake 2.12 stops on it): a git URL without `branch=` / `nobranch=1` / `usehead=1`, a `tag=` notwithstanding, or with several comma-separated branches; the message names those releases. Not reported when `SRC_URI` depends on python, or for an entry still containing `${` after expansion. |
+| `hygiene/src-uri-checksum` | W | recipe | Remote download (`http`, `https`, `ftp`) in the evaluated `SRC_URI` without a checksum; `git://` / `gitsm://` URL without a revision, or without `branch=` (or `nobranch=1`) unless a `tag=` is given. E for a recipe checked against Walnascar or later (BitBake 2.12 stops on it): a git URL without `branch=` / `nobranch=1` / `usehead=1`, a `tag=` notwithstanding, or with several comma-separated branches; the message names those releases. Not reported when `SRC_URI` depends on python, for an entry still containing `${` after expansion, or (since x1) when the evaluation says BitBake would skip the recipe under the configuration evaluated (a static "would skip" note: it fetches nothing there, and a value per machine says nothing about the others). |
 | `hygiene/host-path` | W | file | Absolute host paths (`/usr/lib`, `/etc`, `/home/...`) at the start of a word in `do_<task>` shell bodies, instead of `${D}`, `${S}`, `${bindir}` and friends; a `do_install` that never references `${D}` while running a command that writes files itself. Not scanned: other functions, comments, here-documents, the command word, values after `=`; `/dev`, `/proc`, `/sys`, `/tmp` are never reported. Data is not host access: the arguments of `echo`, `printf` and `bb*` messages, quoted arguments of `sed`, `grep`, `awk`, `perl` (expressions, patterns, shebangs), the target of `ln -s`; a redirection target always is. |
 | `hygiene/workdir-s` | E | file | `S = "${WORKDIR}"` (or `${WORKDIR}/`), reported only when the file's releases include one that rejects it (Styhead and later), naming them. A layer checked only against releases that accept it gets nothing. |
 | `hygiene/variable-order` | I | file | In a `.bb`, the first statement out of the OE style guide order (description block, license, dependencies, `SRC_URI`, `S`, inherit, `PACKAGECONFIG` and build options, tasks, packaging), once per file. Off by default: runs only when selected by its id, the alias `style/variable-order` or the alias group `style`. |
@@ -539,9 +539,10 @@ What the default rule set reports on `tests/fixtures/ws`, whose `sous-chef.toml`
 severity	rule	pointer	message
 info	org/recipe-change-in-local-conf	build:conf/local.conf:9	`EXTRA_OECONF:append:pn-hello` in local.conf changes only recipe hello, and only in this build directory; move it to a hello_%.bbappend in your layer as `EXTRA_OECONF:append`, or to your distro conf if it is policy
 warning	override/plus-equals-on-default	build:conf/local.conf:13	`DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = " wayland"`
-warning	hygiene/release-syntax	meta-mine:recipes-app/app/app_0.1.bb:22	`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
+warning	hygiene/release-syntax	meta-mine:recipes-app/app/app_0.1.bb:22	`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}"); no automatic fix while the layer also claims kirkstone and scarthgap, which have no UNPACKDIR
 warning	org/append-no-match	meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1	orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer
 note: not checked: 2 layers that are not writable (meta-core, meta-vendor); name one as the target or pass --all
+note: checked 6 files with 41 rules: Yocto conventions and release compatibility, not whether the recipes build or work
 ```
 
 `sous-chef lint --all` adds four findings in the other layers (`8 findings in 21 files: 1
@@ -692,13 +693,41 @@ What the rules still get wrong there, as far as it was checked:
   `SECTION` findings replaced by `pypi.bbclass:42` are true.
 - `override/dead` (92, info): real overrides of architectures and target OSes no machine
   of the workspace uses; expected noise while `OVERRIDES` holds python.
-- `org/class-export-functions` (23) and `org/class-recipe-specific` (7): false in the
+- `org/class-export-functions` (23 until x7, 1 since: below) and `org/class-recipe-specific` (7): false in the
   sample checked (a class's own tasks; `native.bbclass` setting `EXCLUDE_FROM_WORLD`).
 - `org/inc-has-version-data` (8): false in the sample (`common-clang.inc` `PV`,
   `u-boot-common.inc` `SRCREV`, shared on purpose by recipes of one version).
 - `override/remove-in-recipe`, `org/class-location`, `override/plus-equals-with-override`:
   true by the rule's definition; OE-core does these on purpose.
-- No rule reports `PV = "1.0+git${SRCPV}"` (`SRCPV` is empty in Wrynose): a miss.
+- No rule reported `PV = "1.0+git${SRCPV}"` (`SRCPV` is empty in Wrynose): a miss until
+  x7 (now `hygiene/release-removed`, below).
+
+Re-measured for branch `x7-cleanup` (2026-11-18, the release binary with
+`runs/x7-cleanup/sous-chef.toml` (the two kas files, `[bitbake] enabled = false`), run from
+`yocto-kiss/`, cache under `runs/x7-cleanup/`, no BitBake run):
+
+| Run | x7-cleanup |
+|---|---|
+| Default (13 files) | 5 findings (0 E, 1 W, 4 I), then the coverage note `checked 13 files with 41 rules: ...` |
+| With --all | 649 findings in 1718 files (0 E, 156 W, 493 I) |
+
+The default run now gives the four problems of meta-kiss the benchmark's t09 expected:
+`linux-kiss` has no `SUMMARY` (W) and no `HOMEPAGE` (I); `u-boot-kiss_git.bb` sets no `PV`
+(`hygiene/git-pv`, I); `sl_git.bb:12` has `${SRCPV}` in `PV` (`hygiene/release-removed`,
+I) and `sl_git.bb:22` skips `ldflags` (`hygiene/insane-skip`, I). Per rule with `--all`,
+what changed since `x2-migrate` (every other rule as in the tables above):
+
+| Rule | x2-migrate | x7-cleanup | Cause |
+|---|---|---|---|
+| hygiene/missing-metadata | 16 | 25 | 9 more "no SUMMARY" warnings, from the x batch (the merged tree at `a76da18` already has them): `linux-kiss` and 8 meta-arm recipes (`cot-dt2c`, three `tf-a-tests`, four `trusted-firmware-a`). Three checked in the files: `cot-dt2c_0.1.0.bb`, `tf-a-tests_2.14.0.bb` and `trusted-firmware-a_2.14.1.bb` (with `trusted-firmware-a.inc`) set `DESCRIPTION` but no `SUMMARY`, and neither do the classes they inherit: true by the rule's definition (BitBake gives them the default `${PN} version ${PV}-${PR}`) |
+| hygiene/insane-skip | - | 25 | new rule (info); 6 in OE-core (`opensbi`, `linux-firmware`, `go-target.inc`, ...), 18 in meta-arm firmware recipes, 1 in meta-kiss: the skip is often legitimate for firmware, as the message says |
+| hygiene/git-pv | - | 7 | new rule (info): OE-core's `sato-icon-theme_git.bb`, `vulkan-samples_git.bb`, `rpm-sequoia-crypto-policy_git.bb`, meta-arm's `scp-firmware`, `trusted-firmware-a`, `trusted-firmware-m` `_git.bb`, meta-kiss's `u-boot-kiss_git.bb`; `PV="git"` checked in `bitbake -e` for `u-boot-kiss` |
+| hygiene/release-removed | 3 | 5 | `${SRCPV}` in `PV` (info) in meta-kiss's `sl_git.bb` and meta-arm's `execstack-native.bb` |
+| org/class-export-functions | 23 | 1 | helpers (`postfuncs`, `PACKAGEFUNCS`, `exec_func`, shell calls) and functions no file adds as a task are no longer reported; the one left is `kernel.bbclass`'s `do_kernel_version_sanity_check`, a task `kernel-yocto.bbclass` adds |
+| override/shadowed, override/plus-equals-with-override, hygiene/tabs, ... | | | unchanged |
+
+(The W count fell from 169 to 156 although `missing-metadata` gained 9 warnings: the 22
+`class-export-functions` warnings went; the `release-removed` warnings stay 3.)
 
 ## Output
 

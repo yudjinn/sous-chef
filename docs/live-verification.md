@@ -150,7 +150,7 @@ them in) against `bitbake-layers show-appends`.
 
 | Variable | Static = BitBake? | Flagged? | Note |
 |---|---|---|---|
-| `SRC_URI` | **equal** (1175 bytes, compared byte for byte through the `value` handle) | flagged as python-dependent | conservative: override variants and python in `OVERRIDES` |
+| `SRC_URI` | **equal** (1175 bytes, compared byte for byte through the `value` handle) | not flagged since x1 (re-checked in x7; before: flagged as python-dependent) | `OVERRIDES`, which decides its override variants, is now evaluated (its inline python is in the evaluated subset, said in a note); the generic warnings about opaque anonymous python remain |
 | `FILE_LAYERNAME` | **equal** (`core`) | no | |
 | `TMPDIR` | **equal** (`build/tmp`) | no | |
 | `PREFERRED_PROVIDER_virtual/kernel`, `.../bootloader` | equal | no | |
@@ -669,6 +669,33 @@ the release build, no BitBake or kas process started (outputs in
   BitBake's values 36 (42 before: the `nativesdk` recipes' `PROVIDES` is no longer
   "changed by python"); agreement with `show-appends` 21 of 24.
 - The four live tests above: all pass (14, 1, 1, 1).
+
+## After the x-batch and its cleanup (x7-cleanup, 2026-11-18)
+
+The six x branches (python helpers, migration report and SARIF, `lint --fix`, the build
+views, multiconfig, the benchmark) and the cleanup round. Re-measured with the release
+build of `x7-cleanup`, no BitBake or kas process started (outputs in
+`{{LIVE}}/runs/x7-cleanup/`, `TMPDIR` and `XDG_CACHE_HOME` there too, `[bitbake] enabled =
+false`):
+
+- Differential on the existing dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`): 1090 compared, 950
+  equal, 109 flagged (74, and 35 whose literal part differs), 31 known gap, 0 bug; the same
+  totals as at the end of x1 (differential.md).
+- Skip comparison (`tests/skip_live.rs`): 1034 recipes collected, none failed to evaluate;
+  with BitBake's values 260 judged skipped (74 `COMPATIBLE_HOST`, 56 `COMPATIBLE_MACHINE`,
+  155 `features_check`, 13 virtual provider, 2 `SKIP_RECIPE`; a recipe can have two), 5
+  not decidable statically; from static values alone "would skip" 259 and "may skip" 6
+  (w12-final: 13 and 274; the static `DISTRO_FEATURES` of yocto-kiss held python that x1
+  evaluates).
+- Lint (`sous-chef lint`, from the yocto-kiss directory with the kas files in
+  `sous-chef.toml`): default 5 findings in 13 files (1 W, 4 I: `linux-kiss` has no
+  `SUMMARY` and no `HOMEPAGE`, `u-boot-kiss_git.bb` sets no `PV`, `sl_git.bb` has
+  `${SRCPV}` in `PV` and skips the `ldflags` QA check: the four facts of the benchmark's
+  t09), then the coverage note; `--all` 649 findings in 1718 files (0 E, 156 W, 493 I).
+  lint-rules.md, "On a real workspace".
+- `curl`'s `SRC_URI` (section 4) is no longer flagged: equal and unflagged since x1.
+- The four live tests (`live_verify`, `audit`, `release_diff`, `skip_live` with
+  `--ignored`): all pass (14, 1, 1, 1).
 
 ## Left in the environment
 
