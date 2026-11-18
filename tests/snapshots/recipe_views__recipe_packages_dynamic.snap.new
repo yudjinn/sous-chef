@@ -1,0 +1,20 @@
+---
+source: tests/recipe_views.rs
+assertion_line: 241
+expression: out
+---
+package	var	value	loc
+-	PACKAGES	app-extra app-dbg app-dev app-doc app	meta-core:conf/bitbake.conf:26, meta-mine:recipes-app/app/app_0.1.bb:37
+-	PACKAGES_DYNAMIC	^app-plugin-.*	meta-mine:recipes-app/app/app_0.1.bb:35
+app-extra	FILES	(not set)	-
+app-dbg	FILES	(not set)	-
+app-dev	FILES	/usr/include /usr/lib/lib*.so	meta-core:conf/bitbake.conf:28
+app-doc	FILES	/usr/share/doc	meta-core:conf/bitbake.conf:29
+app	FILES	/usr/bin/* /usr/sbin/* /usr/lib/lib*.so.*	meta-core:conf/bitbake.conf:27
+app	RDEPENDS	libfoo	meta-mine:recipes-app/app/app_0.1.bb:11
+app	RPROVIDES	app-bin	meta-mine:recipes-app/app/app_0.1.bb:36
+note: values of the evaluated datastore (PACKAGES and FILES defaults come from bitbake.conf); RDEPENDS and RPROVIDES rows only where set
+note: not included: what OE-Core adds while packaging (do_package: shared-library and pkg-config dependencies, packages split by python such as do_split_packages) and the RDEPENDS:${PN} that base.bbclass adds for PACKAGECONFIG with anonymous python (see deps kind=runtime)
+note: PACKAGES_DYNAMIC names packages created by python during do_package; they are not listed
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+note: 1 anonymous python function was not run (none changes PACKAGES, PACKAGES_DYNAMIC, FILES, RDEPENDS, RPROVIDES by name)

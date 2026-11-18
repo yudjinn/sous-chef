@@ -926,8 +926,21 @@ mod tests {
 
     #[test]
     fn immediate_leaves_python() {
-        let ds = store(&[("A", ":=", "${@d.getVar('B')}")]);
-        assert_eq!(raw(&ds, "A").as_deref(), Some("${@d.getVar('B')}"));
+        let ds = store(&[("A", ":=", "${@os.getcwd()}")]);
+        assert_eq!(raw(&ds, "A").as_deref(), Some("${@os.getcwd()}"));
+    }
+
+    #[test]
+    fn immediate_evaluates_pure_python_against_the_store_then() {
+        // `d.getVar('B')` reads B as it is at the `:=`: unset (str(None)), then "x".
+        let ds = store(&[
+            ("A", ":=", "${@d.getVar('B')}"),
+            ("B", "=", "x"),
+            ("C", ":=", "${@d.getVar('B')}"),
+            ("B", "=", "y"),
+        ]);
+        assert_eq!(raw(&ds, "A").as_deref(), Some("None"));
+        assert_eq!(raw(&ds, "C").as_deref(), Some("x"));
     }
 
     #[test]

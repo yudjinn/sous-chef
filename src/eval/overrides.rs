@@ -150,6 +150,88 @@ impl Source for Eval<'_> {
         // The expander has already marked `name` as in progress.
         self.finalise(name, exp, &mut Trace::default())
     }
+
+    fn unset_doubt(&self, name: &str, exp: &mut Expander) -> Option<String> {
+        let base = base_of(name);
+        let notes = &self.ds.notes;
+        if notes.python_vars.contains(base) {
+            return Some("anonymous python may set it".into());
+        }
+        if notes.uncertain_vars.contains(base) {
+            return Some(
+                "a file reached through a reference that is not certain may set it".into(),
+            );
+        }
+        if notes.unresolved_vars.contains_key(base) {
+            return Some("a statement sous-chef could not apply may set it".into());
+        }
+        if ENV_PASSTHROUGH.contains(&name) {
+            return Some("BitBake takes it from the environment when it is set there".into());
+        }
+        if notes.incomplete_keys.iter().any(|k| key_could_be(k, name)) {
+            return Some("a variable whose name could not be expanded may be it".into());
+        }
+        // An override variant or a conditional append that is inactive only because
+        // OVERRIDES is not known.
+        let mut trace = Trace::default();
+        let entered = exp.enter(name);
+        let _ = self.compose(name, true, exp, &mut trace, 0);
+        exp.leave(entered);
+        let unknown_entries = (trace.inactive_seen || trace.multi_active) && self.ovr.uncertain();
+        if trace.consulted && (self.ovr.unstable || unknown_entries) {
+            return Some(
+                "an override decision on it depends on OVERRIDES, which is not known statically"
+                    .into(),
+            );
+        }
+        None
+    }
+
+    fn lookup_flag(&self, name: &str, flag: &str, exp: &mut Expander) -> Option<Option<Value>> {
+        let doubt = self.ds.notes.python_vars.contains(base_of(name))
+            || self.ds.notes.uncertain_vars.contains(base_of(name))
+            || self.ds.notes.unresolved_vars.contains_key(base_of(name));
+        let Some(raw) = self.ds.raw_flag(name, flag) else {
+            return Some(doubt.then(|| Value {
+                text: String::new(),
+                unevaluated_python: true,
+                unresolved: Vec::new(),
+            }));
+        };
+        let mut v = exp.expand_as(&format!("{name}[{flag}]"), &raw, self);
+        v.unevaluated_python |= doubt;
+        Some(Some(v))
+    }
+}
+
+/// The variables BitBake takes from the environment by default (BitBake 2.18
+/// `lib/bb/utils.py` `preserved_envvars`, `preserved_envvars_exported`; the same in 2.0 and
+/// 2.8). `BB_ENV_PASSTHROUGH_ADDITIONS` from the shell can add any name; that is not known
+/// statically.
+const ENV_PASSTHROUGH: &[&str] = &[
+    "BBPATH",
+    "BB_PRESERVE_ENV",
+    "BB_ENV_PASSTHROUGH",
+    "BB_ENV_PASSTHROUGH_ADDITIONS",
+    "BB_TASKHASH",
+    "HOME",
+    "LOGNAME",
+    "PATH",
+    "PWD",
+    "SHELL",
+    "USER",
+    "LC_ALL",
+    "BBSERVER",
+];
+
+/// `key` (a variable name holding `${...}` that could not be expanded) may expand to `name`:
+/// its literal text before the first `${` and after the last `}` match.
+fn key_could_be(key: &str, name: &str) -> bool {
+    let (Some(start), Some(end)) = (key.find("${"), key.rfind('}')) else {
+        return key == name;
+    };
+    let (pre, post) = (&key[..start], &key[end + 1..]);
+    name.len() >= pre.len() + post.len() && name.starts_with(pre) && name.ends_with(post)
 }
 
 impl Eval<'_> {

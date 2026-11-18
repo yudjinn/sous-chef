@@ -10,6 +10,7 @@ mod license;
 pub mod overlay;
 pub mod overrides;
 pub mod providers;
+pub mod pyexpr;
 pub mod replay;
 pub mod skips;
 pub mod variant;
