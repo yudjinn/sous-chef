@@ -13,6 +13,7 @@ pub mod layers;
 pub mod lint;
 pub mod log;
 pub mod overrides;
+pub mod pkgdata;
 pub mod recipe;
 pub mod scaffold;
 pub mod search;

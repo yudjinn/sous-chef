@@ -1,0 +1,10 @@
+PN: hello
+PV: 1.1
+PR: r0
+PKGV: 1.1
+PKGR: r0
+LICENSE: MIT
+SUMMARY: GNU Hello stand-in
+PKG:hello-dbg: hello-dbg
+FILES_INFO:hello-dbg: {"/usr/bin/.debug/hello": 40960}
+PKGSIZE:hello-dbg: 40960

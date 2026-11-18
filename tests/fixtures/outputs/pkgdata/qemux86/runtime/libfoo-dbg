@@ -1,0 +1,10 @@
+PN: libfoo
+PV: 2.0
+PR: r0
+PKGV: 2.0
+PKGR: r0
+LICENSE: MIT
+SUMMARY: Foo library\nwith a second line
+PKG:libfoo-dbg: libfoo-dbg
+FILES_INFO:libfoo-dbg: {}
+PKGSIZE:libfoo-dbg: 0

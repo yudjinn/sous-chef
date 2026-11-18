@@ -1,0 +1,11 @@
+PN: hello
+PV: 1.1
+PR: r0
+PKGV: 1.1
+PKGR: r0
+LICENSE: MIT
+SUMMARY: GNU Hello stand-in
+PKG:hello-dev: hello-dev
+FILES:hello-dev: /usr/include /usr/lib/lib*.so
+FILES_INFO:hello-dev: {}
+PKGSIZE:hello-dev: 0

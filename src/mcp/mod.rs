@@ -487,6 +487,11 @@ pub static TOOLS: &[ToolEntry] = &[
         Deferred,
         "Why a task re-ran: digest of bitbake-diffsigs (changed variables with pointers, the dependency path); builds nothing."
     ),
+    tool!(
+        pkgdata,
+        Deferred,
+        "Which package and recipe ship a file; a package's files, recipe and runtime deps, from a build's package data."
+    ),
 ];
 
 /// Looks up a registry entry by tool name.

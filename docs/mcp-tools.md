@@ -1662,6 +1662,57 @@ cause	do_configure (hello)	value changed: 1 line added, 0 removed	meta-core:clas
 note: from `bitbake-diffsigs -c never -t hello do_compile` (BitBake's own comparison; nothing was built); full output h:... (563 bytes): slice handle=h:...
 ```
 
+### `pkgdata`
+Which package ships a file, and which recipe made a package (x4), from the package data
+an existing build left in `PKGDATA_DIR` (bitbake-semantics.md "Package data"). Never
+builds; reads plain files only.
+
+| Arg | Type | Notes |
+|---|---|---|
+| `mode` | `"find_path"` \| `"list_pkg_files"` \| `"lookup_recipe"` \| `"list_pkgs"` \| `"package_info"` | default `find_path`; the `oe-pkgdata-util` spellings (`find-path`, ...) are accepted |
+| `path` | string? | `find_path`: a path or glob on the target (`fnmatch` rules: `*` crosses `/`) |
+| `package` | string? | `list_pkg_files`, `lookup_recipe`, `package_info`: a runtime name (renamed, e.g. `libfoo2`), a recipe-space name or an `RPROVIDES` name, looked up as `oe-pkgdata-util` does (`runtime-rprovides/`, then `runtime-reverse/`, then `runtime/`); a note says which it was |
+| `recipe` | string? | `list_pkgs` |
+
+`PKGDATA_DIR` is the evaluated configuration's value when it is static and exists, else
+`bitbake-getvar --value PKGDATA_DIR` when a build environment is available (bitbake
+enabled), else the first `<build>/tmp*/pkgdata/<MACHINE>` (or the only machine directory
+there); a note says which was used. A directory outside the workspace and build directory
+is not read (an error says so; the `log` tool has the same limit). With no package data the
+answer is one row `pkgdata none: nothing has been packaged in this build directory` and a
+note that `do_packagedata` of a built recipe writes it.
+
+- `find_path`: rows `path package recipe loc`, every `FILES_INFO` path of every
+  `runtime/` file matching the glob; a renamed package shows `(runtime name ...)`; `loc` is
+  the recipe's applied `FILES:<package>` operations (the recipe evaluated for the default
+  machine and distro, at most 8 recipes per call), else its `.bb`.
+- `list_pkg_files`: rows `path size package`, sorted; a note names the recipe (`.bb`
+  pointer) and `PKGSIZE`.
+- `lookup_recipe`: rows `package recipe version loc` (`[PE:]PV[-PR]`, the `.bb` of that
+  version when the layers have it, else the one BitBake would use).
+- `list_pkgs`: rows `package runtime-name packaged size` from the recipe's `PACKAGES` in
+  the package data; `no (empty)` when there is no `.packaged` marker.
+- `package_info`: rows `package field value loc`: recipe and version (with the `.bb`),
+  package version `[PKGE:]PKGV[-PKGR]`, runtime name (`PKG:`), size, packaged, and where set
+  `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RREPLACES`, `RCONFLICTS`,
+  `LICENSE`, `SECTION`, `SUMMARY`, the number of files.
+
+More than 40 rows: the first 40, `+N more (limit=40)`, and every row under a `text` handle
+(`slice handle=h:...`). Values are decoded as `oe.packagedata.read_pkgdatafile` decodes them
+(Python `unicode_escape`), `FILES_INFO` too, so an escaped file name (`café "notes".txt`)
+is shown as it is on the target; `oe-pkgdata-util find-path` and `list-pkg-files` parse the
+undecoded JSON instead and show such a name escaped (or fail on a `"`).
+
+`find_path` with `path: "/usr/bin/hello"` on a fixture copy with the recorded tree
+`tests/fixtures/outputs/pkgdata/` and `PKGDATA_DIR` in `bitbake.conf`:
+
+```
+path	package	recipe	loc
+/usr/bin/hello	hello	hello	FILES:hello meta-core:conf/bitbake.conf:27, meta-core:recipes-core/hello/hello.inc:20
+note: PKGDATA_DIR = <ws>/build/tmp/pkgdata/qemux86 (from the evaluated configuration)
+note: loc is the recipe's FILES:<package> assignment (evaluated for the default machine and distro), else its .bb; paths are FILES_INFO as do_package recorded them
+```
+
 ## MCP resources
 
 - `sous-chef://help`: this document condensed, generated from the tool registry and the

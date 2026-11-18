@@ -1,0 +1,12 @@
+PN: libfoo
+PV: 2.0
+PR: r0
+PKGV: 2.0
+PKGR: r0
+LICENSE: MIT
+SUMMARY: Foo library\nwith a second line
+RPROVIDES:libfoo: libfoo-compat
+PKG:libfoo: libfoo2
+FILES:libfoo: /usr/bin/* /usr/sbin/* /usr/lib/lib*.so.*
+FILES_INFO:libfoo: {"/usr/lib/libfoo.so.2": 32, "/usr/lib/libfoo.so.2.0.0": 65536, "/usr/share/libfoo/data/00.dat": 100, "/usr/share/libfoo/data/01.dat": 101, "/usr/share/libfoo/data/02.dat": 102, "/usr/share/libfoo/data/03.dat": 103, "/usr/share/libfoo/data/04.dat": 104, "/usr/share/libfoo/data/05.dat": 105, "/usr/share/libfoo/data/06.dat": 106, "/usr/share/libfoo/data/07.dat": 107, "/usr/share/libfoo/data/08.dat": 108, "/usr/share/libfoo/data/09.dat": 109, "/usr/share/libfoo/data/10.dat": 110, "/usr/share/libfoo/data/11.dat": 111, "/usr/share/libfoo/data/12.dat": 112, "/usr/share/libfoo/data/13.dat": 113, "/usr/share/libfoo/data/14.dat": 114, "/usr/share/libfoo/data/15.dat": 115, "/usr/share/libfoo/data/16.dat": 116, "/usr/share/libfoo/data/17.dat": 117, "/usr/share/libfoo/data/18.dat": 118, "/usr/share/libfoo/data/19.dat": 119, "/usr/share/libfoo/data/20.dat": 120, "/usr/share/libfoo/data/21.dat": 121, "/usr/share/libfoo/data/22.dat": 122, "/usr/share/libfoo/data/23.dat": 123, "/usr/share/libfoo/data/24.dat": 124, "/usr/share/libfoo/data/25.dat": 125, "/usr/share/libfoo/data/26.dat": 126, "/usr/share/libfoo/data/27.dat": 127, "/usr/share/libfoo/data/28.dat": 128, "/usr/share/libfoo/data/29.dat": 129, "/usr/share/libfoo/data/30.dat": 130, "/usr/share/libfoo/data/31.dat": 131, "/usr/share/libfoo/data/32.dat": 132, "/usr/share/libfoo/data/33.dat": 133, "/usr/share/libfoo/data/34.dat": 134, "/usr/share/libfoo/data/35.dat": 135, "/usr/share/libfoo/data/36.dat": 136, "/usr/share/libfoo/data/37.dat": 137, "/usr/share/libfoo/data/38.dat": 138, "/usr/share/libfoo/data/39.dat": 139, "/usr/share/libfoo/data/40.dat": 140, "/usr/share/libfoo/data/41.dat": 141, "/usr/share/libfoo/data/42.dat": 142, "/usr/share/libfoo/data/43.dat": 143, "/usr/share/libfoo/data/44.dat": 144}
+PKGSIZE:libfoo: 71058

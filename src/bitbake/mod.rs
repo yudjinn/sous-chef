@@ -11,6 +11,7 @@ pub mod env;
 pub mod envdump;
 pub mod jobs;
 pub mod logs;
+pub mod pkgdata;
 pub mod sigs;
 
 pub use env::{

@@ -1612,6 +1612,48 @@ branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
 - Never checked against two real signatures: the live build ran only two fetches, so it
   holds one signature per task; the tests use output hand-written from the code above.
 
+### Package data
+
+What the `pkgdata` tool reads (x4). Read in OE-core Wrynose `33a6bd6c`
+(`meta/lib/oe/packagedata.py` `emit_pkgdata`, `read_pkgdatafile`;
+`meta/classes-global/package.bbclass` `PKGDATA_VARS`, `emit_pkgdata[dirs]`;
+`scripts/oe-pkgdata-util`; `meta/conf/bitbake.conf`), with `git show` on `scarthgap`
+(the same `packagedata.py` / `package.bbclass`) and `kirkstone` (`emit_pkgdata` in
+`meta/classes/package.bbclass`, the same format). Never checked against a build: the live
+build directory has no package data.
+
+- **Where.** `PKGDATA_DIR = "${TMPDIR}/pkgdata/${MACHINE}"` (`bitbake.conf`), filled by
+  `do_packagedata`'s sstate (`sstate-outputdirs = "${PKGDATA_DIR}"`).
+- **Files.** `<pn>`: `PACKAGES: <list>`. `runtime/<pkg>`: for each `PKGDATA_VARS` word
+  (`PN PE PV PR PKGE PKGV PKGR LICENSE DESCRIPTION SUMMARY RDEPENDS RPROVIDES RRECOMMENDS
+  RSUGGESTS RREPLACES RCONFLICTS SECTION PKG ALLOW_EMPTY FILES CONFFILES FILES_INFO
+  PACKAGE_ADD_METADATA pkg_postinst pkg_postrm pkg_preinst pkg_prerm`, the same on all
+  three) `write_if_exists` writes `VAR:<pkg>: value` when `VAR:<pkg>` is set, else `VAR:
+  value` when `VAR` is set, else nothing; then `FILERPROVIDESFLIST`, `FILERPROVIDES:<file>`,
+  `FILERDEPENDSFLIST`, `FILERDEPENDS:<file>`, and `PKGSIZE:<pkg>: <bytes>` (hard links
+  counted once). `PKG:<pkg>` is always set (to `<pkg>` when nothing renamed it).
+  `FILES_INFO:<pkg>` is `json.dumps({"/path": st_size}, sort_keys=True)` (paths relative to
+  the package root with a leading `/`; ASCII, non-ASCII as `\uXXXX`). Values are encoded
+  with `codecs.getencoder("unicode_escape")` and decoded with the matching decoder
+  (`read_pkgdatafile`: each line matching `(^.+?):\s+(.*)`), so a backslash, a newline or
+  the `\u` of the JSON are written escaped (`\\u00e9`, `\\"`, `\n`). `runtime/<pkg>.packaged`
+  (empty) when the package root is not empty or `ALLOW_EMPTY` is `1`; only then the symlink
+  `runtime-reverse/<PKG:pkg>` -> `../runtime/<pkg>`. For each word of `RPROVIDES:<pkg>`
+  (else `RPROVIDES`) the symlink `runtime-rprovides/<word>/<pkg>`. Also
+  `extended/<pkg>.json.zstd` (per-file sizes and debug sources): zstd, not read.
+  Multilib / allarch variants add `<variant>-<pn>` files and `runtime/<variant>-<pkg>`
+  files holding only `PKG:<variant>-<pkg>: <pkg>`.
+- **`oe-pkgdata-util`** (Wrynose; Kirkstone differs only in error messages and in checking
+  `os.path.exists` instead of a non-empty `runtime-rprovides/<name>`): `find-path` walks
+  `runtime/`, `json.loads` the raw `FILES_INFO:` value (**not** unicode-escape decoded) and
+  prints `<pkg>: <path>` for each path matching `fnmatch.fnmatchcase`; `list-pkg-files -p
+  <pkg>` reads `runtime-rprovides/<pkg>/` entries, else `runtime/<pkg>` (`-r`: by runtime
+  name via `runtime-reverse/`); `lookup-recipe <pkg>` reads `runtime-rprovides/<pkg>/`
+  entries (printing `<pkg> is in the RPROVIDES of <f>:` for each other one), else
+  `runtime-reverse/<pkg>`, and prints the `PN:` line; `package-info` prints
+  `<pkg> [PKGE:]PKGV[-PKGR] PN [PE:]PV[-PR] PKGSIZE`; `list-pkgs -p <pn>` reads `<pn>`'s
+  `PACKAGES` and keeps those with a `.packaged` marker.
+
 ### `bitbake -e` output
 
 Confirmed against real output of BitBake 2.18.0 (`bitbake -e curl` on the live

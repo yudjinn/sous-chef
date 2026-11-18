@@ -35,6 +35,9 @@ It needs no build environment for lookups; it uses BitBake only when asked to ru
   under a handle and read in parts (`slice`).
 - **Why did this task re-run?** A digest of `bitbake-diffsigs`: the variables that
   changed, each with the assignment that sets it now, and the dependency path (`sigs`).
+- **Which package ships this file?** From an existing build's package data: the
+  package, its recipe and the `FILES` assignment; a package's files, version and runtime
+  dependencies (`pkgdata`).
 - **Audit a build repository**: one findings report over every layer (`audit`,
   `sous-chef audit`).
 - **Diff a layer between two revisions**, and see which of your bbappends no longer apply
@@ -349,6 +352,7 @@ starts, and every tool and `status` report the error. Details: "Configuration" i
 | `audit` | One findings report over every layer of the repository (inventory with git facts and kas pins, releases, layer structure, lint, parse problems, what was not checked), stored under a handle; returns a digest |
 | `diff` | Statement-level diff of a layer's recipes between two git revisions (variables, tasks, inherits, `SRC_URI` entries, version renames, changed classes) and which of your bbappends no longer apply, apply to another version or carry patches on changed source; read-only, no checkout |
 | `sigs` | Why a task re-ran: a digest of `bitbake-diffsigs` (root-cause variables with the pointer of the assignment that sets them, the dependency path, taints), full output under a handle; builds nothing |
+| `pkgdata` | From a build's package data: which package ships a file (with the recipe's `FILES` assignment), a package's files, its recipe, a recipe's packages, a package's version, size and runtime dependencies; builds nothing |
 
 Every argument and output format is in [docs/mcp-tools.md](docs/mcp-tools.md); the lint
 rules are in [docs/lint-rules.md](docs/lint-rules.md). The server also offers the resources

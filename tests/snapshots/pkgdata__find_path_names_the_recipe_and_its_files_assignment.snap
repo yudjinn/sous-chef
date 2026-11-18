@@ -1,0 +1,8 @@
+---
+source: tests/pkgdata.rs
+expression: out
+---
+path	package	recipe	loc
+/usr/bin/hello	hello	hello	FILES:hello meta-core:conf/bitbake.conf:27, meta-core:recipes-core/hello/hello.inc:20
+note: PKGDATA_DIR = <ws>/build/tmp/pkgdata/qemux86 (from the evaluated configuration)
+note: loc is the recipe's FILES:<package> assignment (evaluated for the default machine and distro), else its .bb; paths are FILES_INFO as do_package recorded them
