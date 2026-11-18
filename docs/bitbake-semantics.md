@@ -1724,10 +1724,12 @@ patches) wrote `tmp/deploy/cve/curl_cve.json` and the same file in `tmp/log/cve/
 `cve-summary-index.txt` naming it. Its package has `name`, `layer` (`meta`), `version`,
 `products` (`[{"product": "curl", "cvesInRecord": "No"}, {"product": "libcurl", ...}]`, the
 product part of each `CVE_PRODUCT` word, de-duplicated), `cpes` (six
-`cpe:2.3:*:<vendor>:<product>:8.19.0:*:*:*:*:*:*:*`) and 28 issues: 21 `Patched` with
+`cpe:2.3:*:<vendor>:<product>:8.19.0:*:*:*:*:*:*:*`) and 28 issues, each with `id`,
+`status` and `link` (the NVD page of the id): 21 `Patched` with
 `detail` `fix-file-included` and `patch-file` (a list of absolute paths, two for a CVE
 fixed by two patches), 7 `Ignored` from `CVE_STATUS` (`detail` and `description`); no
-NVD fields. The ids, statuses and details are what the rules below give for the recipe
+data from the NVD (no scores, vectors or summaries; y3-leftovers: the y1 text said "no NVD
+fields", but every issue has the `link`). The ids, statuses and details are what the rules below give for the recipe
 (`recipe show=cve` matched all 28). The `BuildCompleted` handlers of the class
 (`vex_save_summary_handler`, `vex_cleanup`) did not run when only a recipe inherits it: no
 `cve-summary.json` was written and the index file was left behind. `sbom-cve-check` was not
@@ -1906,14 +1908,23 @@ and OE-core Wrynose `33a6bd6c` (`classes-global/base.bbclass`, `package.bbclass`
   `log.task_order` gains a line per run, appended across builds (the fetch of the day before
   stayed first) until `WORKDIR` is removed: after `bitbake -c cleanall curl` `T` holds
   `log.do_cleansstate` and `log.do_cleanall` of that run, which are the first two lines of
-  a new `log.task_order`.
+  a new `log.task_order` (seen again in y3-leftovers). A task restored from the shared-state
+  cache has its own `log.do_<task>_setscene` and `run.do_<task>_setscene` with symlinks
+  (y3-leftovers, after a rebuild from sstate: 27 `log.do_*` symlinks, 7 of them
+  `_setscene`).
   `WORKDIR` itself held `build/`, `sources/`, `image/`, `package/`, `packages-split/`,
   `pkgdata/`, `pkgdata-pdata-input/`, `pkgdata-sysroot/`, `sysroot-destdir/`,
   `recipe-sysroot/`, `recipe-sysroot-native/`, `deploy-ipks/`, `deploy-source-date-epoch/`,
   `license-destdir/`, `spdx/`, `pseudo/`, `source-date-epoch/`, `temp/`, and the files
-  `configure.sstate` and `debugsources.list`. In the sstate cache an archive is
+  `configure.sstate` and `debugsources.list` (after a setscene restore also
+  `sstate-install-<task>/` directories). In the sstate cache an archive is
   `<h0h1>/<h2h3>/sstate:<PN>:<MULTIMACH_TARGET_SYS>:<PV>:<PR>:<SSTATE_PKGARCH>:14:<hash>_<task>.tar.zst`
-  (`14`: `SSTATE_VERSION`) with `.siginfo` beside it.
+  (`14`: `SSTATE_VERSION`; the second field is `SSTATE_PKGSPEC`'s
+  `${PACKAGE_ARCH}${TARGET_VENDOR}-${TARGET_OS}`, which is `MULTIMACH_TARGET_SYS` here) with
+  `.siginfo` beside it, for the 11 tasks with `depsig.do_<task>` files. Every other task run
+  also leaves a `<...>_<task>.tar.zst.siginfo` there without an archive (y3-leftovers: for
+  curl `_fetch`, `_unpack`, `_patch`, `_prepare_recipe_sysroot`, `_configure`, `_compile`,
+  `_install`, `_generate_vex`, `_clean`, `_cleansstate`, `_cleanall`).
 - Cooker logs: `BB_CONSOLELOG ?= "${LOG_DIR}/cooker/${MACHINE}/${DATETIME}.log"`, i.e.
   `tmp/log/cooker/<machine>/<datetime>.log` (OE-core `bitbake.conf`).
 - Failure text, as printed by bitbake 5495a54 (2026-11-16) and OE-core 9518ce9:
@@ -1922,8 +1933,12 @@ and OE-core Wrynose `33a6bd6c` (`classes-global/base.bbclass`, `package.bbclass`
     `<PF> <task>: ` (`ERROR: hello-1.0-r0 do_compile: ...`).
   - knotty prints `ERROR: Logfile of failure stored in: <path>`, then the log under
     `Log data follows:` with `| ` (or ` | ` when `BBINCLUDELOGS_LINES` is set) prefixes,
-    but only when `BBINCLUDELOGS` is set and no `ERROR` was logged during the task; an
-    `ERROR` logged with `forcelog` does not count (`build.py` `ErrorCheckHandler`): that is
+    but only when `BBINCLUDELOGS` is set and the task's `errprinted` is false. BitBake
+    2.18.0 `build.py` `ErrorCheckHandler.emit` sets that flag for every `ERROR` record and
+    **clears** it for one logged with `forcelog` (`triggered = False`), and `TaskFailed`
+    takes the flag as it is at the end: so the log is printed when the last `ERROR` of the
+    task was a `forcelog` one, even after other `ERROR`s (y3-leftovers: the y1 text said
+    a `forcelog` `ERROR` "does not count", which misses that it resets the flag). That is
     what the shell's `bbfatal_log` sends (`bb.error(value, forcelog=True)`), so OE's
     `configure failed` (from `bbfatal_log`) still gets the log printed (**seen live**,
     y1-build: `ERROR: curl-8.19.0-r0 do_configure: configure failed`, the `Execution of`
@@ -2051,11 +2066,20 @@ branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
   `tests/live_build.rs`): after curl was built, then rebuilt with `EXTRA_OECONF:append = "
   --disable-dict"` from a scratch bbappend, `bitbake-diffsigs -c never -t curl do_configure`
   printed `basehash changed from A to B` and `Variable EXTRA_OECONF value changed:` followed
-  by a **unified diff** (the value starts with a newline): `@@ -1,4 +1,4 @@`, the whole old
+  by a **unified diff**: `@@ -1,4 +1,4 @@`, the whole old
   value on one `-` line, the whole new one on one `+` line, then context lines `
-  PACKAGECONFIG{gnutls} = Unset` ... `PACKAGECONFIG{openssl} = Set` (one space first: the
-  `contains` entries of the value's varvals, for its `bb.utils.filter('PACKAGECONFIG', ...)`
-  python); no `---` / `+++` header. `-t curl do_compile` printed `Hash for task dependency
+  PACKAGECONFIG{gnutls} = Unset` ... `PACKAGECONFIG{openssl} = Set` (one space first); no
+  `---` / `+++` header. Why a unified diff (y3-leftovers, read in BitBake 2.18.0; the y1
+  text said "the value starts with a newline", which it does not: the continuation lines
+  of `EXTRA_OECONF = " \` are joined without one): `bb.data.build_dependencies`
+  (`handle_contains`) stores a value whose python calls `bb.utils.contains` /
+  `contains_any` / `filter` (the words `codeparser.py` records as `contains`) with one
+  `\n<VAR>{<word>} = Set|Unset` line per word appended, here the four words of curl's
+  `bb.utils.filter('PACKAGECONFIG', 'gnutls mbedtls openssl schannel', d)`; and
+  `siggen.compare_sigfiles` prints a changed value as `difflib.unified_diff` whenever the
+  old or new value holds a newline (the first two header lines cut). Its default three
+  lines of context are why the hunk is `-1,4` and `PACKAGECONFIG{schannel}`, the fifth
+  line, is not shown. `-t curl do_compile` printed `Hash for task dependency
   curl:do_configure changed from A to B` and that comparison indented by four spaces;
   `do_install` two levels (eight spaces). Before the change: `ERROR: Only one matching
   sigdata file found for the specified task (curl do_configure)` on stderr. The client's own
@@ -2252,10 +2276,31 @@ Checked 2026-11-17 against bitbake `master` (`lib/bb/main.py`, `lib/bb/cooker.py
   first SIGINT (`KeyboardInterrupt`) it prints "Keyboard Interrupt, closing down..." and
   sends `stateShutdown` (no new tasks), on the second "Second Keyboard Interrupt,
   stopping..." and `stateForceShutdown` (running tasks killed: `NOTE: Sending SIGTERM to
-  remaining 1 tasks`), and it exits once the server reports the end (`Execution was
-  interrupted, returning a non-zero exit code.`). Live: two SIGINTs 1 s apart, the client
-  gone 3.6 s after the first, the server 1 s after it. A SIGTERM to the client has no such
-  handler.
+  remaining 1 tasks`, logged by `bin/bitbake-worker`), and it exits once the server
+  reports the end (`Execution was interrupted, returning a non-zero exit code.`). Live: two
+  SIGINTs 1 s apart, the client gone 3.6 s after the first, the server 1 s after it. A
+  SIGTERM to the client has no such handler (neither `ui/knotty.py` nor `main.py` installs
+  one; `sigterm_exception` in `cooker.py` is the server's).
+  **Through `kas shell`** (y3-leftovers, kas 5.5, read in `kas.py`, `plugins/shell.py`,
+  `libkas.py`, and run live): kas runs the command as `subprocess.call([$SHELL, "-c",
+  cmd])` and stays its parent; its SIGINT and SIGTERM handlers are registered on its
+  asyncio loop (`register_signal_handlers`: `loop.add_signal_handler`, so the Python-level
+  handler only wakes the loop), and the loop does not run while `subprocess.call` waits,
+  so kas neither dies nor kills its child on Ctrl-C: the interrupt reaches the shell and
+  BitBake through the process group, and kas logs `Shell returned non-zero exit status`
+  once the command has ended. A kas-mode cancel from the `bitbake` tool (job group = kas;
+  the shell `exec`ed `bitbake`: its parent was kas in `ps`) stopped `bitbake curl` in
+  `do_configure` in 3.4 s with the same knotty lines, and no BitBake process was left a
+  second later. kas also copies `SSTATE_DIR`, `SSTATE_MIRRORS`, `BB_HASHSERVE_DB_DIR`,
+  `BB_HASHSERVE`, `BB_HASHSERVE_UPSTREAM`, `DL_DIR` and **`TMPDIR`** from its own
+  environment into the build environment and adds them to `BB_ENV_PASSTHROUGH_ADDITIONS`
+  (`get_build_environ`), so a `TMPDIR` set for any other reason becomes BitBake's
+  `TMPDIR`: seen live, a kas-mode job started from a server whose `TMPDIR` was a scratch
+  directory ran curl's `cleanall` and build there (721 MB restored from sstate,
+  `saved_tmpdir` naming it). sous-chef's kas mode removes `TMPDIR` from kas's environment
+  (`KAS_DROPPED_ENV`). OE-core's passthrough list (`scripts/oe-buildenv-internal`,
+  `BB_ENV_PASSTHROUGH_ADDITIONS_OE`) has none of the seven, so the other modes are not
+  affected.
 - **A second client** (settled on the live environment): while `bitbake -e curl` ran, `bitbake-layers
   show-layers` started in a second shell printed `NOTE: Reconnecting to bitbake server...`,
   **waited**, and completed normally (exit 0) half a second after the first client
@@ -2986,14 +3031,18 @@ against BitBake's behaviour or output:
   exists on yocto-kiss (every `inherit` in an `.inc` there is reached from recipes only).
 - `bitbake -e`: the `# expansion of NAME threw ...` line is from `emit_var`, not seen in
   real output.
-- Task logs: the compiler, make and quilt messages are those tools' own formats, not
-  checked against a source (autoconf's `configure: error:` and wget's were seen in real
-  logs; a real compiler error was not: the y1-build compile failure printed a
-  compiler-style line by hand); build.py's `Backtrace (metadata-relative locations):` was
-  not seen in a real log (the real failures had the run-file backtrace only).
+- Task logs: the make and quilt messages are those tools' own formats, not checked
+  against a source (autoconf's `configure: error:`, wget's and, since y3-leftovers, gcc's
+  were seen in real logs: `<file>:<line>:<col>: error: <message>` after `<file>: In
+  function '<name>':`, then the source line as `<line> | <text>` and a caret line, and
+  make's `make[2]: *** [Makefile:<n>: <target>] Error 1` lines); build.py's `Backtrace
+  (metadata-relative locations):` was not seen in a real log (the real failures had the
+  run-file backtrace only).
 - Running BitBake: the second client's failure after about 20 s of waiting (from
   `lib/bb/main.py`, not observed); the server's behaviour on cancel with
-  `BB_SERVER_TIMEOUT` set (not tried).
+  `BB_SERVER_TIMEOUT` set (not tried); a kas-mode cancel with a `$SHELL` that does not
+  `exec` the last command of `-c` (live it was bash, which did; the fake kas of the tests
+  waits as a parent).
 - How `bitbake-layers add-layer` edits `bblayers.conf` (not run).
 - The release that first has `python_hatchling` (present on Scarthgap and Wrynose, absent on
   Kirkstone; Langdale to Nanbield not checked).

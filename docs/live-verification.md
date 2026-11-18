@@ -780,9 +780,11 @@ Root cause, variable, pointer to the assignment in the scratch bbappend and the 
 right. Two things were wrong and are fixed (tests in `tests/live_build.rs` on the recorded
 outputs):
 
-- **The word added was not named, and the pointer was right by luck.** A value that starts
-  with a newline (`EXTRA_OECONF = " \`...) is printed as a unified diff whose `-` and `+`
-  lines are the whole value; the digest said only "1 line added, 1 removed", and the
+- **The word added was not named, and the pointer was right by luck.** A value with a
+  newline is printed as a unified diff whose `-` and `+` lines are the whole value (y3
+  correction: `EXTRA_OECONF` does not start with one; the newlines are the `\n<VAR>{<word>}
+  = Set|Unset` lines BitBake appends for the words its python tests,
+  bitbake-semantics.md "Task signatures"); the digest said only "1 line added, 1 removed", and the
   "words the change added" used to find the assignment were every word of the `+` line, so
   any applied operation matched and the last one won. Now `bitbake::sigs::word_changes`
   takes the multiset difference of the `+` and `-` words (`--disable-dict`), the detail
@@ -858,8 +860,9 @@ NETRC_FILE ../venv/bin/kas shell ../scratch/kas-scratch.yaml -c 'bitbake curl'`:
 - after the fix: the 37 359-byte configure console is replaced by 583 bytes (recipe,
   version, task, exit 1, the `configure: error`, its context, `oe_runconf (run file line
   255)`, the definition, the handle and the slice hint), the 4 564-byte compile console by
-  477 bytes; 18 to 21 ms per call. The hook does not read the run file, so its function row
-  gives the run-file line, not the metadata line (the `log` tool does).
+  477 bytes; 18 to 21 ms per call. The hook did not read the run file, so its function row
+  gave the run-file line, not the metadata line (the `log` tool did); since y3 it uses the
+  `log` tool's mapping (below, "y3-leftovers").
 
 Seen in the consoles (bitbake-semantics.md, "Build output", corrected): the `configure
 failed` `ERROR:` (from `bbfatal_log`) did not stop knotty from printing `Log data follows:`
@@ -908,7 +911,8 @@ recorded outputs in `tests/live_build.rs`, `real_cancelled_build_outputs`.
 
 Not settled: `log job=` on a cancelled job says "no error lines recognised; slice the log"
 (true; it could say the job was cancelled). Cancel with `BB_SERVER_TIMEOUT` set and a
-kas-mode job (where SIGINT also reaches kas and the shell) were not tried.
+kas-mode job (where SIGINT also reaches kas and the shell) were not tried. (Both but
+`BB_SERVER_TIMEOUT` settled in y3, below.)
 
 ### recipe show=cve against a real report: confirmed
 
@@ -1010,6 +1014,221 @@ All in the kas build, one client at a time; curl the only target, the only recip
 | `bitbake -n -c generate_vex curl`, `bitbake -c generate_vex curl` with `inherit vex` | kas-scratch | one task, succeeded |
 | `bitbake curl` (bbappend removed) | kas, yocto-kiss files | succeeded, 11 tasks ran, `bblayers.conf` and `local.conf` back as before |
 
+## The leftovers of the first build (y3-leftovers, 2026-11-18/19)
+
+The items y1-build left, on the same environment, under the same rule (curl the only
+target and the only recipe cleaned, one BitBake client at a time, experiments in a
+`curl_%.bbappend` in `scratch/meta-scratch`). sous-chef: the release build of branch
+`y3-leftovers`, configurations in `{{LIVE}}/runs/y3-leftovers/` (`sous-chef.toml`: the
+init-script mode of y1; `sous-chef-kas.toml`: **kas mode**, yocto-kiss's own kas files,
+no `init_script`, `venv/bin` on the server's `PATH`), `XDG_CACHE_HOME` and `TMPDIR` under
+`runs/y3-leftovers/`; MCP calls by `runs/y3-leftovers/tools/mcp.py`, hook calls by
+`tools/hookrun.py`; raw outputs in `runs/y3-leftovers/logs/`, recorded copies in
+`tests/fixtures/outputs/live/y3-leftovers/` (README there). `build/conf/bblayers.conf` and
+`local.conf` were copied before (`conf-before/`) and after (`conf-after/`): identical.
+
+### deps and what the build built: RRECOMMENDS, task depends, native variants
+
+`bitbake -g curl` (kas shell, yocto-kiss files; `task-depends.dot` and `pn-buildlist`
+moved to `runs/y3-leftovers/graph/`): 78 recipes, the 78 of the first build. Read against
+it and the BitBake / OE-core source (bitbake-semantics.md, "Runtime dependencies and
+recommendations", new): BitBake builds for `RDEPENDS` and `RRECOMMENDS` alike (`bb.cache`
+`rundeps` / `runrecs`, `bb.taskdata`); `RSUGGESTS` and the other runtime variables cause no
+task. `ca-certificates` is in the graph only as `curl.do_build -> ca-certificates.do_package_write_ipk`
+/ `do_package_qa` and `curl.do_package_write_ipk -> ca-certificates.do_packagedata`
+(`rdeptask`), and no relation of curl but `RRECOMMENDS:libcurl` names it.
+
+Changed: `deps kind=runtime` has a `relation` column (`depends` / `recommends`) and lists
+`RRECOMMENDS:<pkg>`, the plain `RDEPENDS` / `RRECOMMENDS` (every package) and
+`PACKAGECONFIG` field 5; on curl: `libcurl ca-certificates recommends
+RRECOMMENDS:libcurl meta:recipes-support/curl/curl_8.19.0.bb:200`, `curl-dev curl
+recommends RRECOMMENDS:curl-dev meta:conf/bitbake.conf:364`, `curl-staticdev curl-dev
+depends`. `kind=build` lists the recipes the tasks' `depends` flags name (`quilt-native`,
+`patch-replacement-native` from `do_patch[depends]`, `binutils-cross-arm` from
+`do_populate_sysroot[depends]` after the virtual-provider rewrite, the python words of
+`do_package_write_ipk[depends]` and `do_create_spdx[depends]` as unknown rows) and reads a
+native variant's `DEPENDS` through `native_filter` as BitBake does: before, `python3-native`
+at depth 2 listed `expat`, `libffi`, `bzip2` with the **target** recipes as providers;
+now `expat-native`, ... (source `DEPENDS (native_filter)`). Tests:
+`tests/deps_runtime_tasks.rs`.
+
+`deps curl depth=5` plus `kind=runtime` compared with `pn-buildlist`
+(`runs/y3-leftovers/tools/depscompare.py`, output `logs/depscompare.out`): **43 of the 77
+other recipes are named by a row** (32 before the native filter and the task rows). The 34
+not named are each reached in the graph, by inspection of their parents, only through
+what the output says it does not know:
+
+- curl's `${@get_autotools_dep(...)}` and `${@get_base_dep(...)}` rows (unknown: python):
+  `autoconf-native`, `automake-native`, `libtool-native`, `libtool-cross`, `gcc-runtime`,
+  `libgcc`, `gnu-config-native`, and below them `m4-native`, `gmp-native`, `mpfr-native`,
+  `libmpc-native`; `gettext-native` and `gettext-minimal-native` under the
+  `${@gettext_dependencies(...)}` rows of libidn2 and others; `gawk-native` under glibc's
+  `gawk-replacement-native` (provider `-`: a `PROVIDES:append:class-native`, which provider
+  lookup does not find, as the `-` note says);
+- anonymous python (the warnings name the classes, the task-depends note names what they
+  add): `pseudo-native` (`virtual/fakeroot-native`, base.bbclass), `rpm-native`,
+  `dwarfsrcfiles-native` (`PACKAGE_DEPENDS`, package.bbclass), `opkg-utils`
+  (update-alternatives.bbclass), `opkg-utils-native` (the python word of
+  `do_package_write_ipk[depends]`), `ninja-native` (cmake.bbclass, for expat-native), and
+  what those need: `file-native`, `libarchive-native`, `libgcrypt-native`,
+  `libgpg-error-native`, `lua-native`, `elfutils-native`, `libcap-native`,
+  `e2fsprogs-native`, `util-linux-native`, `libcap-ng-native`, `libpcre2-native`,
+  `lzlib-native`, `re2c-native`;
+- the build dependencies of a runtime dependency (the runtime note says they are built
+  too): `debianutils-native` for ca-certificates.
+
+Still not shown statically: `binutils-cross-arm` and `gcc-cross-arm` are listed with
+provider `-` (their `PN` is `binutils-cross-${TARGET_ARCH}`; the note now says a name that
+needs expansion is not found).
+
+### A real compiler error: confirmed, one fix
+
+A patch added to curl's `SRC_URI` from the scratch bbappend turns one line of
+`lib/version.c` into a type error (`y3-leftovers/break-compile.patch`); `bitbake curl`
+through `kas-scratch.yaml` failed in `do_compile` (exit 1) with gcc's
+`../../sources/curl-8.19.0/lib/version.c:152:25: error: incompatible types when
+initializing type 'int' using type 'struct curl_slist'`, after `In function
+'curl_version':` and before the source line and caret; then the `make[2]: ***` lines,
+`ERROR: oe_runmake failed` and the trap (`bbfatal_log` < `die` < `oe_runmake` <
+`autotools_do_compile` < `do_compile`). `log recipe=curl task=compile` (4.2 s, with
+`bitbake-getvar`), `log` (0.5 s) and the Bash hook on the 378 136-byte console (27-33 ms):
+recipe, version, task `do_compile`, exit 1, the first error, the three context lines (the
+compiler's own), no `more` row (the make and `oe_runmake` lines are consequences; there was
+one distinct error), `function autotools_do_compile at meta:classes-recipe/autotools.bbclass:228`
+(the `oe_runmake` line, through the run file, in the hook too), the definition
+`autotools.bbclass:227-229`, 732 bytes. **Wrong:** the error row was cut to the snippet
+width, before the type (`... using type 'st...`), because the compiler's path takes 50
+characters. Fixed: a compiler diagnostic shows the message in the `error` row and the
+location in a `source` row (`source ../../sources/curl-8.19.0/lib/version.c:152:25`); JSON
+keeps the whole line. Test: `tests/live_build.rs`, `real_compiler_error`, on the trimmed
+log, run file and console.
+
+### log job= on a cancelled job, and cancel in kas mode: settled, one fix in kas mode
+
+**kas mode is used here**: `status` with `sous-chef-kas.toml` gave `bitbake build
+environment found (kas)`; yocto-kiss's kas files include no other repository's file (the
+reason kas mode is turned off, bitbake-semantics.md "kas"; only the scratch file
+`kas-scratch.yaml` has `{repo, file}` includes). kas 5.5, read: `plugins/shell.py` runs
+`subprocess.call([$SHELL, "-c", cmd])` and stays the parent; `kas.py` registers SIGINT
+and SIGTERM on its asyncio loop, whose handler only wakes the loop, and the loop is not
+running during that call, so kas neither exits nor kills its child on SIGINT
+(bitbake-semantics.md, "Running BitBake").
+
+**Bug found first: the server's `TMPDIR` became BitBake's.** The first kas-mode run
+(`op=clean args=["cleanall"]`, `op=build`, `op=cancel` 22 s in) ran curl's `cleanall` and
+build in `{{LIVE}}/runs/y3-leftovers/tmp`, the `TMPDIR` the server was started with: kas
+copies `TMPDIR` (and six other variables) into the build environment and adds them to
+`BB_ENV_PASSTHROUGH_ADDITIONS` (`libkas.py` `get_build_environ`). 721 MB was restored from
+sstate there (`saved_tmpdir` named it), and `log job=` found no log in the build directory.
+That directory was deleted afterwards (its cooker logs kept in `logs/leaked-tmpdir/`);
+`build/tmp` was not touched by it (the `cleanall` there removed curl's sstate objects and
+download stamp in the shared `sstate-cache` / `downloads`, which a `cleanall` of curl does
+anyway). Fixed: kas mode removes `TMPDIR` from kas's environment (`KAS_DROPPED_ENV`); test
+`tests/bitbake_kas.rs`, `kas_mode_does_not_hand_the_servers_tmpdir_to_kas`. The init-script
+mode is not affected (OE-core's passthrough list has no `TMPDIR`; y1 built in `build/tmp`
+with the same `TMPDIR` set).
+
+**Cancel through `kas shell`, after the fix** (`tools/calls-kas-cancel.json`, `ps` every
+second in `logs/ps-kas-cancel2.txt`): `op=clean args=["cleanall"]` succeeded in 6 s;
+`op=build` started at once (its client printed `NOTE: Reconnecting to bitbake server...`:
+the `cleanall`'s server, its client gone, was still exiting); `op=cancel` 22 s in, during
+`do_configure`, answered after 3.4 s; the job group was kas's (`kas` pid = pgid, `bitbake`
+its child: bash had `exec`ed it). The output ends as in init-script mode, `Keyboard
+Interrupt, closing down...`, `Second Keyboard Interrupt, stopping...`, `WARNING: Exiting
+due to interrupt.`, `NOTE: Sending SIGTERM to remaining 1 tasks`, `Execution was
+interrupted, returning a non-zero exit code.`, then kas's `Shell returned non-zero exit
+status`; no configure process after 23:53:09 (the cancel was sent at 23:53:08), and no
+BitBake process in the samples from 23:53:12, when the cancel answered, until the next job
+30 s later. Test with a fake kas that stays the parent and defers both signals as kas does:
+`tests/bitbake_kas.rs`, `a_cancel_reaches_bitbake_through_kas_shell`.
+
+**`log job=job:2`** on that job (6 ms) now says what happened instead of "no error lines
+recognised":
+
+```
+job	job:2 (build curl)
+command	bitbake curl
+state	cancelled by the bitbake tool (op=cancel) at 2026-11-18 21:53:12 UTC, 25s after it started: not a failure
+bitbake	Keyboard Interrupt, closing down... / Second Keyboard Interrupt, stopping... / NOTE: Sending SIGTERM to remaining 1 t...
+running	curl-8.19.0-r0 do_configure (task 909 of 919)
+log	build:tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/log.do_configure.1910658
+warning	WARNING: Your host glibc version (2.44) is newer than that in uninative (2.43). Disabling uninative so that sstate is...
+warning	WARNING: Exiting due to interrupt.
+handle	h:48854485ad
+note: that log is the interrupted do_configure of curl-8.19.0-r0, written up to the cancel; log recipe=curl task=configure digests it
+```
+
+The interrupted task's log just stops (`checking if siginterrupt is prototyped...`):
+nothing in it records the interrupt. Test on the recorded job output, replayed by the fake
+BitBake around the two interrupts: `tests/bitbake_jobs.rs`,
+`log_job_on_a_cancelled_job_says_what_happened`; the parsing on all three recorded cancels
+(y1 SIGINT, y1 SIGTERM, y3 kas): `tests/live_build.rs`,
+`real_cancelled_builds_name_the_running_task_and_the_interrupt`.
+
+### A finished job's warnings: fixed
+
+`op=build target=curl wait=300` in kas mode (39 s, `Attempted 919 tasks of which 908 didn't
+need to be rerun`): the report now has `warning WARNING: Your host glibc version (2.44) is
+newer than that in uninative (2.43). ...` and a tail without `Summary: There was 1 WARNING
+message.`; the cancelled job lists its two warnings the same way. The `WARNING:` lines are
+de-duplicated (repeats counted), at most five shown, then `+N more distinct warnings` with a
+`slice ... grep=^WARNING:` hint; the Bash hook lists them the same way above its tail.
+Tests on the first build's console with its three warnings (trimmed): `tests/bitbake_jobs.rs`,
+`a_finished_job_lists_its_warnings_not_their_count`, `tests/hook_bash.rs`,
+`the_hook_lists_the_warnings_of_a_real_successful_build`, `tests/live_build.rs`,
+`real_build_warnings`.
+
+### The hook's function row: the log tool's mapping
+
+The Bash hook now reads the run file the trap names (next to the task log the console
+names, confined) and calls the `log` tool's own functions (`read_run_file`,
+`place_stub_function`). On the real compiler-error console above: `function
+autotools_do_compile at meta:classes-recipe/autotools.bbclass:228` (was `(run file line
+153)`). On y1's failing `do_compile:prepend` console, laid out under `runs/y3-leftovers/hooktest/`
+with the prepend in a test layer there (a copy of the build directory's paths only, never
+parsed by BitBake): `do_compile at meta-hooktest:recipes-test/curl/curl_%.bbappend:4 (run
+inside the EXPORT_FUNCTIONS stub)`, **64-68 ms** per call with the recipe evaluated, under
+the hook's 150 ms budget; the evaluation is skipped (the row then names the stub) when less
+than 80 ms is left. Tests on the recorded y1 consoles and run files: `tests/hook_bash.rs`,
+`the_hook_maps_a_real_failing_frame_to_its_metadata_line`,
+`the_hook_points_a_real_failing_prepend_at_its_operation`.
+
+### bitbake-semantics.md, the y1 edits reviewed
+
+Each changed paragraph was read against its evidence (the recorded outputs, the BitBake
+2.18.0 source, the build directory). Corrected: the unified diff of `EXTRA_OECONF` is not
+because "the value starts with a newline" (it does not) but because BitBake appends a
+`\n<VAR>{<word>} = Set|Unset` line per word of its `bb.utils.filter` (`data.py`
+`handle_contains`) and `siggen` diffs any value with a newline (the fourth word,
+`schannel`, is outside difflib's three context lines); a `forcelog` `ERROR` does not just
+"not count", it clears the flag (`ErrorCheckHandler.emit`), so the log is printed whenever
+the task's last `ERROR` is a `forcelog` one; the VEX issues do have an NVD field, `link`.
+Added from the build directory: `_setscene` logs and run files, `sstate-install-<task>/`,
+and `.siginfo` files for every task run, not only the 11 with archives; the source of
+`Sending SIGTERM to remaining N tasks` (`bin/bitbake-worker`). Confirmed as written: the
+VEX file contents and handlers, the `log.task_order` format and its restart after
+`cleanall` (seen again), the 21 / 11 counts of y1's `T`, the trap lines and the
+`autotools.bbclass:96` mapping, the stub layout, the `configure:` NOTE lines and the 355
+`| ` lines, the diffsigs indentation and client lines, the stamp names, the package data
+details (`PKGSIZE`, the two-space `RPROVIDES`, `:\s+` in `read_pkgdatafile`, empty
+packages, `extended/` and `debugsources/`), and knotty's interrupt handling.
+
+### BitBake commands run in y3-leftovers
+
+All in the kas build directory, one BitBake client at a time (`tools/bbcheck.sh` before
+each; a server still exiting after its client was seen twice, never two clients); curl the
+only target, the only recipe cleaned.
+
+| Command | Through | Result |
+|---|---|---|
+| `bitbake -c cleanall curl`, `bitbake curl`, cancel | sous-chef kas mode, before the TMPDIR fix | ran in the server's `TMPDIR` (`runs/y3-leftovers/tmp`, deleted afterwards); cancelled in 3.5 s |
+| `bitbake -c cleanall curl`, `bitbake curl`, cancel | sous-chef kas mode | cleanall 6 s; cancelled 25 s in (`do_configure`), 3.4 s |
+| `bitbake curl` | sous-chef kas mode | succeeded, 39 s, 908 of 919 not rerun |
+| `bitbake -g curl` | kas, yocto-kiss files | dependency graph only; its two files moved out of `build/` |
+| `bitbake curl` with the `break-compile.patch` bbappend | kas, `kas-scratch.yaml` | failed in `do_compile` (on purpose) |
+| `bitbake-getvar -r curl --value T`, twice (`log recipe=curl task=compile`) | sous-chef init-script mode | read-only |
+| `bitbake curl` (bbappend removed) | kas, yocto-kiss files | succeeded, 918 of 919 not rerun (curl from sstate) |
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,
@@ -1032,6 +1251,20 @@ yocto-kiss's files (identical to the copies taken before, `runs/y1-build/conf-be
 `conf-after/`). `scratch/meta-scratch/recipes-test/` holds only `broken-fetch` again. The
 raw outputs, the sous-chef configuration, cache and helper scripts are in
 `{{LIVE}}/runs/y1-build/`.
+
+Since y3-leftovers: `{{LIVE}}/runs/y3-leftovers/` holds the sous-chef configurations
+(`sous-chef.toml`, `sous-chef-kas.toml`, `sous-chef-hooktest.toml`), the cache, the helper
+scripts (`tools/`), `graph/` (`bitbake -g curl`), `hooktest/` (paths only, for the hook
+timing), `patchwork/` and the raw outputs; its `tmp/` is empty again. In the kas build:
+curl was rebuilt at the end without the scratch bbappend (from sstate, `918 didn't need to
+be rerun`); its `T` keeps the failed `log.do_compile.1958029` and the interrupted
+`log.do_configure.1910658`; `conf/` is identical to the copies taken before
+(`runs/y3-leftovers/conf-before/`, `conf-after/`); `scratch/meta-scratch/recipes-test/`
+holds only `broken-fetch`. BitBake itself rewrote `bitbake/lib/bb/pysh/pyshtables.py`
+(its parser table) during these runs, and each plain `kas shell` rewrote the `.git`
+metadata of the three clones (`repos_checkout`; the same pinned commits, checked in
+`refs/heads/`); nothing else in `yocto-kiss/` outside `build/` changed
+(`runs/y3-leftovers/tools/changed.py`).
 
 To remove: `rm -r {{LIVE}}/scratch {{LIVE}}/runs/verify`, and if wanted
 `{{LIVE}}/yocto-kiss/build/downloads` and `{{LIVE}}/yocto-kiss/build/tmp/work` (BitBake

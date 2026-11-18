@@ -150,7 +150,12 @@ ask `downloads.yoctoproject.org` and `mirrors.edge.kernel.org` for the file. A s
 meant to contact nothing must set `MIRRORS = ""` and `PREMIRRORS = ""`. sous-chef writes its
 index and handles under `$XDG_CACHE_HOME/sous-chef/` (default `~/.cache`): set
 `XDG_CACHE_HOME` to a directory under `runs/` when experimenting, so nothing lands in the
-user's cache.
+user's cache. **kas passes `TMPDIR` on to BitBake** (with `SSTATE_DIR`, `DL_DIR` and four
+`BB_HASHSERVE*` / `SSTATE_MIRRORS` names: kas 5.5 `get_build_environ` adds them to
+`BB_ENV_PASSTHROUGH_ADDITIONS`): a `kas shell` started with `TMPDIR` set builds in that
+directory, not in `build/tmp` (seen in y3-leftovers through sous-chef's kas mode, which
+since then removes `TMPDIR` from kas's environment). Run kas by hand with `env -u TMPDIR`
+as well when `TMPDIR` is set.
 
 ## Pinned versions
 

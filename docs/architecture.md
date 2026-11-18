@@ -914,7 +914,15 @@ removes a blob the server is writing).
   `kas-container shell` whose `-c` command runs one of them) whose stdout plus stderr is over 3 KiB, the hook stores the full output
   under a `build` handle and **replaces** the output with `updatedToolOutput`: `stdout`
   becomes one line naming the handle and size, then the log digest (`bitbake::logs`) when a
-  failure is detected, else the last 10 lines, then a `slice` hint; `stderr` is emptied; the
+  failure is detected, else the warnings (`logs::console_warnings` / `warning_rows`, as the
+  `bitbake` tool lists them; since y3) and the last 10 lines without knotty's
+  `Summary: There w... WARNING message(s).`, then a `slice` hint. The digest's failing
+  function is mapped to the metadata as the `log` tool maps it, by the same functions
+  (`mcp::tools::log::read_run_file`: the run file the trap names, next to the task log the
+  console names, confined; `place_stub_function`: an `EXPORT_FUNCTIONS` stub's `:prepend`
+  at its operation, which evaluates the recipe and is skipped, the row then naming the stub,
+  when less than `STUB_BUDGET` (80 ms) of the hook's budget is left; live, release build:
+  64-68 ms for the whole call with it). `stderr` is emptied; the
   other fields of `tool_response` are kept. Other commands, smaller outputs and image
   output (`isImage`) are left untouched. A missing index, a locked database (50 ms busy timeout) or any write error
   gives no output, so the original output stays.

@@ -89,3 +89,20 @@ Under `y1-build/`; the same scrubbing as above.
 | `y1-build/cve/curl_%.bbappend.vex` | the scratch bbappend for the CVE report (`inherit vex`, removed afterwards) |
 | `y1-build/cve/curl_cve.json` | `build/tmp/deploy/cve/curl_cve.json` after `$KAS shell ../scratch/kas-scratch.yaml -c 'bitbake -c generate_vex curl'` |
 
+## y3-leftovers: the leftovers of the first build (2026-11-18/19)
+
+The same environment and versions (`docs/live-verification.md`, "y3-leftovers"). Under
+`y3-leftovers/`; the same scrubbing (`{{LIVE}}`, `{{USER}}`). Unlike the y1 consoles, kas's
+own INFO / ERROR lines are kept: they are part of what a kas-mode job prints.
+
+| File | Command / source |
+|---|---|
+| `y3-leftovers/build1-first-build-trimmed.out` | the console of y1's first `bitbake curl` (`{{LIVE}}/runs/y1-build/logs/build1.log`), **trimmed** to lines 11-38 (from `Loading cache...` to the first tasks), 1120-1128 and 1247-1255 (around the two fetch warnings) and 2763-2772 (the end, up to `Summary: There were 3 WARNING messages.`); kas's INFO lines are not in it |
+| `y3-leftovers/job-kas-build-curl-cancel.out` | the output of job 2 of the `bitbake` tool in **kas mode** (`sous-chef-kas.toml`: yocto-kiss's kas files, no `init_script`), `op=build target=curl` after `op=clean args=["cleanall"]`, `op=cancel` 22 s in, during `do_configure` (the job's handle content, whole) |
+| `y3-leftovers/log.do_configure.1910658.trimmed` | that interrupted task's log, **trimmed** to its first and last four lines with a `[... lines 5-533 left out ...]` line between (the log simply stops: nothing in it records the interrupt) |
+| `y3-leftovers/job-kas-build-curl.out` | the output of the next kas-mode job, `op=build target=curl wait=300` (succeeded, 39 s, one warning) |
+| `y3-leftovers/curl_%.bbappend.compile`, `break-compile.patch` | the scratch bbappend and patch of the compiler error (`{{LIVE}}/scratch/meta-scratch/recipes-test/curl/`, removed afterwards) |
+| `y3-leftovers/console-compile-error-trimmed.out` | `$KAS shell ../scratch/kas-scratch.yaml -c 'bitbake curl'` with them (exit 1), **trimmed** to lines 1-73 (to the first lines of `Log data follows:`) and 320-366 (from the compile lines before the error to the end); lines 74-319 are libtool compile command lines and three `make` directory lines |
+| `y3-leftovers/log.do_compile.1958029.trimmed` | that task's log, **trimmed** to lines 1-3 and 250-285 |
+| `y3-leftovers/run.do_compile.1958029` | that task's run file, whole |
+
