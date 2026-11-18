@@ -33,6 +33,8 @@ It needs no build environment for lookups; it uses BitBake only when asked to ru
 - **Run BitBake and digest its logs.** `bitbake`, `devtool` and `bitbake-layers` as
   background jobs (`bitbake`); a failed task's log digested (`log`); large output kept
   under a handle and read in parts (`slice`).
+- **Why did this task re-run?** A digest of `bitbake-diffsigs`: the variables that
+  changed, each with the assignment that sets it now, and the dependency path (`sigs`).
 - **Audit a build repository**: one findings report over every layer (`audit`,
   `sous-chef audit`).
 - **Diff a layer between two revisions**, and see which of your bbappends no longer apply
@@ -346,6 +348,7 @@ starts, and every tool and `status` report the error. Details: "Configuration" i
 | `status` | Workspace roots, release, index, build environment, kas project, running job, handle store |
 | `audit` | One findings report over every layer of the repository (inventory with git facts and kas pins, releases, layer structure, lint, parse problems, what was not checked), stored under a handle; returns a digest |
 | `diff` | Statement-level diff of a layer's recipes between two git revisions (variables, tasks, inherits, `SRC_URI` entries, version renames, changed classes) and which of your bbappends no longer apply, apply to another version or carry patches on changed source; read-only, no checkout |
+| `sigs` | Why a task re-ran: a digest of `bitbake-diffsigs` (root-cause variables with the pointer of the assignment that sets them, the dependency path, taints), full output under a handle; builds nothing |
 
 Every argument and output format is in [docs/mcp-tools.md](docs/mcp-tools.md); the lint
 rules are in [docs/lint-rules.md](docs/lint-rules.md). The server also offers the resources

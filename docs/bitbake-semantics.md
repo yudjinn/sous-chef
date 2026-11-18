@@ -1561,6 +1561,57 @@ reproduces it from the indexed statements:
   - The compiler, configure, make, wget and quilt messages inside logs are those tools'
     own formats; they were not checked against a source.
 
+### Task signatures
+
+What the `sigs` tool relies on (x4). Read in BitBake 2.18 `6e260eb6` (`lib/bb/siggen.py`
+`SignatureGeneratorBasic.dump_sigtask`, `compare_sigfiles`, `dump_sigfile`, `build_pnid`;
+`bin/bitbake-diffsigs`), with `git show` on the `2.0` (Kirkstone) and `2.8` (Scarthgap)
+branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
+
+- **On-disk format.** `dump_sigtask` writes `json.dump(data, sort_keys=True,
+  separators=(",", ":"), cls=SetEncoder)` through `bb.compress.zstd.open(..., "wt")` on all
+  three branches (sets as `{"_set_object": [...]}`): zstd-compressed JSON, not pickle (the
+  `pickle` import in `bitbake-diffsigs` is only for the `UnpicklingError` handler).
+  **Confirmed on a real file**: the live build's
+  `tmp/stamps/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0.do_fetch.sigdata.<hash>` begins
+  with the zstd magic `28 b5 2f fd`. Keys: `task`, `basehash_ignore_vars`,
+  `taskhash_ignore_tasks`, `taskdeps`, `basehash`, `gendeps`, `varvals`, and with a task
+  hash `runtaskdeps`, `runtaskhashes`, `file_checksum_values`, `taint`, `unihash`.
+  sous-chef has no zstd decoder (no new dependency), so it reads none of this itself.
+- **Names.** In the stamps directory `<STAMP>.<task>.sigdata.<unihash>` (with a task hash)
+  or `.sigbasedata.<basehash>`, `STAMP = "${STAMPS_DIR}/${MULTIMACH_TARGET_SYS}/${PN}/${PV}"`,
+  `STAMPS_DIR ?= "${TMPDIR}/stamps"`; in the sstate cache `<SSTATE_PKG>.siginfo` (the hash
+  after the last `:`, before `_`). `find_siginfo` globs the stamps directory first
+  (`MULTIMACH_TARGET_SYS`, `PV`, `PR` as `*`), then the sstate cache.
+- **`bitbake-diffsigs -t <pn> <task>`** (`do_` added when missing) takes the two newest
+  signatures by mtime; with one it prints `ERROR: Only one matching sigdata file found for
+  the specified task (<pn> <task>)` and exits 1; with none `No sigdata files found
+  matching <pn> <task>`. `-c never` turns colours off (default `auto`). It starts a
+  config-only tinfoil; it does not run tasks. `-s <from> <to>` picks signatures by hash.
+- **`compare_sigfiles` output** (the same messages on 2.0, 2.8 and 2.18): `basehash_ignore_vars
+  changed from ...`, `taskhash_ignore_tasks changed from ...`, `Task dependencies changed
+  from:\n<list>\nto:\n<list>`, `basehash changed from A to B`, `List of dependencies for
+  variable X changed from '...' to '...'` (+ `changed items: ...`), `Dependency on
+  variable X was added`, `Dependency on Variable X was removed` (capital V), `Variable X
+  value changed:` followed by a unified diff (a value with a newline) or a word diff
+  `"a [-old-] {+new+}"` (a value with a space; `(whitespace changed)` when only spacing
+  did), else `Variable X value changed from 'A' to 'B'`; `Checksum for file F changed
+  from A to B`, `Dependency on checksum of file F was added/removed`, `runtaskdeps
+  changed:`, `Number of task dependencies changed`, `Dependency on task T was added/removed
+  with hash H`, `Hash for task dependency T changed from A to B`, `Taint (by
+  forced/invalidated task) changed from A to B` (`nostamp:` shown as `nostamp(uuid4):`).
+  Varvals are **unexpanded** values. When a dependency's hash changed and the recursion
+  callback finds both signatures, the output so far is **replaced** by that line plus the
+  dependency's own comparison, each line indented by four spaces (`recursecb` in
+  `bitbake-diffsigs`), and the loop stops: so the deepest lines are the root cause. A
+  failed lookup prints `Unable to find matching sigdata for <key> with hash(es) ...`.
+- **Task names.** 2.8 and 2.18: `runtaskdeps` / `runtaskhashes` keys are `<pn>:<task>` or
+  `mc:<mc>:<pn>:<task>` (`build_pnid`). 2.0 (Kirkstone): recipe file ids shortened by
+  `clean_basepath` to `<dir>/<file>.bb:<task>`, with `:virtual:<class>...` (and
+  `:mc:<name>`) after the task for a variant.
+- Never checked against two real signatures: the live build ran only two fetches, so it
+  holds one signature per task; the tests use output hand-written from the code above.
+
 ### `bitbake -e` output
 
 Confirmed against real output of BitBake 2.18.0 (`bitbake -e curl` on the live

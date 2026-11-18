@@ -1608,6 +1608,60 @@ affected there. What the static view cannot see: classes used through `inherit $
 (`KERNEL_CLASSES`) have no users listed, and a recipe that only a `virtual/` provider or a
 package name (not the `PN`) names is not selected by default.
 
+### `sigs`
+Why a task re-ran (x4): a digest of `bitbake-diffsigs`, BitBake's own comparison of two
+task signatures. Never builds anything.
+
+| Arg | Type | Notes |
+|---|---|---|
+| `recipe` | string? | with `task`: the two latest signatures of that task (`bitbake-diffsigs -t <recipe> <task>` finds them in the stamps directory and the sstate cache) |
+| `task` | string? | `compile` or `do_compile` |
+| `sigfile1`, `sigfile2` | string? | instead of `recipe` and `task`: two signature files (a path inside the workspace or build directory, of letters, digits and `_ . + - /` only, so an sstate `*.siginfo` name with `:` cannot be given) |
+| `budget_tokens` | int? | default 250 (about 1 KB) |
+
+Signature files are zstd-compressed JSON on every supported release (bitbake-semantics.md
+"Task signatures"), and sous-chef has no zstd decoder, so it does not read them: it runs
+`bitbake-diffsigs -c never -t <recipe> <task>` (or `-c never <file1> <file2>`) through the
+build environment's runner, stores the whole output under a `text` handle and digests it.
+Rows `kind item detail loc`:
+
+- `task`: what re-ran and why in one line: `its own inputs changed (basehash)`, or `its own
+  inputs did not change; a dependency's did, by way of <dep> -> <dep>` (the recursion
+  `bitbake-diffsigs` followed to the root cause);
+- `via`: each dependency on that path, outermost first, with its old and new hash (first
+  10 hex digits);
+- `cause`: the root-cause changes, deepest first (at most 6, then `+N more (limit=6)`):
+  a variable or function value changed (the word diff `"a [-old-] {+new+}"`, or the line
+  counts of a multi-line diff) with the **pointer of the assignment that sets it now**
+  (the recipe the task belongs to is evaluated for the default machine and distro; the
+  applied operation holding a word the change added, else the last applied one), a
+  variable dependency added or removed, the task's variable list changed, a file checksum
+  changed or added, a task dependency added or removed, a taint (a forced or invalidated
+  task), a change of the ignore lists, or a dependency whose signature could not be found
+  (recursion stopped). A `basehash` row only when nothing else at that level explains it.
+  `(pn)` follows the item when the change is in a dependency.
+- When there is nothing to compare: `only one signature: nothing to compare` (BitBake's
+  `Only one matching sigdata file found`), `no signature found`, `the two signatures do not
+  differ`, or the failure's `ERROR:` lines, with a note on how many signature files the
+  stamps directory holds for the task.
+
+A note gives the command and the handle (`slice handle=h:...` reads the full comparison).
+Without a usable runner (bitbake disabled, no build environment, or `bitbake-diffsigs` not
+in the runner's allowlist) the tool runs nothing: one `task ... not compared` row, why, the
+stamps count, and the command to run by hand.
+
+Hand-written fixture output (`tests/fixtures/outputs/sigs/diffsigs-hello-compile.out`,
+fixture workspace, `recipe: "hello", task: "compile"`):
+
+```
+kind	item	detail	loc
+task	hello:do_compile	re-ran: its own inputs did not change; a dependency's did, by way of hello:do_configure	-
+via	hello:do_configure	hash 6f1c2e0a9b -> 0a1b2c3d4e	-
+cause	EXTRA_OECONF (hello)	value changed: "--disable-nls {+--with-mine+}"	meta-mine:recipes-core/hello/hello_1.1.bbappend:6
+cause	do_configure (hello)	value changed: 1 line added, 0 removed	meta-core:classes-recipe/autotoolsish.bbclass:30
+note: from `bitbake-diffsigs -c never -t hello do_compile` (BitBake's own comparison; nothing was built); full output h:... (563 bytes): slice handle=h:...
+```
+
 ## MCP resources
 
 - `sous-chef://help`: this document condensed, generated from the tool registry and the

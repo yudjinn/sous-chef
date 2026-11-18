@@ -16,6 +16,7 @@ pub mod overrides;
 pub mod recipe;
 pub mod scaffold;
 pub mod search;
+pub mod sigs;
 pub mod slice;
 pub mod status;
 pub mod var;

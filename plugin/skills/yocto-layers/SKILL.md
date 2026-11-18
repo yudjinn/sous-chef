@@ -29,6 +29,7 @@ BitBake's parse order, layer priority and override chain, which a grep does not.
 | Workspace roots, release, index, build environment | `status` |
 | One findings report over the whole repository (every layer, releases, structure, lint, parse problems), when asked to review or audit it; slow (lint of every layer) | `audit`, then `slice` the handle |
 | What changed in an upstream layer between two git revisions (a release or stable update) and which of your bbappends no longer apply, now apply to another version, or carry patches on changed source | `diff` (`layer`, `from`, `to`; `recipe` or `all`) |
+| Why a task re-ran (rebuilt) after a change: which variable changed, where it is set, through which dependency | `sigs` (`recipe` + `task`, or `sigfile1` + `sigfile2`) |
 
 ## Pointers and handles
 
