@@ -565,6 +565,37 @@ fn whole_workspace_skips_upstream_layers_unless_all() {
     assert!(report.notes.is_empty(), "{:?}", report.notes);
 }
 
+/// (w11) The per-file hook: `(0, n)` before the first file, one call per file, `(n, n)`
+/// after the last, `n` the files checked.
+#[test]
+fn progress_hook_counts_every_file() {
+    let env = Env::new();
+    let rule = TestRule::file("hygiene/test-each", line_one);
+    let calls = std::cell::RefCell::new(Vec::new());
+    let hook = |done: usize, total: usize| calls.borrow_mut().push((done, total));
+    let all = Options {
+        all: true,
+        ..Options::default()
+    };
+    let report = lint::run_with_progress(
+        &env.ws,
+        &env.index,
+        &env.config,
+        &Target::Workspace,
+        &all,
+        &[&rule],
+        &NoEval,
+        Some(&hook),
+    )
+    .unwrap();
+    let n = report.files;
+    assert!(n > 2, "{n}");
+    let want: Vec<(usize, usize)> = (0..=n).map(|d| (d, n)).collect();
+    assert_eq!(calls.into_inner(), want);
+    // The same report as without a hook.
+    assert_eq!(env.run(&Target::Workspace, &all, &[&rule]), report);
+}
+
 #[test]
 fn no_writable_layer_means_every_layer() {
     let env = Env::with(|c| c.writable_layers.clear());

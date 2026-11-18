@@ -61,13 +61,15 @@ Common to every tool:
 - **Progress.** A call whose request carries `_meta.progressToken` gets MCP
   `notifications/progress` while a long operation runs, before its result and never after
   it: `bitbake` with `wait` (and while a request waits behind a read-only job), the
-  authoritative `var` (waiting for its `bitbake -e`), and `audit` (one step per stage:
-  refreshing the index, finding layers and git facts, lint, lint done, parse problems).
-  `progress` increases with every notification (seconds since the call began for the waits,
-  a step count for `audit`); there is no `total`; `message` says what is happening. At most
-  four a second: intermediate updates are dropped, and the newest pending one is sent before
-  the result. A request without a token gets none. `lint` sends none (it would need a
-  per-file hook in the lint engine).
+  authoritative `var` (waiting for its `bitbake -e`), `lint` (since w11: the files checked,
+  `progress` = files done, `total` = files planned, message `lint: N of M files`), and
+  `audit` (one step per stage: refreshing the index, finding layers and git facts, lint,
+  lint done, parse problems; during the lint stage the files as for `lint`, with
+  `total`, message `audit: linting, N of M files`). `progress` increases with every
+  notification (seconds since the call began for the waits, a step count for the `audit`
+  stages, the file count for lint); only the lint updates have a `total`; `message` says
+  what is happening. At most four a second: intermediate updates are dropped, and the
+  newest pending one is sent before the result. A request without a token gets none.
 
 The first six are always loaded. The rest are deferred (short descriptions, loaded on demand).
 

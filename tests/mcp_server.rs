@@ -531,6 +531,42 @@ fn without_a_token_no_progress_is_sent() {
     s.finish();
 }
 
+/// (w11) `lint` reports its files as progress `done` of `total` while it runs.
+#[test]
+fn lint_with_a_token_reports_files_with_a_total() {
+    let mut s = Session::start();
+    initialize(&mut s);
+    let token = json!("lint-1");
+    let (result, notes) = s.call_noting(
+        "lint",
+        json!({"target": "meta-core"}),
+        Some(json!({"progressToken": token})),
+    );
+    assert_eq!(result["isError"], json!(false), "{result}");
+    let values = progress_values(&notes, &token);
+    // The first file at once, the last one flushed before the result.
+    assert!(values.len() >= 2, "{notes:?}");
+    let totals: Vec<f64> = notes
+        .iter()
+        .map(|n| n["params"]["total"].as_f64().expect("a total"))
+        .collect();
+    let total = totals[0];
+    assert!(total >= 2.0, "{notes:?}");
+    assert!(totals.iter().all(|t| *t == total), "{notes:?}");
+    assert_eq!(*values.last().unwrap(), total, "{notes:?}");
+    for n in &notes {
+        let m = n["params"]["message"].as_str().unwrap();
+        assert!(m.starts_with("lint: ") && m.ends_with(" files"), "{m}");
+    }
+    assert!(s.idle(Duration::from_millis(400)).is_empty());
+
+    // Without a token: none.
+    let (result, notes) = s.call_noting("lint", json!({"target": "meta-core"}), None);
+    assert_eq!(result["isError"], json!(false), "{result}");
+    assert!(notes.is_empty(), "{notes:?}");
+    s.finish();
+}
+
 #[test]
 fn authoritative_var_and_audit_send_progress_with_a_token() {
     let (mut s, _tmp, root) = with_fake_bitbake();

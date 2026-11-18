@@ -11,7 +11,7 @@ use serde::Deserialize;
 use crate::config::Config;
 use crate::error::Result;
 use crate::lint::{self, Options, Severity};
-use crate::mcp::Ctx;
+use crate::mcp::{Ctx, progress};
 use crate::release::Release;
 use crate::render::{self, Format};
 
@@ -43,7 +43,16 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         min_severity: args.severity,
         all: false,
     };
-    let mut report = lint::run(&ctx.workspace, &index, &ctx.config, &target, &options)?;
+    let mut report = progress::blocking(|| {
+        lint::run_progress(
+            &ctx.workspace,
+            &index,
+            &ctx.config,
+            &target,
+            &options,
+            &file_progress,
+        )
+    })?;
     drop(index);
     if let Some(line) = render::freshness_line(&refresh) {
         report.notes.insert(0, line);
@@ -56,6 +65,18 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         args.format.unwrap_or_default(),
         budget,
     ))
+}
+
+/// The engine's per-file hook ([`lint::Progress`]): one MCP progress update `done` of
+/// `total` files (a no-op without a progress token; the forwarder rate-limits).
+pub fn file_progress(done: usize, total: usize) {
+    if progress::active() {
+        progress::of(
+            done as u64,
+            total as u64,
+            &format!("lint: {done} of {total} files"),
+        );
+    }
 }
 
 /// `sous-chef://rules`: one row per rule of the registry, `id severity scope flags`, in

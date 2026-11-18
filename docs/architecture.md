@@ -537,8 +537,15 @@ per `MIN_INTERVAL` (250 ms), the newest update, and the pending one when the too
 `call_tool` waits for it (at most `FLUSH_WAIT`, 2 s, then aborts it) before returning, so no
 notification follows the result. Senders: `bitbake::job_progress()` / `queue_progress()`
 (ticks for `JobTable::wait_with` / `start_or_queue`, used by `bitbake` with `wait` and the
-authoritative `var`), and the `audit` tool's stage hook (the audit runs in `block_in_place`
-on the multi-threaded runtime, so the forwarder runs while lint blocks its thread).
+authoritative `var`), the `audit` tool's stage hook (the audit runs in `block_in_place`
+on the multi-threaded runtime, so the forwarder runs while lint blocks its thread), and
+(w11) the lint engine's per-file hook: `lint::run_progress(ws, index, config, target,
+options, progress: lint::Progress)` and `lint::run_with_progress(..., rules, eval,
+Option<Progress>)` (`lint::Progress<'a> = &'a dyn Fn(usize, usize)`, called with `(done,
+total)` before each planned file and once with `(total, total)`; `lint::run` and
+`run_with` are unchanged), used by the `lint` tool (`tools::lint::file_progress`, run
+through `progress::blocking`, the `block_in_place` wrapper) and the audit's lint stage
+(`audit::Options::lint_progress: Option<fn(usize, usize)>`).
 
 As implemented in T2.5:
 
