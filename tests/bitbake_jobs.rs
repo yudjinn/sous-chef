@@ -282,6 +282,65 @@ fn argv_for_each_operation() {
     assert!(matches!(e, Error::NotFound { .. }), "{e}");
 }
 
+/// `mc:<multiconfig>:<target>` is a BitBake target (multiconfig); nothing else with a `:`
+/// is, and the earlier injection cases stay rejected with the prefix in front of them.
+#[tokio::test]
+async fn multiconfig_targets_are_accepted_in_exactly_one_form() {
+    let f = fixture();
+    let ws = &f.ctx.workspace;
+    let cfg = &f.ctx.config;
+    let line = |a: Args| plan(cfg, ws, &a).map(|p| p.spec.command_line());
+    assert_eq!(
+        line(target(Op::Build, "mc:musl:core-image-minimal")).unwrap(),
+        "bitbake mc:musl:core-image-minimal"
+    );
+    let mut t = target(Op::Task, "mc:tiny:hello");
+    t.task = Some("compile".into());
+    assert_eq!(line(t).unwrap(), "bitbake -c compile mc:tiny:hello");
+    assert_eq!(
+        line(target(Op::Env, "mc:musl:hello")).unwrap(),
+        "bitbake -e mc:musl:hello"
+    );
+    assert_eq!(
+        line(target(Op::Clean, "mc:musl:hello")).unwrap(),
+        "bitbake -c clean mc:musl:hello"
+    );
+    // devtool and bitbake-layers take plain names.
+    assert!(line(with_args(target(Op::Devtool, "mc:musl:hello"), &["modify"])).is_err());
+    assert!(
+        line(with_args(
+            target(Op::Layers, "mc:musl:hello"),
+            &["show-recipes"]
+        ))
+        .is_err()
+    );
+    let marker = f.root.join("pwned");
+    for t in [
+        "mc:musl:hello;touch pwned",
+        "mc:musl:$(touch pwned)",
+        "mc:musl:`touch pwned`",
+        "mc:musl:-k",
+        "mc:-k:hello",
+        "mc:musl:--help",
+        "mc:musl:a b",
+        "mc:musl:a:b",
+        "mc::hello",
+        "mc:musl:",
+        "multiconfig:musl:hello",
+        "hello:mc:musl:x",
+        "a:b",
+    ] {
+        for op in [Op::Build, Op::Task, Op::Env, Op::Clean] {
+            let mut a = target(op, t);
+            a.task = Some("compile".into());
+            let e = f.call(a).await.unwrap_err();
+            assert!(matches!(e, Error::Invalid { .. }), "{op:?} {t}: {e}");
+        }
+    }
+    assert!(f.ctx.jobs.list().is_empty(), "a process was started");
+    assert!(!marker.exists());
+}
+
 #[tokio::test]
 async fn unsafe_names_are_rejected_before_anything_runs() {
     let f = fixture();
