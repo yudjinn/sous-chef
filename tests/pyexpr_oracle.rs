@@ -155,3 +155,64 @@ fn subset_agrees_with_bitbake_and_oe_core() {
     // Nearly every expression of the oracle is in the subset.
     assert!(agreed * 10 >= python_ok * 9, "{agreed} of {python_ok}");
 }
+
+/// The `${@...}` expressions of the live workspace's layers (OE-core, meta-arm, meta-kiss*):
+/// how many are in the parsed subset, by the allowlisted functions they call. Ignored
+/// (needs `SOUS_CHEF_LIVE`); reads files only.
+#[test]
+#[ignore = "needs the live environment: set SOUS_CHEF_LIVE and run with --ignored"]
+fn live_corpus() {
+    let Some(live) = std::env::var_os("SOUS_CHEF_LIVE") else {
+        return;
+    };
+    let root = std::path::Path::new(&live).join("yocto-kiss");
+    let re = regex::Regex::new(r"\$\{@(?:\{.*?\}|.)+?\}").unwrap();
+    let mut total = 0usize;
+    let mut parsed = 0usize;
+    let mut by: std::collections::BTreeMap<&'static str, usize> = Default::default();
+    let mut stack: Vec<std::path::PathBuf> = std::fs::read_dir(&root)
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                n == "openembedded-core" || n == "meta-arm" || n.starts_with("meta-kiss")
+            })
+        })
+        .collect();
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if p.file_name().is_some_and(|n| n != ".git") {
+                    stack.push(p);
+                }
+                continue;
+            }
+            let ext = p.extension().and_then(|x| x.to_str()).unwrap_or("");
+            if !matches!(ext, "bb" | "bbappend" | "bbclass" | "inc" | "conf") {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&p) else {
+                continue;
+            };
+            let joined = text.replace("\\\n", "");
+            for line in joined.lines().filter(|l| !l.trim_start().starts_with('#')) {
+                for m in re.find_iter(line) {
+                    total += 1;
+                    let code = &m.as_str()[3..m.as_str().len() - 1];
+                    if let Ok(e) = pyexpr::parse(code) {
+                        parsed += 1;
+                        for f in e.funcs() {
+                            *by.entry(f.name()).or_default() += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    eprintln!("expressions {total}, in the parsed subset {parsed}");
+    for (f, n) in &by {
+        eprintln!("{n:6} {f}");
+    }
+    assert!(parsed * 2 > total, "{parsed} of {total}");
+}
