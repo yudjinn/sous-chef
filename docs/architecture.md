@@ -1405,6 +1405,23 @@ accepts, so `BbEnv::command` passes such a target (`mcp::tools::bitbake` uses it
 `build`, `task`, `env`, `clean`). Lint (`lint::run`), the index's `BBMASK` marks and the
 audit stay in the default configuration.
 
+Inline python (x1, 2026-11-18): `eval/pyexpr.rs` parses and evaluates a strict subset of
+python expressions (literals, `d`, the allowlisted pure helpers, string `+` / `%`, `if
+else`, `and` / `or` / `not`, `==` / `!=` / `in`, list subscripts, a few string methods;
+bitbake-semantics.md, "Inline python evaluated statically"); no interpreter, no new
+dependency. `expand::Expander` runs it after each variable-substitution pass on the
+`${@...}` matches whose code has no `${VAR}` left, through `pyexpr::Env`, which hands out
+only *certain* values (`Source::lookup`, `Source::unset_doubt` for a variable that is unset
+but may be set, `Source::lookup_flag`; the datastore's `Eval` implements all three), and
+records every attempt in `Expander::python_log` (`PyEvent`: code, evaluated, why not).
+`Value` is unchanged: an evaluated expression is replaced by its text and flags nothing; a
+refused one stays and sets `unevaluated_python` as before. `DataStore::python_log(name)`
+(`overrides::PythonLog`: the value's own expressions and, when it consulted an override,
+those of `OVERRIDES`) feeds one note line in `var`, `overrides` and `deps`
+(`var::python_eval_notes`). There is no switch in `sous-chef.toml`: an evaluated value is
+exact by construction (`tests/pyexpr_oracle.rs` checks it against the real helpers), so
+there is nothing to opt out of.
+
 ## Errors
 
 `error::Error` (thiserror) with variants `Io(io::Error)`, `Sqlite(rusqlite::Error)`,

@@ -264,7 +264,11 @@ fn an_unknown_fragment_is_reported() {
 #[test]
 fn a_fragment_list_that_needs_python_flags_the_builtin_variables() {
     let fx = modified(|r| {
-        fragment_build(r, FRAGMENTS_4, "OE_FRAGMENTS = \"${@'machine/boardx'}\"\n");
+        fragment_build(
+            r,
+            FRAGMENTS_4,
+            "OE_FRAGMENTS = \"${@os.path.join('machine', 'boardx')}\"\n",
+        );
         // A weak default is allowed next to a built-in fragment.
         append_to(r, "build/conf/local.conf", "MACHINE ??= \"qemux86\"\n");
     });
@@ -710,7 +714,7 @@ fn virtual_providers_keep_flags_and_report_missing_providers() {
         append_to(
             r,
             "meta-mine/recipes-app/app/app_0.1.bb",
-            "DEPENDS += \"virtual/nothing ${@'x'}\"\n",
+            "DEPENDS += \"virtual/nothing ${@os.getcwd()}\"\n",
         );
     });
     let ds = eval(&fx, &target(Some("app")));

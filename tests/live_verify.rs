@@ -429,23 +429,29 @@ fn live_curl_static_values_equal_bitbake() {
         let ours = ds.value(name).unwrap_or_else(|| panic!("{name} not set"));
         assert_eq!(Some(&ours.text), bb.get(name), "{name}");
     }
-    // Equal, but flagged as depending on python (SRC_URI has override variants, and
-    // OVERRIDES contains python): conservative, recorded in live-verification.md.
-    assert!(ds.value("SRC_URI").unwrap().unevaluated_python);
+    // SRC_URI has override variants; until x1 it was flagged because OVERRIDES held python.
+    // With the pure helpers evaluated, OVERRIDES is known and SRC_URI is certain.
+    assert!(!ds.value("SRC_URI").unwrap().unevaluated_python);
     assert!(!ds.value("FILE_LAYERNAME").unwrap().unevaluated_python);
-    // Values that depend on python: different, and flagged.
-    for name in [
-        "DEPENDS",
-        "OVERRIDES",
-        "S",
-        "WORKDIR",
-        "T",
-        "MACHINEOVERRIDES",
-    ] {
+    // Values built from the tune's python: equal since x1 (OVERRIDES and MACHINEOVERRIDES
+    // also certain; the work directories may still carry a flag from elsewhere).
+    for name in ["OVERRIDES", "MACHINEOVERRIDES", "S", "WORKDIR", "T"] {
         let ours = ds.value(name).unwrap();
-        assert_ne!(Some(&ours.text), bb.get(name), "{name} unexpectedly equal");
-        assert!(ours.unevaluated_python, "{name} differs but is not flagged");
+        assert_eq!(Some(&ours.text), bb.get(name), "{name}");
+        if name.ends_with("OVERRIDES") {
+            assert!(
+                !ours.unevaluated_python && ours.unresolved.is_empty(),
+                "{name} equal but flagged: {ours:?}"
+            );
+        }
     }
+    // A value with python outside the subset (`get_base_dep(d)`): different, and flagged.
+    let ours = ds.value("DEPENDS").unwrap();
+    assert_ne!(Some(&ours.text), bb.get("DEPENDS"));
+    assert!(
+        ours.unevaluated_python,
+        "DEPENDS differs but is not flagged"
+    );
 }
 
 /// `overrides show=chain` splits `OVERRIDES` on `:` inside `${@...}`, so python fragments

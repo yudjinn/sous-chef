@@ -44,6 +44,7 @@ and `bitbake -e` dumps into context. That has two costs:
 | Override syntax | Colon syntax (Yocto 3.4 "honister" and later) is the model. Legacy underscore syntax is recognised and tagged, for lint. |
 | Yocto releases | **Wrynose (6.0 LTS) is the primary target**: defaults, fixtures and scaffold output follow it. **Scarthgap (5.0 LTS) is fully supported. Kirkstone (4.0 LTS) is the floor**, best effort: it parses and release-dependent behaviour is switched off or on correctly, but it has no dedicated fixture workspace. Older releases are out of scope. One rule set, with each release-dependent rule or behaviour gated on a feature table (see "Release contract" in architecture.md); no per-release copies. |
 | Lint and multi-release layers | A layer is linted against **every supported release it claims** in `LAYERSERIES_COMPAT`, down to the oldest, plus the workspace's own release. A construct that one of them lacks or rejects is a finding that names the release. This applies to writable layers, to any layer the user names as the lint target (or a file or recipe in it), and to every layer when the workspace has no writable layer. Only an upstream layer swept in by a whole-workspace run (`--all`) is checked against the workspace's release alone. (Decided 2026-11-17; implemented after wave 4.) |
+| Inline python | `${@...}` built only from an allowlist of pure helpers (`bb.utils.contains`, `contains_any`, `filter`, `to_boolean`, `vercmp_string`, `oe.utils.conditional`, `ifelse`, `vartrue`, `less_or_equal`, `version_less_or_equal`, `both_contain`, `prune_suffix`, `all_distro_features`, `any_distro_features`, `filter_default_features`, `set_difference`, `d.getVar` / `getVarFlag` / `expand`) and a few string operations is evaluated statically, each helper reproduced from its BitBake / OE-core source, and only when every value it reads is certain; anything else stays unevaluated and flagged. No python interpreter, nothing that reads the host or the filesystem, no anonymous python. (Decided 2026-11-18, replacing "no simple python evaluation without agreement"; bitbake-semantics.md, "Inline python evaluated statically".) |
 | Transport | stdio only. No network at query time. |
 
 ## Ideas taken from atlas (bloodfeast/atlas)
@@ -64,10 +65,10 @@ Not taken: the memory store, embeddings and semantic search, discussions, SCIP i
 
 ## Non-goals
 
-- Not a BitBake reimplementation. Python expansion (`${@...}`), anonymous python and
-  `d.setVar` in classes are **not** evaluated statically. Affected values are marked
-  (`unevaluated_python`; the tools say `depends on python, not evaluated`); authoritative
-  mode exists for those.
+- Not a BitBake reimplementation. Python expansion (`${@...}`) beyond the allowlisted pure
+  helpers (see "Decisions"), anonymous python and `d.setVar` in classes are **not**
+  evaluated statically. Affected values are marked (`unevaluated_python`; the tools say
+  `depends on python, not evaluated`); authoritative mode exists for those.
 - No arbitrary shell execution through MCP.
 - No editing of upstream layers; writes are confined to layers marked writable.
 - No GUI, no network service, no telemetry.

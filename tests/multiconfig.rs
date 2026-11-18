@@ -208,7 +208,7 @@ fn a_python_bbmulticonfig_is_uncertain_and_lists_the_files_present() {
     append(
         &root,
         "build/conf/local.conf",
-        "BBMULTICONFIG = \"${@'musl' if True else ''}\"\n",
+        "BBMULTICONFIG = \"${@os.environ.get('MC', 'musl')}\"\n",
     );
     let ws = Workspace::discover(&ws_config(&root)).unwrap();
     let cache = tempfile::tempdir().unwrap();

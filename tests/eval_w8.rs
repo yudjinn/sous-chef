@@ -297,7 +297,7 @@ fn compatible_machine_against_partly_known_machine_overrides() {
         append_to(
             r,
             "meta-core/conf/distro/testdistro.conf",
-            "MACHINEOVERRIDES = \"${@'soc-x' if d.getVar('Y') else ''}:${MACHINE}\"\n",
+            "MACHINEOVERRIDES = \"${@'soc-x' if oe.utils.read_file('y') else ''}:${MACHINE}\"\n",
         );
         recipe(
             r,
@@ -343,7 +343,11 @@ fn incompatible_license_three_ways() {
             "LICENSE = \"GPL-3.0-only\"\nLICENSE:${PN} = \"MIT\"\n",
         );
         recipe(r, "excepted", "LICENSE = \"GPL-3.0-only\"\n");
-        recipe(r, "pyl", "LICENSE = \"${@'GPL-3.0-only'}\"\n");
+        recipe(
+            r,
+            "pyl",
+            "LICENSE = \"${@oe.utils.read_file('license')}\"\n",
+        );
         recipe(r, "bad", "LICENSE = \"GPL-3.0-only, MIT\"\n");
         recipe(r, "empty", "LICENSE = \"GPL-3.0-only\"\nPACKAGES = \"\"\n");
     });

@@ -2578,6 +2578,15 @@ impl<'a> Replay<'a> {
             let e = self.ds.expand(s);
             bases.push(base_of(&e.text).to_string());
         }
+        // Names written through a local wrapper (`appendVar('PACKAGECONFIG_CONFARGS', ...)`
+        // in base.bbclass): recorded under their full expanded name.
+        let mut sets = sets;
+        for s in body.as_deref().map(wrapper_writes).unwrap_or_default() {
+            bases.push(self.ds.expand(&s).text);
+            if !sets.contains(&s) {
+                sets.push(s);
+            }
+        }
         // `ClassExtender.rename_package_variables(PACKAGEVARS...)` renames `<VAR>:<pkg>` for
         // each variable the caller lists, read from `PACKAGEVARS` when the function runs.
         if body
@@ -4361,6 +4370,42 @@ fn multilib_provides_filter(body: &str) -> bool {
     (squashed.contains("prefixes=(d.getVar(\"MULTILIB_VARIANTS\")or\"\").split()")
         || squashed.contains("prefixes=(d.getVar('MULTILIB_VARIANTS')or'').split()"))
         && sets_provides_filter(body, "variant, prefixes, d")
+}
+
+/// Variables a python body writes through a function it defines itself that writes `d`
+/// with a computed name (OE-core `base.bbclass`'s anonymous python: `def appendVar(varname,
+/// appends): ... d.appendVar(varname, ...)`, called as `appendVar('PACKAGECONFIG_CONFARGS',
+/// extraconf)`): the names of the calls with a literal first argument.
+fn wrapper_writes(body: &str) -> Vec<String> {
+    static DEF: LazyLock<Option<Regex>> =
+        LazyLock::new(|| Regex::new(r"(?m)^\s*def\s+(\w+)\s*\(").ok());
+    static WRITE: LazyLock<Option<Regex>> = LazyLock::new(|| {
+        Regex::new(r"\bd\.(?:setVar|appendVar|prependVar|setVarFlag|appendVarFlag|prependVarFlag)\s*\(\s*[A-Za-z_]").ok()
+    });
+    let (Some(def), Some(write)) = (DEF.as_ref(), WRITE.as_ref()) else {
+        return Vec::new();
+    };
+    if !write.is_match(body) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for c in def.captures_iter(body) {
+        let Some(f) = c.get(1) else { continue };
+        let Ok(call) = Regex::new(&format!(
+            r#"(?:^|[^\w.]){}\s*\(\s*(?:'([^'\\]*)'|"([^"\\]*)")"#,
+            regex::escape(f.as_str())
+        )) else {
+            continue;
+        };
+        for m in call.captures_iter(body) {
+            if let Some(n) = m.get(1).or_else(|| m.get(2))
+                && !out.iter().any(|o| o == n.as_str())
+            {
+                out.push(n.as_str().to_string());
+            }
+        }
+    }
+    out
 }
 
 fn python_writes(body: &str) -> (Vec<String>, bool) {

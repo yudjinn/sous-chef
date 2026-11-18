@@ -32,7 +32,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::datastore::{Keyword, Piece, base_of, split_keyword};
-use super::expand::{Expander, Source};
+use super::expand::{Expander, PyEvent, Source};
 use super::{DataStore, OpStatus, Value, VarOp};
 use crate::parse::words;
 
@@ -150,6 +150,89 @@ impl Source for Eval<'_> {
         // The expander has already marked `name` as in progress.
         self.finalise(name, exp, &mut Trace::default())
     }
+
+    fn unset_doubt(&self, name: &str, exp: &mut Expander) -> Option<String> {
+        let base = base_of(name);
+        let notes = &self.ds.notes;
+        if notes.python_vars.contains(base) || notes.python_vars.contains(name) {
+            return Some("anonymous python may set it".into());
+        }
+        if notes.uncertain_vars.contains(base) {
+            return Some(
+                "a file reached through a reference that is not certain may set it".into(),
+            );
+        }
+        if notes.unresolved_vars.contains_key(base) {
+            return Some("a statement sous-chef could not apply may set it".into());
+        }
+        if ENV_PASSTHROUGH.contains(&name) {
+            return Some("BitBake takes it from the environment when it is set there".into());
+        }
+        if notes.incomplete_keys.iter().any(|k| key_could_be(k, name)) {
+            return Some("a variable whose name could not be expanded may be it".into());
+        }
+        // An override variant or a conditional append that is inactive only because
+        // OVERRIDES is not known.
+        let mut trace = Trace::default();
+        let entered = exp.enter(name);
+        let _ = self.compose(name, true, exp, &mut trace, 0);
+        exp.leave(entered);
+        let unknown_entries = (trace.inactive_seen || trace.multi_active) && self.ovr.uncertain();
+        if trace.consulted && (self.ovr.unstable || unknown_entries) {
+            return Some(
+                "an override decision on it depends on OVERRIDES, which is not known statically"
+                    .into(),
+            );
+        }
+        None
+    }
+
+    fn lookup_flag(&self, name: &str, flag: &str, exp: &mut Expander) -> Option<Option<Value>> {
+        let doubt = (self.ds.notes.python_vars.contains(base_of(name))
+            || self.ds.notes.python_vars.contains(name))
+            || self.ds.notes.uncertain_vars.contains(base_of(name))
+            || self.ds.notes.unresolved_vars.contains_key(base_of(name));
+        let Some(raw) = self.ds.raw_flag(name, flag) else {
+            return Some(doubt.then(|| Value {
+                text: String::new(),
+                unevaluated_python: true,
+                unresolved: Vec::new(),
+            }));
+        };
+        let mut v = exp.expand_as(&format!("{name}[{flag}]"), &raw, self);
+        v.unevaluated_python |= doubt;
+        Some(Some(v))
+    }
+}
+
+/// The variables BitBake takes from the environment by default (BitBake 2.18
+/// `lib/bb/utils.py` `preserved_envvars`, `preserved_envvars_exported`; the same in 2.0 and
+/// 2.8). `BB_ENV_PASSTHROUGH_ADDITIONS` from the shell can add any name; that is not known
+/// statically.
+const ENV_PASSTHROUGH: &[&str] = &[
+    "BBPATH",
+    "BB_PRESERVE_ENV",
+    "BB_ENV_PASSTHROUGH",
+    "BB_ENV_PASSTHROUGH_ADDITIONS",
+    "BB_TASKHASH",
+    "HOME",
+    "LOGNAME",
+    "PATH",
+    "PWD",
+    "SHELL",
+    "USER",
+    "LC_ALL",
+    "BBSERVER",
+];
+
+/// `key` (a variable name holding `${...}` that could not be expanded) may expand to `name`:
+/// its literal text before the first `${` and after the last `}` match.
+fn key_could_be(key: &str, name: &str) -> bool {
+    let (Some(start), Some(end)) = (key.find("${"), key.rfind('}')) else {
+        return key == name;
+    };
+    let (pre, post) = (&key[..start], &key[end + 1..]);
+    name.len() >= pre.len() + post.len() && name.starts_with(pre) && name.ends_with(post)
 }
 
 impl Eval<'_> {
@@ -158,7 +241,9 @@ impl Eval<'_> {
         let c = self.compose(name, true, exp, trace, 0);
         let mut v = c.parsed?;
         // Anonymous python may change this variable (recorded by the replay, T3.4).
-        if self.ds.notes.python_vars.contains(base_of(name)) {
+        if self.ds.notes.python_vars.contains(base_of(name))
+            || self.ds.notes.python_vars.contains(name)
+        {
             v.unevaluated_python = true;
         }
         // A file reached through a reference whose value is not certain changes it
@@ -396,6 +481,31 @@ fn split_keep_whitespace(s: &str) -> Vec<&str> {
     words::split_keep_whitespace(s)
 }
 
+/// What [`DataStore::python_log`] found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PythonLog {
+    /// Met expanding the value (and the values it references).
+    pub own: Vec<PyEvent>,
+    /// Met expanding `OVERRIDES`, when the value consulted an override.
+    pub overrides: Vec<PyEvent>,
+}
+
+/// `a` is `b` with some elements left out (order kept).
+fn is_subsequence(a: &[String], b: &[String]) -> bool {
+    let mut it = b.iter();
+    a.iter().all(|x| it.any(|y| y == x))
+}
+
+fn dedupe(events: &[PyEvent]) -> Vec<PyEvent> {
+    let mut out: Vec<PyEvent> = Vec::new();
+    for e in events {
+        if !out.iter().any(|o| o.code == e.code) {
+            out.push(e.clone());
+        }
+    }
+    out
+}
+
 fn push_unique(v: &mut Vec<String>, s: &str) {
     if !v.iter().any(|x| x == s) {
         v.push(s.to_string());
@@ -425,6 +535,48 @@ impl DataStore {
             }
         }
         Some(v)
+    }
+
+    /// The `${@...}` expressions the expansion of `name`'s finalised value met, its own and
+    /// those of the values it references (each code once, first occurrence): which were
+    /// evaluated statically and why the others were not; and those of `OVERRIDES` when the
+    /// value consulted an override (its override decisions rest on them).
+    pub fn python_log(&self, name: &str) -> PythonLog {
+        let ovr = self.override_state();
+        let ev = Eval {
+            ds: self,
+            ovr: &ovr,
+        };
+        let mut exp = Expander::new();
+        let entered = exp.enter(name);
+        let mut trace = Trace::default();
+        let _ = ev.finalise(name, &mut exp, &mut trace);
+        exp.leave(entered);
+        let own = dedupe(exp.python_log());
+        let overrides = if trace.consulted && name != "OVERRIDES" {
+            let mut exp = Expander::new();
+            let entered = exp.enter("OVERRIDES");
+            let _ = ev.finalise("OVERRIDES", &mut exp, &mut Trace::default());
+            exp.leave(entered);
+            dedupe(exp.python_log())
+        } else {
+            Vec::new()
+        };
+        PythonLog { own, overrides }
+    }
+
+    /// [`DataStore::python_log`] for a text expanded against the store.
+    pub fn python_log_of_text(&self, text: &str) -> Vec<PyEvent> {
+        let ovr = self.override_state();
+        let mut exp = Expander::new();
+        let _ = exp.expand(
+            text,
+            &Eval {
+                ds: self,
+                ovr: &ovr,
+            },
+        );
+        dedupe(exp.python_log())
     }
 
     /// The known `OVERRIDES` entries, lowest priority first (empty entries dropped, and
@@ -488,7 +640,16 @@ impl DataStore {
         let first =
             OverrideState::from_value(self.value_with("OVERRIDES", &OverrideState::default()));
         let second = OverrideState::from_value(self.value_with("OVERRIDES", &first));
-        if first.list == second.list && first.has_empty == second.has_empty {
+        // BitBake's second pass is only a check: it is fatal when it differs, so when BitBake
+        // gives a value at all, OVERRIDES is the first pass (computed with no override
+        // active, as here, so its known entries are exact). When the first pass has unknown
+        // entries, the second pass runs under unknown decisions and may know fewer entries
+        // (python whose inputs are now uncertain): that is no sign of instability. Only a
+        // known entry the first pass did not have is.
+        let fewer_known = first.uncertain()
+            && is_subsequence(&second.list, &first.list)
+            && (!second.has_empty || first.has_empty);
+        if (first.list == second.list && first.has_empty == second.has_empty) || fewer_known {
             first
         } else {
             OverrideState {

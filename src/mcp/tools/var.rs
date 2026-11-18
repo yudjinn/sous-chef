@@ -139,6 +139,11 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     for f in &finals {
         t.note(f);
     }
+    if flag.is_none() && !ds.is_function(&lookup) {
+        for n in python_eval_notes(&ds.python_log(&lookup)) {
+            t.note(&n);
+        }
+    }
     for n in replay_notes(&ds, &lookup) {
         t.note(&n);
     }
@@ -158,6 +163,66 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
 }
 
 // ---- shared with overrides and deps ----
+
+/// Notes on the inline python a value's expansion met (`DataStore::python_log`): one line
+/// naming what was evaluated statically, one naming the first expression left unevaluated
+/// because of what it reads (with the variable), at most.
+pub fn python_eval_notes(log: &eval::overrides::PythonLog) -> Vec<String> {
+    fn list(events: &[&eval::expand::PyEvent]) -> String {
+        let mut s: Vec<String> = events
+            .iter()
+            .take(2)
+            .map(|e| format!("`{}`", eval::pyexpr::short(&e.code)))
+            .collect();
+        if events.len() > 2 {
+            s.push(format!("+{} more", events.len() - 2));
+        }
+        s.join(", ")
+    }
+    let mut out = Vec::new();
+    let done: Vec<_> = log.own.iter().filter(|e| e.evaluated).collect();
+    let ovr = log.overrides.iter().filter(|e| e.evaluated).count();
+    let in_ovr = match ovr {
+        0 => String::new(),
+        1 => "; OVERRIDES, which decides its override variants, needed 1 more".into(),
+        n => format!("; OVERRIDES, which decides its override variants, needed {n} more"),
+    };
+    if !done.is_empty() {
+        out.push(format!(
+            "note: python evaluated statically (pure helpers, exact): {}{in_ovr}",
+            list(&done)
+        ));
+    } else if ovr > 0 {
+        out.push(format!(
+            "note: OVERRIDES, which decides its override variants, has python evaluated statically (pure helpers, exact): {}",
+            list(&log.overrides.iter().filter(|e| e.evaluated).collect::<Vec<_>>())
+        ));
+    }
+    // A helper that read a value that is not certain: say which.
+    let blocked: Vec<_> = log
+        .own
+        .iter()
+        .filter(|e| {
+            !e.evaluated
+                && e.why
+                    .as_deref()
+                    .is_some_and(|w| !w.starts_with("not in the evaluated subset"))
+        })
+        .collect();
+    if let Some(first) = blocked.first() {
+        let more = if blocked.len() > 1 {
+            format!(" (+{} more)", blocked.len() - 1)
+        } else {
+            String::new()
+        };
+        out.push(format!(
+            "note: python not evaluated: `{}`: {}{more}",
+            eval::pyexpr::short(&first.code),
+            first.why.as_deref().unwrap_or("")
+        ));
+    }
+    out
+}
 
 /// The evaluation target for a `recipe` argument (`None`: the configuration only).
 ///

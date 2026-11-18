@@ -577,7 +577,7 @@ fn compare_classifies_differences() {
 # $EXTRA_OEMAKE
 #   set /x/app.bb:9
 #     \"GREETING=hello\"
-EXTRA_OEMAKE=\"GREETING=hello\"
+EXTRA_OEMAKE=\"GREETING=hello BOARD=1\"
 #
 # $ONLYBB
 #   set /x/a.conf:1

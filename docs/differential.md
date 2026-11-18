@@ -88,6 +88,47 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After x1-python
+
+Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/x1-python/`, release build) after inline python of the
+pure helpers is evaluated statically (bitbake-semantics.md, "Inline python evaluated
+statically"):
+
+| | compared | equal | of which flagged | flagged | flagged, literal differs | known gap | bug |
+|---|---|---|---|---|---|---|---|
+| before (w12-final) | 1090 | 702 | 147 | 332 | 25 | 31 | 0 |
+| after | 1090 | 950 | 148 | 74 | 35 | 31 | 0 |
+
+248 values moved from flagged to equal; **no value is unflagged and different** (0 bug,
+and no new known gap). What made it: `MACHINEOVERRIDES` (`soc-family.inc`'s list
+subscript and the `arch-*.inc` `bb.utils.contains('TUNE_FEATURES', ...)`),
+`TRANSLATED_TARGET_ARCH`, `DISTROOVERRIDES` and `LIBCEXTENSION` are evaluated, so
+`OVERRIDES` is known for every target recipe (13 of 13 entries for curl, 6 before, all
+equal to BitBake's), and every value whose override decisions waited on it is certain
+(`SRC_URI`, `FILES:*`, `PACKAGES`, `PACKAGECONFIG`, `RDEPENDS`); the tune's
+`TUNE_PKGARCH` python (with `%`) and `MACHINE_ARCH` (with `bool()`) give `PACKAGE_ARCH` and so `WORKDIR`, `S`, `B`, `T` and
+`CFLAGS`; `DISTRO_FEATURES` / `MACHINE_FEATURES` (`oe.utils.filter_default_features`).
+
+Two changes were needed to keep 0 bugs. First, BitBake's second `need_overrides` pass is
+only a check (fatal when it differs); when the first pass has unknown entries, the second
+may know fewer, and that was taken for instability (`unresolved` `OVERRIDES` on every
+override-dependent value) until the first pass is used in that case (bitbake-semantics.md,
+"Overrides", "The two passes"). Second, three values became unflagged and short of what
+BitBake has (`EXTRA_OECONF` of dropbear and python3, `EXTRA_OEMESON` of glib-2.0): they
+append `${PACKAGECONFIG_CONFARGS}`, which `base.bbclass`'s anonymous python fills through
+its local `appendVar(...)` wrapper; they had been flagged only for unrelated python. Writes
+through such a wrapper now count as made by anonymous python, and the three are flagged
+again.
+
+What stays flagged (differences by variable): `DEPENDS`, `FILESPATH` (25 each: python
+outside the subset, `get_base_dep(d)`, `base_set_filespath(...)`), `FILE` (25, the
+path-spelling gap), `B`, `S`, `WORKDIR`, `CFLAGS` (3 each: the native and nativesdk
+targets, where `BUILD_ARCH` is `os.uname()`), `EXTRA_OECONF` 9, `FILES` 8,
+`PACKAGES` 7, `RDEPENDS` 5, `OVERRIDES` 3 (the native and nativesdk targets:
+`TRANSLATED_TARGET_ARCH` from the host), `FILESEXTRAPATHS` 4. 148 equal values still carry
+a flag (over-caution, not an error).
+
 ## After w12-final
 
 Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
@@ -518,9 +559,9 @@ static value is a pointer list; the test recognises functions by the value's sha
 
 On this workspace, with the machine and distro given. The counts in this section are the
 23-target sample after the w5 fixes; the current totals, with the two `BBCLASSEXTEND`
-variants and the later rounds ("After w12-final"), are 1090 values compared, 702 equal
-(64%), 357 flagged, 31 known gap (29 path spellings, 2 `FILE_LAYERNAME` of a variant) and
-0 bug, and those are the numbers the README quotes.
+variants and the later rounds ("After x1-python"), are 1090 values compared, 950 equal
+(87%), 109 flagged, 31 known gap (29 path spellings, 2 `FILE_LAYERNAME` of a variant) and
+0 bug. (The README quotes the w12 numbers: 702 equal, 357 flagged.)
 
 - **Nothing was wrong without a warning.** 1019 values compared, 0 bugs: every value that
   differed from BitBake either carried `unevaluated_python` / `unresolved` (336) or was a

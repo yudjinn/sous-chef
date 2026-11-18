@@ -31,7 +31,7 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::var::{mc_notes, recipe_target_in, replay_notes};
+use super::var::{mc_notes, python_eval_notes, recipe_target_in, replay_notes};
 use crate::error::Result;
 use crate::eval::providers::{
     ProviderReason, ProviderSet, Providers, Selection, Setting, VersionReason,
@@ -423,6 +423,9 @@ fn packageconfig(ds: &DataStore) -> Table {
     if python {
         t.note("note: PACKAGECONFIG depends on python, which is not evaluated; the selection may differ");
     }
+    for n in python_eval_notes(&ds.python_log("PACKAGECONFIG")) {
+        t.note(&n.replacen("note: python", "note: PACKAGECONFIG: python", 1));
+    }
     if extra > 0 {
         t.note("note: fields 5 (RRECOMMENDS) and 6 (conflicting options) are not shown; use var PACKAGECONFIG[option]");
     }
@@ -566,6 +569,9 @@ fn build(
             if cross.len() == 1 { "it" } else { "them" }
         ));
     }
+    for n in python_eval_notes(&ds.python_log("DEPENDS")) {
+        t.note(&n.replacen("note: python", "note: DEPENDS: python", 1));
+    }
     Ok(t)
 }
 
@@ -702,6 +708,9 @@ fn runtime(ds: &DataStore) -> Table {
     }
     if let Some(n) = render::python_note(python) {
         t.note(&n);
+    }
+    for n in python_eval_notes(&ds.python_log("PACKAGES")) {
+        t.note(&n.replacen("note: python", "note: PACKAGES: python", 1));
     }
     t
 }
