@@ -267,6 +267,8 @@ instructions and the skill's entry in the skill list. Every B turn re-reads them
 cache), so a 10-turn B session carries about 94,000 tokens of overhead in its total; that
 is why B is more expensive than A on short tasks such as t13 and t14. (In the first trial,
 with the claude.ai connectors still loaded, B's start was 34,145 tokens.)
+Re-measured after the x7 cuts, with and without tool search: "Plugin overhead after the
+definition cuts" at the end of this page.
 
 ### Run to run variation: the first pilot
 
@@ -366,3 +368,81 @@ python3 bench/run.py --model sonnet --run-dir $SOUS_CHEF_LIVE/runs/x6-sonnet   #
 python3 bench/score.py blind                   # then mark scoring/marks.json
 python3 bench/score.py compute
 ```
+
+## Plugin overhead after the definition cuts (2026-11-18)
+
+Since the pilot, the `tools/list` payload went from 31,539 to 14,102 bytes, the skill from
+about 8.0 KB to 2.5 KB, and the six core tools (`recipe var overrides item search class`)
+carry `_meta["anthropic/alwaysLoad"]: true`, so that Claude Code's tool search defers the
+other twelve. The pilot's sessions left `ToolSearch` out of `--tools`, which makes Claude
+Code load every MCP tool upfront (code.claude.com/docs/en/mcp, "Configure tool search").
+This re-measures the overhead with tool search on (its default) and off.
+
+### Method
+
+The prompt "Say ok.", one turn, no tool call, with the pilot's flags and environment (above:
+`--model haiku`, `--setting-sources ''`, `--permission-mode dontAsk`,
+`--no-session-persistence`, the same `--disallowedTools` and Bash allow list,
+`ENABLE_CLAUDEAI_MCP_SERVERS=false`, the parent's `CLAUDE_CODE_*` variables removed,
+`ENABLE_TOOL_SEARCH` unset, a `PATH` wrapper that runs the release build of `a3a310f` with
+`--config` and `[bitbake] enabled = false`), plus `--debug-file` for each session. The
+differences from the pilot:
+
+- The working directory was an empty scratch directory, not a git checkout and not the
+  yocto-kiss workspace (a build was running there). Nothing in the plugin's context
+  depends on the workspace: the server instructions and tool definitions are fixed text.
+  The baseline's absolute size differs from the pilot's (11,074 against 11,323 tokens); the
+  differences between conditions are what is measured.
+- The plugin conditions allow the 16 read-only sous-chef tools (the pilot's 14 plus `sigs`
+  and `pkgdata`, added since); `scaffold` and `bitbake` are denied by name, which removes
+  them from the context, as in the pilot.
+
+| Session | `--tools` | Plugin |
+|---|---|---|
+| 1. Baseline | `Read,Grep,Glob,Bash,Skill,ToolSearch` | no (`--strict-mcp-config`) |
+| 1'. Baseline as in the pilot | `Read,Grep,Glob,Bash,Skill` | no (`--strict-mcp-config`) |
+| 2. Plugin, tool search on | `Read,Grep,Glob,Bash,Skill,ToolSearch` | `--plugin-dir plugin` |
+| 3. Plugin, tool search off (the pilot's B) | `Read,Grep,Glob,Bash,Skill` | `--plugin-dir plugin` |
+
+### Numbers
+
+Claude Code 2.1.327, `--model haiku` (reported as `claude-haiku-5-5`). Total is the pilot's
+sum, input + output + cache creation + cache read of the one turn; output was 4 tokens and
+input 2 in every session, so input + cache creation + cache read is 4 less in each row and
+gives the same differences.
+
+| Session | Total | Cache creation / read | Tools in `init` | sous-chef upfront / deferred | Cost |
+|---|---|---|---|---|---|
+| 1. Baseline | 11,074 | 0 / 11,068 | 6 (5 built-in + `ToolSearch`) | – | $0.00011 |
+| 1'. Baseline, no `ToolSearch` | 11,074 | 5,816 / 5,252 | 5 | – | $0.00122 |
+| 2. Plugin, tool search on | 14,768 | 14,762 / 0 | 22 (6 built-in + 16 sous-chef) | 6 / 10 | $0.00295 |
+| 3. Plugin, tool search off | 16,767 | 16,761 / 0 | 21 (5 built-in + 16 sous-chef) | 16 / 0 | $0.00335 |
+
+- **Overhead with tool search on: 3,694 tokens** (2 − 1).
+- **Overhead with tool search off: 5,693 tokens** (3 − 1'), against the pilot's 9,356 in the
+  same setup: 39% less.
+- Tool search saves 1,999 tokens more (3 − 2): the ten deferred definitions are replaced
+  by their names and the `ToolSearch` tool.
+
+**Upfront and deferred**, from each session's debug log. Session 2: "Dynamic tool loading:
+0/10 deferred tools included", that is, the ten tools without `alwaysLoad` (`layers deps
+lint log slice status audit diff sigs pkgdata`) deferred and the six core tools sent
+upfront. Session 3: "Tool search disabled: ToolSearchTool is not available", "0/0
+deferred tools": all 16 upfront. Session 1: "Tool search disabled: no deferred tools
+available to search"; `init` lists `ToolSearch`, but with no MCP tool to defer the
+baseline came out the same size as 1'. The `init` event lists every tool, deferred or
+not, so the split comes from the log, not from `init`. What session 2 adds, by the
+documentation and the log: the six core definitions, the server instructions (732
+characters, which name the deferred tools), the deferred tools' names, the skill's entry
+in the skill list (`sous-chef:yocto-layers`, 18 skills against 17) and the `ToolSearch`
+tool; the measurement does not split the 3,694 tokens between them.
+
+**Caching.** The pilot's two sessions read everything from the cache; here the plugin
+sessions wrote it (cache creation, 1-hour writes, priced above cache reads), so the costs
+are higher than the pilot's and are not comparable with them; the token totals are.
+
+**A repeat.** The first baseline session (1, tool search at its default) came out at 11,114
+tokens: Claude Code's built-in `cc-plugin-easel` plugin loaded in that session only (none
+of the other four), and it adds a prompt section. That session was set aside and run
+again; the repeat, without that plugin, is the row above. Five sessions in all, $0.0089
+reported.
