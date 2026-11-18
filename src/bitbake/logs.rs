@@ -1145,6 +1145,24 @@ fn python_context(frames: &[Frame], ws: Option<&Workspace>) -> Vec<String> {
     }
 }
 
+/// A compile error's message split into its location (`<file>:<line>[:<col>]`) and the
+/// diagnostic (`error: ...`, `fatal error: ...`), as gcc and clang print it.
+fn compile_location(e: &DigestError) -> Option<(&str, &str)> {
+    if e.kind != FailureKind::Compile {
+        return None;
+    }
+    let at = [": fatal error: ", ": error: "]
+        .iter()
+        .filter_map(|sep| e.message.find(sep))
+        .min()?;
+    let (loc, rest) = e.message.split_at(at);
+    let loc_ok = loc
+        .rsplitn(3, ':')
+        .take(2)
+        .any(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    loc_ok.then(|| (loc, rest.trim_start_matches(": ")))
+}
+
 impl Digest {
     /// The digest as a two-column `field value` table, then the hint line.
     pub fn table(&self, context_rows: usize, with_log: bool) -> Table {
@@ -1165,7 +1183,17 @@ impl Digest {
         match &self.first {
             Some(e) => {
                 let label = format!("error ({}, line {})", e.kind.as_str(), e.line);
-                t.row(&[&label, &render::snippet(&e.message)]);
+                // A compiler diagnostic is `<file>:<line>:<col>: error: <message>`; the file
+                // as the compiler was given it can be long (`../../sources/curl-8.19.0/
+                // lib/version.c`, live, y3-leftovers), which cut the message itself to the
+                // snippet width. The location gets a row of its own.
+                match compile_location(e) {
+                    Some((at, msg)) => {
+                        t.row(&[&label, &render::snippet(msg)]);
+                        t.row(&["source", &render::snippet(at)]);
+                    }
+                    None => t.row(&[&label, &render::snippet(&e.message)]),
+                }
                 if let Some(d) = &e.detail {
                     let field = match e.kind {
                         FailureKind::Fetch => "url",
