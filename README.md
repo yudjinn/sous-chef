@@ -81,9 +81,16 @@ estimated at 4 bytes each.
 - A table is cut to `budget_tokens` (600 by default, at 4 bytes a token) with a marker
   saying how many rows were left out; `item` and `slice` text is capped at 8 KB; long
   values, logs, diffs and reports go under a handle read with `slice`.
-- These are per-question measurements. The effect on a whole task depends on how an agent
-  uses the tools and has not been measured; doing so needs the same tasks run in Claude Code
-  with and without the plugin.
+- These are per-question measurements.
+
+**Whole tasks.** A pilot ran 14 read-only questions about the same workspace as real Claude
+Code sessions (Claude Code 2.1.327, Haiku 5.5, one session per task and condition), with
+and without the plugin ([docs/benchmark.md](docs/benchmark.md)). Without sous-chef the
+sessions used 1.28 times the tokens (1,919,410 against 1,505,217), 199 against 128 turns,
+and scored 0.60 against 0.83 on the reference facts. Per task the ratio ranged from 0.23 to
+2.52: sous-chef used fewer tokens on 8 tasks and more on 6, among them a simple search
+(4.3 times more). The plugin adds 9,356 tokens to every session's context. One run per cell
+is a pilot: single tasks moved by up to a factor of 2.3 between two runs.
 
 ### Accuracy
 

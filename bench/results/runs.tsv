@@ -1,0 +1,32 @@
+task	cond	total	input	output	cache_creation	cache_read	cost_usd	num_turns	tool_calls	sous_chef_calls	builtin_calls	builtin_after_sc	tool_errors	wall_s	score	facts	wrong	overconfident	calls
+containment	A	27393	4	2069	5947	19373	0.00241803	9	8	0	8		6	11.6					Read Grep Glob Bash Bash Bash Bash Read
+overhead	A	11323	2	4	0	11317	0.00011537	1	0	0	0		0	3.0					
+overhead	B	20679	2	4	0	20673	0.00020893000000000002	1	0	0	0	0	0	3.5					
+t01-curl-srcuri	A	258476	18	7661	28280	222517	0.01171347	15	14	0	14		1	60.4	0.8	HPPPH	1	False	Glob Grep Grep Read Bash Bash Bash Bash Bash Glob Read Read Grep Glob
+t01-curl-srcuri	B	113525	8	4009	11183	98325	0.00522515	9	8	8	0	0	0	28.9	0.9	PPPPH	0	False	var recipe recipe slice item layers search search
+t02-providers	A	145418	16	4941	14602	125859	0.00665109	11	10	0	10		1	33.4	0.9	PHPPP	0	False	Grep Grep Read Bash Bash Bash Read Glob Bash Bash
+t02-providers	B	71668	6	1616	4946	65100	0.0024488	7	6	6	0	0	0	11.6	0.9	PPPPH	0	False	var var deps deps recipe recipe
+t03-linux-kiss-appends	A	120473	14	6630	12465	101364	0.00682304	22	21	0	21		1	36.0	0.75	HPHP	2	False	Grep Glob Bash Read Read Read Read Read Glob Glob Grep Read Glob Glob Read Read Read Read Read Read Read
+t03-linux-kiss-appends	B	171667	12	3975	12009	155671	0.0059472100000000005	14	13	13	0	0	2	23.0	1.0	PPPP	0	False	recipe recipe var layers recipe search item item item item search item var
+t04-dropbear-classes	A	159893	16	7064	15998	136815	0.00810135	15	14	0	14		1	40.8	0.6	PPHAH	0	False	Glob Grep Read Bash Bash Glob Grep Grep Grep Grep Grep Grep Grep Grep
+t04-dropbear-classes	B	94385	8	2043	4718	87616	0.0028420600000000004	6	5	5	0	0	0	19.9	0.7	PPHHH	1	False	recipe recipe var var var
+t05-curl-deps	A	84639	12	4030	4702	75895	0.0037155499999999998	12	11	0	11		4	25.4	0.1	AAAHA	1	False	Bash Bash Grep Read Read Bash Glob Glob Read Grep Grep
+t05-curl-deps	B	150350	10	4910	15931	129499	0.006937189999999999	13	12	12	0	0	0	27.2	0.7	PHHPH	0	False	deps var deps deps var var item item deps deps var recipe
+t06-gnutls-search	A	187336	20	6250	13402	167664	0.007484040000000001	17	16	0	16		2	37.5	-0.17	CAH	2	False	Grep Glob Read Grep Bash Bash Grep Grep Grep Grep Grep Grep Grep Read Read Read
+t06-gnutls-search	B	75549	6	3224	6396	65923	0.00355103	7	6	6	0	0	0	16.3	0.83	PPH	1	False	search search layers search search search
+t07-busybox-install	A	294010	18	10312	35192	248488	0.014681079999999999	19	18	0	18		1	52.8	0.6	PPPAA	0	False	Grep Glob Bash Read Read Bash Read Bash Read Bash Bash Glob Grep Grep Grep Read Grep Grep
+t07-busybox-install	B	116457	8	4553	15306	96590	0.0063044	12	11	11	0	0	0	33.2	1.0	PPPPP	0	False	recipe var search item recipe search layers var var var var
+t08-layers	A	84412	10	3560	11229	69613	0.00472293	13	12	0	12		1	20.9	1.0	PPPP	0	False	Bash Bash Read Read Read Grep Read Read Read Read Read Grep
+t08-layers	B	43761	4	750	0	43007	0.00080547	3	2	2	0	0	0	9.4	0.75	PPPA	0	False	layers layers
+t09-lint-meta-kiss	A	132926	12	14752	22042	96120	0.012746799999999999	18	17	0	17		2	74.1	0.25	ACPP	3	False	Bash Glob Glob Read Read Read Read Read Read Read Read Read Read Grep Grep Read Read
+t09-lint-meta-kiss	B	97210	8	2819	4965	89418	0.0032974799999999998	8	7	6	1	1	1	25.5	0.12	HAAA	1	True	lint layers layers search recipe Glob item
+t10-linux-kiss-srcuri	A	72780	10	2892	5548	64330	0.0031999000000000003	10	9	0	9		1	30.9	1.0	PPP	0	False	Grep Glob Read Read Grep Grep Read Grep Grep
+t10-linux-kiss-srcuri	B	104876	8	2355	6940	95573	0.0035220299999999998	8	7	7	0	0	0	15.3	1.0	PPP	0	False	recipe var var var recipe var var
+t11-distro-features	A	103762	12	4680	8818	90252	0.00500732	12	11	0	11		2	28.2	0.12	PCAH	3	True	Grep Glob Read Read Grep Bash Grep Glob Glob Read Grep
+t11-distro-features	B	184492	14	4331	9578	170569	0.00578819	14	13	11	2	2	1	28.2	1.0	PPPP	0	False	var status var item item search item search search search Grep Grep item
+t12-kiss-image-install	A	182427	18	7175	17423	157811	0.00865201	22	21	0	21		1	44.5	1.0	PPPP	0	False	Grep Glob Read Read Read Grep Bash Read Read Read Glob Grep Grep Grep Read Grep Grep Grep Glob Grep Glob
+t12-kiss-image-install	B	74508	6	3087	6668	64747	0.0035251700000000006	7	6	6	0	0	0	16.6	1.0	PPPP	0	False	var recipe recipe var var var
+t13-git-srcrevs	A	30596	4	1666	6202	22724	0.0023010400000000003	3	2	0	2		0	10.3	1.0	PPP	0	False	Grep Glob
+t13-git-srcrevs	B	132358	10	3222	11921	117205	0.00516825	13	12	12	0	0	0	22.6	1.0	PPP	0	False	search search search layers search search layers search search recipe var var
+t14-u-boot-kiss	A	62262	8	3504	6768	51982	0.0036262200000000003	10	9	0	9		0	21.5	0.5	PPCP	1	False	Glob Grep Read Read Read Read Grep Grep Glob
+t14-u-boot-kiss	B	74411	6	1955	6853	65597	0.00300467	7	6	6	0	0	0	17.8	0.75	PPPA	0	False	var recipe layers var search layers

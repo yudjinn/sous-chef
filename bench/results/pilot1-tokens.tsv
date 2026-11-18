@@ -1,0 +1,16 @@
+task	total_A	total_B	A_over_B	turns_A	turns_B
+overhead	11323	20679	0.55	1	1
+t01-curl-srcuri	193596	83152	2.33	20	6
+t02-providers	110967	71602	1.55	12	7
+t03-linux-kiss-appends	158317	312980	0.51	22	24
+t04-dropbear-classes	258424	66737	3.87	23	5
+t05-curl-deps	258248	235762	1.10	24	20
+t06-gnutls-search	58806	44152	1.33	5	3
+t07-busybox-install	373764	109026	3.43	21	10
+t08-layers	85741	43647	1.96	13	3
+t09-lint-meta-kiss	152799	225150	0.68	18	25
+t10-linux-kiss-srcuri	105141	101851	1.03	15	7
+t11-distro-features	266424	211562	1.26	21	17
+t12-kiss-image-install	93622	72635	1.29	6	5
+t13-git-srcrevs	60677	176343	0.34	5	14
+t14-u-boot-kiss	130291	69152	1.88	14	4
