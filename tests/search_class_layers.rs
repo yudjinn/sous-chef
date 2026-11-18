@@ -531,3 +531,127 @@ async fn layers_shadowed() {
     let out = layers_ok(&f, layers::Show::Shadowed).await;
     insta::assert_snapshot!("layers_shadowed", out);
 }
+
+// ---- x7: what made the benchmark's search sessions iterate ----
+
+#[tokio::test]
+async fn name_mode_finds_a_flag_statement_written_name_bracket_flag() {
+    let f = fixture();
+    let out = search_ok(&f, sargs("PACKAGECONFIG[ssl]", Mode::Name)).await;
+    let rows: Vec<&str> = out.lines().skip(1).collect();
+    assert_eq!(rows.len(), 1, "{out}");
+    assert!(
+        rows[0].starts_with("meta-core:recipes-core/libfoo/libfoo_2.0.bb:16\tassign"),
+        "{out}"
+    );
+    // A flag fragment matches like a name fragment; the exact flag comes first.
+    let out = search_ok(&f, sargs("SRC_URI[sha256", Mode::Name)).await;
+    assert!(
+        out.contains("no hits"),
+        "an unclosed bracket is a plain name: {out}"
+    );
+    let out = search_ok(&f, sargs("SRC_URI[sha256sum]", Mode::Name)).await;
+    assert_eq!(out.lines().count(), 4, "three SRC_URI[sha256sum]: {out}");
+}
+
+#[tokio::test]
+async fn text_mode_is_a_literal_line_search() {
+    let f = fixture();
+    // `[` and `.` are literal: no escaping needed, and nothing else matches.
+    let out = search_ok(&f, sargs("PACKAGECONFIG[zlib] =", Mode::Text)).await;
+    let rows: Vec<&str> = out.lines().skip(1).collect();
+    assert_eq!(rows.len(), 1, "{out}");
+    assert!(rows[0].contains("libfoo_2.0.bb:15"), "{out}");
+    let out = search_ok(&f, sargs("example.org/libfoo.git", Mode::Text)).await;
+    assert_eq!(out.lines().count(), 2, "{out}");
+    // The same query as a regex is an error (unclosed class) or matches differently.
+    let err = search::run(&f.ctx, sargs("PACKAGECONFIG[zlib", Mode::Regex))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("bad regex"), "{err}");
+    let out = search_ok(&f, sargs("PACKAGECONFIG[zlib", Mode::Text)).await;
+    assert_eq!(out.lines().count(), 2, "{out}");
+}
+
+#[tokio::test]
+async fn layer_takes_several_names() {
+    let f = fixture();
+    let one = |l: &str| search::Args {
+        layer: Some(l.into()),
+        limit: Some(100),
+        budget_tokens: Some(100_000),
+        ..sargs("file://", Mode::Text)
+    };
+    let core = search_ok(&f, one("meta-core")).await;
+    let legacy = search_ok(&f, one("meta-mine")).await;
+    let both = search_ok(&f, one("meta-core, meta-mine")).await;
+    let rows = |s: &str| -> Vec<String> { s.lines().skip(1).map(str::to_string).collect() };
+    assert!(
+        !rows(&core).is_empty() && !rows(&legacy).is_empty(),
+        "{core}{legacy}"
+    );
+    let mut expected = rows(&core);
+    expected.extend(rows(&legacy));
+    assert_eq!(rows(&both), expected);
+    let err = search::run(&f.ctx, one("meta-core,meta-nope"))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("layer meta-nope"), "{err}");
+    // Name mode too.
+    let out = search_ok(
+        &f,
+        search::Args {
+            layer: Some("meta-core,meta-vendor".into()),
+            ..sargs("SRC_URI[sha256sum]", Mode::Name)
+        },
+    )
+    .await;
+    assert_eq!(out.lines().count(), 4, "{out}");
+}
+
+#[tokio::test]
+async fn the_budget_marker_says_how_to_get_everything_in_one_call() {
+    let f = fixture();
+    let small = search_ok(
+        &f,
+        search::Args {
+            budget_tokens: Some(50),
+            limit: Some(1000),
+            ..sargs(r"=", Mode::Regex)
+        },
+    )
+    .await;
+    let marker = small
+        .lines()
+        .find(|l| l.contains("more over budget_tokens"))
+        .unwrap();
+    let b: usize = marker
+        .split("(budget_tokens=")
+        .nth(1)
+        .and_then(|s| s.split(' ').next())
+        .unwrap()
+        .parse()
+        .unwrap();
+    let all = search_ok(
+        &f,
+        search::Args {
+            budget_tokens: Some(b),
+            limit: Some(1000),
+            ..sargs(r"=", Mode::Regex)
+        },
+    )
+    .await;
+    assert!(!all.contains("more over budget_tokens"), "{all}");
+    assert!(all.lines().count() > small.lines().count());
+}
+
+#[tokio::test]
+async fn the_default_budget_holds_the_default_limit() {
+    // 30 hits of about 150 bytes do not fit 600 tokens; search defaults to 1200, so a
+    // default call is cut by its limit only.
+    let f = fixture();
+    let out = search_ok(&f, sargs(r"=", Mode::Regex)).await;
+    assert!(out.contains("more (limit=30)"), "{out}");
+    assert!(!out.contains("over budget_tokens"), "{out}");
+    assert_eq!(out.lines().count(), 32, "{out}");
+}

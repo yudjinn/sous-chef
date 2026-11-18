@@ -485,8 +485,10 @@ Output rules:
 
 - Plain text, tab-separated, header row first. `format: "json"` on any tool returns the same
   data as JSON.
-- Default `budget_tokens` is 600. Rows that do not fit are dropped from the end and replaced
-  by one line: `+N more over budget_tokens` or `+N more (limit=L)`.
+- Default `budget_tokens` is 600 (`search`: 1200, since x7). Rows that do not fit are dropped
+  from the end and replaced by one line: `+N more over budget_tokens (budget_tokens=B shows
+  all)` (since x7 it names B, the budget at which the same call returns every row; JSON
+  `budget_for_all`) or `+N more (limit=L)`.
 - A snippet is one line, at most 120 characters.
 - Freshness is reported only when something changed:
   `reindexed 2 files: meta-foo:recipes-bar/baz/baz_1.0.bb, ...`.

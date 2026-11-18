@@ -224,7 +224,10 @@ async fn budget_truncation_keeps_the_summary_line() {
         "{out}"
     );
     assert_eq!(lines.next(), Some("severity\trule\tpointer\tmessage"));
-    assert!(out.contains(" more over budget_tokens\n"), "{out}");
+    assert!(
+        out.contains(" more over budget_tokens (budget_tokens="),
+        "{out}"
+    );
     assert!(sous_chef::render::estimate_tokens(&out) <= 150, "{out}");
 
     // JSON keeps the counts of every finding while the rows are cut.

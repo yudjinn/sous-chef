@@ -915,6 +915,31 @@ pub fn search_names(
     )
 }
 
+/// [`search_names`] for a flag statement `NAME[flag]`: names containing `name` whose flag
+/// contains `flag` (both case-insensitive, as `LIKE`), the exact `NAME[flag]` first.
+pub fn search_name_flags(
+    index: &Index,
+    name: &str,
+    flag: &str,
+    filter: &StatementFilter,
+    limit: usize,
+) -> Result<Vec<StatementRow>> {
+    statements_where(
+        index,
+        "s.name LIKE ?1 ESCAPE '\\' AND s.flag LIKE ?2 ESCAPE '\\' \
+         AND f.not_collected IS NOT 'data'",
+        vec![
+            Box::new(format!("%{}%", like_escape(name))),
+            Box::new(format!("%{}%", like_escape(flag))),
+            Box::new(name.to_string()),
+            Box::new(flag.to_string()),
+        ],
+        filter,
+        "(lower(s.name) = lower(?3) AND lower(s.flag) = lower(?4)) DESC, l.id, f.path, s.ord",
+        Some(limit),
+    )
+}
+
 /// Full-text search over statement names and snippets (SQLite FTS5 query syntax), best
 /// matches first. A malformed query is an `Invalid` error.
 pub fn search_fts(

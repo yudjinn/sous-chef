@@ -59,8 +59,10 @@ fn everything_fits_no_marker() {
 #[test]
 fn budget_cut_off_marker_fits_inside_budget() {
     let t = table(50);
-    let header_and_marker =
-        estimate_tokens("name\tpointer\tsnippet\n+50 more over budget_tokens\n");
+    let header_and_marker = estimate_tokens(&format!(
+        "name\tpointer\tsnippet\n+50 more over budget_tokens (budget_tokens={} shows all)\n",
+        t.budget_for_all()
+    ));
     for budget in header_and_marker..=1200 {
         let out = t.render(budget);
         assert!(
@@ -71,13 +73,22 @@ fn budget_cut_off_marker_fits_inside_budget() {
         let (_, rows, marker) = parse_text(&out);
         match marker {
             Some(m) => {
-                assert!(m.ends_with(" more over budget_tokens"), "{m}");
+                assert!(
+                    m.ends_with(&format!(
+                        " more over budget_tokens (budget_tokens={} shows all)",
+                        t.budget_for_all()
+                    )),
+                    "{m}"
+                );
                 assert_eq!(rows.len() + marker_count(&m), 50, "budget {budget}");
                 // Maximal: one more row (with a marker one smaller, or none) does not fit.
                 let mut bigger = table(rows.len() + 1).render(usize::MAX);
                 let left = 50 - rows.len() - 1;
                 if left > 0 {
-                    bigger.push_str(&format!("+{left} more over budget_tokens\n"));
+                    bigger.push_str(&format!(
+                        "+{left} more over budget_tokens (budget_tokens={} shows all)\n",
+                        t.budget_for_all()
+                    ));
                 }
                 assert!(
                     estimate_tokens(&bigger) > budget,
@@ -96,7 +107,15 @@ fn budget_cut_marker_is_last_line_and_rows_are_a_prefix() {
     let t = table(50);
     let out = t.render(100);
     let last = out.lines().last().unwrap();
-    assert!(last.starts_with('+') && last.ends_with("more over budget_tokens"));
+    assert!(
+        last.starts_with('+')
+            && last.ends_with(&format!(
+                "more over budget_tokens (budget_tokens={} shows all)",
+                t.budget_for_all()
+            ))
+    );
+    // That budget returns every row.
+    assert_eq!(t.render(t.budget_for_all()), t.render(usize::MAX));
     let (_, rows, _) = parse_text(&out);
     assert!(!rows.is_empty());
     for (i, r) in rows.iter().enumerate() {
@@ -117,7 +136,13 @@ fn short_last_row_kept_when_all_fit_without_marker() {
 fn tiny_budget_emits_header_and_marker_only() {
     let t = table(5);
     let out = t.render(0);
-    assert_eq!(out, "name\tpointer\tsnippet\n+5 more over budget_tokens\n");
+    assert_eq!(
+        out,
+        format!(
+            "name\tpointer\tsnippet\n+5 more over budget_tokens (budget_tokens={} shows all)\n",
+            t.budget_for_all()
+        )
+    );
 }
 
 #[test]
@@ -138,8 +163,9 @@ fn limit_cut_off() {
     assert_eq!(
         last,
         format!(
-            "+{} more over budget_tokens; +10 more (limit=40)",
-            40 - rows.len()
+            "+{} more over budget_tokens (budget_tokens={} shows all); +10 more (limit=40)",
+            40 - rows.len(),
+            t.budget_for_all()
         )
     );
 
@@ -187,7 +213,10 @@ fn notes_are_kept_and_counted_in_the_budget() {
         assert!(estimate_tokens(&out) <= budget, "budget {budget}");
         assert!(out.ends_with("use authoritative=true\n"));
         let marker = out.lines().rev().nth(1).unwrap();
-        assert!(marker.ends_with("more over budget_tokens"), "{marker}");
+        assert!(
+            marker.contains("more over budget_tokens (budget_tokens="),
+            "{marker}"
+        );
     }
     let mut t = Table::new(&["a"]);
     t.note("two\nlines");

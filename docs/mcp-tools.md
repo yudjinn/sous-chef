@@ -595,13 +595,13 @@ fakeroot do_install() {
 | Arg | Type | Notes |
 |---|---|---|
 | `query` | string | required |
-| `mode` | `"name"` \| `"regex"` \| `"fts"` | default `name`: statement names containing `query`, case-insensitive, exact names first. `fts`: SQLite FTS5 over names and snippets |
+| `mode` | `"name"` \| `"text"` \| `"regex"` \| `"fts"` | default `name`: statement names containing `query`, case-insensitive, exact names first; `NAME[flag]` (since x7) matches flag statements, the name and the flag each as a fragment, so `PACKAGECONFIG[gnutls]` finds every `PACKAGECONFIG[gnutls] = ...`. `text` (since x7): file content line by line containing `query` literally (case-sensitive, nothing to escape: `PACKAGECONFIG[gnutls] =`). `regex`: the same with a regular expression. `fts`: SQLite FTS5 over names and snippets |
 | `kind` | list? | `assign`, `function`, `pydef`, `inherit`, `include`, `addtask`, `deltask`, `addhandler`, `export_functions`, `export`, `unset`, `addfragments`, `addpylib`, `unknown` (every kind the index stores); aliases `task` (`addtask`) and `def` (`pydef`) |
-| `layer`, `file_kind`, `recipe` | filters | `recipe` restricts to that recipe's tree (the `.bb`, its includes and classes, its bbappends) |
-| `limit` | int | default 30, at most 1000 |
+| `layer`, `file_kind`, `recipe` | filters | `layer` takes one name or several separated by commas (since x7: `meta-kiss,meta-kiss-ti`); `recipe` restricts to that recipe's tree (the `.bb`, its includes and classes, its bbappends) |
+| `limit` | int | default 30, at most 1000. `budget_tokens` defaults to 1200 here (since x7; 600 elsewhere), room for 30 hits, unless `sous-chef.toml` sets another `[output] budget_tokens` |
 
 Each hit is a row `loc kind item snippet`; `item` is `[name A-B]`, the enclosing item and
-its range. `regex` mode reads file content line by line, through the confinement check;
+its range. `text` and `regex` modes read file content line by line, through the confinement check;
 `kind` is the enclosing statement's kind (`-` outside any statement), and the `kind` filter
 applies to the enclosing statement, so lines outside any statement are dropped. Files that
 cannot be read are skipped and counted in a note. The other modes use the index. `limit`

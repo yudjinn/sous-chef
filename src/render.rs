@@ -6,7 +6,9 @@
 //!
 //! The budget covers the whole rendered table: header, the rows kept, the truncation marker
 //! line and any notes. Rows that do not fit are dropped from the end and replaced by one
-//! marker line (`+N more over budget_tokens`, `+N more (limit=L)`, or both joined by `; `).
+//! marker line (`+N more over budget_tokens (budget_tokens=B shows all)`, `+N more
+//! (limit=L)`, or both joined by `; `), where B is [`Table::budget_for_all`]: the budget at
+//! which the same call returns every row.
 //! The header, the marker and the notes are always emitted, so a budget too small to hold
 //! even those is exceeded by exactly them and nothing else.
 //!
@@ -59,6 +61,9 @@ pub struct JsonTable {
     pub rows: Vec<Vec<String>>,
     /// Rows dropped because they did not fit in `budget_tokens`.
     pub more_over_budget: usize,
+    /// When rows were dropped: the `budget_tokens` at which all of them fit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget_for_all: Option<usize>,
     /// Rows not returned because of a query limit.
     pub more_over_limit: usize,
     /// The limit that cut `more_over_limit` rows, if any.
@@ -143,6 +148,7 @@ impl Table {
             header: self.header.clone(),
             rows: self.rows[..layout.kept].to_vec(),
             more_over_budget: layout.dropped,
+            budget_for_all: (layout.dropped > 0).then(|| self.budget_for_all()),
             more_over_limit: self.limit_cut.map_or(0, |(m, _)| m),
             limit: self.limit_cut.map(|(_, l)| l),
             notes: self.notes.clone(),
@@ -196,8 +202,26 @@ impl Table {
         }
     }
 
+    /// The `budget_tokens` at which every row fits: the whole table (header, rows, limit
+    /// marker, notes) in tokens, rounded up to a multiple of 100. Shown in the budget marker
+    /// so one more call gets the rest.
+    pub fn budget_for_all(&self) -> usize {
+        let header = line_of(&self.header).len();
+        let rows: usize = self.rows.iter().map(|r| line_of(r).len()).sum();
+        let notes: usize = self.notes.iter().map(|n| n.len() + 1).sum();
+        let limit = self.limit_cut.map_or(0, |(more, limit)| {
+            format!("+{more} more (limit={limit})\n").len()
+        });
+        (header + rows + notes + limit).div_ceil(4).div_ceil(100) * 100
+    }
+
     fn marker(&self, dropped: usize) -> Option<String> {
-        let budget = (dropped > 0).then(|| format!("+{dropped} more over budget_tokens"));
+        let budget = (dropped > 0).then(|| {
+            format!(
+                "+{dropped} more over budget_tokens (budget_tokens={} shows all)",
+                self.budget_for_all()
+            )
+        });
         let limit = self
             .limit_cut
             .map(|(more, limit)| format!("+{more} more (limit={limit})"));

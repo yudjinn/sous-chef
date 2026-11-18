@@ -575,11 +575,10 @@ pub static TOOLS: &[ToolEntry] = &[
     tool!(
         search,
         Always,
-        "Search the Yocto layers. mode=name (default): statement names by substring; \
-         mode=regex: file content line by line; mode=fts: full text of names and snippets. \
-         Filter by kind (assign, function, task, inherit, include, ...), layer, file_kind or \
-         recipe (that recipe's tree). Each hit: pointer, kind, enclosing item with its range, \
-         snippet; limit defaults to 30. Prefer this over Grep for Yocto metadata."
+        "Search the Yocto layers, instead of Grep (which misses gitignored layers). mode: \
+         name (statement names, also NAME[flag]), text (literal line text), regex, fts. \
+         Filter by kind, layer (comma-separated), file_kind or recipe. Each hit: pointer, \
+         kind, enclosing item, line."
     ),
     tool!(
         class,
