@@ -245,8 +245,10 @@ Checked against `ast.py` `DataNode.eval` and `data_smart.py`, BitBake master (20
   (`\$\{@(?:\{.*?\}|.)+?\}`) is evaluated as python, and the whole pass repeats until the text
   stops changing (so `${${A}}` works). References inside `${@...}` are substituted before the
   python runs. A variable referencing itself is an error; deeper cycles end in a recursion
-  error. sous-chef never runs the python (the value is flagged `unevaluated_python`) and
-  leaves a reference that closes a cycle in place, listing it in `unresolved`.
+  error. sous-chef evaluates only the pure helpers of "Inline python evaluated statically"
+  below (x1, 2026-11-18); any other python is left as text and the value is flagged
+  `unevaluated_python`. A reference that closes a cycle is left in place and listed in
+  `unresolved`.
 - Legacy `_` override names: any name containing `_append`, `_prepend` or `_remove` is fatal;
   others (`RDEPENDS_${PN}`) are just different variables. sous-chef records them in the
   history (status `InactiveOverride`) and does not apply them.
@@ -261,6 +263,164 @@ Do not hard-code this. Read it from the indexed `bitbake.conf` and expand it. No
 entries: `pn-<recipe>` (per-recipe settings from conf files), `class-target` /
 `class-native` / `class-nativesdk` via `CLASSOVERRIDE`, machine and SoC family names via
 `MACHINEOVERRIDES`, `forcevariable` (highest).
+
+**The two passes** (BitBake 2.18 `data_smart.py` `need_overrides`; the same loop in 2.0 and
+2.8): each of the up to five iterations first sets `overrides = []`, computes `OVERRIDES`
+with no override active, then computes it again with that result; equal ends the loop,
+anything else runs the same two passes again and so ends in `bb.fatal("Overrides could
+not be expanded into a stable state ...")`. So whenever BitBake gives a value at all,
+`OVERRIDES` is the first pass. sous-chef computes both; when they differ it marks the
+values that consult an override (`unresolved` gets `OVERRIDES`), except (x1) when the first
+pass has entries it does not know and the second pass only knows fewer of them (python that
+was evaluated in the first pass reads, in the second, a value whose override decisions
+depend on those unknown entries): that is no sign of instability, and the first pass is
+used.
+
+### Inline python evaluated statically
+
+Decided 2026-11-18 (overview.md, "Decisions"). `${@code}` is run by BitBake's
+`VariableParse.python_sub` (BitBake 2.18 `lib/bb/data_smart.py`; the same in 2.0 and 2.8):
+code that still holds a `${VAR}` reference (`__expand_var_regexp__.findall(code)`) is
+returned as it is, never run; otherwise `compile(code.strip(), ..., "eval")`, then
+`utils.better_eval(codeobj, DataContext(d), {'d': d})`, and `str(result)` replaces the
+text. A `SyntaxError` whose message is `EOL while scanning string literal` or starts with
+`unterminated string literal` is swallowed by `expandWithRefs` for the **whole**
+`__expand_python_regexp__.sub` of that pass (no expression of the text is replaced, and the
+pass loop goes on while the variable substitution changes the text); any other exception
+fails the expansion. `DataContext` resolves a bare name that is not a builtin and not in
+the global context (`bb`, `oe`, `os`, functions defined in classes) to `d.getVar(name)`.
+
+sous-chef (`src/eval/pyexpr.rs`, called by `src/eval/expand.rs` after each variable
+substitution pass, so in BitBake's order and laziness: a value is evaluated when it is
+expanded, against the final datastore for `=`, against the datastore of that moment for
+`:=`) evaluates `code` only when all of this holds, and otherwise leaves the text and flags
+the value exactly as before:
+
+- `code` has no `${VAR}` reference left, and no expression of the same pass has an
+  unterminated string (the swallowed `SyntaxError` above);
+- `code` parses in this subset, and nothing else: string literals `'...'` / `"..."` with
+  the escapes `\\ \' \" \n \t` (no prefix, no triple quote, no implicit concatenation);
+  decimal integers; `True` / `False` / `None`; list displays `[a, b]`; the name `d` (only
+  as an argument, or as `d.getVar` / `d.getVarFlag` / `d.expand`); calls of the allowlisted
+  helpers below and of `len`, with positional and keyword arguments bound as python binds
+  them to the helper's signature; `a + b` (strings, lists); `a % b` with the conversions
+  `%s`, `%d` (of an integer) and `%%` only, `b` a single value or a tuple (needed by OE-core's
+  arm tune python, see "Corpus" below); `a if c else b`; `and` / `or` (returning an
+  operand, as python does) / `not`; one `==`, `!=`, `in` or `not in` per comparison (no
+  chain); `-` before an integer literal; `x[i]` on a list by an integer (negative counted
+  from the end) or a boolean (`['', 'x:'][cond]`); the string methods `split()` /
+  `split(sep)`, `strip()` / `strip(chars)`, `replace(old, new)`, `startswith(s)`,
+  `endswith(s)`, `lower()` / `upper()` (ASCII text only), `sep.join(list or str)`.
+  Rejected, whatever else the expression holds: any other name (`os`, `bb.parse`,
+  `oe.types`, class-defined functions, a bare variable name), attribute or method,
+  `lambda`, comprehensions, generators, slices, `%` with anything else, f-strings, byte
+  strings, `is`, `<` and the other comparisons, arithmetic;
+- every value it reads is **certain**: `d.getVar('X')` of a value that holds python left
+  unevaluated, an undefined `${VAR}`, an uncertain override decision, a variable anonymous
+  python or a handler sets, or one a file reached through an uncertain reference sets,
+  stops the evaluation, and the note says which variable (`X holds python that is not
+  evaluated`); a `${VAR}` substituted into the code whose value is not certain does the
+  same. `d.getVar` of an unset variable is `None` only when nothing may set it: not when
+  anonymous python sets it by name, when an override variant or a conditional append of it
+  is inactive only because `OVERRIDES` is not known, when an unexpanded variable name may be
+  it, or when it is one BitBake takes from the environment by default (BitBake 2.18
+  `lib/bb/utils.py` `preserved_envvars` / `preserved_envvars_exported`: `BBPATH`,
+  `BB_PRESERVE_ENV`, `BB_ENV_PASSTHROUGH_ADDITIONS`, `BB_TASKHASH`, `HOME`, `LOGNAME`,
+  `PATH`, `PWD`, `SHELL`, `USER`, `LC_ALL`, `BBSERVER`; the same lists in 2.0 and 2.8). A
+  name the user passes through `BB_ENV_PASSTHROUGH_ADDITIONS` is not known statically: an
+  unset variable is then read as `None`, the same gap every static value has;
+- it is no cycle: `d.getVar` of a variable being expanded is left unevaluated (BitBake ends
+  in a recursion error);
+- python would not raise: an `AttributeError` (`d.getVar('X').split()` with `X` unset), an
+  `IndexError`, a `ValueError` of `to_boolean`, a `TypeError` is never reproduced, the
+  expression just stays unevaluated (BitBake would fail to expand the value).
+
+`str()` of the result: a string as it is, `True` / `False`, `None`, an integer in decimal;
+a list (python's `repr`) is not reproduced. Python's whitespace for `split()` / `strip()`
+is `char::is_whitespace` plus U+001C..U+001F (`Py_UNICODE_ISSPACE`).
+
+The helpers, each from its source; the BitBake functions are the same code in 2.0
+(Kirkstone), 2.8 (Scarthgap) and 2.18 (Wrynose) apart from `filter`, which 2.18 moved into
+`filter_string`; the OE-core ones are the same on `origin/kirkstone`, `origin/scarthgap` and
+Wrynose `33a6bd6cc8` unless said:
+
+| Helper | Source | Semantics reproduced |
+|---|---|---|
+| `bb.utils.contains(variable, checkvalues, truevalue, falsevalue, d)` | `lib/bb/utils.py` `contains` | `val = d.getVar(variable)`; falsy (unset or empty): `falsevalue`; `checkvalues` split on whitespace when a string, else `set(checkvalues)`; `truevalue` when it is a subset of `set(val.split())` (an empty set is), else `falsevalue`. The values are returned as given (`True` gives `"True"`). |
+| `bb.utils.contains_any(...)` | `contains_any` | the same, `truevalue` when the intersection is not empty (never for empty `checkvalues`). |
+| `bb.utils.filter(variable, checkvalues, d)` | `filter` / `filter_string` (2.18) | falsy value: `''`; else `' '.join(sorted(checkvalues & set(val.split())))`. |
+| `bb.utils.to_boolean(string, default=None)` | `to_boolean` | falsy: `default`; an integer (a boolean too): `!= 0`; `lower()` in `y yes 1 true` / `n no 0 false`, else `ValueError` (not evaluated). Non-ASCII text is not evaluated. |
+| `bb.utils.vercmp_string(a, b)` | `vercmp_string`, `split_version`, `vercmp`, `vercmp_part`, `explode_version` | `strip(" <>=")`; epoch `int()` of the part before the first `:` (then the second part only), revision after the last `-`; parts: digit runs `(0, int)`, letter runs `(1, str)`, `~` `(-1)`, any other character `(2, c)`; an exhausted side is `(0, None)`, which loses to anything. Returns the epoch difference, else -1 / 0 / 1. Text with non-ASCII or control characters is not evaluated. |
+| `oe.utils.conditional(variable, checkvalue, truevalue, falsevalue, d)` | `lib/oe/utils.py` `conditional` | `d.getVar(variable) == checkvalue` (`None` equals no string). |
+| `oe.utils.ifelse(condition, iftrue=True, iffalse=False)` | `ifelse` | python truth of `condition`. |
+| `oe.utils.vartrue(var, iftrue, iffalse, d)` | `vartrue`, `lib/oe/types.py` `boolean` | `boolean(d.getVar(var))`: `None` false; `lower()` in `yes y true t 1` / `no n false f 0`, else `ValueError` (not evaluated). |
+| `oe.utils.less_or_equal(variable, checkvalue, truevalue, falsevalue, d)` | `less_or_equal` | `float(d.getVar(variable)) <= float(checkvalue)`; only plain decimals (`12`, `1.5`) and integers are evaluated (python's `float` also takes spaces, `1e3`, `inf`, `1_0`). |
+| `oe.utils.version_less_or_equal(...)` | `version_less_or_equal` | `bb.utils.vercmp_string(d.getVar(variable), checkvalue) <= 0`. |
+| `oe.utils.both_contain(variable1, variable2, checkvalue, d)` | `both_contain` | both values must be set (`None.split()` raises); `checkvalue` a subset of both: `" ".join(checkvalue)` (a python `set`: evaluated only for zero or one word, since the order of several is python's hash order), else `""`. |
+| `oe.utils.prune_suffix(var, suffixes, d)` | `prune_suffix` | each non-empty suffix in order, cut when `var` ends with it; then `MLPREFIX` cut from the front when set and `var` starts with it. |
+| `oe.utils.all_distro_features(d, features, truevalue="1", falsevalue="")` / `any_distro_features(...)` | `all_distro_features` / `any_distro_features` | `bb.utils.contains` / `contains_any` on `DISTRO_FEATURES`. |
+| `oe.utils.filter_default_features(varname, d)`, `oe.utils.set_difference(variable1, variable2, d)` | `filter_default_features`, `set_difference` (Wrynose only: neither function is on `origin/scarthgap` or `origin/kirkstone`) | `set_difference(varname + "_DEFAULTS", varname + "_OPTED_OUT")`: first value falsy: `""`; second falsy: the first value as it is; `*` among the second's words: `""`; else `" ".join(sorted(set(v1.split()) - set(v2.split())))`. Not on the requested allowlist; added because OE-core Wrynose's `bitbake.conf` appends it to `DISTRO_FEATURES` and `MACHINE_FEATURES`, which the skip checks read. A call on an older release, where the function does not exist, fails in BitBake; sous-chef does not check the release here. |
+| `d.getVar(name)`, `d.getVar(name, True)`, `d.getVar(name, expand=...)` | `data_smart.py` `getVar` | the finalised, expanded value (overrides, appends, removes), `None` when unset; `expand` false is not evaluated (the unexpanded value is not reproduced), nor are `noweakdefault` / `parsing`. |
+| `d.getVarFlag(name, flag)` | `getVarFlag` | the expanded flag (a `??=` flag default when unset), `None`; `expand` false and flags starting with `_` are not evaluated. |
+| `d.expand(text)` | `expand` | the text expanded against the datastore (no owner, so no self-reference check). |
+
+Not evaluated: `oe.utils.set_intersect` (it returns `" ".join(val1 & val2)`, a set of
+several strings in python's hash order: COMBINED_FEATURES stays flagged), and every other
+function. Those that read the host or the filesystem must never be evaluated statically:
+`os.uname()` (`BUILD_ARCH`, `BUILD_OS`), `oe.utils.cpu_count()` (`PARALLEL_MAKE`,
+`BB_NUMBER_THREADS`), `os.getpid()`, `time.strftime(...)`, `bb.utils.which(...)` (searches
+`PATH` on disk), `oe.utils.read_file(...)`, `get_perl_version(d)` and the other functions
+that open files of the sysroot or the kernel build directory, `bb.fetch.get_checksum_file_list`,
+`oe.utils.get_host_gcc_version`. Functions a class defines with `def`
+(`meson_array`, `systemd_filter_services`, `get_base_dep`, `all_multilib_tune_values`, ...)
+are metadata code and are not interpreted. `bb.parse.vars_from_file` (`PN`, `PV` from the
+file name) is computed by the replay itself ("Replay").
+
+**Corpus** (the `${@...}` of OE-core, meta-arm and meta-kiss* in the live workspace, lines
+joined at `\`, comments left out; `tests/pyexpr_oracle.rs` `live_corpus`): 2156 expressions;
+1691 parse in the subset. By the functions they call (an expression counts once per
+function): `bb.utils.contains` 1300, `d.getVar` 280, `bb.utils.filter` 130,
+`bb.utils.contains_any` 46, `oe.utils.conditional` 32, `oe.utils.vartrue` 13,
+`bb.utils.to_boolean` 4, `d.getVarFlag` 5, `d.expand` 4, `oe.utils.filter_default_features`
+2, `oe.utils.ifelse` 2, `oe.utils.prune_suffix` 1, `oe.utils.set_intersect` 1; none calls
+`less_or_equal`, `version_less_or_equal`, `both_contain`, `all_distro_features`,
+`any_distro_features` or `vercmp_string` (implemented from the source all the same). The
+most common calls outside the allowlist: `meson_array` 31, `os.path.relpath` 28,
+`get_perl_version` 14, `systemd_filter_services` 13, `all_multilib_tune_values` 12,
+`oe.utils.parallel_make_argument` 8, `oecmake_map_compiler` 8, `oe.utils.trim_version` 7,
+`get_compiler_rt_arch` 6, `oe.utils.cpu_count` 5, `oe.utils.parallel_make` 5,
+`oe.tune.riscv_isa_to_tune` 5. `%` occurs in 28 expressions; it is in the subset because
+the arm tune's `TUNE_PKGARCH` (`('-%s' % d.getVar('TUNE_CCARGS_MFPU').split()[-1]...)`)
+decides `PACKAGE_ARCH` and so every target recipe's `WORKDIR`, `S`, `B`, `T` and the
+`CFLAGS` that hold them.
+
+**Checked against the real helpers**: `tests/fixtures/pyexpr/oracle.tsv`, written by
+`tests/fixtures/pyexpr/oracle.py` with BitBake 2.18's `lib/bb` and OE-core Wrynose's
+`meta/lib` imported, runs 139 expressions over 114 pairs of values (unset, empty, spaces and
+tabs, `Yes`, `0`, versions, ...): of the 13,572 cases where python succeeds sous-chef
+evaluates 12,997 with the same `str()` and leaves the rest; where python raises (2,274)
+sous-chef never evaluates (`tests/pyexpr_oracle.rs`).
+
+**Where it takes effect**: everything that expands a value: `var`, the `recipe` views,
+`deps`, names with `${@...}` (`expandKeys`), `include` / `require` / `inherit` /
+`inherit_defer` arguments, `OVERRIDES` (OE-core's `DISTROOVERRIDES ?= "${@d.getVar('DISTRO')
+or ''}"`, `TRANSLATED_TARGET_ARCH ??= "${@d.getVar('TARGET_ARCH').replace("_", "-")}"`,
+`soc-family.inc`'s `['', '${SOC_FAMILY}:']['${SOC_FAMILY}' != '']` and the
+`arch-*.inc` `bb.utils.contains('TUNE_FEATURES', ...)` of `MACHINEOVERRIDES`; `TARGET_OS`
+is plain text with `${LIBCEXTENSION}${ABIEXTENSION}`, whose `['', '-gnu'][...]` is in the
+subset), `DISTRO_FEATURES` / `MACHINE_FEATURES` (`filter_default_features`; not
+`COMBINED_FEATURES`, `set_intersect`), `PACKAGECONFIG`, `SRC_URI`, and so the skip checks.
+Anonymous python and python functions are never run. A value produced with an evaluated
+expression is not flagged; `DataStore::python_log` lists what was evaluated and what was not
+(with the reason), and `var`, `overrides` and `deps` say it in one note line.
+
+Anonymous python that writes through a function it defines (OE-core `base.bbclass`:
+`def appendVar(varname, appends): ... d.appendVar(varname, ...)`, called as
+`appendVar('PACKAGECONFIG_CONFARGS', extraconf)`, `appendVar('DEPENDS', ...)`,
+`appendVar('RDEPENDS:${PN}', ...)`) is taken to set those names (the full expanded name
+for one with an override part): with python evaluated, `EXTRA_OECONF` (which appends
+`${PACKAGECONFIG_CONFARGS}`) was otherwise unflagged and short of the options BitBake
+adds.
 
 ### Legacy syntax
 
@@ -2106,7 +2266,8 @@ in the live environment:
 
 ## What the static evaluator cannot do
 
-- `${@python expression}` in values
+- `${@python expression}` in values, apart from the pure helpers of "Inline python
+  evaluated statically" (x1) reading certain values
 - anonymous python functions and event handlers
 - `d.setVar` / `d.appendVar` inside classes (e.g. `PACKAGECONFIG` processing in `base.bbclass`)
 - `inherit` / `require` whose argument depends on any of the above
@@ -2157,7 +2318,9 @@ in the live environment:
   static, unset `HOST_SYS`, a regular expression Rust cannot compile. A match on a known
   `MACHINEOVERRIDES` entry is a match (nothing said). On yocto-kiss `MACHINEOVERRIDES` is
   `${@...}...${@...}dogbonedark` (the `soc-family.inc` and `arch-arm*.inc` `=.` python
-  glued to the machine name, no `:` outside the python), so no entry is known statically.
+  glued to the machine name, no `:` outside the python), so no entry was known statically
+  until x1; with those helpers evaluated it is `armv7a:ti-soc:ti33x:dogbonedark`, as
+  BitBake's.
   `SKIP_RECIPE` is said only when its flag is static. (w10) The two matches are public as
   `eval::compatible_machine(need, entries)` and `eval::compatible_host(need, host_sys)` so
   they can be run with given values (`tests/skip_live.rs` runs them with BitBake's).
@@ -2223,7 +2386,14 @@ in the live environment:
   `DISTRO_FEATURES` there holds python. (w12) With the certain-words rule the counts there
   are unchanged (13 "would skip", 274 "may skip"): the words those notes decide on come from
   operations applied with no uncertain override decision, and no uncertain `:remove` or
-  override variant of the `*_FEATURES` values applies.
+  override variant of the `*_FEATURES` values applies. (x1) With the pure python helpers
+  evaluated (`MACHINEOVERRIDES`, `DISTRO_FEATURES`, `COMPATIBLE_HOST` and the rest known):
+  259 "would skip" and 6 "may skip" (3 `COMPATIBLE_HOST` lookaheads Rust's `regex` cannot
+  compile, 1 `COMPATIBLE_HOST` that is not static, waffle's `REQUIRED_DISTRO_FEATURES` that
+  is not static, and mesa-tools-native, whose `DISTRO_FEATURES` `native_virtclass_handler`
+  filters); every "would skip" is among the
+  260 recipes the same checks skip with BitBake's own values, and none names a recipe
+  BitBake parsed.
 - **`INCOMPATIBLE_LICENSE`** (OE-core Wrynose `33a6bd6c`, `classes-global/base.bbclass`
   anonymous python lines 591-621, only when neither `SOURCE_MIRROR_FETCH` nor
   `PARSE_ALL_RECIPES` is true; `lib/oe/license.py` `skip_incompatible_package_licenses`,

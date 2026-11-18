@@ -3,10 +3,10 @@
 recipe	compared	equal	equal-ws	flagged	gap	bug	unset-both	not-printed	note
 curl	38	34	0	3	1	0	3	0	anonymous python 14 (11 opaque); unfollowed references 2
 sl	30	27	0	2	1	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
-linux-kiss	27	18	0	7	2	0	3	0	anonymous python 15 (11 opaque); unfollowed references 2
-u-boot-kiss	46	35	0	10	1	0	1	0	anonymous python 12 (7 opaque); unfollowed references 2
-kiss-image	27	20	0	6	1	0	3	0	anonymous python 17 (12 opaque); unfollowed references 3
-packagegroup-core-boot	31	22	0	8	1	0	2	0	anonymous python 12 (9 opaque); unfollowed references 3
+linux-kiss	27	22	0	3	2	0	3	0	anonymous python 15 (11 opaque); unfollowed references 2
+u-boot-kiss	46	41	0	4	1	0	1	0	anonymous python 12 (7 opaque); unfollowed references 2
+kiss-image	27	24	0	2	1	0	3	0	anonymous python 17 (12 opaque); unfollowed references 3
+packagegroup-core-boot	31	27	0	3	1	0	2	0	anonymous python 12 (9 opaque); unfollowed references 2
 zlib	35	32	0	2	1	0	3	0	anonymous python 11 (8 opaque); unfollowed references 2
 openssl	48	45	0	2	1	0	4	0	anonymous python 14 (11 opaque); unfollowed references 2
 busybox	64	58	0	5	1	0	2	0	anonymous python 15 (11 opaque); unfollowed references 2
@@ -20,20 +20,20 @@ nativesdk-zlib	35	24	0	9	2	0	3	0	anonymous python 12 (9 opaque); unfollowed refe
 quilt-native	38	26	0	11	1	0	2	0	anonymous python 12 (9 opaque); unfollowed references 2
 expat	36	33	0	2	1	0	2	0	anonymous python 12 (8 opaque); unfollowed references 2
 glib-2.0	53	47	0	5	1	0	2	0	anonymous python 13 (10 opaque); unfollowed references 2
-base-files	46	38	0	7	1	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
+base-files	46	43	0	2	1	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
 python3	69	55	0	13	1	0	4	0	anonymous python 14 (11 opaque); unfollowed references 2
 bash	42	38	0	3	1	0	2	0	anonymous python 13 (10 opaque); unfollowed references 2
 opencsd	31	28	0	2	1	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
-virtual/kernel	27	18	0	7	2	0	3	0	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
-virtual/bootloader	46	35	0	10	1	0	1	0	provider u-boot-kiss (PreferredProvider); anonymous python 12 (7 opaque); unfollowed references 2
+virtual/kernel	27	22	0	3	2	0	3	0	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
+virtual/bootloader	46	41	0	4	1	0	1	0	provider u-boot-kiss (PreferredProvider); anonymous python 12 (7 opaque); unfollowed references 2
 curl@default	38	34	0	3	1	0	3	0	anonymous python 14 (11 opaque); unfollowed references 2
 sl@default	30	27	0	2	1	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
-virtual/kernel@default	27	18	0	7	2	0	3	0	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
+virtual/kernel@default	27	22	0	3	2	0	3	0	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
 
 ## Totals (1090 values compared, explicit machine and distro; `unset` = unset on both sides, `not-printed` = BitBake printed no value; neither counted)
-(equal, but flagged)	114
-equal	916
-flagged	108
+(equal, but flagged)	148
+equal	950
+flagged	74
 flagged-literal-differs	35
 gap:layerdir-canonical	29
 gap:variant-layername	2
@@ -43,19 +43,17 @@ unset	63
 DEPENDS	25
 FILE	25
 FILESPATH	25
-B	10
-CFLAGS	10
-S	10
-WORKDIR	10
 EXTRA_OECONF	9
 FILES	8
 PACKAGES	7
 RDEPENDS	5
 FILESEXTRAPATHS	4
-PACKAGE_ARCH	4
+B	3
+CFLAGS	3
 OVERRIDES	3
+S	3
+WORKDIR	3
 CONFIGURE_FILES	2
-EXTRA_OEMAKE	2
 EXTRA_OEMESON	2
 FILE_LAYERNAME	2
 SRC_URI	2
@@ -65,3 +63,5 @@ MAJOR_VERSION	1
 OE_DEL	1
 OE_FEATURES	1
 PACKAGE_WRITE_DEPS	1
+SSTATE_HASHEQUIV_FILEMAP	1
+configmangle	1

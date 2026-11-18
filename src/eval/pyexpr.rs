@@ -13,9 +13,10 @@
 //! - the name `d` (the datastore, only as an argument or for `d.getVar` / `d.getVarFlag` /
 //!   `d.expand`);
 //! - calls to the allowlisted helpers ([`Func`]), with positional and keyword arguments as
-//!   their python signatures accept them, and to `len`;
+//!   their python signatures accept them, and to `len` and `bool` (positional only);
 //! - `a + b` (strings, lists), `a if c else b`, `and` / `or` / `not`, one `==` / `!=` / `in`
-//!   / `not in` per comparison, `-` before an integer literal;
+//!   / `not in` per comparison, `-` before an integer literal, `fmt % args` with `%s`, `%d`
+//!   and `%%` only;
 //! - a subscript `x[i]` of a list by an integer or a boolean (`['', 'x'][cond]`);
 //! - the string methods `split()` / `split(sep)`, `strip()` / `strip(chars)`,
 //!   `replace(old, new)`, `startswith(s)`, `endswith(s)`, `lower()`, `upper()` (ASCII text
@@ -336,6 +337,7 @@ pub enum Func {
     DGetVarFlag,
     DExpand,
     Len,
+    Bool,
 }
 
 impl Func {
@@ -430,7 +432,9 @@ impl Func {
             Func::DGetVarFlag => &[("var", None), ("flag", None), ("expand", Some(D::True))],
             // `expand(self, s, varname=None)`: `varname` is not accepted.
             Func::DExpand => &[("s", None)],
-            Func::Len => &[("obj", None)],
+            // Positional-only in python: an empty name never matches a keyword.
+            Func::Len => &[("", None)],
+            Func::Bool => &[("", Some(D::False))],
         }
     }
 
@@ -457,6 +461,7 @@ impl Func {
             Func::DGetVarFlag => "d.getVarFlag",
             Func::DExpand => "d.expand",
             Func::Len => "len",
+            Func::Bool => "bool",
         }
     }
 }
@@ -932,6 +937,7 @@ impl Parser {
                     "False" => Ok(Node::Lit(PyVal::Bool(false))),
                     "None" => Ok(Node::Lit(PyVal::None)),
                     "len" if self.is_op("(") => self.call(Func::Len),
+                    "bool" if self.is_op("(") => self.call(Func::Bool),
                     "d" => {
                         if self.is_op(".") {
                             self.pos += 1;
@@ -1610,6 +1616,7 @@ fn call(func: Func, a: Vec<PyVal>, env: &mut dyn Env) -> Result<PyVal, Stop> {
             let s = want_str(&a[0], "the text")?;
             Ok(PyVal::Str(env.expand(s)?))
         }
+        Func::Bool => Ok(PyVal::Bool(a[0].truthy()?)),
         Func::Len => match &a[0] {
             PyVal::Str(s) => Ok(PyVal::Int(s.chars().count() as i128)),
             PyVal::List(l) => Ok(PyVal::Int(l.len() as i128)),
@@ -1906,6 +1913,15 @@ mod tests {
         assert_eq!(ok("'abc'.startswith('ab')", v), "True");
         assert_eq!(ok("'abc'.endswith('ab')", v), "False");
         assert_eq!(ok("len('abc')", v), "3");
+        assert_eq!(ok("bool('')", v), "False");
+        assert_eq!(ok("bool()", v), "False");
+        assert_eq!(
+            ok(
+                "[d.getVar('PV'), 'm'][bool(d.getVar('X'))].replace('-', '_')",
+                v
+            ),
+            "m"
+        );
         assert_eq!(ok("d.getVar('UNSET')", v), "None");
         assert_eq!(ok("d.getVar('X', True)", v), "a b c");
         assert_eq!(ok("d.getVar('X', 1)", v), "a b c");
@@ -1996,6 +2012,9 @@ mod tests {
             "'it' 's'",
             "foo(d)",
             "len",
+            "len(obj='x')",
+            "bool(x=1)",
+            "bool(1, 2)",
             "bb.utils",
             "bb.utils.contains",
             "bb.data.inherits_class('native', d)",

@@ -274,7 +274,16 @@ anonymous python function that changes the variable by name, and
 one for each that is opaque (changes variables through computed names or hands `d` to other
 code), since anonymous python is never run; a count of the other anonymous functions;
 `note: global configuration only (no recipe)` without a recipe; the python note when the
-value depends on python.
+value depends on python. (x1) When the expansion met inline python of the evaluated subset
+(bitbake-semantics.md, "Inline python evaluated statically"): `note: python evaluated
+statically (pure helpers, exact): `bb.utils.contains('DISTRO_FEATURES', ...)`, ...` (two
+shown, `+N more`; `; OVERRIDES, which decides its override variants, needed N more` when
+`OVERRIDES` did too), and, for the first expression left unevaluated because of what it
+reads, `note: python not evaluated: `...`: X holds python that is not evaluated` (the
+reason names the variable; `(+N more)`). Python outside the subset gives no such line, only
+the python note. `overrides` gives the same lines for `OVERRIDES` (`note: OVERRIDES:
+python ...`), `deps` for `DEPENDS` (`build`), `PACKAGES` (`runtime`) and `PACKAGECONFIG`
+(`packageconfig`).
 
 **Authoritative mode** (`authoritative: true`) answers from `bitbake -e [<recipe>]`
 instead of the static evaluator:
@@ -349,13 +358,16 @@ applied	=	append	meta-mine:recipes-core/hello/hello_1.1.bbappend:6	EXTRA_OECONF:
 final: "--disable-nls --enable-local-debug --enable-boardx --with-mine"
 ```
 
-With python (recipe `app`, variable `EXTRA_OEMAKE`):
+With python (recipe `app`, variable `EXTRA_OEMAKE`): the inline python of `APP_GREETING`
+is in the evaluated subset; the anonymous python that appends to the variable is not run,
+so the value stays flagged:
 
 ```
 status	op	override	loc	snippet
 shadowed	?=	-	meta-core:conf/bitbake.conf:43	EXTRA_OEMAKE ?= ""
 applied	=	-	meta-mine:recipes-app/app/app_0.1.bb:9	EXTRA_OEMAKE = "GREETING=${APP_GREETING}"
-final: "GREETING=${@'hi' if d.getVar('MACHINE') == 'boardx' else 'hello'}"
+final: "GREETING=hello"
+note: python evaluated statically (pure helpers, exact): `'hi' if d.getVar('MACHINE') == 'boardx' else 'hello'`
 warning: anonymous python at meta-mine:recipes-app/app/app_0.1.bb:13-16 changes EXTRA_OEMAKE; it is not run, so the value shown is the one before it
 note: 1 value depends on python and was not evaluated; use authoritative=true
 ```
@@ -382,7 +394,8 @@ final: function do_install, 3 pieces in order: meta-core:classes-recipe/autotool
   lowest priority first, each with the variables it came through
   (`OVERRIDES <- MACHINEOVERRIDES <- MACHINE`) and the deepest assignment that contributes
   it. Entries are attributed by expanding the applied assignments piece by piece; a piece
-  that is python is unknown and said so. `OVERRIDES` is split on `:` with `${...}` kept
+  that is python is unknown and said so, unless the python is in the evaluated subset (x1):
+  then its text is credited to the assignment (`armv7a` from `arch-armv7a.inc`). `OVERRIDES` is split on `:` with `${...}` kept
   whole (bitbake-semantics.md, "Splitting list values"): an entry that holds python is one
   row, abbreviated (`${@...}dogbonedark`, `linux${@...}eabi`), from `${@...} (python, not
   evaluated): stands for entries that are not known`; it is never split into fragments and

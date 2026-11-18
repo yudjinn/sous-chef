@@ -22,13 +22,15 @@ class D:
         self.vars = vars
         self.flags = flags
 
-    def getVar(self, name, expand=True):
-        return self.vars.get(name)
+    # The signatures of BitBake 2.18 data_smart.py (keyword names matter).
+    def getVar(self, var, expand=True, noweakdefault=False, parsing=False):
+        return self.vars.get(var)
 
-    def getVarFlag(self, name, flag, expand=True):
-        return self.flags.get(name + "[" + flag + "]")
+    def getVarFlag(self, var, flag, expand=True, noweakdefault=False, parsing=False,
+                   retparser=False):
+        return self.flags.get(var + "[" + flag + "]")
 
-    def expand(self, s):
+    def expand(self, s, varname=None):
         return re.sub(r"\$\{([^}]+)\}", lambda m: self.vars.get(m.group(1), m.group(0)), s)
 
 
@@ -110,6 +112,13 @@ codes += [
     "('-%s' % d.getVar('V').split()[-1].replace('a', 'z')) if (d.getVar('V') != '') else ''",
     "'%s' % (d.getVar('V'),)",
     "'%s %s' % d.getVar('V')",
+    "[d.getVar('W'), d.getVar('V')][bool(d.getVar('V'))].replace('-', '_')",
+    "bool(d.getVar('V'))",
+    "bool()",
+    "len(obj=d.getVar('V'))",
+    "bool(x=d.getVar('V'))",
+    "d.getVar(var='V')",
+    "bb.utils.to_boolean(string=d.getVar('V'))",
 ]
 
 out = open(sys.argv[3], "w")

@@ -87,15 +87,15 @@ linux-kiss	FILES:linux-kiss	equal
 linux-kiss	OVERRIDES	equal	
 linux-kiss	MACHINEOVERRIDES	equal	
 linux-kiss	DISTROOVERRIDES	equal	
-linux-kiss	S	flagged	unevaluated_python
-linux-kiss	B	flagged	unevaluated_python
-linux-kiss	WORKDIR	flagged	unevaluated_python
+linux-kiss	S	equal	
+linux-kiss	B	equal	
+linux-kiss	WORKDIR	equal	
 linux-kiss	LICENSE	equal	
 linux-kiss	INHERIT	equal	
 linux-kiss	PROVIDES	equal	
 linux-kiss	EXTRA_OECONF	equal	
 linux-kiss	EXTRA_OECMAKE	unset	
-linux-kiss	CFLAGS	flagged	unevaluated_python
+linux-kiss	CFLAGS	equal	
 linux-kiss	FILESPATH	flagged	unevaluated_python
 linux-kiss	MACHINE	equal	
 linux-kiss	DISTRO	equal	
@@ -117,15 +117,15 @@ u-boot-kiss	FILES:u-boot-kiss	equal
 u-boot-kiss	OVERRIDES	equal	
 u-boot-kiss	MACHINEOVERRIDES	equal	
 u-boot-kiss	DISTROOVERRIDES	equal	
-u-boot-kiss	S	flagged	unevaluated_python
-u-boot-kiss	B	flagged	unevaluated_python
-u-boot-kiss	WORKDIR	flagged	unevaluated_python
+u-boot-kiss	S	equal	
+u-boot-kiss	B	equal	
+u-boot-kiss	WORKDIR	equal	
 u-boot-kiss	LICENSE	equal	
 u-boot-kiss	INHERIT	equal	
 u-boot-kiss	PROVIDES	equal	
 u-boot-kiss	EXTRA_OECONF	equal	
 u-boot-kiss	EXTRA_OECMAKE	unset	
-u-boot-kiss	CFLAGS	flagged	unevaluated_python
+u-boot-kiss	CFLAGS	equal	
 u-boot-kiss	FILESPATH	flagged	unevaluated_python
 u-boot-kiss	MACHINE	equal	
 u-boot-kiss	DISTRO	equal	
@@ -134,12 +134,12 @@ u-boot-kiss	ALLOW_EMPTY:u-boot-kiss-env	equal
 u-boot-kiss	CONFIGURE_FILES	flagged	unevaluated_python
 u-boot-kiss	CVE_PRODUCT	equal	
 u-boot-kiss	DESCRIPTION	equal	
-u-boot-kiss	EXTRA_OEMAKE	flagged	unevaluated_python
+u-boot-kiss	EXTRA_OEMAKE	equal	
 u-boot-kiss	FILES:u-boot-kiss-env	equal	
 u-boot-kiss	FILES:u-boot-kiss-extlinux	equal	
 u-boot-kiss	HOMEPAGE	equal	
 u-boot-kiss	LIC_FILES_CHKSUM	equal	
-u-boot-kiss	PACKAGE_ARCH	flagged	unevaluated_python
+u-boot-kiss	PACKAGE_ARCH	equal	
 u-boot-kiss	PACKAGE_BEFORE_PN	equal	
 u-boot-kiss	PE	equal	
 u-boot-kiss	RPROVIDES:u-boot-kiss-env	equal	
@@ -164,15 +164,15 @@ kiss-image	FILES:kiss-image	equal
 kiss-image	OVERRIDES	equal	
 kiss-image	MACHINEOVERRIDES	equal	
 kiss-image	DISTROOVERRIDES	equal	
-kiss-image	S	flagged	unevaluated_python
-kiss-image	B	flagged	unevaluated_python
-kiss-image	WORKDIR	flagged	unevaluated_python
+kiss-image	S	equal	
+kiss-image	B	equal	
+kiss-image	WORKDIR	equal	
 kiss-image	LICENSE	equal	
 kiss-image	INHERIT	equal	
 kiss-image	PROVIDES	equal	
 kiss-image	EXTRA_OECONF	equal	
 kiss-image	EXTRA_OECMAKE	unset	
-kiss-image	CFLAGS	flagged	unevaluated_python
+kiss-image	CFLAGS	equal	
 kiss-image	FILESPATH	flagged	unevaluated_python
 kiss-image	MACHINE	equal	
 kiss-image	DISTRO	equal	
@@ -194,22 +194,22 @@ packagegroup-core-boot	FILES:packagegroup-core-boot	equal
 packagegroup-core-boot	OVERRIDES	equal	
 packagegroup-core-boot	MACHINEOVERRIDES	equal	
 packagegroup-core-boot	DISTROOVERRIDES	equal	
-packagegroup-core-boot	S	flagged	unevaluated_python
-packagegroup-core-boot	B	flagged	unevaluated_python
-packagegroup-core-boot	WORKDIR	flagged	unevaluated_python
+packagegroup-core-boot	S	equal	
+packagegroup-core-boot	B	equal	
+packagegroup-core-boot	WORKDIR	equal	
 packagegroup-core-boot	LICENSE	equal	
 packagegroup-core-boot	INHERIT	equal	
 packagegroup-core-boot	PROVIDES	equal	
 packagegroup-core-boot	EXTRA_OECONF	equal	
 packagegroup-core-boot	EXTRA_OECMAKE	unset	
-packagegroup-core-boot	CFLAGS	flagged	unevaluated_python
+packagegroup-core-boot	CFLAGS	equal	
 packagegroup-core-boot	FILESPATH	flagged	unevaluated_python
 packagegroup-core-boot	MACHINE	equal	
 packagegroup-core-boot	DISTRO	equal	
 packagegroup-core-boot	TMPDIR	equal	
 packagegroup-core-boot	DESCRIPTION	equal	
 packagegroup-core-boot	EFI_PROVIDER	equal	
-packagegroup-core-boot	PACKAGE_ARCH	flagged	unevaluated_python
+packagegroup-core-boot	PACKAGE_ARCH	equal	
 packagegroup-core-boot	RRECOMMENDS:packagegroup-core-boot	equal	
 packagegroup-core-boot	SUMMARY	equal	
 packagegroup-core-boot	SYSVINIT_SCRIPTS	equal	
@@ -889,15 +889,15 @@ base-files	FILES:base-files	equal
 base-files	OVERRIDES	equal	
 base-files	MACHINEOVERRIDES	equal	
 base-files	DISTROOVERRIDES	equal	
-base-files	S	flagged	unevaluated_python
-base-files	B	flagged	unevaluated_python
-base-files	WORKDIR	flagged	unevaluated_python
+base-files	S	equal	
+base-files	B	equal	
+base-files	WORKDIR	equal	
 base-files	LICENSE	equal	
 base-files	INHERIT	equal	
 base-files	PROVIDES	equal	
 base-files	EXTRA_OECONF	equal	
 base-files	EXTRA_OECMAKE	unset	
-base-files	CFLAGS	flagged	unevaluated_python
+base-files	CFLAGS	equal	
 base-files	FILESPATH	flagged	unevaluated_python
 base-files	MACHINE	equal	
 base-files	DISTRO	equal	
@@ -910,7 +910,7 @@ base-files	FILESEXTRAPATHS	equal
 base-files	INHIBIT_DEFAULT_DEPS	equal	
 base-files	INSANE_SKIP:base-files	equal	
 base-files	LIC_FILES_CHKSUM	equal	
-base-files	PACKAGE_ARCH	flagged	unevaluated_python
+base-files	PACKAGE_ARCH	equal	
 base-files	SECTION	equal	
 base-files	SUMMARY	equal	
 base-files	SYSROOT_DIRS	equal	
@@ -1089,15 +1089,15 @@ virtual/kernel	FILES:linux-kiss	equal
 virtual/kernel	OVERRIDES	equal	
 virtual/kernel	MACHINEOVERRIDES	equal	
 virtual/kernel	DISTROOVERRIDES	equal	
-virtual/kernel	S	flagged	unevaluated_python
-virtual/kernel	B	flagged	unevaluated_python
-virtual/kernel	WORKDIR	flagged	unevaluated_python
+virtual/kernel	S	equal	
+virtual/kernel	B	equal	
+virtual/kernel	WORKDIR	equal	
 virtual/kernel	LICENSE	equal	
 virtual/kernel	INHERIT	equal	
 virtual/kernel	PROVIDES	equal	
 virtual/kernel	EXTRA_OECONF	equal	
 virtual/kernel	EXTRA_OECMAKE	unset	
-virtual/kernel	CFLAGS	flagged	unevaluated_python
+virtual/kernel	CFLAGS	equal	
 virtual/kernel	FILESPATH	flagged	unevaluated_python
 virtual/kernel	MACHINE	equal	
 virtual/kernel	DISTRO	equal	
@@ -1119,15 +1119,15 @@ virtual/bootloader	FILES:u-boot-kiss	equal
 virtual/bootloader	OVERRIDES	equal	
 virtual/bootloader	MACHINEOVERRIDES	equal	
 virtual/bootloader	DISTROOVERRIDES	equal	
-virtual/bootloader	S	flagged	unevaluated_python
-virtual/bootloader	B	flagged	unevaluated_python
-virtual/bootloader	WORKDIR	flagged	unevaluated_python
+virtual/bootloader	S	equal	
+virtual/bootloader	B	equal	
+virtual/bootloader	WORKDIR	equal	
 virtual/bootloader	LICENSE	equal	
 virtual/bootloader	INHERIT	equal	
 virtual/bootloader	PROVIDES	equal	
 virtual/bootloader	EXTRA_OECONF	equal	
 virtual/bootloader	EXTRA_OECMAKE	unset	
-virtual/bootloader	CFLAGS	flagged	unevaluated_python
+virtual/bootloader	CFLAGS	equal	
 virtual/bootloader	FILESPATH	flagged	unevaluated_python
 virtual/bootloader	MACHINE	equal	
 virtual/bootloader	DISTRO	equal	
@@ -1136,12 +1136,12 @@ virtual/bootloader	ALLOW_EMPTY:u-boot-kiss-env	equal
 virtual/bootloader	CONFIGURE_FILES	flagged	unevaluated_python
 virtual/bootloader	CVE_PRODUCT	equal	
 virtual/bootloader	DESCRIPTION	equal	
-virtual/bootloader	EXTRA_OEMAKE	flagged	unevaluated_python
+virtual/bootloader	EXTRA_OEMAKE	equal	
 virtual/bootloader	FILES:u-boot-kiss-env	equal	
 virtual/bootloader	FILES:u-boot-kiss-extlinux	equal	
 virtual/bootloader	HOMEPAGE	equal	
 virtual/bootloader	LIC_FILES_CHKSUM	equal	
-virtual/bootloader	PACKAGE_ARCH	flagged	unevaluated_python
+virtual/bootloader	PACKAGE_ARCH	equal	
 virtual/bootloader	PACKAGE_BEFORE_PN	equal	
 virtual/bootloader	PE	equal	
 virtual/bootloader	RPROVIDES:u-boot-kiss-env	equal	
@@ -1240,15 +1240,15 @@ virtual/kernel@default	FILES:linux-kiss	equal
 virtual/kernel@default	OVERRIDES	equal	
 virtual/kernel@default	MACHINEOVERRIDES	equal	
 virtual/kernel@default	DISTROOVERRIDES	equal	
-virtual/kernel@default	S	flagged	unevaluated_python
-virtual/kernel@default	B	flagged	unevaluated_python
-virtual/kernel@default	WORKDIR	flagged	unevaluated_python
+virtual/kernel@default	S	equal	
+virtual/kernel@default	B	equal	
+virtual/kernel@default	WORKDIR	equal	
 virtual/kernel@default	LICENSE	equal	
 virtual/kernel@default	INHERIT	equal	
 virtual/kernel@default	PROVIDES	equal	
 virtual/kernel@default	EXTRA_OECONF	equal	
 virtual/kernel@default	EXTRA_OECMAKE	unset	
-virtual/kernel@default	CFLAGS	flagged	unevaluated_python
+virtual/kernel@default	CFLAGS	equal	
 virtual/kernel@default	FILESPATH	flagged	unevaluated_python
 virtual/kernel@default	MACHINE	equal	
 virtual/kernel@default	DISTRO	equal	
