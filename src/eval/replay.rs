@@ -3543,6 +3543,9 @@ impl Replay<'_> {
     /// filter is set when `PN` starts with `nativesdk-` (or the function has no such guard);
     /// when `PN` is not known statically, `PROVIDES` is flagged.
     fn nativesdk_anonymous_filter(&mut self) {
+        if self.ds.notes.nativesdk_anon.is_none() {
+            return;
+        }
         let Some((loc, guard)) = Arc::make_mut(&mut self.ds.notes).nativesdk_anon.take() else {
             return;
         };
