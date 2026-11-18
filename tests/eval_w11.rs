@@ -450,16 +450,18 @@ fn the_native_variant_provides_what_native_filter_makes_of_provides() {
 }
 
 #[test]
-fn the_nativesdk_variant_is_an_uncertain_provider_its_python_decides() {
+fn the_nativesdk_variant_is_a_certain_provider_since_w12() {
+    // w11: an uncertain provider (the filter is installed by python). Since w12 the replay
+    // computes nativesdk.bbclass's suffix_filter on the static value (tests/eval_w12.rs).
     let fx = modified(class_extension);
     let set = providers_of(&fx, "virtual/nativesdk-foo");
     let sel = set.selected().expect("a candidate");
     assert_eq!(sel.pn, "nativesdk-libfoo");
-    assert!(sel.python, "{sel:?}");
+    assert!(!sel.python, "{sel:?}");
     assert!(
         set.notes
             .iter()
-            .any(|n| n.contains("goes through python that was not run")),
+            .any(|n| n.contains("through the PROVIDES its class rewrites")),
         "{:?}",
         set.notes
     );

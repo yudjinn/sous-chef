@@ -646,9 +646,12 @@ the flags of the selected options, with a note.
   selected one first, with the reason for its version and for the choice; then the
   `PREFERRED_PROVIDER` / `PREFERRED_VERSION` assignments that decided it. Candidates are
   recipes whose `PN` or static `PROVIDES` names it, confirmed by evaluating each, and the
-  `native` / `nativesdk` variants whose `PN` or rewritten `PROVIDES` names it (a
-  `nativesdk` variant's `PROVIDES` goes through python, so it is listed as uncertain, with a
-  note); multilib variants by their name only, when nothing else provides it. A `PREFERRED_PROVIDERS` entry
+  `native` / `nativesdk` variants whose `PN` or rewritten `PROVIDES` names it, and the
+  multilib variants (those the configuration's `BBCLASSEXTEND` lists) whose rewritten
+  `PROVIDES` names it (a variant whose rewritten `PROVIDES` could not be computed, because
+  it depends on python such as a `MULTILIB_VARIANTS` computed by python, is listed as
+  uncertain, with a note); other multilib variants by their name only, when nothing else
+  provides it. A `PREFERRED_PROVIDERS` entry
   `<name>:<pn>` is used when no `PREFERRED_PROVIDER_<name>` is set (status `selected by
   PREFERRED_PROVIDERS (<name>:<pn>)`, and a `PREFERRED_PROVIDERS` row whose value is the
   provider); a malformed word, conflicting entries and an entry `PREFERRED_PROVIDER_<name>`

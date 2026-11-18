@@ -200,14 +200,86 @@ pub fn add_suffix(val: &str, extname: &str, prefixes: &[&str]) -> String {
     val
 }
 
+/// Whether [`add_suffix`] decides `val` before it looks at its `prefixes` (it returns early
+/// for a word starting with `<extname>-`, ending in `-native` / `-native-runtime`, or
+/// holding `nativesdk-`, `-cross-`, `-crosssdk-`), or the prefixes cannot match (a prefix
+/// `p` matches only a word starting with `p-`, so a word without `-` is not affected).
+fn prefixes_cannot_matter(val: &str, extname: &str) -> bool {
+    !val.contains('-')
+        || val.starts_with(&format!("{extname}-"))
+        || val.ends_with("-native")
+        || val.ends_with("-native-runtime")
+        || val.contains("nativesdk-")
+        || val.contains("-cross-")
+        || val.contains("-crosssdk-")
+}
+
+/// `oe.classextend.suffix_filter(val, extname, prefixes)` (OE-core Wrynose
+/// `meta/lib/oe/classextend.py`), the filter `ClassExtender.set_filter(var, deps=False)`
+/// installs: [`add_suffix`] on each word of `val.split()`, joined with one space. BitBake
+/// applies it only to a non-empty value (`None` for an empty one). `prefixes` `None`: not
+/// known (the multilib classes read them from `MULTILIB_VARIANTS`, which OE-core computes
+/// with python); then `Some(Err(word))` names the first word whose result depends on them.
+pub fn suffix_filter(
+    val: &str,
+    extname: &str,
+    prefixes: Option<&[&str]>,
+) -> Option<Result<String, String>> {
+    if val.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for w in val.split_whitespace() {
+        match prefixes {
+            Some(p) => out.push(add_suffix(w, extname, p)),
+            None if prefixes_cannot_matter(w, extname) => out.push(add_suffix(w, extname, &[])),
+            None => return Some(Err(w.to_string())),
+        }
+    }
+    Some(Ok(out.join(" ")))
+}
+
+/// `(base word, multilib word)` pairs such that the multilib variant `<v>` (one of
+/// `variants`, the multilib variants the configuration's `BBCLASSEXTEND` lists) of a recipe
+/// providing (or named) `base word` may provide `name` through the `PROVIDES` its class
+/// rewrites with [`suffix_filter`]: `x` becomes `<v>-x` (and `x-<v>` too), `virtual/x`
+/// becomes `virtual/<v>-x`, and the words [`add_suffix`] passes through stay. Candidates
+/// only: the variant is evaluated to confirm.
+pub fn multilib_provides_forms(name: &str, variants: &[&str]) -> Vec<(String, ClassExtend)> {
+    let name = name.trim();
+    let mut out = Vec::new();
+    for v in variants {
+        if v.is_empty() {
+            continue;
+        }
+        let ext = ClassExtend::new(&format!("multilib:{v}"));
+        if add_suffix(name, v, variants) == name {
+            out.push((name.to_string(), ext.clone()));
+        }
+        if let Some(rest) = name.strip_prefix(&format!("{v}-")) {
+            out.push((rest.to_string(), ext.clone()));
+            out.push((format!("{rest}-{v}"), ext.clone()));
+        }
+        if let Some(rest) = name.strip_prefix(&format!("virtual/{v}-")) {
+            out.push((format!("virtual/{rest}"), ext.clone()));
+            out.push((format!("virtual/{rest}-{v}"), ext.clone()));
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|(b, e)| {
+        !b.is_empty() && !b.ends_with('-') && seen.insert((b.clone(), e.word.clone()))
+    });
+    out
+}
+
 /// `(base word, variant word)` pairs such that the variant of a recipe providing (or named)
 /// `base word` may provide `name` through the `PROVIDES` its class rewrites, or through its
 /// `PN` ([`name_forms`]): for `native`, `native_filter` turns `x` into `x-native` and keeps
 /// a word ending in `-native`, and turns `a-cross-b` into `a-native-b`; for `nativesdk`,
 /// `add_suffix` turns `x` into `nativesdk-x` and `virtual/x` into `virtual/nativesdk-x`, and
 /// keeps the words it passes through. Candidates only: the variant is evaluated to confirm.
-/// Multilib variants are found by their `PN` only (their prefixes come from
-/// `MULTILIB_VARIANTS`, and their `BBCLASSEXTEND` words from the configuration).
+/// The multilib forms here are by `PN` only ([`name_forms`]); the ones through `PROVIDES`
+/// need the configuration's multilib variants ([`multilib_provides_forms`]).
 pub fn provides_forms(name: &str) -> Vec<(String, ClassExtend)> {
     let name = name.trim();
     let mut out = name_forms(name);

@@ -32,8 +32,10 @@
 //! the `native` / `nativesdk` variants as files of their `PN` beside real recipes of that
 //! name; [`Providers::providers`] finds variant candidates through
 //! [`super::variant::provides_forms`] and confirms them by evaluating the variant (whose
-//! `native` `PROVIDES` filter the replay computes). Multilib variants: by `PN`, when nothing
-//! else has the name.
+//! `native`, `nativesdk` and multilib `PROVIDES` filters the replay computes when their
+//! inputs are static, w12). Multilib variants: through `PROVIDES` for the variants the
+//! configuration's `BBCLASSEXTEND` lists ([`super::variant::multilib_provides_forms`]);
+//! otherwise by `PN`, when nothing else has the name.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet, VecDeque};
@@ -553,6 +555,20 @@ impl<'a> Providers<'a> {
         })
     }
 
+    /// The multilib variants the configuration's `BBCLASSEXTEND` lists (`multilib:<v>`
+    /// words; OE-core's `conf/multilib.conf` appends `${MULTILIBS}` there), the ones whose
+    /// `PROVIDES` rewrite is looked through. Words that depend on python are not known, and
+    /// such variants are then found by their `PN` only.
+    fn multilib_variants(&self) -> Vec<String> {
+        let v = self.cfg.value("BBCLASSEXTEND").unwrap_or_default();
+        words::known_words(&v.text)
+            .into_iter()
+            .filter_map(|w| w.strip_prefix("multilib:"))
+            .filter(|v| !v.is_empty() && !v.contains(':'))
+            .map(str::to_string)
+            .collect()
+    }
+
     /// The providers of `name`, the selected one first (`filterProviders`).
     pub fn providers(&self, name: &str) -> Result<ProviderSet> {
         let mut notes = Vec::new();
@@ -568,14 +584,19 @@ impl<'a> Providers<'a> {
         // Class-extended variants (BBCLASSEXTEND): BitBake registers every variant with its
         // own PN and its finalised PROVIDES (`bb.cache.CoreRecipeInfo` of the variant's
         // datastore), beside the real recipes. Candidates: the recipes that provide (or are)
-        // a word the variant's class turns into the name (`variant::provides_forms`);
-        // multilib variants by their PN only, and only when nothing else provides the name.
+        // a word the variant's class turns into the name (`variant::provides_forms`; for
+        // the multilib variants the configuration's BBCLASSEXTEND lists,
+        // `variant::multilib_provides_forms`); other multilib variants by their PN only, and
+        // only when nothing else provides the name.
         let mut variant_candidates: Vec<(RecipeRow, ClassExtend)> = Vec::new();
         let mut vseen = HashSet::new();
-        for (base, ext) in variant::provides_forms(name) {
-            if ext.class() == "multilib" {
-                continue;
-            }
+        let ml = self.multilib_variants();
+        let ml: Vec<&str> = ml.iter().map(String::as_str).collect();
+        let forms = variant::provides_forms(name)
+            .into_iter()
+            .filter(|(_, ext)| ext.class() != "multilib")
+            .chain(variant::multilib_provides_forms(name, &ml));
+        for (base, ext) in forms {
             for f in query::files_providing(self.index, &base)? {
                 for r in recipes_using(self.index, &f)? {
                     if vseen.insert((r.file.id, ext.word.clone())) {

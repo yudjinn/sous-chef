@@ -16,7 +16,7 @@ dbus	45	28	0	16	1	0	2	0	anonymous python 15 (12 opaque); unfollowed references 2
 systemd-boot	42	26	0	14	2	0	2	0	anonymous python 12 (8 opaque); unfollowed references 3
 util-linux	98	76	0	20	2	0	2	0	anonymous python 14 (11 opaque); unfollowed references 2
 gmp-native	36	23	0	11	2	0	2	0	anonymous python 11 (8 opaque); unfollowed references 2
-nativesdk-zlib	35	22	1	10	2	0	3	0	anonymous python 12 (9 opaque); unfollowed references 2
+nativesdk-zlib	35	23	0	10	2	0	3	0	anonymous python 12 (9 opaque); unfollowed references 2
 quilt-native	38	25	0	12	1	0	2	0	anonymous python 12 (9 opaque); unfollowed references 2
 expat	36	22	0	13	1	0	2	0	anonymous python 12 (8 opaque); unfollowed references 2
 glib-2.0	53	36	0	16	1	0	2	0	anonymous python 13 (10 opaque); unfollowed references 2
@@ -31,9 +31,8 @@ sl@default	30	19	0	10	1	0	3	0	anonymous python 10 (7 opaque); unfollowed referen
 virtual/kernel@default	27	13	0	12	2	0	3	0	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
 
 ## Totals (1090 values compared, explicit machine and distro; `unset` = unset on both sides, `not-printed` = BitBake printed no value; neither counted)
-(equal, but flagged)	148
-equal	701
-equal-ws	1
+(equal, but flagged)	147
+equal	702
 flagged	332
 flagged-literal-differs	25
 gap:layerdir-canonical	29

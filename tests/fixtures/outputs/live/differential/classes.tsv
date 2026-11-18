@@ -723,7 +723,7 @@ nativesdk-zlib	B	flagged	unevaluated_python
 nativesdk-zlib	WORKDIR	flagged	unevaluated_python
 nativesdk-zlib	LICENSE	equal	
 nativesdk-zlib	INHERIT	equal	
-nativesdk-zlib	PROVIDES	equal-ws	
+nativesdk-zlib	PROVIDES	equal	
 nativesdk-zlib	EXTRA_OECONF	equal	
 nativesdk-zlib	EXTRA_OECMAKE	unset	
 nativesdk-zlib	CFLAGS	flagged	unevaluated_python

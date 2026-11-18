@@ -1284,6 +1284,12 @@ through `variant::provides_forms(name)` (new, with `variant::native_filter`,
 `variant::add_suffix`, `variant::explode_deps`, OE-core's and BitBake's functions) and
 evaluates them. The replay computes `native_virtclass_handler`'s `PROVIDES` filter
 (`Replay::apply_native_provides_filter`) instead of flagging it, when the value is static.
+(w12) Also the `nativesdk` and multilib `PROVIDES` filters (`Replay::apply_provides_filter`,
+replacing `apply_native_provides_filter`; `variant::suffix_filter(val, extname,
+Option<&[&str]>) -> Option<Result<String, String>>` and
+`variant::multilib_provides_forms(name, variants) -> Vec<(String, ClassExtend)>`, new);
+`Providers::providers` looks for multilib variants through `PROVIDES` for the variants the
+configuration's `BBCLASSEXTEND` lists.
 Variant class order (w11, `src/release.rs`): `ClassExtendOrder { BaseDeferredThenClass,
 PerVariantDeferred }`, `BitbakeSource { dir, version, order }`, `bitbake_version(init_py)`,
 `class_extend_order_in(ast_py)`, `workspace_bitbake(&[Layer]) ->
