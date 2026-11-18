@@ -172,7 +172,8 @@ fn workdir_local_ref<'a>(text: &str, files: &'a BTreeSet<String>) -> Option<&'a 
 }
 
 /// Uses of the features [`instruction`] knows, other than the `KeptUntil*` ones (those come
-/// from `hygiene/release-removed`), in one file. `wanted` limits the scan.
+/// from `hygiene/release-removed`), in one file, for a migration to `to`. `wanted` limits
+/// the scan.
 pub fn scan_feature_uses(
     ws: &Workspace,
     loc: &Loc,
@@ -180,6 +181,7 @@ pub fn scan_feature_uses(
     parsed: &ParsedFile,
     text: &str,
     wanted: &HashSet<Feature>,
+    to: Release,
 ) -> Vec<FeatureUse> {
     let mut out = Vec::new();
     let mut add = |feature: Feature, line: u32, what: &str| {
@@ -203,7 +205,10 @@ pub fn scan_feature_uses(
             ClassDir::Recipe | ClassDir::Global | ClassDir::Unsearched => {
                 add(Feature::SplitClassDirs, 1, &format!("classes in {dir}/"));
             }
-            _ if dir == "classes" => add(Feature::SplitClassDirs, 1, "classes in classes/"),
+            // Only news when moving to a release that searches the split directories.
+            _ if dir == "classes" && to.has(Feature::SplitClassDirs) => {
+                add(Feature::SplitClassDirs, 1, "classes in classes/")
+            }
             _ => {}
         }
     }
@@ -456,7 +461,7 @@ pub fn report(
             }
         };
         let kind = FileKind::from_path(abs);
-        let mut found = scan_feature_uses(ws, &loc0, kind, &entry.parsed, &entry.text, changed);
+        let mut found = scan_feature_uses(ws, &loc0, kind, &entry.parsed, &entry.text, changed, to);
         let target_only = [to];
         let cx = LintContext {
             file: Some(&entry.parsed),

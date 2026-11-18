@@ -559,3 +559,174 @@ fn audit_with_migrate_to_has_section_7() {
     assert!(!sous_chef::audit::render_markdown(&plain).contains("## 7."));
     assert!(!sous_chef::audit::render_json(&plain).contains("\"migration\""));
 }
+
+// ---------------------------------------------------------------------------------------
+// hygiene/release-syntax, made release-aware where the migration report showed a gap
+
+fn syntax(text: &str, as_path: &str, releases: &[Release]) -> Vec<String> {
+    use sous_chef::lint::rules::hygiene_release_syntax::HygieneReleaseSyntax;
+    let cache = tempfile::tempdir().unwrap();
+    let ws = fixture_ws();
+    let mut index = Index::open_in(cache.path(), &ws).unwrap();
+    index.refresh(&ws).unwrap();
+    lint::check_text(
+        &HygieneReleaseSyntax,
+        &ws,
+        &index,
+        Loc {
+            layer: "fixture".into(),
+            path: PathBuf::from(as_path),
+            lines: LineSpan::line(1),
+        },
+        text,
+        FileKind::from_path(Path::new(as_path)),
+        releases,
+        None,
+    )
+    .into_iter()
+    .map(|f| {
+        format!(
+            "{} {}: {}",
+            f.loc.lines.start,
+            f.severity.as_str(),
+            f.message
+        )
+    })
+    .collect()
+}
+
+#[test]
+fn release_syntax_addfragments_by_release() {
+    use Release::*;
+    let three = "addfragments conf/fragments OE_FRAGMENTS OE_FRAGMENTS_METADATA_VARS\n";
+    let four = "addfragments conf/fragments OE_FRAGMENTS OE_FRAGMENTS_METADATA_VARS OE_FRAGMENTS_BUILTIN\n";
+    let got = syntax(three, "conf/x.conf", &[Scarthgap, Wrynose]);
+    assert_eq!(got.len(), 2, "{got:#?}");
+    assert!(
+        got[0].starts_with("1 error: `addfragments` is not available in scarthgap"),
+        "{got:#?}"
+    );
+    assert!(
+        got[1].starts_with("1 error: `addfragments` with three arguments: from whinlatter on"),
+        "{got:#?}"
+    );
+    assert!(got[1].contains("checked against wrynose;"), "{got:#?}");
+    assert_eq!(
+        syntax(four, "conf/x.conf", &[Wrynose]),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        syntax(three, "conf/x.conf", &[Walnascar]),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn release_syntax_unpackdir_from_the_core_layer_does_not_hide_an_old_release() {
+    // meta-core (collection core) sets UNPACKDIR, as OE-core does from Styhead; meta-mine
+    // uses it and is linted as kirkstone too: reported. A definition in meta-mine itself
+    // would keep it quiet.
+    let e = env("wrynose", |root| {
+        write(
+            root,
+            "meta-core/conf/unpack.conf",
+            "UNPACKDIR ??= \"${WORKDIR}/sources-unpack\"\n",
+        );
+        write(
+            root,
+            "meta-mine/recipes-app/u/u_1.0.bb",
+            "SUMMARY = \"u\"\nLICENSE = \"MIT\"\ndo_install() {\n    install -d ${D} ${UNPACKDIR}\n}\n",
+        );
+    });
+    let opts = Options {
+        as_release: Some(Release::Kirkstone),
+        only_release: true,
+        ..Options::default()
+    };
+    let found = lint_layer(&e, "meta-mine", &["hygiene/release-syntax"], opts.clone());
+    let r = rows(&found);
+    assert!(
+        r.iter().any(|x| x.starts_with("error hygiene/release-syntax meta-mine:recipes-app/u/u_1.0.bb:4: `${UNPACKDIR}` is not available in kirkstone")),
+        "{r:?}"
+    );
+    let e = env("wrynose", |root| {
+        write(
+            root,
+            "meta-mine/conf/unpack.inc",
+            "UNPACKDIR ??= \"${WORKDIR}/sources-unpack\"\n",
+        );
+        write(
+            root,
+            "meta-mine/recipes-app/u/u_1.0.bb",
+            "SUMMARY = \"u\"\nLICENSE = \"MIT\"\ndo_install() {\n    install -d ${D} ${UNPACKDIR}\n}\n",
+        );
+    });
+    let found = lint_layer(&e, "meta-mine", &["hygiene/release-syntax"], opts);
+    assert!(
+        rows(&found).iter().all(|x| !x.contains("u_1.0.bb:4")),
+        "{:?}",
+        rows(&found)
+    );
+}
+
+#[test]
+fn lint_tool_migrate_to_and_as_release() {
+    let e = scarthgap_env();
+    let cache = tempfile::tempdir().unwrap();
+    let mut index = Index::open_in(cache.path(), &e.ws).unwrap();
+    index.refresh(&e.ws).unwrap();
+    let handles =
+        sous_chef::handles::HandleStore::open(&index.cache_dir().join("handles")).unwrap();
+    let ctx = sous_chef::mcp::Ctx {
+        config: e.config.clone(),
+        workspace: e.ws.clone(),
+        index: tokio::sync::Mutex::new(index),
+        handles,
+        jobs: sous_chef::bitbake::JobTable::new(),
+    };
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    use sous_chef::mcp::tools::lint as tool;
+    let out = rt
+        .block_on(tool::run(
+            &ctx,
+            tool::Args {
+                target: Some("meta-mine".into()),
+                migrate_to: Some("wrynose".into()),
+                budget_tokens: Some(150),
+                ..tool::Args::default()
+            },
+        ))
+        .unwrap();
+    assert!(
+        out.starts_with("migration to wrynose (6.0): 4 findings new with wrynose"),
+        "{out}"
+    );
+    assert!(out.ends_with("format json has the whole report"), "{out}");
+    assert!(sous_chef::render::estimate_tokens(&out) <= 150, "{out}");
+    let out = rt
+        .block_on(tool::run(
+            &ctx,
+            tool::Args {
+                target: Some("meta-mine".into()),
+                rules: Some(vec!["hygiene/workdir-s".into()]),
+                as_release: Some("wrynose".into()),
+                ..tool::Args::default()
+            },
+        ))
+        .unwrap();
+    assert!(out.starts_with("1 finding in"), "{out}");
+    let err = rt
+        .block_on(tool::run(
+            &ctx,
+            tool::Args {
+                only_release: Some(true),
+                ..tool::Args::default()
+            },
+        ))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("only_release needs as_release"), "{err}");
+}
