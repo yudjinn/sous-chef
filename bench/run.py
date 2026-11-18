@@ -52,7 +52,16 @@ BASH_ALLOW = [
     "Bash(grep *)", "Bash(rg *)", "Bash(cat *)", "Bash(ls *)", "Bash(find *)",
     "Bash(head *)", "Bash(tail *)", "Bash(wc *)", "Bash(sed -n *)",
 ]
-ALLOW_COMMON = ["Read", "Grep", "Glob"] + BASH_ALLOW
+# Read, Grep and Glob are not in the allow list: inside the working directory (the
+# workspace) they need no approval, outside it they would prompt and are therefore denied.
+# The first pilot allowed them everywhere, and two baseline sessions read the captured
+# `bitbake -e` dumps next to the workspace (see docs/benchmark.md).
+ALLOW_COMMON = BASH_ALLOW
+# Everything next to the workspace in the live directory is off limits, for every tool
+# that reads files (the reference dumps live in runs/, a second setup in bitbake-builds/).
+OUTSIDE = ["runs", "bitbake-builds", "scratch", "tools", "venv"]
+DENY_READ = [f"Read(/{os.path.join(LIVE, d)}/**)" for d in OUTSIDE] + [
+    f"Read(/{os.path.join(LIVE, 'bitbake-setup-sources.json')})"]
 # sous-chef's read-only tools (condition B). scaffold (writes) and bitbake (runs BitBake)
 # are denied below, and BitBake is also switched off in the benchmark's sous-chef.toml.
 SC = "mcp__plugin_sous-chef_sous-chef__"
@@ -65,7 +74,7 @@ DENY = [
     "Bash(bitbake *)", "Bash(kas *)", "Bash(devtool *)", "Bash(rm *)", "Bash(mv *)",
     "Bash(cp *)", "Bash(sed -i *)", "Bash(find * -delete *)", "Bash(find * -exec *)",
     "Bash(git *)", "Bash(curl *)", "Bash(wget *)",
-]
+] + DENY_READ
 
 # Environment variables of a parent Claude Code session that must not leak into the child.
 PARENT_ENV_PREFIXES = ("CLAUDE_CODE_", "CLAUDECODE", "CLAUDE_PID", "CLAUDE_JOB_DIR",
@@ -273,6 +282,9 @@ def main():
     jobs = []
     if opts.overhead or (opts.only and "overhead" in opts.only.split(",")):
         jobs.append(("overhead", spec["overhead_prompt"]))
+    if opts.only and "containment" in opts.only.split(","):
+        # Checks the sandbox: every attempt below must be denied.
+        jobs.append(("containment", spec["containment_prompt"]))
     for t in spec["tasks"]:
         if opts.only and t["id"] not in opts.only.split(","):
             continue
