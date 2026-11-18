@@ -6,7 +6,12 @@
 # `kas shell [options] <files> -c <command>` does what kas does with the command: runs it as
 # one string under a shell (here always /bin/sh, so tests do not depend on the user's
 # $SHELL), in the build directory ($KAS_BUILD_DIR, else ./build), with BUILDDIR and BBPATH
-# set and the fake BitBake (../bin) first on PATH.
+# set and the fake BitBake (../bin) first on PATH. With FAKEKAS_AS_KAS=1 it stays the
+# parent, as kas 5.5 does (`ShellCommand.execute`: `subprocess.call([$SHELL, "-c", cmd])`),
+# and handles SIGINT and SIGTERM as kas does: kas.py registers them on its asyncio loop,
+# whose handler only queues the callback, and the loop does not run while subprocess.call
+# waits, so kas goes on waiting for the shell; the signal reaches the command through the
+# process group. It prints the exit status of the command and exits with it.
 FAKEBB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 printf '%s\n' "$*" >> "$PWD/fakekas-called"
 if [ -f "$PWD/fakekas.env" ]; then
@@ -35,4 +40,12 @@ export BUILDDIR
 export BBPATH="$BUILDDIR"
 export PATH="$FAKEBB_ROOT/bin:$PATH"
 cd "$BUILDDIR" || exit 1
+if [ "${FAKEKAS_AS_KAS-}" = 1 ]; then
+    trap 'echo "fakekas: SIGINT handled later"' INT
+    trap 'echo "fakekas: SIGTERM handled later"' TERM
+    /bin/sh -c "$cmd"
+    st=$?
+    echo "fakekas: shell returned $st"
+    exit "$st"
+fi
 exec /bin/sh -c "$cmd"

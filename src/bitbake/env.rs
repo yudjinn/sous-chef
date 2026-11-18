@@ -79,6 +79,19 @@ pub const SETUP_WRAPPER: &str = r#"__sous_chef_argv=("$@"); set --; source "${__
 /// such an include ([`BbEnv::probe`]).
 pub const KAS_SHELL_ARGS: [&str; 2] = ["shell", "--keep-config-unchanged"];
 
+/// Variables of the server's environment that kas mode does not hand to kas. kas copies
+/// `SSTATE_DIR`, `SSTATE_MIRRORS`, `BB_HASHSERVE_DB_DIR`, `BB_HASHSERVE`,
+/// `BB_HASHSERVE_UPSTREAM`, `DL_DIR` and `TMPDIR` from its own environment into the build
+/// environment and adds them to `BB_ENV_PASSTHROUGH_ADDITIONS` (kas 5.5 `libkas.py`
+/// `get_build_environ`), so BitBake takes them as its own. `TMPDIR` is also the POSIX
+/// temporary directory, which a server is often started with for itself (Claude Code's
+/// sandbox, the live checks' `TMPDIR` under `runs/`): passed on, it moves BitBake's whole
+/// `TMPDIR` (work directories, stamps, sysroots, deploy) out of the build directory. Seen
+/// live (y3-leftovers): a kas-mode `bitbake -c cleanall curl` and `bitbake curl` ran in
+/// the server's `TMPDIR` and restored 721 MB from the shared-state cache there. The other
+/// six are BitBake's own names and are left as they are.
+pub const KAS_DROPPED_ENV: [&str; 1] = ["TMPDIR"];
+
 /// How a kas-mode command is started: `<program> shell --keep-config-unchanged
 /// <files joined by :> -c '<command>'` in `work_dir`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,6 +382,9 @@ impl BbEnv {
                 let files = kas_files_arg(&k.files)?;
                 let mut c = Command::new(&k.program);
                 c.args(KAS_SHELL_ARGS).arg(files).arg("-c").arg(script);
+                for v in KAS_DROPPED_ENV {
+                    c.env_remove(v);
+                }
                 dir = k.work_dir.clone();
                 c
             }

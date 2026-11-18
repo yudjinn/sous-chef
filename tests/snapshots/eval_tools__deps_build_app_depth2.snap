@@ -8,5 +8,5 @@ depth	dep	provider	source	loc
 2	automake-native	-	DEPENDS	meta-core:classes-recipe/autotoolsish.bbclass:11
 2	zlib	-	PACKAGECONFIG[zlib]	meta-core:recipes-core/libfoo/libfoo_2.0.bb:15
 note: PACKAGECONFIG rows: OE-Core's base.bbclass adds the build (field 3) and runtime (field 4) dependencies of the selected options with anonymous python, which is not run; they are listed from the flags
-note: provider - means no recipe in the workspace provides the name (nor a BBCLASSEXTEND variant of a recipe whose BBCLASSEXTEND lists the class, by its name or through the PROVIDES its class rewrites)
+note: provider - means no recipe in the workspace was found to provide the name (nor a BBCLASSEXTEND variant of a recipe whose BBCLASSEXTEND lists the class, by its name or through the PROVIDES its class rewrites); a PN or PROVIDES that needs expansion to name it is not found (binutils-cross-${TARGET_ARCH}, a PROVIDES:append:class-native)
 note: 1 anonymous python function was not run (none changes DEPENDS by name)

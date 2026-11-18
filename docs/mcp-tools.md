@@ -734,11 +734,23 @@ the flags of the selected options, with a note.
   the recipe that provides it (provider selection; `-` when no recipe of the workspace
   does; a `BBCLASSEXTEND` variant such as `-native` is a provider of its name and of its
   rewritten `PROVIDES`, shown as `curl-native (the `native` variant of curl 8.19.0)`), then the build
-  dependencies of the selected `PACKAGECONFIG` options. `depth` follows the selected
+  dependencies of the selected `PACKAGECONFIG` options, then (since y3) the recipes the
+  `depends` flags of the recipe's tasks name (`do_patch[depends] (do_populate_sysroot)`,
+  one row per recipe with the tasks counted; a name already in `DEPENDS` is not repeated;
+  what anonymous python adds is named in a note). In a native variant (`PN` ending in
+  `-native`, `native` in `BBCLASSEXTEND`) the `DEPENDS` words are shown as BitBake reads
+  them through `native.bbclass`'s `native_filter` (`expat` as `expat-native`, source
+  `DEPENDS (native_filter)`, the recipe's own name left out). `depth` follows the selected
   providers.
-- `runtime`: rows `package dep source loc`: per package of `PACKAGES`, the words of
-  `RDEPENDS:<package>`, then the runtime dependencies of the selected `PACKAGECONFIG`
-  options (on `${PN}`).
+- `runtime`: rows `package dep relation source loc`: the plain `RDEPENDS` and
+  `RRECOMMENDS` (package `(every package)`: BitBake adds them to each), then per package of
+  `PACKAGES` the words of `RDEPENDS:<package>` (relation `depends`) and
+  `RRECOMMENDS:<package>` (relation `recommends`), then the runtime dependencies (field 4,
+  `depends`) and recommendations (field 5, `recommends`) of the selected `PACKAGECONFIG`
+  options (on `${PN}`). Recommendations are built as dependencies are (bitbake-semantics.md,
+  "Runtime dependencies and recommendations"); `RSUGGESTS`, `RCONFLICTS` and `RREPLACES`
+  build nothing and are not listed. What `do_package` adds is known only after a build
+  (`pkgdata package_info`).
 - `packageconfig`: rows `option selected enable disable build runtime loc`, one per
   `PACKAGECONFIG[option]` flag (fields 1 to 4), and a note with the value of
   `PACKAGECONFIG` and where it is set. Fields 5 and 6 are not shown. BitBake's own flags
@@ -1236,7 +1248,9 @@ mode, or `bitbake-setup` when the file is named `init-build-env`); an environmen
 was started in (`BUILDDIR` or `BBPATH` set and `bitbake` on `PATH`: `initialised`, the
 program is run directly); a kas project with `kas` on `PATH` and an existing kas build
 directory (`kas`: every command is `kas shell --keep-config-unchanged <files> -c '<command>'`
-in kas's work directory, so kas does not rewrite `conf/` first; not used when a kas file
+in kas's work directory, so kas does not rewrite `conf/` first, with `TMPDIR` removed from
+kas's environment, because kas would hand it to BitBake as BitBake's `TMPDIR`
+(bitbake-semantics.md, "Running BitBake"; seen live in y3); not used when a kas file
 has a `{repo, file}` include, because `-k` still fetches and checks out those repositories:
 the modes below are tried instead); a build directory holding
 bitbake-setup's `init-build-env` (`bitbake-setup`); an `oe-init-build-env` in a layer root,
@@ -1268,9 +1282,13 @@ NOTE: Running task 812 of 3301 ...`). Without `wait`, poll with `op: status`.
 
 `status` reports `job`, `op`, `target`, `command`, `state` (`running`, `succeeded`,
 `failed`, `cancelled`), `elapsed`, `exit` and `handle`. While running it shows the last 5
-output lines; a finished job that did not fail shows the last 3 and a `slice` hint; a
+output lines; a finished job that did not fail shows its warnings (since y3: rows
+`warning`, the distinct `WARNING:` lines of its output in order, at most 5, then `+N more
+distinct warnings` / `N repeated lines left out` with a `slice ... grep=^WARNING:` hint) and
+the last 3 lines without knotty's `Summary: There was 1 WARNING message.` (live, y1: a real
+build's tail ended with that line instead of the warning), and a `slice` hint; a
 failed job is followed by a digest of the console output and, for operations that run
-tasks, a `log job=` hint. JSON: `{job, tail, digest, notes}`. `cancel` stops the job as
+tasks, a `log job=` hint. JSON: `{job, warnings, tail, digest, notes}`. `cancel` stops the job as
 Ctrl-C twice does: SIGINT to its process group (BitBake's client asks the server to stop
 scheduling), a second SIGINT 1 s later (the server kills the running tasks), up to 60 s for
 the client to exit and 1 s more for the rest of the group; only then, if something is
@@ -1330,7 +1348,19 @@ which the `function` row already says.
 With `job`: the log named in the job's output (the first failed task's
 `Logfile of failure stored in:`, then any other log it names), filtered by `recipe` and
 `task`. If none is readable it digests the job's console output, with a note. A running job
-is an error.
+is an error. A **cancelled** job whose output names no failed task (since y3) is not
+digested as a failure: rows `job`, `command`, `state` (`cancelled by the bitbake tool
+(op=cancel) at <UTC time>, <n>s after it started: not a failure`), `bitbake` (knotty's
+interrupt lines: `Keyboard Interrupt, closing down...`, `Second Keyboard Interrupt,
+stopping...`, `NOTE: Sending SIGTERM to remaining N tasks`, `Execution was interrupted`),
+`running` (each task started and not ended in the output, `<PF> do_<task> (task <n> of
+<m>)`), `log` (the task log of the last of them, when one was written after the job
+started; a note says `log recipe=<pn> task=<task>` digests it, else that none was found),
+`warning` rows and the job's handle.
+
+A compiler error (`<file>:<line>:<col>: error: <message>`) is shown as the message in the
+`error` row and the location in a `source` row (since y3: live, the compiler's path
+`../../sources/curl-8.19.0/lib/version.c:152:25` cut the message to the snippet width).
 
 ### `slice`
 | Arg | Notes |
@@ -1781,7 +1811,8 @@ Rows `kind item detail loc`:
   counts of a unified diff, and, when its lines were changed in place (as many `-` as `+`),
   the words added and removed: `value changed: 1 line added, 1 removed; words added:
   --disable-dict`, as for a real `EXTRA_OECONF:append` on curl, whose value BitBake prints
-  as a unified diff because it starts with a newline) with the **pointer of the assignment that sets it now**
+  as a unified diff because its stored value has one `\n<VAR>{<word>} = Set|Unset` line per
+  word its python tests with `bb.utils.filter`, bitbake-semantics.md "Task signatures") with the **pointer of the assignment that sets it now**
   (the recipe the task belongs to is evaluated for the default machine and distro; the
   applied operation holding a word the change added, else the last applied one), a
   variable dependency added or removed, the task's variable list changed, a file checksum

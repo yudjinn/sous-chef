@@ -1,0 +1,16 @@
+y3-leftovers: break one line of lib/version.c with a type error, for a real compiler
+error in the log digest (removed again afterwards).
+
+Upstream-Status: Inappropriate [test only]
+
+--- a/lib/version.c
++++ b/lib/version.c
+@@ -148,6 +148,8 @@
+   char *outp;
+   size_t outlen;
+   const char *src[VERSION_PARTS];
++  struct curl_slist *sous_chef_probe = NULL;
++  int sous_chef_count = *sous_chef_probe;
+ #ifdef USE_SSL
+   char ssl_version[200];
+ #endif

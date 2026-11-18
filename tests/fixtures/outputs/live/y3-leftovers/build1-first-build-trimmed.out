@@ -1,0 +1,56 @@
+Loading cache...done.
+Loaded 2085 entries from dependency cache.
+NOTE: Resolving any missing task queue dependencies
+
+Build Configuration:
+BB_VERSION           = "2.18.0"
+BUILD_SYS            = "x86_64-linux"
+NATIVELSBSTRING      = "endeavouros"
+TARGET_SYS           = "arm-oe-linux-gnueabi"
+MACHINE              = "dogbonedark"
+SDKMACHINE           = "x86_64"
+DISTRO               = "kiss"
+DISTRO_VERSION       = "1.0"
+TUNE_FEATURES        = "arm armv7a vfp thumb neon callconvention-hard"
+meta-arm             
+meta-arm-toolchain   = "wrynose:673e8d7c5dcd14de58092eb73e6ecc5eee5c1735"
+meta-kiss            
+meta-kiss-ti         = "wrynose:cc621c5d5725a51af9abb7b0d531cf6f9264a468"
+meta                 = "wrynose:33a6bd6cc8a9a976902081642414bd67adc74879"
+
+WARNING: Your host glibc version (2.44) is newer than that in uninative (2.43). Disabling uninative so that sstate is not corrupted.
+Initialising tasks...Sstate summary: Wanted 376 Local 0 Mirrors 0 Missed 376 Current 1 (0% match, 0% complete)
+done.
+NOTE: Executing Tasks
+NOTE: Running task 1 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/quilt/quilt-native_0.69.bb:do_recipe_qa)
+NOTE: Running task 2 of 919 (virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/gnu-config/gnu-config_git.bb:do_recipe_qa)
+NOTE: Running task 3 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-extended/texinfo-dummy-native/texinfo-dummy-native.bb:do_recipe_qa)
+NOTE: Running task 4 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-core/gettext/gettext-minimal-native_1.0.bb:do_recipe_qa)
+NOTE: recipe xz-native-5.8.4-r0: task do_create_recipe_spdx: Succeeded
+NOTE: Running task 373 of 919 (virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/perl-cross/perlcross_1.6.4.bb:do_create_spdx)
+NOTE: Running task 374 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/opkg-utils/opkg-utils_0.7.0.bb:do_create_recipe_spdx)
+NOTE: recipe rpm-native-1_4.20.1-r0: task do_patch: Started
+WARNING: ca-certificates-20260816-r0 do_fetch: Failed to fetch URL http://deb.debian.org/debian/pool/main/c/ca-certificates/ca-certificates_20260816.tar.xz, attempting MIRRORS if available
+NOTE: recipe re2c-native-4.4-r0: task do_create_recipe_spdx: Started
+NOTE: recipe libtool-cross-2.5.4-r0: task do_create_recipe_spdx: Succeeded
+NOTE: recipe perlcross-native-1.6.4-r0: task do_create_spdx: Started
+NOTE: Running task 375 of 919 (virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/libedit/libedit_20251016-3.1.bb:do_create_recipe_spdx)
+NOTE: recipe zstd-native-1.5.7-r0: task do_populate_sysroot: Succeeded
+NOTE: Running task 410 of 919 (virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-extended/zstd/zstd_1.5.7.bb:do_create_spdx)
+NOTE: recipe zstd-native-1.5.7-r0: task do_create_spdx: Started
+NOTE: recipe zstd-native-1.5.7-r0: task do_create_spdx: Succeeded
+WARNING: gnu-config-native-20250709+git-r0 do_fetch: Failed to fetch URL git://git.savannah.gnu.org/git/config.git;protocol=https;branch=master, attempting MIRRORS if available
+NOTE: recipe gnu-config-native-20250709+git-r0: task do_fetch: Succeeded
+NOTE: Running task 411 of 919 (virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/gnu-config/gnu-config_git.bb:do_unpack)
+NOTE: Running task 412 of 919 (virtual:native:{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-devtools/gnu-config/gnu-config_git.bb:do_prepare_recipe_sysroot)
+NOTE: recipe gnu-config-native-20250709+git-r0: task do_unpack: Started
+NOTE: recipe curl-8.19.0-r0: task do_package_write_ipk: Succeeded
+NOTE: recipe curl-8.19.0-r0: task do_create_spdx: Succeeded
+NOTE: Running task 918 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_create_package_spdx)
+NOTE: recipe curl-8.19.0-r0: task do_package_qa: Succeeded
+NOTE: recipe curl-8.19.0-r0: task do_create_package_spdx: Started
+NOTE: recipe curl-8.19.0-r0: task do_create_package_spdx: Succeeded
+NOTE: Running noexec task 919 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_build)
+NOTE: Tasks Summary: Attempted 919 tasks of which 2 didn't need to be rerun and all succeeded.
+
+Summary: There were 3 WARNING messages.

@@ -1,0 +1,62 @@
+2026-11-18 23:53:43 - INFO     - kas 5.5 started on EndeavourOS rolling
+2026-11-18 23:53:43 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss
+2026-11-18 23:53:43 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss-ti
+2026-11-18 23:53:43 - INFO     - To start the default build, run: bitbake -c build kiss-image
+Loading cache...done.
+Loaded 2085 entries from dependency cache.
+NOTE: Resolving any missing task queue dependencies
+
+Build Configuration:
+BB_VERSION           = "2.18.0"
+BUILD_SYS            = "x86_64-linux"
+NATIVELSBSTRING      = "endeavouros"
+TARGET_SYS           = "arm-oe-linux-gnueabi"
+MACHINE              = "dogbonedark"
+SDKMACHINE           = "x86_64"
+DISTRO               = "kiss"
+DISTRO_VERSION       = "1.0"
+TUNE_FEATURES        = "arm armv7a vfp thumb neon callconvention-hard"
+meta-arm             
+meta-arm-toolchain   = "wrynose:673e8d7c5dcd14de58092eb73e6ecc5eee5c1735"
+meta-kiss            
+meta-kiss-ti         = "wrynose:cc621c5d5725a51af9abb7b0d531cf6f9264a468"
+meta                 = "wrynose:33a6bd6cc8a9a976902081642414bd67adc74879"
+
+WARNING: Your host glibc version (2.44) is newer than that in uninative (2.43). Disabling uninative so that sstate is not corrupted.
+Initialising tasks...Sstate summary: Wanted 7 Local 0 Mirrors 0 Missed 7 Current 370 (0% match, 98% complete)
+done.
+NOTE: Executing Tasks
+NOTE: Running task 841 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_configure)
+NOTE: recipe curl-8.19.0-r0: task do_configure: Started
+NOTE: recipe curl-8.19.0-r0: task do_configure: Succeeded
+NOTE: Running task 910 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_compile)
+NOTE: recipe curl-8.19.0-r0: task do_compile: Started
+NOTE: recipe curl-8.19.0-r0: task do_compile: Succeeded
+NOTE: Running task 911 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_install)
+NOTE: recipe curl-8.19.0-r0: task do_install: Started
+NOTE: recipe curl-8.19.0-r0: task do_install: Succeeded
+NOTE: Running task 912 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_package)
+NOTE: Running task 913 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_populate_sysroot)
+NOTE: recipe curl-8.19.0-r0: task do_populate_sysroot: Started
+NOTE: recipe curl-8.19.0-r0: task do_package: Started
+NOTE: recipe curl-8.19.0-r0: task do_populate_sysroot: Succeeded
+NOTE: recipe curl-8.19.0-r0: task do_package: Succeeded
+NOTE: Running task 914 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_packagedata)
+NOTE: recipe curl-8.19.0-r0: task do_packagedata: Started
+NOTE: recipe curl-8.19.0-r0: task do_packagedata: Succeeded
+NOTE: Running task 915 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_create_spdx)
+NOTE: Running task 916 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_package_write_ipk)
+NOTE: Running task 917 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_package_qa)
+NOTE: recipe curl-8.19.0-r0: task do_create_spdx: Started
+NOTE: recipe curl-8.19.0-r0: task do_package_write_ipk: Started
+NOTE: recipe curl-8.19.0-r0: task do_package_qa: Started
+NOTE: recipe curl-8.19.0-r0: task do_package_write_ipk: Succeeded
+NOTE: recipe curl-8.19.0-r0: task do_create_spdx: Succeeded
+NOTE: Running task 918 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_create_package_spdx)
+NOTE: recipe curl-8.19.0-r0: task do_package_qa: Succeeded
+NOTE: recipe curl-8.19.0-r0: task do_create_package_spdx: Started
+NOTE: recipe curl-8.19.0-r0: task do_create_package_spdx: Succeeded
+NOTE: Running noexec task 919 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_build)
+NOTE: Tasks Summary: Attempted 919 tasks of which 908 didn't need to be rerun and all succeeded.
+
+Summary: There was 1 WARNING message.

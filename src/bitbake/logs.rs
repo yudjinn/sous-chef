@@ -1066,7 +1066,7 @@ fn pointer_or_path(ws: Option<&Workspace>, file: &Path, line: u32) -> String {
 }
 
 /// A log path relative to the build directory when inside it.
-fn display_path(ws: Option<&Workspace>, p: &Path) -> String {
+pub fn display_path(ws: Option<&Workspace>, p: &Path) -> String {
     ws.and_then(|w| w.build_dir.as_ref())
         .and_then(|b| p.strip_prefix(b).ok())
         .map(|r| format!("{BUILD_LAYER}:{}", r.display()))
@@ -1145,6 +1145,24 @@ fn python_context(frames: &[Frame], ws: Option<&Workspace>) -> Vec<String> {
     }
 }
 
+/// A compile error's message split into its location (`<file>:<line>[:<col>]`) and the
+/// diagnostic (`error: ...`, `fatal error: ...`), as gcc and clang print it.
+fn compile_location(e: &DigestError) -> Option<(&str, &str)> {
+    if e.kind != FailureKind::Compile {
+        return None;
+    }
+    let at = [": fatal error: ", ": error: "]
+        .iter()
+        .filter_map(|sep| e.message.find(sep))
+        .min()?;
+    let (loc, rest) = e.message.split_at(at);
+    let loc_ok = loc
+        .rsplitn(3, ':')
+        .take(2)
+        .any(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    loc_ok.then(|| (loc, rest.trim_start_matches(": ")))
+}
+
 impl Digest {
     /// The digest as a two-column `field value` table, then the hint line.
     pub fn table(&self, context_rows: usize, with_log: bool) -> Table {
@@ -1165,7 +1183,17 @@ impl Digest {
         match &self.first {
             Some(e) => {
                 let label = format!("error ({}, line {})", e.kind.as_str(), e.line);
-                t.row(&[&label, &render::snippet(&e.message)]);
+                // A compiler diagnostic is `<file>:<line>:<col>: error: <message>`; the file
+                // as the compiler was given it can be long (`../../sources/curl-8.19.0/
+                // lib/version.c`, live, y3-leftovers), which cut the message itself to the
+                // snippet width. The location gets a row of its own.
+                match compile_location(e) {
+                    Some((at, msg)) => {
+                        t.row(&[&label, &render::snippet(msg)]);
+                        t.row(&["source", &render::snippet(at)]);
+                    }
+                    None => t.row(&[&label, &render::snippet(&e.message)]),
+                }
                 if let Some(d) = &e.detail {
                     let field = match e.kind {
                         FailureKind::Fetch => "url",
@@ -1358,6 +1386,162 @@ pub fn exit_from_console(output: &str, log: &Path) -> Option<i32> {
         .into_iter()
         .find(|t| t.log.as_deref().is_some_and(|l| tail(l) == want))
         .and_then(|t| t.exit_code)
+}
+
+// ---------------------------------------------------------------------------------------
+// A finished job's console: warnings and interruption
+// ---------------------------------------------------------------------------------------
+
+/// Warnings shown for a finished job; the rest are counted.
+pub const MAX_WARNINGS: usize = 5;
+
+/// The `WARNING:` lines of console output (knotty prints each warning the server logs as
+/// `WARNING: <message>`, with the `<PF> <task>: ` prefix for a task's), distinct, in
+/// order, with how many there were in all. Lines of a task log printed under `Log data
+/// follows:` (`| WARNING: ...`) are not the console's own and are left out, as is
+/// knotty's closing count (`Summary: There was 1 WARNING message.`,
+/// [`is_warning_summary`]).
+pub fn console_warnings(output: &str) -> (Vec<String>, usize) {
+    let mut seen = HashSet::new();
+    let mut distinct = Vec::new();
+    let mut total = 0;
+    for raw in output.lines() {
+        let line = raw.trim_end_matches('\r').trim_end();
+        if !line.starts_with("WARNING: ") {
+            continue;
+        }
+        total += 1;
+        if seen.insert(line.to_string()) {
+            distinct.push(line.to_string());
+        }
+    }
+    (distinct, total)
+}
+
+/// The rows of a finished job's warnings: the first [`MAX_WARNINGS`] distinct
+/// `WARNING:` lines ([`console_warnings`]), then how many more there are and where.
+pub fn warning_rows(shown: &[String], total: usize, handle: Option<&Handle>) -> Vec<String> {
+    let mut out: Vec<String> = shown.iter().take(MAX_WARNINGS).cloned().collect();
+    let more = shown.len().saturating_sub(MAX_WARNINGS);
+    let repeats = total.saturating_sub(shown.len());
+    if more > 0 || repeats > 0 {
+        let mut s = String::new();
+        if more > 0 {
+            s.push_str(&format!(
+                "+{more} more distinct {}",
+                if more == 1 { "warning" } else { "warnings" }
+            ));
+        }
+        if repeats > 0 {
+            if !s.is_empty() {
+                s.push_str("; ");
+            }
+            s.push_str(&format!(
+                "{repeats} repeated {} left out",
+                if repeats == 1 { "line" } else { "lines" }
+            ));
+        }
+        s.push_str(&format!(" ({total} WARNING lines in all"));
+        if let Some(h) = handle {
+            s.push_str(&format!(": slice handle={h} grep=^WARNING:"));
+        }
+        s.push(')');
+        out.push(s);
+    }
+    out
+}
+
+/// knotty's count of warnings and errors at the end of a build (`bb.ui.knotty`: `Summary:
+/// There was 1 WARNING message.`, `Summary: There were 3 WARNING messages.`), which says
+/// nothing the warnings themselves do not.
+pub fn is_warning_summary(line: &str) -> bool {
+    let l = line.trim();
+    l.starts_with("Summary: There w") && l.ends_with("WARNING message.")
+        || l.starts_with("Summary: There w") && l.ends_with("WARNING messages.")
+}
+
+/// A task that had started and not ended when the console stopped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RunningTask {
+    /// `PF`, from `NOTE: recipe <PF>: task do_<task>: Started`.
+    pub pf: String,
+    /// `PN`: from the recipe file of the matching `NOTE: Running task` line, else `PF`
+    /// without its last two `-` fields.
+    pub pn: String,
+    /// `do_<task>` (a setscene task keeps its `_setscene` suffix).
+    pub task: String,
+    /// `<n> of <m>` from the `NOTE: Running task <n> of <m> (<file>:<task>)` line.
+    pub number: Option<String>,
+}
+
+/// How a build that was interrupted ended, from its console output (`bb.ui.knotty`,
+/// docs/bitbake-semantics.md "Running BitBake").
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Interruption {
+    /// The tasks started and not reported as ended (`Succeeded` / `Failed`), last started
+    /// last.
+    pub running: Vec<RunningTask>,
+    /// knotty's lines about the interrupt, in order: `Keyboard Interrupt, closing
+    /// down...`, `Second Keyboard Interrupt, stopping...`, `NOTE: Sending SIGTERM to
+    /// remaining N tasks`, `Execution was interrupted, returning a non-zero exit code.`.
+    pub lines: Vec<String>,
+}
+
+/// The tasks running when the console output stops, and knotty's interrupt lines.
+pub fn interruption(output: &str) -> Interruption {
+    static RUNNING: LazyLock<Option<Regex>> = LazyLock::new(|| {
+        Regex::new(r"^NOTE: Running (?:setscene |noexec )?task (\d+ of \d+) \((.+):(do_[A-Za-z0-9_+.-]+)\)$")
+            .ok()
+    });
+    static STATE: LazyLock<Option<Regex>> = LazyLock::new(|| {
+        Regex::new(r"^NOTE: recipe (\S+): task (do_[A-Za-z0-9_+.-]+): (Started|Succeeded|Failed)$")
+            .ok()
+    });
+    let (Some(running_re), Some(state_re)) = (RUNNING.as_ref(), STATE.as_ref()) else {
+        return Interruption::default();
+    };
+    // (`<n> of <m>`, recipe file, task) of every `Running task` line, newest last.
+    let mut scheduled: Vec<(String, PathBuf, String)> = Vec::new();
+    let mut out = Interruption::default();
+    for raw in output.lines() {
+        let line = raw.trim_end_matches('\r').trim_end();
+        if let Some(c) = running_re.captures(line) {
+            scheduled.push((c[1].to_string(), PathBuf::from(&c[2]), c[3].to_string()));
+        } else if let Some(c) = state_re.captures(line) {
+            let (pf, task) = (c[1].to_string(), c[2].to_string());
+            if &c[3] == "Started" {
+                let found = scheduled.iter().rev().find(|(_, file, t)| {
+                    *t == task
+                        && pn_pv_from_file(file)
+                            .0
+                            .is_some_and(|pn| pf.starts_with(&format!("{pn}-")))
+                });
+                let pn = found
+                    .and_then(|(_, f, _)| pn_pv_from_file(f).0)
+                    .unwrap_or_else(|| pn_from_pf(&pf));
+                out.running.push(RunningTask {
+                    pf,
+                    pn,
+                    task,
+                    number: found.map(|(n, _, _)| n.clone()),
+                });
+            } else {
+                out.running.retain(|r| !(r.pf == pf && r.task == task));
+            }
+        } else if line == "Keyboard Interrupt, closing down..."
+            || line == "Second Keyboard Interrupt, stopping..."
+            || (line.starts_with("NOTE: Sending SIGTERM to remaining ") && line.ends_with("tasks"))
+            || line.starts_with("Execution was interrupted")
+        {
+            out.lines.push(line.to_string());
+        }
+    }
+    out
+}
+
+/// `PN` from `PF` (`${PN}-${EXTENDPE}${PV}-${PR}`): without its last two `-` fields.
+fn pn_from_pf(pf: &str) -> String {
+    pf.rsplitn(3, '-').nth(2).unwrap_or(pf).to_string()
 }
 
 /// `compile` or `do_compile` -> `do_compile`. Task and recipe names may hold only

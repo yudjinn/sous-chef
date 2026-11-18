@@ -5,10 +5,14 @@
 //!   (`eval::providers`: `PREFERRED_PROVIDER`, `PREFERRED_VERSION`, layer priority and
 //!   version). Then the build dependencies of the selected `PACKAGECONFIG` options: OE-Core's
 //!   `base.bbclass` adds them to `DEPENDS` with anonymous python, which is never run, so they
-//!   are listed from the flags. `depth` follows the selected providers.
-//! - `runtime`: per package of `PACKAGES`, the words of `RDEPENDS:<package>`, plus the
-//!   runtime dependencies of the selected `PACKAGECONFIG` options (`base.bbclass` adds them to
-//!   `RDEPENDS:${PN}`).
+//!   are listed from the flags. Then the recipes named by the `depends` flags of the
+//!   recipe's tasks. A native variant's words are read through `native_filter`
+//!   ([`NativeDepends`]). `depth` follows the selected providers.
+//! - `runtime`: the plain `RDEPENDS` / `RRECOMMENDS` (every package), per package of
+//!   `PACKAGES` the words of `RDEPENDS:<package>` and `RRECOMMENDS:<package>` (relation
+//!   `depends` / `recommends`, [`RUNTIME_VARS`]), plus the runtime dependencies and
+//!   recommendations of the selected `PACKAGECONFIG` options (`base.bbclass` adds them to
+//!   `RDEPENDS:${PN}` and `RRECOMMENDS:${PN}`).
 //! - `packageconfig`: one row per `PACKAGECONFIG[option]` flag: selected or not, the enable
 //!   and disable arguments, build and runtime dependencies (fields 1 to 4 of the flag, OE-Core
 //!   `base.bbclass` and the `PACKAGECONFIG` entry of the reference manual).
@@ -36,7 +40,7 @@ use crate::error::Result;
 use crate::eval::providers::{
     ProviderReason, ProviderSet, Providers, Selection, Setting, VersionReason,
 };
-use crate::eval::{self, ClassExtend, DataStore, OpStatus};
+use crate::eval::{self, ClassExtend, DataStore, OpKind, OpStatus};
 use crate::index::Index;
 use crate::index::query::{self, RecipeRow};
 use crate::mcp::Ctx;
@@ -491,6 +495,8 @@ fn build(
     let mut seen: HashSet<(i64, Option<ClassExtend>)> = HashSet::new();
     let mut python = 0;
     let mut pkgconfig = false;
+    let mut task_rows = false;
+    let mut native_mapped = false;
     let mut missing = 0;
     while let Some((d, data)) = queue.pop_front() {
         let mut next: Vec<Selection> = Vec::new();
@@ -499,24 +505,43 @@ fn build(
             python += 1;
         }
         let words = value.map(|v| dep_words(&v.text)).unwrap_or_default();
-        let mut rows: Vec<(String, String, Option<Loc>)> = words
-            .iter()
-            .map(|w| {
-                (
-                    w.clone(),
-                    "DEPENDS".to_string(),
-                    word_source(&data, "DEPENDS", w),
-                )
-            })
-            .collect();
+        let filter = NativeDepends::of(&data);
+        let mut rows: Vec<(String, String, Option<Loc>)> = Vec::new();
+        for w in &words {
+            let loc = word_source(&data, "DEPENDS", w);
+            match filter.map(w) {
+                Mapped::Same => rows.push((w.clone(), "DEPENDS".to_string(), loc)),
+                Mapped::To(n) => {
+                    native_mapped = true;
+                    rows.push((n, "DEPENDS (native_filter)".to_string(), loc));
+                }
+                Mapped::Dropped => native_mapped = true,
+            }
+        }
         let opts = pkg_options(&data).options;
         for o in opts.iter().filter(|o| o.selected) {
             for w in dep_words(o.field(2)) {
+                let (w, source) = match filter.map(&w) {
+                    Mapped::Same => (w, format!("PACKAGECONFIG[{}]", o.name)),
+                    Mapped::To(n) => {
+                        native_mapped = true;
+                        (n, format!("PACKAGECONFIG[{}] (native_filter)", o.name))
+                    }
+                    Mapped::Dropped => continue,
+                };
                 if !rows.iter().any(|(x, _, _)| *x == w) {
                     pkgconfig = true;
-                    rows.push((w, format!("PACKAGECONFIG[{}]", o.name), o.loc.clone()));
+                    rows.push((w, source, o.loc.clone()));
                 }
             }
+        }
+        let task_deps = task_depends(index, &data)?;
+        for (name, tasks, loc) in task_deps {
+            if rows.iter().any(|(x, _, _)| *x == name) {
+                continue;
+            }
+            task_rows = true;
+            rows.push((name, tasks, loc));
         }
         for (w, source, loc) in rows {
             if words::is_unevaluated(&w) {
@@ -549,8 +574,14 @@ fn build(
     if pkgconfig {
         t.note(PACKAGECONFIG_NOTE);
     }
+    if task_rows {
+        t.note(TASK_DEPENDS_NOTE);
+    }
+    if native_mapped {
+        t.note(NATIVE_FILTER_NOTE);
+    }
     if missing > 0 {
-        t.note("note: provider - means no recipe in the workspace provides the name (nor a BBCLASSEXTEND variant of a recipe whose BBCLASSEXTEND lists the class, by its name or through the PROVIDES its class rewrites)");
+        t.note("note: provider - means no recipe in the workspace was found to provide the name (nor a BBCLASSEXTEND variant of a recipe whose BBCLASSEXTEND lists the class, by its name or through the PROVIDES its class rewrites); a PN or PROVIDES that needs expansion to name it is not found (binutils-cross-${TARGET_ARCH}, a PROVIDES:append:class-native)");
     }
     if let Some(n) = render::python_note(python) {
         t.note(&n);
@@ -572,6 +603,143 @@ fn build(
         t.note(&n.replacen("note: python", "note: DEPENDS: python", 1));
     }
     Ok(t)
+}
+
+const NATIVE_FILTER_NOTE: &str = "note: native_filter rows: in a native variant (PN ending in -native, \"native\" in BBCLASSEXTEND) OE-core's native.bbclass filters DEPENDS on every read (native_virtclass_handler: setVarFilter with oe.classextend.native_filter, selfref=False), so BitBake builds expat-native for the word expat; shown as it reads it, the recipe itself left out";
+
+/// How a dependency word of `DEPENDS` reads in a recipe ([`NativeDepends::map`]).
+enum Mapped {
+    Same,
+    To(String),
+    /// The recipe's own name (`selfref=False`).
+    Dropped,
+}
+
+/// OE-core's `native_virtclass_handler` (Wrynose `classes-recipe/native.bbclass`): when
+/// `PN` ends with `-native` and `"native" in BBCLASSEXTEND` (a substring test), it sets
+/// `d.setVarFilter("DEPENDS", "native_filter(val, pn, bpn, selfref=False)")`, so every read
+/// of `DEPENDS` (and so `bb.cache`'s, which schedules the build) gets the filtered words
+/// (`oe.classextend.native_filter`, [`crate::eval::variant::native_filter`]). The
+/// evaluator flags that filter and does not compute it (docs/bitbake-semantics.md,
+/// "Class-extended variants"); `deps` applies it to each word it lists.
+struct NativeDepends {
+    pn: String,
+    bpn: Option<String>,
+    on: bool,
+}
+
+impl NativeDepends {
+    fn of(ds: &DataStore) -> NativeDepends {
+        let pn = ds.value("PN").map(|v| v.text).unwrap_or_default();
+        let classextend = ds
+            .value("BBCLASSEXTEND")
+            .map(|v| v.text)
+            .unwrap_or_default();
+        NativeDepends {
+            on: pn.ends_with("-native") && classextend.contains("native"),
+            bpn: ds
+                .value("BPN")
+                .filter(|v| !v.unevaluated_python && v.unresolved.is_empty())
+                .map(|v| v.text),
+            pn,
+        }
+    }
+
+    fn map(&self, word: &str) -> Mapped {
+        if !self.on || words::is_unevaluated(word) {
+            return Mapped::Same;
+        }
+        if word == self.pn {
+            return Mapped::Dropped;
+        }
+        match eval::variant::native_filter(word, &self.pn, self.bpn.as_deref()) {
+            Some(Ok(n)) if n != word => Mapped::To(n),
+            _ => Mapped::Same,
+        }
+    }
+}
+
+const TASK_DEPENDS_NOTE: &str = "note: do_<task>[depends] rows: the task waits for that recipe's task (the flag's <recipe>:<task> entries, bb.runqueue); classes set most of them. Not seen: what anonymous python adds (OE-core: base.bbclass virtual/fakeroot-native to the fakeroot tasks and the decompressors such as xz-native to do_unpack, package.bbclass PACKAGE_DEPENDS to do_package, update-alternatives.bbclass virtual/update-alternatives to DEPENDS)";
+
+/// The recipes named by the `depends` flag of the recipe's tasks
+/// (`do_unpack[depends] = "xz-native:do_populate_sysroot"`; `bb.runqueue` makes the task
+/// wait for `<recipe>:<task>` of the selected provider). One entry per recipe name, with
+/// the tasks that name it (`do_install[depends] (do_populate_sysroot)`) and the first
+/// applied assignment holding the word; an unevaluated word is one entry of its own.
+fn task_depends(index: &Index, ds: &DataStore) -> Result<Vec<(String, String, Option<Loc>)>> {
+    let pn = ds.value("PN").map(|v| v.text).unwrap_or_default();
+    let mut out: Vec<(String, Vec<String>, Option<Loc>)> = Vec::new();
+    for task in crate::mcp::tools::recipe::task_names(index, ds)? {
+        let Some(v) = ds.flag(&task, "depends") else {
+            continue;
+        };
+        for w in words::words(&v.text) {
+            let (name, dep_task) = if words::is_unevaluated(w) {
+                (w.to_string(), String::new())
+            } else {
+                match w.rsplit_once(':') {
+                    Some((n, t)) if !n.is_empty() && !t.is_empty() => {
+                        (n.to_string(), t.to_string())
+                    }
+                    _ => continue,
+                }
+            };
+            if name == pn {
+                continue;
+            }
+            let label = if dep_task.is_empty() {
+                format!("{task}[depends]")
+            } else {
+                format!("{task}[depends] ({dep_task})")
+            };
+            match out.iter_mut().find(|(n, _, _)| *n == name) {
+                Some((_, tasks, _)) => {
+                    if !tasks.contains(&label) {
+                        tasks.push(label);
+                    }
+                }
+                None => {
+                    let loc = flag_word_source(ds, &task, "depends", w);
+                    out.push((name, vec![label], loc));
+                }
+            }
+        }
+    }
+    Ok(out
+        .into_iter()
+        .map(|(name, tasks, loc)| {
+            let source = match tasks.split_first() {
+                Some((first, [])) => first.clone(),
+                Some((first, rest)) => format!("{first} (+{} more tasks)", rest.len()),
+                None => String::new(),
+            };
+            (name, source, loc)
+        })
+        .collect())
+}
+
+/// The first assignment to `name[flag]` whose expanded value contains `word`. BitBake's
+/// `handleVirtRecipeProviders` stores every task's `depends` flag again at the end of
+/// parsing (docs/bitbake-semantics.md, "Replay", recipe virtual providers), which leaves the assignments
+/// before it shadowed: those count, and the rewrite itself only for a word it put there
+/// (a `virtual/...` name replaced by its provider; its loc is the `PREFERRED_PROVIDER_*`).
+fn flag_word_source(ds: &DataStore, name: &str, flag: &str, word: &str) -> Option<Loc> {
+    let history = ds.flag_history(name, flag);
+    let has = |op: &crate::eval::VarOp| words::words(&ds.expand(&op.value).text).contains(&word);
+    history
+        .iter()
+        .filter(|(op, st)| {
+            op.kind != OpKind::VirtualProviderRewrite
+                && matches!(st, OpStatus::Applied | OpStatus::Shadowed)
+        })
+        .find(|(op, _)| has(op))
+        .or_else(|| {
+            history
+                .iter()
+                .filter(|(_, st)| *st == OpStatus::Applied)
+                .find(|(op, _)| has(op))
+        })
+        .map(|(op, _)| op.loc.clone())
 }
 
 // ---- mcdepends ----
@@ -641,8 +809,19 @@ fn mcdepends_table(ds: &DataStore) -> Table {
 
 // ---- runtime ----
 
+/// The runtime relations BitBake builds for, in the order of `bb.cache`: `RDEPENDS` and
+/// `RRECOMMENDS` (`CoreRecipeInfo`: `depvar` of the plain variable, added to every
+/// package, and `pkgvar` per package; `rundeps` / `runrecs`). `bb.taskdata`
+/// `TaskData.add_tasks` puts both in the recipe's run targets, so a recommendation's
+/// provider is built (`do_build[rdeptask]`, `do_package_qa[rdeptask]`,
+/// `do_package_write_<type>[rdeptask]` in OE-core) and an unprovidable one fails the recipe
+/// as a missing `RDEPENDS` does (`remove_runtarget`). `RSUGGESTS`, `RCONFLICTS`,
+/// `RREPLACES` and `RPROVIDES` cause no task (docs/bitbake-semantics.md, "Runtime
+/// dependencies and recommendations").
+const RUNTIME_VARS: [(&str, &str); 2] = [("RDEPENDS", "depends"), ("RRECOMMENDS", "recommends")];
+
 fn runtime(ds: &DataStore) -> Table {
-    let mut t = Table::new(&["package", "dep", "source", "loc"]);
+    let mut t = Table::new(&["package", "dep", "relation", "source", "loc"]);
     let all: Vec<String> = ds
         .value("PACKAGES")
         .map(|v| {
@@ -656,7 +835,7 @@ fn runtime(ds: &DataStore) -> Table {
         all.into_iter().partition(|w| words::is_unevaluated(w));
     if !unknown_pkgs.is_empty() {
         t.note(&format!(
-            "note: PACKAGES holds python that is not evaluated ({}); the packages it adds, and their RDEPENDS, are not listed",
+            "note: PACKAGES holds python that is not evaluated ({}); the packages it adds, and their RDEPENDS / RRECOMMENDS, are not listed",
             unknown_pkgs
                 .iter()
                 .map(|u| words::abbreviate(u))
@@ -666,19 +845,38 @@ fn runtime(ds: &DataStore) -> Table {
     }
     let pn = ds.value("PN").map(|v| v.text).unwrap_or_default();
     let mut python = 0;
-    for pkg in &packages {
-        let name = format!("RDEPENDS:{pkg}");
-        if let Some(v) = ds.value(&name) {
+    let mut recommends = false;
+    let row = |t: &mut Table, pkg: &str, name: &str, relation: &str, w: &str| {
+        let loc = word_source(ds, name, w);
+        let shown = if words::is_unevaluated(w) {
+            format!("{} ({UNEVALUATED})", words::abbreviate(w))
+        } else {
+            w.to_string()
+        };
+        t.row(&[pkg, &shown, relation, name, &loc_str(loc)]);
+    };
+    for (var, relation) in RUNTIME_VARS {
+        // The plain variable applies to every package (bb.cache `depvar`).
+        if let Some(v) = ds.value(var).filter(|v| !v.text.trim().is_empty()) {
             if v.unevaluated_python {
                 python += 1;
             }
             for w in dep_words(&v.text) {
-                let loc = word_source(ds, &name, &w);
-                if words::is_unevaluated(&w) {
-                    let shown = format!("{} ({UNEVALUATED})", words::abbreviate(&w));
-                    t.row(&[pkg, &shown, &name, &loc_str(loc)]);
-                } else {
-                    t.row(&[pkg, &w, &name, &loc_str(loc)]);
+                recommends |= relation == "recommends";
+                row(&mut t, "(every package)", var, relation, &w);
+            }
+        }
+    }
+    for pkg in &packages {
+        for (var, relation) in RUNTIME_VARS {
+            let name = format!("{var}:{pkg}");
+            if let Some(v) = ds.value(&name) {
+                if v.unevaluated_python {
+                    python += 1;
+                }
+                for w in dep_words(&v.text) {
+                    recommends |= relation == "recommends";
+                    row(&mut t, pkg, &name, relation, &w);
                 }
             }
         }
@@ -686,21 +884,29 @@ fn runtime(ds: &DataStore) -> Table {
     let opts = pkg_options(ds).options;
     let mut pkgconfig = false;
     for o in opts.iter().filter(|o| o.selected) {
-        for w in dep_words(o.field(3)) {
-            pkgconfig = true;
-            t.row(&[
-                &pn,
-                &w,
-                &format!("PACKAGECONFIG[{}]", o.name),
-                &loc_str(o.loc.clone()),
-            ]);
+        // Field 4 to RDEPENDS:${PN}, field 5 to RRECOMMENDS:${PN} (base.bbclass).
+        for (field, relation) in [(3, "depends"), (4, "recommends")] {
+            for w in dep_words(o.field(field)) {
+                pkgconfig = true;
+                recommends |= relation == "recommends";
+                t.row(&[
+                    &pn,
+                    &w,
+                    relation,
+                    &format!("PACKAGECONFIG[{}]", o.name),
+                    &loc_str(o.loc.clone()),
+                ]);
+            }
         }
     }
     if t.is_empty() {
         t.note(&format!(
-            "note: no RDEPENDS for the packages {}",
+            "note: no RDEPENDS or RRECOMMENDS for the packages {}",
             packages.join(" ")
         ));
+    }
+    if recommends {
+        t.note(RECOMMENDS_NOTE);
     }
     if pkgconfig {
         t.note(PACKAGECONFIG_NOTE);
@@ -711,8 +917,13 @@ fn runtime(ds: &DataStore) -> Table {
     for n in python_eval_notes(&ds.python_log("PACKAGES")) {
         t.note(&n.replacen("note: python", "note: PACKAGES: python", 1));
     }
+    if !t.is_empty() {
+        t.note("note: each recipe providing one of these is built with its own build dependencies (deps <recipe>); what do_package adds (the shared-library and pkg-config RDEPENDS, debian renames) is known only after a build: pkgdata package_info shows it");
+    }
     t
 }
+
+const RECOMMENDS_NOTE: &str = "note: relation recommends (RRECOMMENDS): BitBake builds its provider as it does for RDEPENDS (bb.taskdata), and a recommendation nothing provides fails the build too; only an image may leave one out (BAD_RECOMMENDATIONS). RSUGGESTS, RCONFLICTS and RREPLACES build nothing and are not listed";
 
 // ---- reverse ----
 

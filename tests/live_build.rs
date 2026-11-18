@@ -548,3 +548,179 @@ fn live_whole_pkgdata_find_path_equals_oe_pkgdata_util() {
         "ours only {only_ours:?}, theirs only {only_theirs:?}"
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// y3-leftovers: a cancelled build's console (the interrupt and the task that was running)
+// and the warnings of finished builds.
+
+fn sample_y3(name: &str) -> String {
+    fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/outputs/live/y3-leftovers")
+            .join(name),
+    )
+    .unwrap()
+}
+
+/// The three real cancelled builds: interrupted twice (y1-build, init-script mode; and
+/// y3-leftovers through `kas shell`), and killed with SIGTERM (y1-build, before the fix).
+/// Each was in `do_configure` of curl, task 909 of 919.
+#[test]
+fn real_cancelled_builds_name_the_running_task_and_the_interrupt() {
+    for (text, interrupted) in [
+        (sample("bitbake/job-build-curl-cancel-sigint.out"), true),
+        (sample_y3("job-kas-build-curl-cancel.out"), true),
+        (sample("bitbake/job-build-curl-cancel-sigterm.out"), false),
+    ] {
+        let stop = logs::interruption(&text);
+        assert_eq!(stop.running.len(), 1, "{:?}", stop.running);
+        let r = &stop.running[0];
+        assert_eq!(
+            (
+                r.pf.as_str(),
+                r.pn.as_str(),
+                r.task.as_str(),
+                r.number.as_deref()
+            ),
+            ("curl-8.19.0-r0", "curl", "do_configure", Some("909 of 919"))
+        );
+        if interrupted {
+            assert_eq!(
+                stop.lines,
+                [
+                    "Keyboard Interrupt, closing down...",
+                    "Second Keyboard Interrupt, stopping...",
+                    "NOTE: Sending SIGTERM to remaining 1 tasks",
+                    "Execution was interrupted, returning a non-zero exit code."
+                ]
+            );
+        } else {
+            assert!(stop.lines.is_empty());
+        }
+    }
+    // A finished build has no running task.
+    assert!(
+        logs::interruption(&sample("bitbake/job-build-curl.out"))
+            .running
+            .is_empty()
+    );
+}
+
+/// The warnings of the real finished builds: one (uninative) in a rebuild, three in the
+/// first build; the interrupted build adds knotty's `Exiting due to interrupt`.
+#[test]
+fn real_build_warnings() {
+    let (w, n) = logs::console_warnings(&sample_y3("job-kas-build-curl.out"));
+    assert_eq!(n, 1);
+    assert!(w[0].starts_with(
+        "WARNING: Your host glibc version (2.44) is newer than that in uninative (2.43)."
+    ));
+    let (w, n) = logs::console_warnings(&sample_y3("build1-first-build-trimmed.out"));
+    assert_eq!((w.len(), n), (3, 3));
+    assert!(w[1].contains("attempting MIRRORS if available"));
+    let (w, _) = logs::console_warnings(&sample_y3("job-kas-build-curl-cancel.out"));
+    assert_eq!(w[1], "WARNING: Exiting due to interrupt.");
+    for name in ["job-kas-build-curl.out", "build1-first-build-trimmed.out"] {
+        let text = sample_y3(name);
+        let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap();
+        assert!(logs::is_warning_summary(last), "{name}: {last}");
+    }
+}
+
+/// A real gcc error in curl's own build (y3-leftovers: a patch from a scratch bbappend
+/// turns one line of `lib/version.c` into a type error). The log and the console (both
+/// trimmed) give the first `error:` with its file and line, the compiler's own context
+/// (`In function`, the source line, the caret), no further errors (the `make: ***` lines
+/// and `ERROR: oe_runmake failed` are consequences), the failing function mapped through
+/// the run file to `autotools.bbclass:228` (`oe_runmake` in `autotools_do_compile`), and a
+/// digest under 1 KB that shows the whole diagnostic.
+#[test]
+fn real_compiler_error() {
+    const MSG: &str = "../../sources/curl-8.19.0/lib/version.c:152:25: error: incompatible types when initializing type 'int' using type 'struct curl_slist'";
+    let log = sample_y3("log.do_compile.1958029.trimmed");
+    let run = sample_y3("run.do_compile.1958029");
+    let failures = logs::detect(&log);
+    let first = logs::first_error(&failures).cloned().unwrap();
+    assert_eq!(first.kind, FailureKind::Compile);
+    assert_eq!(first.message, MSG);
+    let trace = logs::shell_trace(&log).unwrap();
+    assert_eq!((trace.exit_code, trace.command.as_str()), (1, "exit 1"));
+    let frames: Vec<&str> = trace.frames.iter().map(|f| f.function.as_str()).collect();
+    assert_eq!(
+        frames,
+        [
+            "bbfatal_log",
+            "die",
+            "oe_runmake",
+            "autotools_do_compile",
+            "do_compile",
+            "main"
+        ]
+    );
+    let func = logs::failing_function(&trace, Some(&run)).unwrap();
+    assert_eq!(func.function, "autotools_do_compile");
+    let (file, line) = func.source.clone().unwrap();
+    assert!(
+        file.ends_with("openembedded-core/meta/classes-recipe/autotools.bbclass"),
+        "{file:?}"
+    );
+    assert_eq!(line, 228);
+
+    let d = logs::digest(&DigestInput {
+        text: &log,
+        run_script: Some(&run),
+        ..DigestInput::default()
+    });
+    let e = d.first.as_ref().unwrap();
+    assert_eq!(
+        e.context,
+        [
+            "../../sources/curl-8.19.0/lib/version.c: In function 'curl_version':",
+            "152 |   int sous_chef_count = *sous_chef_probe;",
+            "|                         ^"
+        ]
+    );
+    assert_eq!(d.more, 0, "the make and oe_runmake lines are consequences");
+    let text = d.render(sous_chef::render::Format::Text, 400);
+    assert!(text.len() < 1024, "{}: {text}", text.len());
+    assert!(
+        text.contains(&format!(
+            "error (compile, line {})\terror: incompatible types when initializing type 'int' using type 'struct curl_slist'\n",
+            first.line
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains("source\t../../sources/curl-8.19.0/lib/version.c:152:25\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("function\tautotools_do_compile at "),
+        "{text}"
+    );
+
+    // The console: the same first error, the runqueue's exit code and the log it names.
+    let console = sample_y3("console-compile-error-trimmed.out");
+    let first = logs::first_error(&logs::detect(&console)).cloned().unwrap();
+    assert_eq!(first.message, MSG);
+    let tasks = logs::failed_tasks(&console);
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(
+        (tasks[0].task.as_str(), tasks[0].exit_code),
+        ("do_compile", Some(1))
+    );
+    assert!(
+        tasks[0]
+            .log
+            .as_ref()
+            .unwrap()
+            .ends_with("curl/8.19.0/temp/log.do_compile.1958029")
+    );
+    let d = logs::digest(&DigestInput {
+        text: &console,
+        ..DigestInput::default()
+    });
+    assert_eq!(d.meta.exit_code, Some(1));
+    assert_eq!(d.meta.task.as_deref(), Some("do_compile"));
+    assert_eq!(d.more, 0);
+}
