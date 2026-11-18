@@ -515,6 +515,29 @@ fn release_syntax_workdir_file_fixes_only_when_every_release_has_unpackdir() {
 }
 
 #[test]
+fn class_export_functions_leaves_helpers_and_non_tasks_alone() {
+    // x7: on OE-core the rule reported 23 helpers (do_qa_sysroot as a postfunc,
+    // package_do_filedeps in PACKAGEFUNCS, do_package_deb called with exec_func, ...).
+    // In the fixture workspace base.bbclass adds the standard tasks.
+    let env = Env::new();
+    let text = fixture("org/class-export-functions/helpers.bbclass");
+    let path = "classes/mytool.bbclass";
+    let found = lint::check_text(
+        &OrgClassExportFunctions,
+        &env.ws,
+        &env.index,
+        loc_of(path),
+        &text,
+        kind(path),
+        &[],
+        None,
+    );
+    let lines: Vec<String> = found.iter().map(|f| f.loc.lines.to_string()).collect();
+    // Only `do_install()` defined directly: a standard task, used by nothing else.
+    assert_eq!(lines, ["38-40"], "{found:?}");
+}
+
+#[test]
 fn class_export_functions_fixes() {
     // The rule takes the class name from the file name: lint the fixture as mytool.bbclass.
     let env = Env::new();

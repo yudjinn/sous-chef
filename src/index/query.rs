@@ -915,6 +915,18 @@ pub fn search_names(
     )
 }
 
+/// The task lists of every `addtask` statement of the index (`statements.name`, e.g.
+/// `"fetch"` or `"do_compile"`), data files left out.
+pub fn addtask_names(index: &Index) -> Result<Vec<String>> {
+    collect(
+        index,
+        "SELECT s.name FROM statements s JOIN files f ON f.id = s.file_id \
+         WHERE s.kind = 'addtask' AND s.name IS NOT NULL AND f.not_collected IS NOT 'data'",
+        &[],
+        |r| r.get::<_, String>(0),
+    )
+}
+
 /// [`search_names`] for a flag statement `NAME[flag]`: names containing `name` whose flag
 /// contains `flag` (both case-insensitive, as `LIKE`), the exact `NAME[flag]` first.
 pub fn search_name_flags(
