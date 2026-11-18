@@ -22,6 +22,7 @@ use sous_chef::index::Index;
 use sous_chef::lint::fix::{self, FixOptions, Safety};
 use sous_chef::lint::rules::{
     hygiene_continuation::HygieneContinuation, hygiene_release_removed::HygieneReleaseRemoved,
+    hygiene_release_syntax::HygieneReleaseSyntax, hygiene_workdir_s::HygieneWorkdirS,
     org_class_export_functions::OrgClassExportFunctions,
     org_include_must_exist::OrgIncludeMustExist, org_inherit_defer::OrgInheritDefer,
     org_layer_conf::OrgLayerConf, override_append_no_space::OverrideAppendNoSpace,
@@ -394,8 +395,115 @@ fn continuation_fixes() {
 fn release_removed_fixes() {
     let r = &HygieneReleaseRemoved;
     let dir = "hygiene/release-removed";
+    // Line 8: `WHITELIST_GPL-3.0-only` takes another value form under its new name: no fix.
+    check_fixture(r, dir, "fixable.bb", "fixed.bb", &[8]);
+    assert_eq!(
+        {
+            let mut s = safeties(r, dir, "fixable.bb");
+            s.sort();
+            s
+        },
+        [(3, S), (4, S), (5, S), (6, S), (7, S)]
+    );
+    // The old bad fixture: only PNBLACKLIST[foo] (line 10) has a fix.
+    assert_eq!(safeties(r, dir, "bad.bb"), [(10, S)]);
+}
+
+/// The fixes of `rule` on fixture `dir/name` for a layer checked against `releases`.
+fn safeties_for(
+    rule: &dyn Rule,
+    dir: &str,
+    name: &str,
+    releases: &[sous_chef::release::Release],
+) -> Vec<(u32, Safety)> {
+    let env = Env::new();
+    let text = fixture(&format!("{dir}/{name}"));
+    fix::fixes_in_text(
+        rule,
+        &env.ws,
+        &env.index,
+        loc_of(name),
+        &text,
+        kind(name),
+        releases,
+    )
+    .iter()
+    .map(|f| (f.finding.loc.lines.start, f.fix.safety))
+    .collect()
+}
+
+#[test]
+fn a_rename_is_fixed_only_where_no_release_still_has_the_old_name() {
+    use sous_chef::release::Release;
+    // DISTRO_FEATURES_BACKFILL_CONSIDERED is renamed from Wrynose on: a layer that also
+    // claims Whinlatter still needs the old name there.
+    let env = Env::new();
+    let text = "DISTRO_FEATURES_BACKFILL_CONSIDERED = \"pulseaudio\"\n";
+    let fixes = |releases: &[Release]| {
+        fix::fixes_in_text(
+            &HygieneReleaseRemoved,
+            &env.ws,
+            &env.index,
+            loc_of("conf/distro/x.conf"),
+            text,
+            kind("conf/distro/x.conf"),
+            releases,
+        )
+        .into_iter()
+        .map(|f| f.fix.description)
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        fixes(&[Release::Wrynose]),
+        ["rename `DISTRO_FEATURES_BACKFILL_CONSIDERED` to `DISTRO_FEATURES_OPTED_OUT`"]
+    );
+    assert!(fixes(&[Release::Whinlatter, Release::Wrynose]).is_empty());
+}
+
+#[test]
+fn workdir_s_fixes_only_when_every_release_has_unpackdir() {
+    use sous_chef::release::Release;
+    let r = &HygieneWorkdirS;
+    let dir = "hygiene/workdir-s";
+    check_fixture(r, dir, "bad.bb", "fixed.bb", &[]);
+    assert_eq!(safeties(r, dir, "bad.bb"), [(3, S), (5, S)]);
+    // A layer that also claims scarthgap (no UNPACKDIR there): reported, no fix, and the
+    // message says to do it by hand.
+    let mixed = [Release::Scarthgap, Release::Wrynose];
+    assert_eq!(safeties_for(r, dir, "bad.bb", &mixed), []);
+    let env = Env::new();
+    let text = fixture(&format!("{dir}/bad.bb"));
+    let found = lint::check_text(
+        r,
+        &env.ws,
+        &env.index,
+        loc_of("bad.bb"),
+        &text,
+        kind("bad.bb"),
+        &mixed,
+        None,
+    );
+    assert_eq!(found.len(), 2);
+    assert!(
+        found[0].message.ends_with(
+            "; no automatic fix while the layer also claims scarthgap, which has no UNPACKDIR"
+        ),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn release_syntax_workdir_file_fixes_only_when_every_release_has_unpackdir() {
+    use sous_chef::release::Release;
+    let r = &HygieneReleaseSyntax;
+    let dir = "hygiene/release-syntax";
     check_fixture(r, dir, "fixable.bb", "fixed.bb", &[]);
-    assert!(safeties(r, dir, "fixable.bb").iter().all(|(_, s)| *s == S));
+    // One finding (and fix) per statement; every `${WORKDIR}/<local file>` of it changes.
+    assert_eq!(safeties(r, dir, "fixable.bb"), [(5, S), (10, S)]);
+    let mixed = [Release::Kirkstone, Release::Wrynose];
+    assert_eq!(safeties_for(r, dir, "fixable.bb", &mixed), []);
+    // The bad fixture's other cases (inherit_defer, include_all) have none.
+    assert_eq!(safeties(r, dir, "bad.bb"), [(7, S)]);
 }
 
 #[test]
@@ -446,6 +554,8 @@ fn rules_without_a_fix_offer_none() {
         "org/inherit-defer",
         "override/plus-equals-on-default",
         "hygiene/release-removed",
+        "hygiene/workdir-s",
+        "hygiene/release-syntax",
     ];
     let env = Env::new();
     for r in lint::all_rules() {
@@ -558,8 +668,81 @@ fn release_removed_srcpv_fix_keeps_every_value_where_srcpv_is_empty() {
         fs::read_to_string(fixture_path("ws/meta-mine/conf/layer.conf")).unwrap()
     );
     let (a, b) = evaluate_pair_with(&bad, &fixed, &[("meta-mine/conf/layer.conf", &layer_conf)]);
-    assert_eq!(a, b);
+    // The renames: the new name holds the old one's value; nothing else changes.
+    assert_eq!(
+        changed(&a, &b),
+        [
+            "BB_ENV_EXTRAWHITE",
+            "BB_ENV_PASSTHROUGH_ADDITIONS",
+            "LICENSE_FLAGS_ACCEPTED",
+            "LICENSE_FLAGS_WHITELIST"
+        ]
+    );
+    assert_eq!(
+        a.get("BB_ENV_EXTRAWHITE"),
+        b.get("BB_ENV_PASSTHROUGH_ADDITIONS")
+    );
+    assert_eq!(
+        a.get("LICENSE_FLAGS_WHITELIST"),
+        b.get("LICENSE_FLAGS_ACCEPTED")
+    );
     assert_eq!(a.get("PV"), Some(&Some("1.0+git".to_string())));
+    assert_eq!(a.get("PV"), b.get("PV"));
+}
+
+/// The fixture's meta-mine layer.conf with `extra` appended.
+fn layer_conf_with(extra: &str) -> String {
+    format!(
+        "{}{extra}",
+        fs::read_to_string(fixture_path("ws/meta-mine/conf/layer.conf")).unwrap()
+    )
+}
+
+/// The names whose values differ between two evaluations.
+fn changed(
+    a: &BTreeMap<String, Option<String>>,
+    b: &BTreeMap<String, Option<String>>,
+) -> Vec<String> {
+    a.keys()
+        .chain(b.keys())
+        .filter(|k| a.get(*k) != b.get(*k))
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+#[test]
+fn workdir_s_fix_changes_only_s_to_the_unpack_directory() {
+    // As OE-core from Styhead (`UNPACKDIR ??= "${WORKDIR}/sources-unpack"`).
+    let conf = layer_conf_with("UNPACKDIR ??= \"${WORKDIR}/sources-unpack\"\n");
+    let bad = fixture("hygiene/workdir-s/bad.bb");
+    let fixed = fixed_in_memory(&HygieneWorkdirS, &bad);
+    assert_eq!(fixed, fixture("hygiene/workdir-s/fixed.bb"));
+    let (a, b) = evaluate_pair_with(&bad, &fixed, &[("meta-mine/conf/layer.conf", &conf)]);
+    // B is `${S}` in the fixture's bitbake.conf, so it follows.
+    assert_eq!(changed(&a, &b), ["B", "S", "S:class-native"]);
+    let s = b.get("S").cloned().flatten().unwrap();
+    assert!(s.ends_with("/sources-unpack"), "{s}");
+    assert_eq!(Some(&Some(s)), b.get("UNPACKDIR"));
+}
+
+#[test]
+fn release_syntax_fix_changes_only_the_functions_that_name_local_files() {
+    let conf = layer_conf_with("UNPACKDIR ??= \"${WORKDIR}/sources-unpack\"\n");
+    let bad = fixture("hygiene/release-syntax/fixable.bb");
+    let fixed = fixed_in_memory(&HygieneReleaseSyntax, &bad);
+    let (a, b) = evaluate_pair_with(&bad, &fixed, &[("meta-mine/conf/layer.conf", &conf)]);
+    // Only function bodies change, and the evaluator gives a function's value as its
+    // location, which the fix keeps: every value is equal.
+    assert_eq!(a, b);
+    // In the text: the local files go through UNPACKDIR, the sed line keeps WORKDIR (the
+    // guide: "References to WORKDIR in sed commands are usually left as they are"), and
+    // `main.c.orig`, no SRC_URI entry, keeps WORKDIR.
+    assert!(fixed.contains("s:@WORK@:${WORKDIR}:"), "{fixed}");
+    assert!(fixed.contains("cp ${WORKDIR}/main.c.orig"), "{fixed}");
+    assert!(!fixed.contains("${WORKDIR}/app.conf"), "{fixed}");
+    assert!(!fixed.contains("${WORKDIR}/main.c "), "{fixed}");
 }
 
 #[test]

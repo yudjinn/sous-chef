@@ -187,7 +187,7 @@ expression: masked_json(&a)
             },
             "findings": [
               {
-                "message": "`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = \"${UNPACKDIR}\")",
+                "message": "`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = \"${UNPACKDIR}\"); no automatic fix while the layer also claims kirkstone and scarthgap, which have no UNPACKDIR",
                 "pointer": "meta-mine:recipes-app/app/app_0.1.bb:22",
                 "rule": "hygiene/release-syntax",
                 "severity": "warning"
@@ -494,7 +494,7 @@ expression: masked_json(&a)
         "layers": [
           "meta-mine"
         ],
-        "message": "`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = \"${UNPACKDIR}\")",
+        "message": "`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = \"${UNPACKDIR}\"); no automatic fix while the layer also claims kirkstone and scarthgap, which have no UNPACKDIR",
         "pointer": "meta-mine:recipes-app/app/app_0.1.bb:22",
         "section": "lint",
         "severity": "warning",

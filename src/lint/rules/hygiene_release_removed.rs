@@ -220,6 +220,52 @@ pub const REMOVALS: &[Removal] = &[
     row(RemovedFetcher, "npmsw", K53, E, "fetch the sources another way (the npm fetchers were disabled for security reasons)"),
 ];
 
+/// The renames with a safe fix: a one-to-one new name in OE-core's `BB_RENAMED_VARIABLES`
+/// (`meta/conf/bitbake.conf`, wrynose) or BitBake's `bitbake_renamed_vars`
+/// (`lib/bb/data_smart.py`), whose value keeps its meaning, and which the newest release
+/// still reads. Not here: the `CVE_CHECK_*` names (`cve-check.bbclass` is gone from
+/// Wrynose), the `ICECC_*` names (`icecc.bbclass` is gone from Whinlatter), the
+/// `WHITELIST_<license>` names (`INCOMPATIBLE_LICENSE_EXCEPTIONS` takes `<pkg>:<license>`
+/// words, another value), and every "remove it" row. The fix renames the variable and keeps
+/// its overrides, flag, operator and value; it is offered only when every release the file is
+/// checked against lacks the old name (the new one exists there).
+#[rustfmt::skip]
+pub const PURE_RENAMES: &[(&str, &str)] = &[
+    ("BB_ENV_WHITELIST", "BB_ENV_PASSTHROUGH"),
+    ("BB_ENV_EXTRAWHITE", "BB_ENV_PASSTHROUGH_ADDITIONS"),
+    ("BB_HASHBASE_WHITELIST", "BB_BASEHASH_IGNORE_VARS"),
+    ("BB_HASHCONFIG_WHITELIST", "BB_HASHCONFIG_IGNORE_VARS"),
+    ("BB_HASHTASK_WHITELIST", "BB_TASKHASH_IGNORE_TASKS"),
+    ("BB_SETSCENE_ENFORCE_WHITELIST", "BB_SETSCENE_ENFORCE_IGNORE_TASKS"),
+    ("MULTI_PROVIDER_WHITELIST", "BB_MULTI_PROVIDER_ALLOWED"),
+    ("PNBLACKLIST", "SKIP_RECIPE"),
+    ("SDK_LOCAL_CONF_BLACKLIST", "ESDK_LOCALCONF_REMOVE"),
+    ("SDK_LOCAL_CONF_WHITELIST", "ESDK_LOCALCONF_ALLOW"),
+    ("SDK_INHERIT_BLACKLIST", "ESDK_CLASS_INHERIT_DISABLE"),
+    ("SSTATE_DUPWHITELIST", "SSTATE_ALLOW_OVERLAP_FILES"),
+    ("SYSROOT_DIRS_BLACKLIST", "SYSROOT_DIRS_IGNORE"),
+    ("UNKNOWN_CONFIGURE_WHITELIST", "UNKNOWN_CONFIGURE_OPT_IGNORE"),
+    ("LICENSE_FLAGS_WHITELIST", "LICENSE_FLAGS_ACCEPTED"),
+    ("DISTRO_FEATURES_BACKFILL_CONSIDERED", "DISTRO_FEATURES_OPTED_OUT"),
+    ("MACHINE_FEATURES_BACKFILL_CONSIDERED", "MACHINE_FEATURES_OPTED_OUT"),
+];
+
+/// The safe fix of a renamed variable's assignment `s`: the base name replaced by `new`.
+fn rename_fix(cx: &LintContext<'_>, s: &Statement, old: &str, new: &str) -> Option<Fix> {
+    let p = fix::assign_parts(cx.source?, s)?;
+    let name = cx.source?.get(p.name.clone())?;
+    let rest = name.strip_prefix(old)?;
+    if !(rest.is_empty() || rest.starts_with(':')) {
+        return None;
+    }
+    Fix::in_file(
+        cx,
+        vec![Edit::replace(p.name.start..p.name.start + old.len(), new)],
+        format!("rename `{old}` to `{new}`"),
+        Safety::Safe,
+    )
+}
+
 /// OE-core's `obsolete_license_list()` (`meta/lib/oe/license.py`, identical on the kirkstone
 /// and wrynose branches).
 #[rustfmt::skip]
@@ -453,6 +499,11 @@ impl HygieneReleaseRemoved {
                                 r.name, r.name, r.instead
                             ),
                         );
+                        if lack.len() == cx.releases.len()
+                            && let Some((_, new)) = PURE_RENAMES.iter().find(|(o, _)| *o == r.name)
+                        {
+                            out.fix_last(rename_fix(cx, s, r.name, new));
+                        }
                     }
                     (RemovedVariable, StatementKind::Assign { var, .. })
                         if var.base == r.name && var.flag.is_none() =>
@@ -1033,6 +1084,17 @@ mod tests {
             license_words("GPLv2 & (MIT | BSD-3-Clause)"),
             ["GPLv2", "MIT", "BSD-3-Clause"]
         );
+    }
+
+    #[test]
+    fn every_pure_rename_is_a_renamed_row_saying_write_the_new_name() {
+        for (old, new) in PURE_RENAMES {
+            let row = REMOVALS
+                .iter()
+                .find(|r| r.name == *old && r.what == RenamedVariable)
+                .unwrap_or_else(|| panic!("{old} is no RenamedVariable row"));
+            assert_eq!(row.instead, format!("write `{new}`"), "{old}");
+        }
     }
 
     #[test]

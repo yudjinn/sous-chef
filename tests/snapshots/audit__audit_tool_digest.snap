@@ -11,8 +11,8 @@ workspace	root .; release wrynose (LAYERSERIES_CORENAMES); build build
 4 lint	8 findings in 21 files: own layers and build directory 4 (0 error, 3 warning, 1 info); upstream layers 4 (1 error, 1 warning, 2 info)
 5 parse	0 unparsed statements, 4 unresolved include/require, 0 unresolved inherits, 0 indexed files BitBake does not collect
 6 not checked	build environment not found; anonymous python, which is not run, in 1 recipe and 0 classes; layers present but not enabled, not analysed: 1
-attention 1	warning hygiene/release-syntax x1 (meta-mine): meta-mine:recipes-app/app/app_0.1.bb:22 `${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
+attention 1	warning hygiene/release-syntax x1 (meta-mine): meta-mine:recipes-app/app/app_0.1.bb:22 `${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}"); no automatic fix while the layer also claims kirkstone and scarthgap, which have no UNPACKDIR
 attention 2	warning org/append-no-match x1 (meta-mine): meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1 orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer
-attention 3	warning override/plus-equals-on-default x1 (build): build:conf/local.conf:13 `DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = " wayland"`
-report h:XXXXXXXXXX: 171 lines, 10433 bytes of Markdown; attention items are chosen by: errors in own layers, then layer structure errors, then warnings in own layers
++1 more over budget_tokens (budget_tokens=700 shows all)
+report h:XXXXXXXXXX: 171 lines, 10623 bytes of Markdown; attention items are chosen by: errors in own layers, then layer structure errors, then warnings in own layers
 slice handle=h:XXXXXXXXXX page=1 | grep=RE | lines=A-B

@@ -32,6 +32,7 @@
 use std::collections::BTreeSet;
 
 use crate::index::query;
+use crate::lint::fix::{Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::words;
@@ -276,28 +277,126 @@ impl Rule for HygieneReleaseSyntax {
             }
             if !new_unpack.is_empty()
                 && !assigns_unpackdir
-                && let Some((i, f)) = text
-                    .lines()
-                    .enumerate()
-                    .find_map(|(i, l)| workdir_ref(l, &files).map(|f| (i, f)))
+                && let Some((finding, _)) =
+                    self.workdir_finding(cx, s, text, &files, &new_unpack, &old_unpack, false)
             {
-                let at = u32::try_from(i).map_or(line, |i| line + i);
-                let mut finding = helpers::finding(
-                    self,
-                    cx,
-                    LineSpan::line(at),
-                    format!(
-                        "`${{WORKDIR}}/{f}`: from {} on, `file://` sources are unpacked into \
-                         ${{UNPACKDIR}}, not ${{WORKDIR}}, and this layer is checked against {}; \
-                         write `${{UNPACKDIR}}/{f}` (or `${{S}}/{f}` with S = \"${{UNPACKDIR}}\")",
-                        Feature::UnpackDir.first().codename(),
-                        helpers::release_list(&new_unpack)
-                    ),
-                );
-                finding.severity = Severity::Warning;
                 out.push(finding);
             }
         }
+    }
+
+    /// `${WORKDIR}/<file>` for a local `file://` source; fixed (since x7) to
+    /// `${UNPACKDIR}/<file>`, every such reference of the statement, when every release the
+    /// file is checked against has `UNPACKDIR`, the 5.1 guide's change ("If they reference
+    /// files from SRC_URI, they likely need changing to UNPACKDIR"). Safe: on those releases
+    /// the file is only in `UNPACKDIR`. A layer that also claims an older release gets no fix.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        let Some(file) = cx.file else {
+            return Vec::new();
+        };
+        let mut files: BTreeSet<String> = BTreeSet::new();
+        let mut assigns_unpackdir = false;
+        for s in &file.statements {
+            if let StatementKind::Assign { var, value, .. } = &s.kind {
+                assigns_unpackdir |= var.base == "UNPACKDIR";
+                if var.base == "SRC_URI" && var.flag.is_none() {
+                    files.extend(local_files(value));
+                }
+            }
+        }
+        let old_unpack = helpers::releases_lacking(cx, Feature::UnpackDir);
+        let new_unpack = helpers::releases_having(cx, Feature::UnpackDir);
+        if new_unpack.is_empty() || !old_unpack.is_empty() || assigns_unpackdir {
+            return Vec::new();
+        }
+        file.statements
+            .iter()
+            .filter(|s| {
+                matches!(&s.kind, StatementKind::Assign { var, .. } if var.base != "UNPACKDIR")
+                    || matches!(
+                        s.kind,
+                        StatementKind::Function { .. } | StatementKind::PyDef { .. }
+                    )
+            })
+            .filter_map(|s| {
+                let text = helpers::statement_text(cx, s);
+                let (finding, fix) =
+                    self.workdir_finding(cx, s, text, &files, &new_unpack, &old_unpack, true)?;
+                Some(FixedFinding { finding, fix: fix? })
+            })
+            .collect()
+    }
+}
+
+impl HygieneReleaseSyntax {
+    /// The `${WORKDIR}/<file>` finding of statement `s` (text `text`), and its fix when
+    /// `want_fix` and no release lacks `UNPACKDIR`.
+    #[allow(clippy::too_many_arguments)]
+    fn workdir_finding(
+        &self,
+        cx: &LintContext<'_>,
+        s: &crate::parse::Statement,
+        text: &str,
+        files: &BTreeSet<String>,
+        new_unpack: &[Release],
+        old_unpack: &[Release],
+        want_fix: bool,
+    ) -> Option<(Finding, Option<Fix>)> {
+        let line = s.span.start;
+        let (i, f) = text
+            .lines()
+            .enumerate()
+            .find_map(|(i, l)| workdir_ref(l, files).map(|f| (i, f)))?;
+        let at = u32::try_from(i).map_or(line, |i| line + i);
+        let by_hand = if old_unpack.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "; no automatic fix while the layer also claims {}, which {} no UNPACKDIR",
+                helpers::release_list(old_unpack),
+                if old_unpack.len() == 1 { "has" } else { "have" }
+            )
+        };
+        let mut finding = helpers::finding(
+            self,
+            cx,
+            LineSpan::line(at),
+            format!(
+                "`${{WORKDIR}}/{f}`: from {} on, `file://` sources are unpacked into \
+                 ${{UNPACKDIR}}, not ${{WORKDIR}}, and this layer is checked against {}; \
+                 write `${{UNPACKDIR}}/{f}` (or `${{S}}/{f}` with S = \"${{UNPACKDIR}}\"){by_hand}",
+                Feature::UnpackDir.first().codename(),
+                helpers::release_list(new_unpack)
+            ),
+        );
+        finding.severity = Severity::Warning;
+        if !want_fix || !old_unpack.is_empty() {
+            return Some((finding, None));
+        }
+        // Every `${WORKDIR}/<file>` of the statement whose path is one of `files`.
+        const PREFIX: &str = "${WORKDIR}/";
+        let mut edits = Vec::new();
+        let mut from = 0;
+        while let Some(rel) = text[from..].find(PREFIX) {
+            let start = from + rel;
+            let after = &text[start + PREFIX.len()..];
+            let path: String = after
+                .chars()
+                .take_while(|c| !c.is_whitespace() && !matches!(c, '"' | '\'' | ';' | ')' | '`'))
+                .collect();
+            if files.contains(&path) {
+                let abs = s.bytes.start + start;
+                edits.push(Edit::replace(abs..abs + PREFIX.len(), "${UNPACKDIR}/"));
+            }
+            from = start + PREFIX.len();
+        }
+        let fix = Fix::in_file(
+            cx,
+            edits,
+            "refer to the local file through `${UNPACKDIR}`",
+            Safety::Safe,
+        );
+        Some((finding, fix))
     }
 }
 
