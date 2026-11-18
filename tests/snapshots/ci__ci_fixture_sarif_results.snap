@@ -1,0 +1,110 @@
+---
+source: tests/ci.rs
+expression: results
+---
+[
+  {
+    "level": "note",
+    "locations": [
+      {
+        "physicalLocation": {
+          "artifactLocation": {
+            "uri": "build/conf/local.conf",
+            "uriBaseId": "%SRCROOT%"
+          },
+          "region": {
+            "endLine": 9,
+            "startLine": 9
+          }
+        }
+      }
+    ],
+    "message": {
+      "text": "`EXTRA_OECONF:append:pn-hello` in local.conf changes only recipe hello, and only in this build directory; move it to a hello_%.bbappend in your layer as `EXTRA_OECONF:append`, or to your distro conf if it is policy"
+    },
+    "partialFingerprints": {
+      "primaryLocationLineHash": "71de2d8193bafa159960fb5a51d775df:1",
+      "sousChefFinding/v1": "71de2d8193bafa159960fb5a51d775df:1"
+    },
+    "ruleId": "org/recipe-change-in-local-conf",
+    "ruleIndex": 25
+  },
+  {
+    "level": "warning",
+    "locations": [
+      {
+        "physicalLocation": {
+          "artifactLocation": {
+            "uri": "build/conf/local.conf",
+            "uriBaseId": "%SRCROOT%"
+          },
+          "region": {
+            "endLine": 13,
+            "startLine": 13
+          }
+        }
+      }
+    ],
+    "message": {
+      "text": "`DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = \" wayland\"`"
+    },
+    "partialFingerprints": {
+      "primaryLocationLineHash": "880c9ac3c9a6e4e99036f7b2cd3630e7:1",
+      "sousChefFinding/v1": "880c9ac3c9a6e4e99036f7b2cd3630e7:1"
+    },
+    "ruleId": "override/plus-equals-on-default",
+    "ruleIndex": 9
+  },
+  {
+    "level": "warning",
+    "locations": [
+      {
+        "physicalLocation": {
+          "artifactLocation": {
+            "uri": "meta-mine/recipes-app/app/app_0.1.bb",
+            "uriBaseId": "%SRCROOT%"
+          },
+          "region": {
+            "endLine": 22,
+            "startLine": 22
+          }
+        }
+      }
+    ],
+    "message": {
+      "text": "`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = \"${UNPACKDIR}\")"
+    },
+    "partialFingerprints": {
+      "primaryLocationLineHash": "fe92ab3f99cc6a8e249e8b1bde88ed95:1",
+      "sousChefFinding/v1": "fe92ab3f99cc6a8e249e8b1bde88ed95:1"
+    },
+    "ruleId": "hygiene/release-syntax",
+    "ruleIndex": 38
+  },
+  {
+    "level": "warning",
+    "locations": [
+      {
+        "physicalLocation": {
+          "artifactLocation": {
+            "uri": "meta-mine/recipes-app/orphan/orphan_9.%25.bbappend",
+            "uriBaseId": "%SRCROOT%"
+          },
+          "region": {
+            "endLine": 1,
+            "startLine": 1
+          }
+        }
+      }
+    ],
+    "message": {
+      "text": "orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error (\"No recipes available for\"); there is no orphan recipe; remove the append or add its layer"
+    },
+    "partialFingerprints": {
+      "primaryLocationLineHash": "ec939931a4e8d940f8e1ff8ab94fb562:1",
+      "sousChefFinding/v1": "ec939931a4e8d940f8e1ff8ab94fb562:1"
+    },
+    "ruleId": "org/append-no-match",
+    "ruleIndex": 21
+  }
+]

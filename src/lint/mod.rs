@@ -45,10 +45,12 @@
 //! each one becomes a note in the report, so a typo is visible without making every lint run
 //! fail. Unknown ids in [`Options::rules`] are an error (the caller typed them just now).
 
+pub mod baseline;
 pub mod ci;
 pub mod helpers;
 pub mod migrate;
 pub mod rules;
+pub mod sarif;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -1290,8 +1292,9 @@ pub struct LintCliArgs {
     /// Minimum severity to report.
     #[arg(long, value_enum)]
     pub severity: Option<Severity>,
-    /// Output format.
-    #[arg(long, value_enum)]
+    /// Output format (text or json) for library callers; the command line's `--format` is
+    /// [`LintCliArgs::output`].
+    #[arg(skip)]
     pub format: Option<Format>,
     /// Exit with status 1 if any finding is at or above this severity (default: error).
     #[arg(long, value_enum)]
@@ -1308,8 +1311,19 @@ pub struct LintCliArgs {
     /// Migration report: what holds for this release and not for the releases the target
     /// layers claim now, the features they use that it changed, and their
     /// LAYERSERIES_COMPAT. Exit status 1 for a new finding at or above --fail-on.
-    #[arg(long, value_name = "CODENAME", conflicts_with = "as_release")]
+    #[arg(long, value_name = "CODENAME", conflicts_with_all = ["as_release", "baseline", "write_baseline"])]
     pub migrate_to: Option<String>,
+    /// Output format: text (default), json, sarif (SARIF 2.1.0) or github (workflow
+    /// command annotations).
+    #[arg(long = "format", value_enum, value_name = "FORMAT")]
+    pub output: Option<ci::OutputFormat>,
+    /// Report, and fail on, only the findings that are not in this baseline file; say how
+    /// many baseline entries matched and how many are stale.
+    #[arg(long, value_name = "FILE", conflicts_with = "write_baseline")]
+    pub baseline: Option<PathBuf>,
+    /// Write the current findings to this baseline file (JSON) and exit 0.
+    #[arg(long, value_name = "FILE")]
+    pub write_baseline: Option<PathBuf>,
 }
 
 /// Runs `sous-chef lint`, printing the report to stdout. Returns the process exit code: 1 if
