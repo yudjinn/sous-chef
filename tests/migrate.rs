@@ -334,3 +334,228 @@ fn release_removed_skips_a_class_or_variable_a_layer_provides() {
         "{r:?}"
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// The migration report
+
+const OLD_RECIPE: &str = "\
+SUMMARY = \"An old recipe\"
+LICENSE = \"CLOSED\"
+SRC_URI = \"file://old.c\"
+S = \"${WORKDIR}\"
+SERIAL_CONSOLE = \"115200 ttyS0\"
+OLD_FLAGS=\"-O2\"
+do_compile() {
+    ${CC} ${WORKDIR}/old.c -o old
+}
+";
+
+/// A Scarthgap workspace whose meta-mine claims only scarthgap, with a recipe that Wrynose
+/// breaks.
+fn scarthgap_env() -> Env {
+    env("scarthgap", |root| {
+        claim(root, "scarthgap");
+        let core = root.join("meta-core/conf/layer.conf");
+        let t = fs::read_to_string(&core).unwrap().replace(
+            "LAYERSERIES_CORENAMES = \"wrynose\"",
+            "LAYERSERIES_CORENAMES = \"scarthgap wrynose\"",
+        );
+        fs::write(&core, t).unwrap();
+        write(root, "meta-mine/recipes-app/old/old_1.0.bb", OLD_RECIPE);
+        write(
+            root,
+            "meta-mine/recipes-app/old/files/old.c",
+            "int main(void) { return 0; }\n",
+        );
+    })
+}
+
+fn migrate_cli(e: &Env, args: lint::LintCliArgs) -> (i32, String) {
+    let mut out = Vec::new();
+    let code = lint::cli_with(&e.ws, &e.index, &e.config, &args, &mut out).unwrap();
+    (code, String::from_utf8(out).unwrap())
+}
+
+#[test]
+fn migrate_to_wrynose_text_and_json() {
+    let e = scarthgap_env();
+    let (code, text) = migrate_cli(
+        &e,
+        lint::LintCliArgs {
+            target: Some("meta-mine".into()),
+            migrate_to: Some("wrynose".into()),
+            ..lint::LintCliArgs::default()
+        },
+    );
+    // S = "${WORKDIR}" is a new error: exit status 1.
+    assert_eq!(code, 1, "{text}");
+    insta::assert_snapshot!("migrate_meta_mine_to_wrynose_text", text);
+    let (_, json) = migrate_cli(
+        &e,
+        lint::LintCliArgs {
+            target: Some("meta-mine".into()),
+            migrate_to: Some("wrynose".into()),
+            format: Some(sous_chef::render::Format::Json),
+            ..lint::LintCliArgs::default()
+        },
+    );
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["schema"], "sous-chef-migration/1");
+    assert_eq!(v["to"], "wrynose");
+    insta::assert_snapshot!("migrate_meta_mine_to_wrynose_json", json);
+    // Without the option, the same layer is clean of these.
+    let (_, plain) = migrate_cli(
+        &e,
+        lint::LintCliArgs {
+            target: Some("meta-mine".into()),
+            rules: vec!["hygiene/workdir-s".into()],
+            ..lint::LintCliArgs::default()
+        },
+    );
+    assert!(plain.starts_with("no findings"), "{plain}");
+}
+
+#[test]
+fn migrate_report_groups_feature_uses() {
+    let e = scarthgap_env();
+    let m = lint::migrate::report(
+        &e.ws,
+        &e.index,
+        &e.config,
+        &Target::Layer("meta-mine".into()),
+        &Options::default(),
+        Release::Wrynose,
+    )
+    .unwrap();
+    let features: Vec<&str> = m.features.iter().map(|f| f.feature.as_str()).collect();
+    assert!(features.contains(&"UnpackDir"), "{features:?}");
+    assert!(features.contains(&"WorkdirAsSourceDir"), "{features:?}");
+    // SERIAL_CONSOLE went in mickledore: it already fails on scarthgap, so it is a finding
+    // that already holds, not a change wrynose makes.
+    assert!(!features.contains(&"KeptUntilLangdale"), "{features:?}");
+    assert!(
+        m.existing_findings
+            .iter()
+            .any(|f| f.message.starts_with("`SERIAL_CONSOLE`")),
+        "{:?}",
+        m.existing_findings
+    );
+    assert!(
+        features.contains(&"AssignmentWhitespaceWarning"),
+        "{features:?}"
+    );
+    let unpack = m
+        .features
+        .iter()
+        .find(|f| f.feature == "UnpackDir")
+        .unwrap();
+    let ptrs: Vec<&str> = unpack
+        .groups
+        .iter()
+        .flat_map(|g| g.pointers.iter().map(String::as_str))
+        .collect();
+    assert!(
+        ptrs.contains(&"meta-mine:recipes-app/old/old_1.0.bb:8"),
+        "{ptrs:?}"
+    );
+    assert!(
+        ptrs.contains(&"meta-mine:recipes-app/app/app_0.1.bb:22"),
+        "{ptrs:?}"
+    );
+    let compat = &m.layers[0];
+    assert_eq!(compat.layer, "meta-mine");
+    assert_eq!(
+        compat.pointer.as_deref(),
+        Some("meta-mine:conf/layer.conf:11")
+    );
+    assert!(
+        compat
+            .advice
+            .starts_with("write LAYERSERIES_COMPAT_mine = \"scarthgap wrynose\""),
+        "{}",
+        compat.advice
+    );
+    // The same report backwards, to kirkstone: nothing Kirkstone lacks is used except
+    // the unpack directory convention (the recipe already uses WORKDIR).
+    let back = lint::migrate::report(
+        &e.ws,
+        &e.index,
+        &e.config,
+        &Target::Layer("meta-mine".into()),
+        &Options::default(),
+        Release::Kirkstone,
+    )
+    .unwrap();
+    assert!(
+        back.new_findings
+            .iter()
+            .all(|f| f.rule != "hygiene/workdir-s")
+    );
+}
+
+#[test]
+fn migrate_to_rejects_bad_names_and_as_release() {
+    let e = scarthgap_env();
+    let mut out = Vec::new();
+    let err = lint::cli_with(
+        &e.ws,
+        &e.index,
+        &e.config,
+        &lint::LintCliArgs {
+            migrate_to: Some("thud".into()),
+            ..lint::LintCliArgs::default()
+        },
+        &mut out,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("older than kirkstone"), "{err}");
+}
+
+#[test]
+fn audit_with_migrate_to_has_section_7() {
+    let e = scarthgap_env();
+    let cache = tempfile::tempdir().unwrap();
+    let mut index = Index::open_in(cache.path(), &e.ws).unwrap();
+    index.refresh(&e.ws).unwrap();
+    let handles =
+        sous_chef::handles::HandleStore::open(&index.cache_dir().join("handles")).unwrap();
+    let ctx = sous_chef::mcp::Ctx {
+        config: e.config.clone(),
+        workspace: e.ws.clone(),
+        index: tokio::sync::Mutex::new(index),
+        handles,
+        jobs: sous_chef::bitbake::JobTable::new(),
+    };
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let root = fs::canonicalize(&e.root).unwrap();
+    let opts = sous_chef::audit::Options {
+        generated: Some("2026-11-18T00:00:00Z".into()),
+        migrate_to: Some(Release::Wrynose),
+        ..sous_chef::audit::Options::new(&root)
+    };
+    let a = rt.block_on(sous_chef::audit::build(&ctx, &opts)).unwrap();
+    let md = sous_chef::audit::render_markdown(&a);
+    let at = md
+        .find("## 7. Migration to wrynose (6.0)")
+        .expect("section 7");
+    let section = &md[at..];
+    assert!(section.contains("### New with wrynose"), "{section}");
+    assert!(section.contains("hygiene/workdir-s"), "{section}");
+    assert!(section.contains("`UnpackDir`"), "{section}");
+    assert!(section.contains("### Not told by this report"), "{section}");
+    let json = sous_chef::audit::render_json(&a);
+    assert!(json.contains("\"migration\""), "{json}");
+    // Without the option there is no section 7 and no `migration` field.
+    let plain = rt
+        .block_on(sous_chef::audit::build(
+            &ctx,
+            &sous_chef::audit::Options::new(&root),
+        ))
+        .unwrap();
+    assert!(!sous_chef::audit::render_markdown(&plain).contains("## 7."));
+    assert!(!sous_chef::audit::render_json(&plain).contains("\"migration\""));
+}

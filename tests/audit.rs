@@ -449,6 +449,7 @@ async fn tool_digest_fits_the_budget_and_slice_returns_the_report() {
             root: None,
             budget_tokens: Some(600),
             format: None,
+            ..audit_tool::Args::default()
         },
     )
     .await
@@ -503,6 +504,7 @@ async fn tool_digest_fits_the_budget_and_slice_returns_the_report() {
             root: None,
             budget_tokens: Some(600),
             format: Some(Format::Json),
+            ..audit_tool::Args::default()
         },
     )
     .await
@@ -521,6 +523,7 @@ async fn tool_digest_keeps_the_hint_on_a_tiny_budget() {
             root: None,
             budget_tokens: Some(150),
             format: None,
+            ..audit_tool::Args::default()
         },
     )
     .await

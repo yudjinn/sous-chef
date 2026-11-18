@@ -32,6 +32,10 @@ pub struct Args {
     pub as_release: Option<String>,
     /// With `as_release`: check against that release only.
     pub only_release: Option<bool>,
+    /// Migration report to this release (a codename): what holds for it and not for the
+    /// releases the target layers claim now, the features they use that it changed, and
+    /// their `LAYERSERIES_COMPAT`.
+    pub migrate_to: Option<String>,
 }
 
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
@@ -50,6 +54,9 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         as_release: tool_as_release(&args)?,
         only_release: args.only_release.unwrap_or(false),
     };
+    if let Some(to) = args.migrate_to.as_deref() {
+        return migration(ctx, &index, &target, &options, to, &args);
+    }
     let mut report = progress::blocking(|| {
         lint::run_progress(
             &ctx.workspace,
@@ -72,6 +79,51 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         args.format.unwrap_or_default(),
         budget,
     ))
+}
+
+/// `migrate_to`: the migration report ([`lint::migrate`]) within the budget.
+fn migration(
+    ctx: &Ctx,
+    index: &crate::index::Index,
+    target: &lint::Target,
+    options: &Options,
+    to: &str,
+    args: &Args,
+) -> Result<String> {
+    if args.as_release.is_some() {
+        return Err(crate::error::Error::Invalid {
+            msg: "migrate_to and as_release cannot be combined".into(),
+        });
+    }
+    let to = Release::parse_arg(to, "migrate_to")?;
+    let m = progress::blocking(|| {
+        lint::migrate::report(&ctx.workspace, index, &ctx.config, target, options, to)
+    })?;
+    let budget = args
+        .budget_tokens
+        .unwrap_or(ctx.config.output.budget_tokens);
+    let format = args.format.unwrap_or_default();
+    let text = lint::migrate::render(&m, format);
+    if format == Format::Json || render::estimate_tokens(&text) <= budget.max(1) {
+        return Ok(text);
+    }
+    // Text over the budget: keep whole lines from the top, then say what was cut.
+    let tail =
+        "... cut to the budget; `sous-chef lint --migrate-to` or format json has the whole report";
+    let mut out = String::new();
+    for line in text.lines() {
+        if render::estimate_tokens(&out)
+            + render::estimate_tokens(line)
+            + render::estimate_tokens(tail)
+            > budget
+        {
+            break;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str(tail);
+    Ok(out)
 }
 
 /// `as_release` parsed; `only_release` without it is an error.

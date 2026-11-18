@@ -404,17 +404,25 @@ impl HygieneReleaseRemoved {
     fn push(
         &self,
         cx: &LintContext<'_>,
-        out: &mut Vec<Finding>,
+        out: &mut Sink,
         line: u32,
         severity: Severity,
         message: String,
     ) {
         let mut f = helpers::finding(self, cx, LineSpan::line(line), message);
         f.severity = severity;
-        out.push(f);
+        out.findings.push(f);
+        if let Some((feature, what, instead)) = out.pending.take() {
+            out.uses.push(RemovalUse {
+                feature,
+                line,
+                what,
+                instead,
+            });
+        }
     }
 
-    fn table(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
+    fn table(&self, cx: &LintContext<'_>, out: &mut Sink) {
         let Some(file) = cx.file else { return };
         for r in REMOVALS {
             let lack = lacking(cx, r.feature);
@@ -427,6 +435,7 @@ impl HygieneReleaseRemoved {
                 let line = s.span.start;
                 match (r.what, &s.kind) {
                     (RenamedVariable, StatementKind::Assign { var, .. }) if var.base == r.name => {
+                        out.tag(r.feature, r.name, r.instead);
                         self.push(
                             cx,
                             out,
@@ -443,6 +452,7 @@ impl HygieneReleaseRemoved {
                     (RemovedVariable, StatementKind::Assign { var, .. })
                         if var.base == r.name && var.flag.is_none() =>
                     {
+                        out.tag(r.feature, r.name, r.instead);
                         self.push(
                             cx,
                             out,
@@ -472,6 +482,7 @@ impl HygieneReleaseRemoved {
                         if own || assigned_outside_core(cx, r.name) {
                             continue;
                         }
+                        out.tag(r.feature, r.name, r.instead);
                         self.push(
                             cx,
                             out,
@@ -489,6 +500,7 @@ impl HygieneReleaseRemoved {
                         if words::words(classes).contains(&r.name)
                             && !class_outside_core(cx, r.name)
                         {
+                            out.tag(r.feature, r.name, r.instead);
                             self.push(
                                 cx,
                                 out,
@@ -505,6 +517,7 @@ impl HygieneReleaseRemoved {
                     {
                         if words::words(value).contains(&r.name) && !class_outside_core(cx, r.name)
                         {
+                            out.tag(r.feature, r.name, r.instead);
                             self.push(
                                 cx,
                                 out,
@@ -525,6 +538,7 @@ impl HygieneReleaseRemoved {
                             } else {
                                 "it has no effect there"
                             };
+                            out.tag(r.feature, r.name, r.instead);
                             self.push(
                                 cx,
                                 out,
@@ -546,6 +560,7 @@ impl HygieneReleaseRemoved {
                     ) => {
                         let text = helpers::statement_text(cx, s);
                         if let Some(at) = contains_word(text, r.name) {
+                            out.tag(r.feature, r.name, r.instead);
                             self.push(
                                 cx,
                                 out,
@@ -565,6 +580,7 @@ impl HygieneReleaseRemoved {
                     {
                         let prefix = format!("{}://", r.name);
                         if words::words(value).iter().any(|w| w.starts_with(&prefix)) {
+                            out.tag(r.feature, r.name, r.instead);
                             self.push(
                                 cx,
                                 out,
@@ -585,7 +601,7 @@ impl HygieneReleaseRemoved {
     }
 
     /// `S` below `${WORKDIR}`, and `S = "${UNPACKDIR}/git"`.
-    fn source_dir(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
+    fn source_dir(&self, cx: &LintContext<'_>, out: &mut Sink) {
         let Some(file) = cx.file else { return };
         // `bitbake.conf`'s default `S` belongs to the core layer of the release: a migration
         // replaces it with the new release's.
@@ -617,6 +633,11 @@ impl HygieneReleaseRemoved {
             } else {
                 continue;
             };
+            out.tag(
+                Some(Feature::KeptUntilWalnascar),
+                "S below ${WORKDIR}",
+                &instead,
+            );
             self.push(
                 cx,
                 out,
@@ -632,7 +653,7 @@ impl HygieneReleaseRemoved {
     }
 
     /// `LAYERSERIES_COMPAT_<c> = "${LAYERSERIES_CORENAMES}"`.
-    fn compat_corenames(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
+    fn compat_corenames(&self, cx: &LintContext<'_>, out: &mut Sink) {
         let Some(file) = cx.file else { return };
         if cx.kind != Some(FileKind::Conf) {
             return;
@@ -654,6 +675,11 @@ impl HygieneReleaseRemoved {
             if var.base.starts_with("LAYERSERIES_COMPAT_")
                 && value.contains("${LAYERSERIES_CORENAMES}")
             {
+                out.tag(
+                    Some(Feature::KeptUntilLangdale),
+                    "LAYERSERIES_COMPAT copying ${LAYERSERIES_CORENAMES}",
+                    "write the release names the layer is tested with",
+                );
                 self.push(
                     cx,
                     out,
@@ -675,7 +701,7 @@ impl HygieneReleaseRemoved {
     }
 
     /// Obsolete license names in `LICENSE`.
-    fn licenses(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
+    fn licenses(&self, cx: &LintContext<'_>, out: &mut Sink) {
         let Some(file) = cx.file else { return };
         if matches!(cx.kind, Some(FileKind::Conf) | Some(FileKind::Class)) {
             return;
@@ -724,6 +750,11 @@ impl HygieneReleaseRemoved {
                     ),
                 )
             };
+            out.tag(
+                Some(Feature::KeptUntilScarthgap),
+                "obsolete license names in LICENSE",
+                &spdx,
+            );
             self.push(
                 cx,
                 out,
@@ -739,7 +770,7 @@ impl HygieneReleaseRemoved {
     }
 
     /// Assignments without whitespace around the operator.
-    fn whitespace(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
+    fn whitespace(&self, cx: &LintContext<'_>, out: &mut Sink) {
         let Some(file) = cx.file else { return };
         let warned = helpers::releases_having(cx, Feature::AssignmentWhitespaceWarning);
         if warned.is_empty() {
@@ -754,6 +785,11 @@ impl HygieneReleaseRemoved {
             if !lacks_assignment_whitespace(first) {
                 continue;
             }
+            out.tag(
+                Some(Feature::AssignmentWhitespaceWarning),
+                "assignments without whitespace around the operator",
+                "write `NAME = \"value\"`",
+            );
             self.push(
                 cx,
                 out,
@@ -768,6 +804,48 @@ impl HygieneReleaseRemoved {
                 ),
             );
         }
+    }
+}
+
+/// One use of something a release removed, for the migration report: the `Feature` that
+/// still has it (`None`: no supported release), the line, what it is and what to write
+/// instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovalUse {
+    pub feature: Option<Feature>,
+    pub line: u32,
+    pub what: String,
+    pub instead: String,
+}
+
+/// Findings, and the use behind each.
+#[derive(Default)]
+pub struct Sink {
+    findings: Vec<Finding>,
+    uses: Vec<RemovalUse>,
+    pending: Option<(Option<Feature>, String, String)>,
+}
+
+impl Sink {
+    fn tag(&mut self, feature: Option<Feature>, what: &str, instead: &str) {
+        self.pending = Some((feature, what.to_string(), instead.to_string()));
+    }
+}
+
+impl HygieneReleaseRemoved {
+    fn run(&self, cx: &LintContext<'_>, out: &mut Sink) {
+        self.table(cx, out);
+        self.source_dir(cx, out);
+        self.compat_corenames(cx, out);
+        self.licenses(cx, out);
+        self.whitespace(cx, out);
+    }
+
+    /// What the rule finds in the context's file, as uses (one per finding, same order).
+    pub fn uses(&self, cx: &LintContext<'_>) -> Vec<RemovalUse> {
+        let mut sink = Sink::default();
+        self.run(cx, &mut sink);
+        sink.uses
     }
 }
 
@@ -793,11 +871,9 @@ impl Rule for HygieneReleaseRemoved {
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
-        self.table(cx, out);
-        self.source_dir(cx, out);
-        self.compat_corenames(cx, out);
-        self.licenses(cx, out);
-        self.whitespace(cx, out);
+        let mut sink = Sink::default();
+        self.run(cx, &mut sink);
+        out.append(&mut sink.findings);
     }
 }
 

@@ -45,7 +45,9 @@
 //! each one becomes a note in the report, so a typo is visible without making every lint run
 //! fail. Unknown ids in [`Options::rules`] are an error (the caller typed them just now).
 
+pub mod ci;
 pub mod helpers;
+pub mod migrate;
 pub mod rules;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -1303,6 +1305,11 @@ pub struct LintCliArgs {
     /// With --as-release: check against that release only, not the layers' own releases.
     #[arg(long, requires = "as_release")]
     pub only_release: bool,
+    /// Migration report: what holds for this release and not for the releases the target
+    /// layers claim now, the features they use that it changed, and their
+    /// LAYERSERIES_COMPAT. Exit status 1 for a new finding at or above --fail-on.
+    #[arg(long, value_name = "CODENAME", conflicts_with = "as_release")]
+    pub migrate_to: Option<String>,
 }
 
 /// Runs `sous-chef lint`, printing the report to stdout. Returns the process exit code: 1 if
@@ -1337,6 +1344,9 @@ pub fn cli_with(
         as_release: cli_as_release(args)?,
         only_release: args.only_release,
     };
+    if let Some(code) = ci::dispatch(ws, index, cfg, args, &target, &options, out)? {
+        return Ok(code);
+    }
     let report = run(ws, index, cfg, &target, &options)?;
     let text = render_report(&report, args.format.unwrap_or_default(), usize::MAX);
     out.write_all(text.as_bytes())?;

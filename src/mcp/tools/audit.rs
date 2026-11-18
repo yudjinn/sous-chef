@@ -25,7 +25,7 @@ use crate::mcp::Ctx;
 use crate::render::{Format, Table};
 use crate::workspace::Workspace;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct Args {
     /// The repository root to audit: the working directory (default) or a directory inside
     /// the workspace's span (relative to the working directory).
@@ -34,6 +34,9 @@ pub struct Args {
     pub budget_tokens: Option<usize>,
     /// `text` (default) or `json`.
     pub format: Option<Format>,
+    /// Add section 7: the migration report of the writable layers to this release (a
+    /// codename).
+    pub migrate_to: Option<String>,
 }
 
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
@@ -41,6 +44,11 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let opts = audit::Options {
         progress: Some(stage_progress),
         lint_progress: Some(lint_file_progress),
+        migrate_to: args
+            .migrate_to
+            .as_deref()
+            .map(|s| crate::release::Release::parse_arg(s, "migrate_to"))
+            .transpose()?,
         ..audit::Options::new(&root)
     };
     let build = audit::build(ctx, &opts);
@@ -114,6 +122,9 @@ pub fn digest(a: &Audit, handle: &str, lines: usize, bytes: usize) -> Table {
     t.row(&["4 lint", &a.lint.summary]);
     t.row(&["5 parse", &a.parse.summary]);
     t.row(&["6 not checked", &a.not_checked.summary]);
+    if let Some(m) = &a.migration {
+        t.row(&["7 migration", &m.summary]);
+    }
     for (i, x) in s.attention.iter().enumerate() {
         t.row(&[
             &format!("attention {}", i + 1),
