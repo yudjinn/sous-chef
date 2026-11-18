@@ -14,7 +14,8 @@ It needs no build environment for lookups; it uses BitBake only when asked to ru
 
 - **Find and read recipe items.** A recipe's files, versions (and which one BitBake picks,
   and why), bbappends in application order, classes and key values; its file tree,
-  functions, sources and patches, tasks and packages (`recipe`). The exact text of a
+  functions, sources and patches, tasks and packages, and what its metadata declares about
+  CVEs (`recipe`). The exact text of a
   function or assignment, usable as an Edit string (`item`). Statements by name, regex or
   full text, each with its enclosing item (`search`). Which class file wins and who
   inherits it (`class`).
@@ -329,7 +330,7 @@ starts, and every tool and `status` report the error. Details: "Configuration" i
 
 | Tool | What it answers |
 |---|---|
-| `recipe` | A recipe's files, versions, bbappends, classes and key values; its file tree; its functions; its sources and patches, tasks in order, packages |
+| `recipe` | A recipe's files, versions, bbappends, classes and key values; its file tree; its functions; its sources and patches, tasks in order, packages; its CVE view (`CVE_PRODUCT`, `CVE_STATUS`, CVE patches, inconsistencies, a build's CVE report if there is one) |
 | `var` | The history and final value of a variable for a recipe, machine and distro; with `authoritative`, BitBake's own (`bitbake -e`) |
 | `overrides` | The evaluated `OVERRIDES` chain; conditional operations, active or not; overrides that match nothing |
 | `item` | The text of a pointer or of a named statement |

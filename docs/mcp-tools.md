@@ -89,7 +89,7 @@ Resolve a recipe and show its shape.
 |---|---|---|
 | `name` | string | required: a `pn`, a `pn_pv`, or a pointer to a `.bb` or a `.bbappend` (a bbappend pointer means the recipe it applies to) |
 | `version` | string? | default: the version BitBake would use (provider selection for the default machine and distro); `%` matches any rest |
-| `show` | `"summary"` \| `"tree"` \| `"outline"` \| `"sources"` \| `"tasks"` \| `"packages"` | default `summary` |
+| `show` | `"summary"` \| `"tree"` \| `"outline"` \| `"sources"` \| `"tasks"` \| `"packages"` \| `"cve"` | default `summary` |
 
 An unknown version is an error listing the versions that exist. A `pn_pv` together with a
 different `version` is an error. A bbappend that applies to several recipes is an error
@@ -123,8 +123,8 @@ directory) and `no MACHINE is set`; `summary` names only the machine and distro 
   `kind` is `shell`, `python`, `fakeroot shell`, `def`, `addtask`, `deltask` or
   `addhandler`; anonymous python is named `__anonymous`.
 
-`sources`, `tasks` and `packages` are evaluated (`eval::evaluate` of the chosen file for
-the default machine and distro). Each ends with a note naming the machine and distro and
+`sources`, `tasks`, `packages` and `cve` are evaluated (`eval::evaluate` of the chosen
+file for the default machine and distro). Each ends with a note naming the machine and distro and
 the warnings about anonymous python that every evaluated view gives (stronger for one that
 changes variables through computed names).
 
@@ -156,6 +156,60 @@ changes variables through computed names).
   set), evaluated, with the applied operations as `loc`. A value that depends on python is
   flagged, not guessed; a `PACKAGES` word that does not expand is counted in a note; what
   `PACKAGES_DYNAMIC` and `do_package` add is not listed, and a note says so.
+
+- `cve` (x4): what OE-core's CVE check reads from the recipe, for the default machine and
+  distro, without building anything. **What the metadata declares, not a scan against the
+  NVD**; a note says so. Rows `kind cve value file loc`, in this order:
+  - `identity`: `CVE_PRODUCT`, `CVE_VERSION`, `CVE_VERSION_SUFFIX` with the operation that
+    set them (on Wrynose `spdx-common.bbclass` sets the `??=` defaults `${BPN}` / `${PV}`;
+    when nothing sets them the row says the CVE classes default them so);
+  - `build` and `unpatched`: when the build directory holds a CVE check JSON report for the
+    recipe (tried in order: `CVE_CHECK_RECIPE_FILE_JSON`, `${CVE_CHECK_DIR}` or
+    `${DEPLOY_DIR}/cve/<pn>_cve.json`, `<build>/tmp*/deploy/cve/<pn>_cve.json`,
+    `${LOG_DIR}/cve/cve-summary.json`, `${DEPLOY_DIR_IMAGE}/<pn>-recipe-sbom.sbom-cve-check.yocto.json`,
+    each through the confinement check), its Unpatched / Patched / Ignored counts and the
+    version, then one `unpatched` row per Unpatched id with its scores (`v4`, `v3`, `v2`,
+    zero scores left out). Without one, a note says how to produce it from the classes the
+    layers have (`cve-check`: `INHERIT += "cve-check"`, `bitbake -c cve_check <pn>`;
+    `vex`: `bitbake -c generate_vex <pn>`; `sbom-cve-check-recipe`), and that sous-chef
+    does not run it;
+  - `fact`: inconsistencies worth a person's attention, stated as facts: a CVE both
+    patched and in `CVE_STATUS`; a status not in `CVE_CHECK_STATUSMAP` (counted as
+    Unpatched by OE-core); a `CVE_STATUS_GROUPS` entry that is not set or has no
+    `[status]`; a `cpe:vendor:product` status that matches no `CVE_PRODUCT` word (skipped
+    by OE-core) or is malformed; a patch named for a CVE whose header has no `CVE:` line
+    or names another id; patches that declare ids only in their header (grouped per id);
+    on Kirkstone, a `CVE_STATUS` that has no effect;
+  - `status`: every `CVE_STATUS[CVE-...]` entry after `extend_cve_status` (direct flags,
+    then `CVE_CHECK_IGNORE` as `ignored`, then each `CVE_STATUS_GROUPS` group's
+    `[status]`, each replacing), as `<category> (<detail>): <description>` with `(from
+    CVE_CHECK_IGNORE)` / `(from CVE_STATUS_GROUPS <group>)` and the pointer of the
+    assignment (its layer is the pointer's); ids in numeric order. A value with python is
+    shown as `(depends on python, not evaluated)` and counted in the python note. On an
+    OE-core without `CVE_STATUS` (Kirkstone) the rows are `ignore` rows for
+    `CVE_CHECK_IGNORE` instead;
+  - `patch`: one row per CVE id a patch of the evaluated `SRC_URI` fixes (`by name`, `by
+    header`, `by name and header`), with its `Upstream-Status`, its file and the
+    `SRC_URI` operation that added it (the layer that added it). A remote, compressed or
+    missing patch is matched by file name only (a note lists them).
+
+  Which rules apply (whether `CVE_STATUS` exists, the `cpe:` form, how patch headers are
+  read) is read from the `lib/oe/cve_check.py` of the first layer that has one, and named
+  in a note; without one, Wrynose's rules are used and the note says so. Ends with the
+  evaluated views' notes. On the fixture copy of `tests/recipe_cve.rs` (cut):
+
+  ```
+  kind	cve	value	file	loc
+  identity	CVE_PRODUCT	acme:vuln	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:9
+  identity	CVE_VERSION	1.0 (not set; the CVE classes default it to ${PV})	-	-
+  build	-	Unpatched 2, Patched 1, Ignored 1 (version 1.0)	build:tmp/deploy/cve/vuln_cve.json	-
+  unpatched	CVE-2024-90001	v3 9.8, v2 6.8	-	-
+  fact	CVE-2023-00002	status "maybe-later" is not in CVE_CHECK_STATUSMAP: decode_cve_status warns and counts it as Unpatched	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:12
+  fact	CVE-2024-11111	patched by CVE-2024-11111.patch and also in CVE_STATUS "fixed-version"; CVE_STATUS wins, with a warning	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:11
+  status	CVE-2023-10001	Ignored (not-applicable-platform): Windows only (from CVE_STATUS_GROUPS CVE_STATUS_WIN)	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:16
+  patch	CVE-2025-44444	by name and header; Upstream-Status: Backport [https://example.org/vuln/commit/4]	meta-vendor:recipes-sec/vuln/files/CVE-2025-44444.patch	meta-vendor:recipes-sec/vuln/vuln_%.bbappend:2
+  note: what the metadata declares (CVE_PRODUCT, CVE_STATUS, CVE_CHECK_IGNORE, patches in SRC_URI), read as OE-core's CVE check reads it; this is not a scan against the NVD, and nothing was run
+  ```
 
 `sources` of `hello` on a copy of the fixture with a missing file, patches with a malformed
 and no `Upstream-Status`, a directory and a `:remove` (search rows cut here):

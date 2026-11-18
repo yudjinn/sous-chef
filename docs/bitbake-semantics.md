@@ -1385,6 +1385,75 @@ show=sources` reproduces:
   (multiline, case-sensitive) is valid; else a line matching `upstream.*status`
   case-insensitively is "Malformed"; else "Missing".
 
+### CVE metadata
+
+What `recipe show=cve` reproduces (x4). Read in OE-core Wrynose `33a6bd6c`
+(`meta/lib/oe/cve_check.py`, `meta/classes/vex.bbclass`, `meta/conf/cve-check-map.conf`,
+`meta/lib/oe/patch.py`), and with `git show` on the `scarthgap` and `kirkstone` branch
+tips (`meta/classes/cve-check.bbclass`, `meta/lib/oe/cve_check.py`), and the `nanbield` /
+`mickledore` tips for when `CVE_STATUS` appeared. Never checked against a build: the live
+build directory has no CVE output.
+
+- **Classes.** Kirkstone and Scarthgap have `cve-check.bbclass` (`do_cve_check`, needs the
+  NVD database from `cve-update-nvd2-native`, network); Scarthgap and Wrynose have
+  `vex.bbclass` (`do_generate_vex`, no NVD scan: only what the metadata declares). Wrynose
+  **removed `cve-check.bbclass`** (OE-core `00de455f8d`, "classes/cve-check: remove
+  class", in `yocto-6.0`); its scanning is `sbom-cve-check.bbclass` /
+  `sbom-cve-check-recipe.bbclass` (an external tool on the SPDX 3 SBOM). `vex.bbclass`
+  refuses to run with `cve-check` inherited (`SkipRecipe`). Both classes default
+  `CVE_PRODUCT ??= "${BPN}"` and `CVE_VERSION ??= "${PV}"` and set `CVE_VERSION_SUFFIX ??=
+  ""`; on Wrynose `spdx-common.bbclass` (inherited globally) sets the same two defaults.
+- **`CVE_STATUS`** (Nanbield and later: `decode_cve_status` is on the `nanbield` branch,
+  not on `mickledore`; Kirkstone has only `CVE_CHECK_IGNORE`, a list of ids
+  `check_cves` skips). `extend_cve_status` (anonymous python of the class, once per
+  recipe): every word of `CVE_CHECK_IGNORE` becomes `CVE_STATUS[id] = "ignored"` (with a
+  deprecation warning), then for each word `G` of `CVE_STATUS_GROUPS`, every word of `${G}`
+  gets `CVE_STATUS[id] = G[status]` (an unset `G` warns and is skipped); each step
+  replaces what was there. `decode_cve_status`: Scarthgap `split(':', 1)`: detail before the
+  first `:`, description after it, stripped; Wrynose `split(':', 4)`: `detail: cpe:vendor:
+  product: description` gives vendor and product (with exactly four parts the code indexes
+  a fifth and fails), `detail: cpe...` with fewer parts warns "Invalid CPE information" and
+  keeps `*`; otherwise as Scarthgap. The detail is **not stripped** before
+  `getVarFlag("CVE_CHECK_STATUSMAP", detail)`; an unknown detail warns and maps to
+  `Unpatched`. `CVE_CHECK_STATUSMAP` is in `conf/cve-check-map.conf`, `require`d by
+  `bitbake.conf`: Patched (`patched`, `backported-patch`, `cpe-stable-backport`,
+  `fixed-version`, and on Wrynose `fix-file-included`, `version-not-in-range`), Unpatched
+  (`unpatched`, `vulnerable-investigating`, Wrynose `version-in-range`), Ignored
+  (`ignored`, `cpe-incorrect`, `disputed`, `not-applicable-config`,
+  `not-applicable-platform`, `upstream-wontfix`), Wrynose `unknown` = Unknown. Wrynose's
+  `get_patched_cves` keeps a `CVE_STATUS` entry only when `has_cve_product_match` (some
+  `CVE_PRODUCT` word, `vendor:product` or `product`, matches, `*` matching anything), and
+  an entry for a CVE a patch already fixes replaces it with a warning ("is overwriting
+  previous status"); Scarthgap adds the `Patched` ones to the patched set and
+  `check_cves` treats `Ignored` ones as ignored. All flags of `CVE_STATUS` are decoded,
+  whatever their name.
+- **Patches that fix CVEs** (`get_patched_cves` over `oe.patch.src_patches`: the patches of
+  `SRC_URI` as above, matched on their **local path**): the file name gives the last
+  `CVE-YYYY-N` in the path, case-insensitive, upper-cased (Wrynose
+  `parse_cve_from_filename`, `\d{4,}` after the year; Scarthgap and Kirkstone `\d+`); the
+  contents (only when the path is a file, so not a remote or compressed patch; UTF-8, else
+  ISO-8859-1): Wrynose `parse_cves_from_patch_contents`: every `CVE-\d{4}-\d{4,}` on each
+  line that **starts with** `CVE:` (any separator); Scarthgap and Kirkstone:
+  `CVE:( CVE-\d{4}-\d+)+` matched **anywhere** in the text, the ids separated by single
+  spaces after `CVE: `. sous-chef reads which of these the workspace's OE-core has from
+  its `lib/oe/cve_check.py` (`def decode_cve_status`, `== "cpe"`, `def
+  parse_cves_from_patch_contents`) rather than from the release, because no
+  `release::Feature` covers it.
+- **Reports.** Per recipe `CVE_CHECK_RECIPE_FILE_JSON ?= "${CVE_CHECK_DIR}/${PN}_cve.json"`,
+  `CVE_CHECK_DIR ??= "${DEPLOY_DIR}/cve"` (same in `cve-check` on Kirkstone and Scarthgap
+  and in `vex`); a copy in `${CVE_CHECK_SUMMARY_DIR}` (`${LOG_DIR}/cve`) indexed by
+  `cve-summary-index.txt` and merged at `BuildCompleted` into `cve-summary.json` (a
+  symlink to `cve-summary-<timestamp>.json`). Schema (`cve_write_data_json`): `{"version":
+  "1", "package": [{"name", "layer", "version", "products": [{"product", "cvesInRecord"}],
+  "issue": [...]}]}`; `cve-check` issues have `id`, `summary`, `scorev2`, `scorev3`,
+  `scorev4` (also on the `kirkstone` branch tip), `vector`, `vectorString`, `status`
+  (`Patched` / `Unpatched` / `Ignored`), `link`, and `detail` / `description` from
+  `CVE_STATUS`; `vex` issues have `id`, `status` (the mapping), `link`, `detail`,
+  `description`, `patch-file` and the NVD fields only when present, plus `cpes` on the
+  package. `sbom-cve-check` writes `${IMAGE_NAME}` / `${SPDX_RECIPE_SBOM_NAME}` (`${PN}-recipe-sbom`)
+  `.sbom-cve-check.yocto.json` into `DEPLOY_DIR_IMAGE`, "in the same format as the
+  cve-check class" by its doc flag; that tool's output was not read.
+
 ## Tasks
 
 Checked against BitBake `5495a54` (`lib/bb/parse/ast.py` `AddTaskNode`, `DelTaskNode`,

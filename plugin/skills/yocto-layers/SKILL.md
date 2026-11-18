@@ -13,7 +13,7 @@ BitBake's parse order, layer priority and override chain, which a grep does not.
 
 | Question | Tool |
 |---|---|
-| What is this recipe: file, versions, bbappends, classes, key values | `recipe` (`show`: `summary`, `tree` of files in parse order, `outline` of functions and tasks, `sources` with patch files and their `Upstream-Status`, `tasks` in order, `packages`) |
+| What is this recipe: file, versions, bbappends, classes, key values | `recipe` (`show`: `summary`, `tree` of files in parse order, `outline` of functions and tasks, `sources` with patch files and their `Upstream-Status`, `tasks` in order, `packages`, `cve`: CVE identity, `CVE_STATUS`, CVE patches, inconsistencies, a build's CVE report) |
 | Final value of a variable and every operation on it, in order | `var` (`recipe`, `machine`, `distro`; `VAR[flag]`; `flags: true`) |
 | Active overrides, conditional operations, misspelt overrides | `overrides` (`show`: `chain`, `conditional`, `dead`) |
 | The text of a function or assignment | `item` (`loc`, or `recipe` + `name`, or `file` + `name`) |
