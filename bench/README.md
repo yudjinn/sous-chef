@@ -58,5 +58,8 @@ Every session runs with the workspace as working directory, `--setting-sources "
 user, project or local settings: no user plugins, hooks or permissions), `--permission-mode
 dontAsk` (anything not allowed is denied, never prompted), `--no-session-persistence`,
 `ENABLE_CLAUDEAI_MCP_SERVERS=false`, `XDG_CACHE_HOME` under the run directory, and the run
-directory's `wrap-bin` first on `PATH`. Condition A adds `--strict-mcp-config` (no MCP
+directory's `wrap-bin` first on `PATH`. Read, Grep and Glob are not in the allow list, so
+under `dontAsk` they work only inside the workspace; the rest of the live directory (with
+the reference `bitbake -e` dumps in `runs/`) is also denied by `Read(...)` rules.
+`--only containment --conditions A` runs a session that checks this. Condition A adds `--strict-mcp-config` (no MCP
 server); B cannot, because that flag also drops a plugin's server.

@@ -37,7 +37,7 @@ def tasks():
 
 
 def blind():
-    runs = [s for s in harness.stored(RUN_DIR).values() if s["task"] != "overhead"]
+    runs = [s for s in harness.stored(RUN_DIR).values() if s["task"] not in ("overhead", "containment")]
     rng = random.Random(20261118)
     rng.shuffle(runs)
     os.makedirs(SCORING, exist_ok=True)
@@ -163,8 +163,10 @@ def compute():
     for k in ("total", "output", "num_turns", "tool_calls", "wall_s", "cost_usd", "score"):
         av, bv = agg[(k, "A")], agg[(k, "B")]
         sa, sb = sum(av), sum(bv)
-        lines.append(f"| {k} | {sa:,.4g} | {sb:,.4g} | {statistics.median(av):,.4g} | "
-                     f"{statistics.median(bv):,.4g} |")
+        def f(x):
+            return f"{x:,.0f}" if abs(x) >= 1000 else f"{x:.4g}"
+        lines.append(f"| {k} | {f(sa)} | {f(sb)} | {f(statistics.median(av))} | "
+                     f"{f(statistics.median(bv))} |")
     rs = agg[("ratio", "-")]
     lines.append("")
     lines.append(f"Per-task A/B total-token ratio: median {statistics.median(rs):.2f}, "
