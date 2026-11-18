@@ -40,10 +40,11 @@ use crate::error::{Error, Result};
 use crate::workspace::Workspace;
 
 /// Programs [`BbEnv::command`] runs. Anything else is refused.
-pub const ALLOWED_PROGRAMS: [&str; 5] = [
+pub const ALLOWED_PROGRAMS: [&str; 6] = [
     "bitbake",
     "bitbake-layers",
     "bitbake-getvar",
+    "bitbake-diffsigs",
     "devtool",
     "oe-pkgdata-util",
 ];

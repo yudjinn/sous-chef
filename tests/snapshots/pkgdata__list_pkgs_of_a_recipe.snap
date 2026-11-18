@@ -1,0 +1,12 @@
+---
+source: tests/pkgdata.rs
+expression: out
+---
+package	runtime name	packaged	size
+hello-dbg	hello-dbg	yes	40960
+hello-dev	hello-dev	no (empty)	0
+hello-doc	hello-doc	yes	1101
+hello	hello	yes	14862
+note: package data found by searching the build directory: build:tmp/pkgdata/qemux86 (PKGDATA_DIR is not set, or not static, in the configuration; machine qemux86)
+note: packages of recipe hello (meta-core:recipes-core/hello/hello_1.1.bb), from hello's PACKAGES in the package data
+note: 1 package has no .packaged marker (empty and not ALLOW_EMPTY): no package file is made for it

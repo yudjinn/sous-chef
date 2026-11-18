@@ -13,6 +13,8 @@
 //! - `sources`, `tasks`, `packages` (T8.3, module `views`): evaluated views of `SRC_URI`
 //!   (with `FILESPATH` lookup and patch status), the task graph and the packages. See
 //!   docs/mcp-tools.md.
+//! - `cve` (module `views`, rules in `bitbake::cve`): the CVE identity, `CVE_STATUS`, the
+//!   patches that fix CVEs, inconsistencies, and a build's CVE check report if present.
 //!
 //! This file also holds the recipe helpers the other lookup tools share: [`resolve_selected`]
 //! (a recipe argument resolved the way BitBake picks the file: `recipe`, `item`, `search` and
@@ -77,6 +79,8 @@ pub enum Show {
     Tasks,
     /// `PACKAGES`, and per package `FILES`, `RDEPENDS`, `RPROVIDES`.
     Packages,
+    /// What the CVE check reads: `CVE_PRODUCT`, `CVE_STATUS`, CVE patches; a build's report.
+    Cve,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -85,7 +89,7 @@ pub struct Args {
     pub name: String,
     /// Default: the preferred version.
     pub version: Option<String>,
-    /// `summary` (default), `tree`, `outline`, `sources`, `tasks` or `packages`.
+    /// `summary` (default), `tree`, `outline`, `sources`, `tasks`, `packages` or `cve`.
     #[serde(default)]
     pub show: Show,
     /// Multiconfig for the version choice and the evaluated values (default: the default
@@ -136,7 +140,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         )?,
         Show::Tree => tree_table(&index, &recipe)?,
         Show::Outline => outline(&index, &recipe)?,
-        Show::Sources | Show::Tasks | Show::Packages => {
+        Show::Sources | Show::Tasks | Show::Packages | Show::Cve => {
             let target = Target {
                 recipe: Some(eval_label(&recipe, variant.as_ref())),
                 mc: mc.clone(),
@@ -146,6 +150,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
             match args.show {
                 Show::Sources => views::sources(&ctx.workspace, &ds)?,
                 Show::Tasks => views::tasks(&index, &ds)?,
+                Show::Cve => views::cve(&index, &ctx.workspace, &ds)?,
                 _ => views::packages(&ds),
             }
         }
@@ -1905,5 +1910,711 @@ mod views {
             "the packages may differ",
         );
         t
+    }
+
+    // ---- cve ----
+
+    /// Where a `CVE_STATUS` entry comes from (`oe.cve_check.extend_cve_status` adds the
+    /// last two at the end of parsing).
+    enum StatusSource {
+        Flag,
+        Ignore,
+        Group(String),
+    }
+
+    struct Status {
+        value: crate::eval::Value,
+        source: StatusSource,
+        loc: Option<Loc>,
+    }
+
+    /// The `lib/oe/cve_check.py` of the first layer (in `BBLAYERS` order) that has one,
+    /// read through `Workspace::confine`, and the rules it implements.
+    fn cve_rules(ws: &Workspace) -> (crate::bitbake::cve::CveRules, Option<String>) {
+        for l in &ws.layers {
+            let p = l.root.join("lib/oe/cve_check.py");
+            if let Ok(c) = ws.confine(&p)
+                && let Ok(text) = fs::read_to_string(&c)
+            {
+                return (
+                    crate::bitbake::cve::CveRules::from_lib(&text),
+                    Some(format!("{}:lib/oe/cve_check.py", l.name)),
+                );
+            }
+        }
+        (crate::bitbake::cve::CveRules::NEWEST, None)
+    }
+
+    /// The last applied operation on `name[flag]`.
+    fn flag_loc(ds: &DataStore, name: &str, flag: &str) -> Option<Loc> {
+        ds.flag_history(name, flag)
+            .into_iter()
+            .rev()
+            .find(|(_, st)| *st == OpStatus::Applied)
+            .map(|(op, _)| op.loc)
+    }
+
+    /// The first applied operation on `name` whose expanded value has the word `w`.
+    fn word_loc(ds: &DataStore, name: &str, w: &str) -> Option<Loc> {
+        ds.history(name)
+            .into_iter()
+            .filter(|(op, st)| *st == OpStatus::Applied && op.var.flag.is_none())
+            .find(|(op, _)| {
+                split_words(&ds.expand(&op.value).text)
+                    .iter()
+                    .any(|x| x == w)
+            })
+            .map(|(op, _)| op.loc)
+    }
+
+    /// A value for the identity rows: the final value, or `default` when not set.
+    fn identity(ds: &DataStore, name: &str, default: &str, python: &mut usize) -> (String, String) {
+        match ds.value(name) {
+            Some(v) => {
+                let mut s = render::snippet(v.text.trim());
+                if s.is_empty() {
+                    s = "(empty)".into();
+                }
+                if v.unevaluated_python {
+                    *python += 1;
+                    s.push_str(" (depends on python, not evaluated)");
+                }
+                (
+                    s,
+                    applied_locs(ds, name)
+                        .last()
+                        .map_or("-".into(), Loc::to_string),
+                )
+            }
+            None => (default.to_string(), "-".into()),
+        }
+    }
+
+    /// The CVE check JSON reports that may hold this recipe, in the order they are tried:
+    /// `CVE_CHECK_RECIPE_FILE_JSON` (`${CVE_CHECK_DIR}/${PN}_cve.json`, `CVE_CHECK_DIR ??=
+    /// "${DEPLOY_DIR}/cve"`), the same under every `<build>/tmp*/deploy`, the summary
+    /// `${LOG_DIR}/cve/cve-summary.json`, and `sbom-cve-check-recipe`'s
+    /// `${DEPLOY_DIR_IMAGE}/${PN}-recipe-sbom.sbom-cve-check.yocto.json`.
+    fn cve_reports(ws: &Workspace, ds: &DataStore, pn: &str) -> Vec<PathBuf> {
+        let static_path = |v: Option<crate::eval::Value>| -> Option<String> {
+            let v = v?;
+            (!v.unevaluated_python && v.unresolved.is_empty() && v.text.starts_with('/'))
+                .then(|| v.text.trim().to_string())
+        };
+        let mut out: Vec<PathBuf> = Vec::new();
+        let mut push = |p: PathBuf| {
+            if !out.contains(&p) {
+                out.push(p);
+            }
+        };
+        if let Some(p) = static_path(ds.value("CVE_CHECK_RECIPE_FILE_JSON")) {
+            push(PathBuf::from(p));
+        }
+        let cve_dir = static_path(ds.value("CVE_CHECK_DIR"))
+            .or_else(|| static_path(ds.value("DEPLOY_DIR")).map(|d| format!("{d}/cve")));
+        if let Some(d) = cve_dir {
+            push(PathBuf::from(format!("{d}/{pn}_cve.json")));
+        }
+        if let Some(build) = &ws.build_dir
+            && let Ok(rd) = fs::read_dir(build)
+        {
+            let mut tmps: Vec<PathBuf> = rd
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with("tmp"))
+                        && p.is_dir()
+                })
+                .collect();
+            tmps.sort();
+            for t in tmps {
+                push(t.join("deploy/cve").join(format!("{pn}_cve.json")));
+            }
+        }
+        let summary_dir = static_path(ds.value("CVE_CHECK_SUMMARY_DIR"))
+            .or_else(|| static_path(ds.value("LOG_DIR")).map(|d| format!("{d}/cve")));
+        if let Some(d) = summary_dir {
+            push(PathBuf::from(format!("{d}/cve-summary.json")));
+        }
+        if let Some(d) = static_path(ds.value("DEPLOY_DIR_IMAGE")) {
+            push(PathBuf::from(format!(
+                "{d}/{pn}-recipe-sbom.sbom-cve-check.yocto.json"
+            )));
+        }
+        out
+    }
+
+    /// `recipe show=cve`: the CVE identity, `CVE_STATUS` (or `CVE_CHECK_IGNORE`), the patches
+    /// that fix CVEs, the inconsistencies between them, and the build directory's CVE check
+    /// report for the recipe when there is one. See docs/mcp-tools.md.
+    pub fn cve(index: &Index, ws: &Workspace, ds: &DataStore) -> Result<Table> {
+        use crate::bitbake::cve as cvelib;
+
+        let mut t = Table::new(&["kind", "cve", "value", "file", "loc"]);
+        let (rules, rules_file) = cve_rules(ws);
+        let mut python = 0usize;
+        let pn = ds.value("PN").map(|v| v.text).unwrap_or_default();
+        let bpn = ds.value("BPN").map(|v| v.text).unwrap_or_default();
+        let pv = ds.value("PV").map(|v| v.text).unwrap_or_default();
+
+        // ---- identity ----
+        let (product, loc) = identity(
+            ds,
+            "CVE_PRODUCT",
+            &format!("{bpn} (not set; the CVE classes default it to ${{BPN}})"),
+            &mut python,
+        );
+        t.row(&["identity", "CVE_PRODUCT", &product, "-", &loc]);
+        let products = ds
+            .value("CVE_PRODUCT")
+            .map(|v| v.text)
+            .unwrap_or_else(|| bpn.clone());
+        let (version, loc) = identity(
+            ds,
+            "CVE_VERSION",
+            &format!("{pv} (not set; the CVE classes default it to ${{PV}})"),
+            &mut python,
+        );
+        t.row(&["identity", "CVE_VERSION", &version, "-", &loc]);
+        let (suffix, loc) = identity(ds, "CVE_VERSION_SUFFIX", "(not set)", &mut python);
+        t.row(&["identity", "CVE_VERSION_SUFFIX", &suffix, "-", &loc]);
+
+        // ---- statuses ----
+        let mut facts: Vec<[String; 4]> = Vec::new();
+        let mut statuses: std::collections::BTreeMap<String, Status> = Default::default();
+        let ignore = ds.value("CVE_CHECK_IGNORE");
+        let ignore_words: Vec<String> = ignore
+            .as_ref()
+            .map(|v| split_words(&v.text))
+            .unwrap_or_default();
+        if rules.status {
+            for id in ds.flag_names("CVE_STATUS") {
+                let Some(value) = ds.flag("CVE_STATUS", &id) else {
+                    continue;
+                };
+                let loc = flag_loc(ds, "CVE_STATUS", &id);
+                statuses.insert(
+                    id,
+                    Status {
+                        value,
+                        source: StatusSource::Flag,
+                        loc,
+                    },
+                );
+            }
+            // extend_cve_status: CVE_CHECK_IGNORE first, then the groups, each replacing.
+            for w in &ignore_words {
+                statuses.insert(
+                    w.clone(),
+                    Status {
+                        value: crate::eval::Value {
+                            text: "ignored".into(),
+                            unevaluated_python: false,
+                            unresolved: Vec::new(),
+                        },
+                        source: StatusSource::Ignore,
+                        loc: word_loc(ds, "CVE_CHECK_IGNORE", w),
+                    },
+                );
+            }
+            let groups = ds
+                .value("CVE_STATUS_GROUPS")
+                .map(|v| split_words(&v.text))
+                .unwrap_or_default();
+            for g in groups {
+                let groups_loc =
+                    word_loc(ds, "CVE_STATUS_GROUPS", &g).map_or("-".into(), |l| l.to_string());
+                let Some(members) = ds.value(&g) else {
+                    facts.push([
+                        "-".into(),
+                        format!(
+                            "CVE_STATUS_GROUPS names {g}, which is not set (extend_cve_status warns and skips it)"
+                        ),
+                        "-".into(),
+                        groups_loc,
+                    ]);
+                    continue;
+                };
+                let Some(status) = ds.flag(&g, "status") else {
+                    facts.push([
+                        "-".into(),
+                        format!(
+                            "CVE_STATUS_GROUPS names {g}, which has no [status] flag: its CVEs get no status value"
+                        ),
+                        "-".into(),
+                        groups_loc,
+                    ]);
+                    continue;
+                };
+                let loc = flag_loc(ds, &g, "status");
+                for id in split_words(&members.text) {
+                    statuses.insert(
+                        id,
+                        Status {
+                            value: status.clone(),
+                            source: StatusSource::Group(g.clone()),
+                            loc: loc.clone(),
+                        },
+                    );
+                }
+            }
+        } else {
+            for w in &ignore_words {
+                let loc = word_loc(ds, "CVE_CHECK_IGNORE", w).map_or("-".into(), |l| l.to_string());
+                t.row(&["ignore", w, "CVE_CHECK_IGNORE (not checked)", "-", &loc]);
+            }
+            for id in ds.flag_names("CVE_STATUS") {
+                facts.push([
+                    id.clone(),
+                    "CVE_STATUS has no effect here (no decode_cve_status in lib/oe/cve_check.py); this OE-core reads CVE_CHECK_IGNORE".into(),
+                    "-".into(),
+                    flag_loc(ds, "CVE_STATUS", &id).map_or("-".into(), |l| l.to_string()),
+                ]);
+            }
+        }
+        let statusmap_known = !ds.flag_names("CVE_CHECK_STATUSMAP").is_empty();
+        let mut status_rows: Vec<[String; 4]> = Vec::new();
+        let mut ordered: Vec<(&String, &Status)> = statuses.iter().collect();
+        ordered.sort_by_key(|(id, _)| cve_order(id));
+        for (id, st) in ordered {
+            let loc = st.loc.as_ref().map_or("-".into(), Loc::to_string);
+            let via = match &st.source {
+                StatusSource::Flag => String::new(),
+                StatusSource::Ignore => " (from CVE_CHECK_IGNORE)".into(),
+                StatusSource::Group(g) => format!(" (from CVE_STATUS_GROUPS {g})"),
+            };
+            if !cvelib::is_cve_id(id) {
+                facts.push([
+                    id.clone(),
+                    format!("CVE_STATUS[{id}] is not a CVE id; get_patched_cves decodes it like any other entry"),
+                    "-".into(),
+                    loc.clone(),
+                ]);
+            }
+            if st.value.unevaluated_python {
+                python += 1;
+                status_rows.push([
+                    id.clone(),
+                    format!(
+                        "(depends on python, not evaluated){via}: {}",
+                        render::snippet(&st.value.text)
+                    ),
+                    "-".into(),
+                    loc,
+                ]);
+                continue;
+            }
+            let d = cvelib::decode_status(&st.value.text, rules);
+            let mapping = if rules.status {
+                ds.flag("CVE_CHECK_STATUSMAP", &d.detail).map(|v| v.text)
+            } else {
+                None
+            };
+            let mut value = match &mapping {
+                Some(m) => format!("{m} ({})", d.detail),
+                None => {
+                    facts.push([
+                        id.clone(),
+                        if statusmap_known {
+                            format!(
+                                "status {:?} is not in CVE_CHECK_STATUSMAP: decode_cve_status warns and counts it as Unpatched",
+                                d.detail
+                            )
+                        } else {
+                            "CVE_CHECK_STATUSMAP is not set (conf/cve-check-map.conf not included): decode_cve_status counts every entry as Unpatched".into()
+                        },
+                        "-".into(),
+                        loc.clone(),
+                    ]);
+                    format!("Unpatched ({}, unknown status)", d.detail)
+                }
+            };
+            if d.malformed_cpe {
+                facts.push([
+                    id.clone(),
+                    "the status has `cpe:` without both a vendor and a product (`detail: cpe:vendor:product:description`); decode_cve_status ignores the CPE part".into(),
+                    "-".into(),
+                    loc.clone(),
+                ]);
+            }
+            if rules.cpe && !cvelib::product_matches(&d, &products) {
+                facts.push([
+                    id.clone(),
+                    format!(
+                        "the status is for {}:{}, which matches no CVE_PRODUCT word ({}): get_patched_cves skips it",
+                        d.vendor,
+                        d.product,
+                        products.trim()
+                    ),
+                    "-".into(),
+                    loc.clone(),
+                ]);
+            }
+            if d.vendor != "*" || d.product != "*" {
+                value.push_str(&format!(" for {}:{}", d.vendor, d.product));
+            }
+            if !d.description.is_empty() {
+                value.push_str(": ");
+                value.push_str(&d.description);
+            }
+            value.push_str(&via);
+            status_rows.push([id.clone(), render::snippet(&value), "-".into(), loc]);
+        }
+
+        // ---- patches ----
+        let (entries, _, _) = entries(ds);
+        let sp = search_path(ds);
+        let mut outside = 0usize;
+        let mut scanned = 0usize;
+        let mut not_read: Vec<String> = Vec::new();
+        let mut conditional = 0usize;
+        let mut patched: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        let mut patch_rows: Vec<[String; 4]> = Vec::new();
+        // Patches that declare CVEs only in their header, by the ids they declare.
+        let mut unnamed: std::collections::BTreeMap<String, Vec<(String, String, String)>> =
+            Default::default();
+        for e in entries.iter().filter(|e| e.state == "active") {
+            if e.word.contains("${@") {
+                continue;
+            }
+            let Some(uri) = parse_uri(&e.word) else {
+                continue;
+            };
+            if !uri.is_patch() {
+                continue;
+            }
+            let loc = e.loc.as_ref().map_or("-".into(), Loc::to_string);
+            if [
+                "mindate", "maxdate", "minrev", "maxrev", "rev", "notrev", "minver", "maxver",
+            ]
+            .iter()
+            .any(|k| uri.param(k).is_some())
+            {
+                conditional += 1;
+            }
+            let base = uri.path.rsplit('/').next().unwrap_or(&uri.path).to_string();
+            let (name_path, file, text) = if uri.scheme == "file" {
+                match sp.as_ref().map(|sp| find(ws, sp, &uri.path, &mut outside)) {
+                    Some(Found::Dir(_)) => continue,
+                    Some(Found::File(p)) if !uri.compressed() => {
+                        let text = ws
+                            .confine(&p)
+                            .ok()
+                            .and_then(|c| fs::read(c).ok())
+                            .map(|b| String::from_utf8_lossy(&b).into_owned());
+                        if text.is_none() {
+                            not_read.push(base.clone());
+                        }
+                        (
+                            p.display().to_string(),
+                            shown_path(ws, &p.display().to_string()),
+                            text,
+                        )
+                    }
+                    Some(Found::File(p)) => {
+                        not_read.push(base.clone());
+                        (
+                            uncompressed(&base),
+                            shown_path(ws, &p.display().to_string()),
+                            None,
+                        )
+                    }
+                    _ => {
+                        not_read.push(base.clone());
+                        (base.clone(), "not found".into(), None)
+                    }
+                }
+            } else {
+                not_read.push(base.clone());
+                (base.clone(), "-".into(), None)
+            };
+            scanned += 1;
+            let by_name = cvelib::cve_from_filename(&name_path, rules);
+            let by_text = text
+                .as_deref()
+                .map(|s| cvelib::cves_from_patch_text(s, rules))
+                .unwrap_or_default();
+            let tag = if rules.line_rule {
+                "line starting with CVE:"
+            } else {
+                "CVE: tag"
+            };
+            if let Some(n) = &by_name
+                && text.is_some()
+            {
+                if by_text.is_empty() {
+                    facts.push([
+                        n.clone(),
+                        format!("{base} is named for {n}, but its header has no {tag}"),
+                        file.clone(),
+                        loc.clone(),
+                    ]);
+                } else if !by_text.contains(n) {
+                    facts.push([
+                        n.clone(),
+                        format!(
+                            "{base} is named for {n}, but its header names {}",
+                            by_text.join(" ")
+                        ),
+                        file.clone(),
+                        loc.clone(),
+                    ]);
+                }
+            }
+            if by_name.is_none() && !by_text.is_empty() {
+                unnamed.entry(by_text.join(" ")).or_default().push((
+                    base.clone(),
+                    file.clone(),
+                    loc.clone(),
+                ));
+            }
+            let status = if text.is_some() {
+                upstream_status(ws, Path::new(&name_path))
+            } else {
+                "-".into()
+            };
+            let mut ids: Vec<String> = by_text.clone();
+            if let Some(n) = &by_name
+                && !ids.contains(n)
+            {
+                ids.push(n.clone());
+            }
+            ids.sort();
+            for id in ids {
+                let how = match (
+                    by_name.as_deref() == Some(id.as_str()),
+                    by_text.contains(&id),
+                ) {
+                    (true, true) => "by name and header",
+                    (true, false) if text.is_none() => "by name (contents not read)",
+                    (true, false) => "by name",
+                    _ => "by header",
+                };
+                patched.entry(id.clone()).or_default().push(base.clone());
+                patch_rows.push([
+                    id,
+                    render::snippet(&format!("{how}; {status}")),
+                    file.clone(),
+                    loc.clone(),
+                ]);
+            }
+        }
+        for (ids, list) in &unnamed {
+            match list.as_slice() {
+                [(base, file, loc)] => facts.push([
+                    ids.clone(),
+                    format!("{base} declares {ids} in its header, but its name has no CVE id"),
+                    file.clone(),
+                    loc.clone(),
+                ]),
+                _ => facts.push([
+                    ids.clone(),
+                    format!(
+                        "{} patches declare {ids} in their header, but their names have no CVE id: {}",
+                        list.len(),
+                        list.iter().map(|(b, _, _)| b.as_str()).collect::<Vec<_>>().join(", ")
+                    ),
+                    "-".into(),
+                    list.first().map_or("-".into(), |(_, _, l)| l.clone()),
+                ]),
+            }
+        }
+        for (id, files) in &patched {
+            if let Some(st) = statuses.get(id) {
+                let what = if st.value.unevaluated_python {
+                    "a CVE_STATUS that depends on python".to_string()
+                } else {
+                    format!(
+                        "CVE_STATUS {:?}",
+                        cvelib::decode_status(&st.value.text, rules).detail
+                    )
+                };
+                let keeps = if rules.cpe {
+                    "; CVE_STATUS wins, with a warning"
+                } else {
+                    ""
+                };
+                facts.push([
+                    id.clone(),
+                    format!("patched by {} and also in {what}{keeps}", files.join(", ")),
+                    "-".into(),
+                    st.loc.as_ref().map_or("-".into(), Loc::to_string),
+                ]);
+            }
+        }
+
+        // ---- build output ----
+        let mut report_note: Option<String> = None;
+        let mut found_report = false;
+        for p in cve_reports(ws, ds, &pn) {
+            let Ok(c) = ws.confine(&p) else {
+                continue;
+            };
+            let Ok(text) = fs::read_to_string(&c) else {
+                continue;
+            };
+            let shown = shown_path(ws, &c.display().to_string());
+            match cvelib::read_check_json(&text, &pn) {
+                Ok(Some(pkg)) => {
+                    found_report = true;
+                    let counts = pkg.counts();
+                    let mut parts: Vec<String> = ["Unpatched", "Patched", "Ignored"]
+                        .iter()
+                        .map(|k| format!("{k} {}", counts.get(*k).copied().unwrap_or(0)))
+                        .collect();
+                    for (k, n) in &counts {
+                        if !["Unpatched", "Patched", "Ignored"].contains(&k.as_str()) {
+                            parts.push(format!("{k} {n}"));
+                        }
+                    }
+                    t.row(&[
+                        "build",
+                        "-",
+                        &format!("{} (version {})", parts.join(", "), pkg.version),
+                        &shown,
+                        "-",
+                    ]);
+                    for i in pkg.issues.iter().filter(|i| i.status == "Unpatched") {
+                        t.row(&["unpatched", &i.id, &i.score_text(), "-", "-"]);
+                    }
+                    break;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    report_note = Some(format!("note: {shown} was not read: {e}"));
+                }
+            }
+        }
+        for f in facts {
+            t.row(&["fact", &f[0], &render::snippet(&f[1]), &f[2], &f[3]]);
+        }
+        for r in status_rows {
+            t.row(&["status", &r[0], &r[1], &r[2], &r[3]]);
+        }
+        for r in patch_rows {
+            t.row(&["patch", &r[0], &r[1], &r[2], &r[3]]);
+        }
+
+        t.note("note: what the metadata declares (CVE_PRODUCT, CVE_STATUS, CVE_CHECK_IGNORE, patches in SRC_URI), read as OE-core's CVE check reads it; this is not a scan against the NVD, and nothing was run");
+        t.note(&match &rules_file {
+            Some(f) => format!(
+                "note: rules of {f}: {}; {}",
+                if rules.status {
+                    "CVE_STATUS with CVE_CHECK_STATUSMAP and CVE_STATUS_GROUPS"
+                } else {
+                    "no CVE_STATUS (CVE_CHECK_IGNORE only)"
+                },
+                if rules.line_rule {
+                    "patch headers: every id on lines starting with CVE:"
+                } else {
+                    "patch headers: the tag CVE: followed by space-separated ids"
+                }
+            ),
+            None => {
+                "note: no lib/oe/cve_check.py in the layers; the newest OE-core rules were used"
+                    .into()
+            }
+        });
+        t.note(&format!(
+            "note: {scanned} {} in SRC_URI scanned (file name and header); patches without a CVE id are not listed (see show=sources)",
+            if scanned == 1 { "patch" } else { "patches" }
+        ));
+        if !not_read.is_empty() {
+            t.note(&format!(
+                "note: contents not read (remote, compressed or not found), file name only: {}",
+                not_read.join(", ")
+            ));
+        }
+        if conditional > 0 {
+            t.note(&format!(
+                "note: {conditional} {} mindate/maxdate/rev/minver/maxver parameters, which are not evaluated (oe.patch.should_apply)",
+                if conditional == 1 { "patch has" } else { "patches have" }
+            ));
+        }
+        if outside > 0 {
+            t.note(&format!(
+                "note: {outside} search {} outside the workspace and not checked",
+                if outside == 1 { "path is" } else { "paths are" }
+            ));
+        }
+        if let Some(n) = report_note {
+            t.note(&n);
+        }
+        if !found_report {
+            t.note(&how_to_check(index, ws, &pn));
+        }
+        if let Some(n) = render::python_note(python) {
+            t.note(&n);
+        }
+        replay_notes(
+            &mut t,
+            ds,
+            &[
+                "CVE_STATUS",
+                "CVE_PRODUCT",
+                "CVE_VERSION",
+                "CVE_CHECK_IGNORE",
+                "CVE_STATUS_GROUPS",
+                "SRC_URI",
+            ],
+            "the CVE metadata may differ",
+        );
+        Ok(t)
+    }
+
+    /// Sort key of a CVE id: year and number as numbers (`CVE-2026-8458` before
+    /// `CVE-2026-10536`), anything else after, by text.
+    fn cve_order(id: &str) -> (u8, u64, u64, String) {
+        let mut parts = id.splitn(3, '-');
+        match (parts.next(), parts.next(), parts.next()) {
+            (Some("CVE"), Some(y), Some(n)) => match (y.parse(), n.parse()) {
+                (Ok(y), Ok(n)) => (0, y, n, String::new()),
+                _ => (1, 0, 0, id.to_string()),
+            },
+            _ => (1, 0, 0, id.to_string()),
+        }
+    }
+
+    /// `x.patch.gz` -> `x.patch`: the name OE-core gives a compressed patch it unpacks.
+    fn uncompressed(base: &str) -> String {
+        [".gz", ".bz2", ".xz", ".Z"]
+            .iter()
+            .find_map(|c| base.strip_suffix(c))
+            .unwrap_or(base)
+            .to_string()
+    }
+
+    /// How to produce a CVE check report for `pn`, by the classes the layers have.
+    fn how_to_check(index: &Index, ws: &Workspace, pn: &str) -> String {
+        let has = |c: &str| {
+            query::class_files(index, ws, c, true)
+                .map(|v| !v.is_empty())
+                .unwrap_or(false)
+        };
+        let mut ways: Vec<String> = Vec::new();
+        if has("cve-check") {
+            ways.push(format!(
+                "INHERIT += \"cve-check\" in local.conf, then bitbake -c cve_check {pn} (it fetches the NVD database: network)"
+            ));
+        }
+        if has("vex") {
+            ways.push(format!(
+                "INHERIT += \"vex\", then bitbake -c generate_vex {pn} (the statuses the metadata declares, no NVD scan)"
+            ));
+        }
+        if has("sbom-cve-check-recipe") {
+            ways.push(format!(
+                "INHERIT += \"create-spdx-3.0 sbom-cve-check-recipe\", then bitbake -c sbom_cve_check_recipe {pn} (scans the recipe SBOM; network for its databases)"
+            ));
+        }
+        if ways.is_empty() {
+            return "note: no CVE check report for this recipe in the build directory, and the layers have no cve-check, vex or sbom-cve-check class to produce one".into();
+        }
+        format!(
+            "note: no CVE check report for {pn} in the build directory; to produce one (sous-chef does not run it): {}",
+            ways.join("; or ")
+        )
     }
 }

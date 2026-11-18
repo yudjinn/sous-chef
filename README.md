@@ -14,7 +14,8 @@ It needs no build environment for lookups; it uses BitBake only when asked to ru
 
 - **Find and read recipe items.** A recipe's files, versions (and which one BitBake picks,
   and why), bbappends in application order, classes and key values; its file tree,
-  functions, sources and patches, tasks and packages (`recipe`). The exact text of a
+  functions, sources and patches, tasks and packages, and what its metadata declares about
+  CVEs (`recipe`). The exact text of a
   function or assignment, usable as an Edit string (`item`). Statements by name, regex or
   full text, each with its enclosing item (`search`). Which class file wins and who
   inherits it (`class`).
@@ -32,6 +33,11 @@ It needs no build environment for lookups; it uses BitBake only when asked to ru
 - **Run BitBake and digest its logs.** `bitbake`, `devtool` and `bitbake-layers` as
   background jobs (`bitbake`); a failed task's log digested (`log`); large output kept
   under a handle and read in parts (`slice`).
+- **Why did this task re-run?** A digest of `bitbake-diffsigs`: the variables that
+  changed, each with the assignment that sets it now, and the dependency path (`sigs`).
+- **Which package ships this file?** From an existing build's package data: the
+  package, its recipe and the `FILES` assignment; a package's files, version and runtime
+  dependencies (`pkgdata`).
 - **Audit a build repository**: one findings report over every layer (`audit`,
   `sous-chef audit`).
 - **Diff a layer between two revisions**, and see which of your bbappends no longer apply
@@ -344,7 +350,7 @@ starts, and every tool and `status` report the error. Details: "Configuration" i
 
 | Tool | What it answers |
 |---|---|
-| `recipe` | A recipe's files, versions, bbappends, classes and key values; its file tree; its functions; its sources and patches, tasks in order, packages |
+| `recipe` | A recipe's files, versions, bbappends, classes and key values; its file tree; its functions; its sources and patches, tasks in order, packages; its CVE view (`CVE_PRODUCT`, `CVE_STATUS`, CVE patches, inconsistencies, a build's CVE report if there is one) |
 | `var` | The history and final value of a variable for a recipe, machine and distro; with `authoritative`, BitBake's own (`bitbake -e`) |
 | `overrides` | The evaluated `OVERRIDES` chain; conditional operations, active or not; overrides that match nothing |
 | `item` | The text of a pointer or of a named statement |
@@ -360,6 +366,8 @@ starts, and every tool and `status` report the error. Details: "Configuration" i
 | `status` | Workspace roots, release, index, build environment, kas project, multiconfigs, running job, handle store |
 | `audit` | One findings report over every layer of the repository (inventory with git facts and kas pins, releases, layer structure, lint, parse problems, what was not checked), stored under a handle; returns a digest |
 | `diff` | Statement-level diff of a layer's recipes between two git revisions (variables, tasks, inherits, `SRC_URI` entries, version renames, changed classes) and which of your bbappends no longer apply, apply to another version or carry patches on changed source; read-only, no checkout |
+| `sigs` | Why a task re-ran: a digest of `bitbake-diffsigs` (root-cause variables with the pointer of the assignment that sets them, the dependency path, taints), full output under a handle; builds nothing |
+| `pkgdata` | From a build's package data: which package ships a file (with the recipe's `FILES` assignment), a package's files, its recipe, a recipe's packages, a package's version, size and runtime dependencies; builds nothing |
 
 Every argument and output format is in [docs/mcp-tools.md](docs/mcp-tools.md); the lint
 rules are in [docs/lint-rules.md](docs/lint-rules.md). The server also offers the resources

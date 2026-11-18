@@ -1,0 +1,10 @@
+---
+source: tests/sigs.rs
+expression: mask(&out)
+---
+kind	item	detail	loc
+task	hello:do_compile	re-ran: its own inputs did not change; a dependency's did, by way of hello:do_configure	-
+via	hello:do_configure	hash 6f1c2e0a9b -> 0a1b2c3d4e	-
+cause	EXTRA_OECONF (hello)	value changed: "--disable-nls {+--with-mine+}"	meta-mine:recipes-core/hello/hello_1.1.bbappend:6
+cause	do_configure (hello)	value changed: 1 line added, 0 removed	meta-core:classes-recipe/autotoolsish.bbclass:30
+note: from `bitbake-diffsigs -c never -t hello do_compile` (BitBake's own comparison; nothing was built); full output h:HANDLE (563 bytes): slice handle=h:HANDLE

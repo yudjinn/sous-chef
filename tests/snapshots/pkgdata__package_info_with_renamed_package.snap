@@ -1,0 +1,17 @@
+---
+source: tests/pkgdata.rs
+expression: out
+---
+package	field	value	loc
+libfoo	recipe	libfoo 2.0-r0	meta-core:recipes-core/libfoo/libfoo_2.0.bb
+libfoo	version	2.0-r0	-
+libfoo	runtime name	libfoo2	-
+libfoo	size	71058	-
+libfoo	packaged	yes	-
+libfoo	RPROVIDES	libfoo-compat	-
+libfoo	LICENSE	MIT	-
+libfoo	SUMMARY	Foo library	-
+libfoo	files	47	-
+note: package data found by searching the build directory: build:tmp/pkgdata/qemux86 (PKGDATA_DIR is not set, or not static, in the configuration; machine qemux86)
+note: libfoo2 is the runtime name of the recipe-space package libfoo (PKG:libfoo = libfoo2)
+note: values as do_packagedata recorded them (after do_package: RDEPENDS includes the shared-library and pkg-config dependencies it added)

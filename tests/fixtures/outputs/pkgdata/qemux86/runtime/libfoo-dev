@@ -1,0 +1,11 @@
+PN: libfoo
+PV: 2.0
+PR: r0
+PKGV: 2.0
+PKGR: r0
+LICENSE: MIT
+SUMMARY: Foo library\nwith a second line
+RDEPENDS:libfoo-dev: libfoo2 (= 2.0-r0)
+PKG:libfoo-dev: libfoo-dev
+FILES_INFO:libfoo-dev: {"/usr/include/foo.h": 2048, "/usr/lib/libfoo.so": 20}
+PKGSIZE:libfoo-dev: 2068

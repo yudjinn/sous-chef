@@ -1,0 +1,11 @@
+PN: hello
+PV: 1.1
+PR: r0
+PKGV: 1.1
+PKGR: r0
+LICENSE: MIT
+SUMMARY: GNU Hello stand-in
+PKG:hello-doc: hello-doc
+FILES:hello-doc: /usr/share/doc
+FILES_INFO:hello-doc: {"/usr/share/doc/hello/README": 1024, "/usr/share/doc/hello/caf\\u00e9 \\"notes\\".txt": 77}
+PKGSIZE:hello-doc: 1101

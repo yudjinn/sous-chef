@@ -1,0 +1,33 @@
+---
+source: tests/recipe_cve.rs
+expression: out
+---
+kind	cve	value	file	loc
+identity	CVE_PRODUCT	acme:vuln	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:9
+identity	CVE_VERSION	1.0 (not set; the CVE classes default it to ${PV})	-	-
+identity	CVE_VERSION_SUFFIX	(not set)	-	-
+build	-	Unpatched 2, Patched 1, Ignored 1 (version 1.0)	build:tmp/deploy/cve/vuln_cve.json	-
+unpatched	CVE-2024-90001	v3 9.8, v2 6.8	-	-
+unpatched	CVE-2024-90002	v2 4.3	-	-
+fact	-	CVE_STATUS_GROUPS names CVE_STATUS_NONE, which is not set (extend_cve_status warns and skips it)	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:14
+fact	CVE-2023-00002	status "maybe-later" is not in CVE_CHECK_STATUSMAP: decode_cve_status warns and counts it as Unpatched	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:12
+fact	CVE-2023-00003	the status is for other:thing, which matches no CVE_PRODUCT word (acme:vuln): get_patched_cves skips it	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:13
+fact	CVE-2024-22222	CVE-2024-22222-and-more.patch is named for CVE-2024-22222, but its header has no line starting with CVE:	meta-mine:recipes-sec/vuln/files/CVE-2024-22222-and-more.patch	meta-mine:recipes-sec/vuln/vuln_1.0.bb:3-8
+fact	CVE-2024-33333 CVE-2024-33334	fix-overflow.patch declares CVE-2024-33333 CVE-2024-33334 in its header, but its name has no CVE id	meta-mine:recipes-sec/vuln/files/fix-overflow.patch	meta-mine:recipes-sec/vuln/vuln_1.0.bb:3-8
+fact	CVE-2024-11111	patched by CVE-2024-11111.patch and also in CVE_STATUS "fixed-version"; CVE_STATUS wins, with a warning	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:11
+status	CVE-2023-00001	Ignored (not-applicable-config): needs the frobnicator	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:10
+status	CVE-2023-00002	Unpatched (maybe-later, unknown status): who knows	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:12
+status	CVE-2023-00003	Ignored (cpe-incorrect) for other:thing: not ours	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:13
+status	CVE-2023-10001	Ignored (not-applicable-platform): Windows only (from CVE_STATUS_GROUPS CVE_STATUS_WIN)	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:16
+status	CVE-2023-10002	Ignored (not-applicable-platform): Windows only (from CVE_STATUS_GROUPS CVE_STATUS_WIN)	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:16
+status	CVE-2024-11111	Patched (fixed-version): fixed in 1.0	-	meta-mine:recipes-sec/vuln/vuln_1.0.bb:11
+status	CVE-2025-50000	Ignored (cpe-incorrect): the NVD entry is for another vuln	-	meta-vendor:recipes-sec/vuln/vuln_%.bbappend:3
+patch	CVE-2024-11111	by name and header; Upstream-Status: Backport [https://example.org/vuln/commit/1]	meta-mine:recipes-sec/vuln/files/CVE-2024-11111.patch	meta-mine:recipes-sec/vuln/vuln_1.0.bb:3-8
+patch	CVE-2024-33333	by header; Upstream-Status: Submitted [https://example.org/vuln/pull/2]	meta-mine:recipes-sec/vuln/files/fix-overflow.patch	meta-mine:recipes-sec/vuln/vuln_1.0.bb:3-8
+patch	CVE-2024-33334	by header; Upstream-Status: Submitted [https://example.org/vuln/pull/2]	meta-mine:recipes-sec/vuln/files/fix-overflow.patch	meta-mine:recipes-sec/vuln/vuln_1.0.bb:3-8
+patch	CVE-2024-22222	by name; Upstream-Status: Pending	meta-mine:recipes-sec/vuln/files/CVE-2024-22222-and-more.patch	meta-mine:recipes-sec/vuln/vuln_1.0.bb:3-8
+patch	CVE-2025-44444	by name and header; Upstream-Status: Backport [https://example.org/vuln/commit/4]	meta-vendor:recipes-sec/vuln/files/CVE-2025-44444.patch	meta-vendor:recipes-sec/vuln/vuln_%.bbappend:2
+note: what the metadata declares (CVE_PRODUCT, CVE_STATUS, CVE_CHECK_IGNORE, patches in SRC_URI), read as OE-core's CVE check reads it; this is not a scan against the NVD, and nothing was run
+note: rules of meta-core:lib/oe/cve_check.py: CVE_STATUS with CVE_CHECK_STATUSMAP and CVE_STATUS_GROUPS; patch headers: every id on lines starting with CVE:
+note: 5 patches in SRC_URI scanned (file name and header); patches without a CVE id are not listed (see show=sources)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)

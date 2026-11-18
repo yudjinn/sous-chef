@@ -1,0 +1,13 @@
+PN: hello
+PV: 1.1
+PR: r0
+PKGV: 1.1
+PKGR: r0
+LICENSE: MIT
+SUMMARY: GNU Hello stand-in
+RDEPENDS:hello: libfoo2 (>= 2.0)
+SECTION: base
+PKG:hello: hello
+FILES:hello: /usr/bin/* /usr/sbin/* /usr/lib/lib*.so.*
+FILES_INFO:hello: {"/usr/bin/hello": 14552, "/usr/bin/hello-wrapper": 310}
+PKGSIZE:hello: 14862

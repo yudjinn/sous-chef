@@ -1519,6 +1519,75 @@ show=sources` reproduces:
   (multiline, case-sensitive) is valid; else a line matching `upstream.*status`
   case-insensitively is "Malformed"; else "Missing".
 
+### CVE metadata
+
+What `recipe show=cve` reproduces (x4). Read in OE-core Wrynose `33a6bd6c`
+(`meta/lib/oe/cve_check.py`, `meta/classes/vex.bbclass`, `meta/conf/cve-check-map.conf`,
+`meta/lib/oe/patch.py`), and with `git show` on the `scarthgap` and `kirkstone` branch
+tips (`meta/classes/cve-check.bbclass`, `meta/lib/oe/cve_check.py`), and the `nanbield` /
+`mickledore` tips for when `CVE_STATUS` appeared. Never checked against a build: the live
+build directory has no CVE output.
+
+- **Classes.** Kirkstone and Scarthgap have `cve-check.bbclass` (`do_cve_check`, needs the
+  NVD database from `cve-update-nvd2-native`, network); Scarthgap and Wrynose have
+  `vex.bbclass` (`do_generate_vex`, no NVD scan: only what the metadata declares). Wrynose
+  **removed `cve-check.bbclass`** (OE-core `00de455f8d`, "classes/cve-check: remove
+  class", in `yocto-6.0`); its scanning is `sbom-cve-check.bbclass` /
+  `sbom-cve-check-recipe.bbclass` (an external tool on the SPDX 3 SBOM). `vex.bbclass`
+  refuses to run with `cve-check` inherited (`SkipRecipe`). Both classes default
+  `CVE_PRODUCT ??= "${BPN}"` and `CVE_VERSION ??= "${PV}"` and set `CVE_VERSION_SUFFIX ??=
+  ""`; on Wrynose `spdx-common.bbclass` (inherited globally) sets the same two defaults.
+- **`CVE_STATUS`** (Nanbield and later: `decode_cve_status` is on the `nanbield` branch,
+  not on `mickledore`; Kirkstone has only `CVE_CHECK_IGNORE`, a list of ids
+  `check_cves` skips). `extend_cve_status` (anonymous python of the class, once per
+  recipe): every word of `CVE_CHECK_IGNORE` becomes `CVE_STATUS[id] = "ignored"` (with a
+  deprecation warning), then for each word `G` of `CVE_STATUS_GROUPS`, every word of `${G}`
+  gets `CVE_STATUS[id] = G[status]` (an unset `G` warns and is skipped); each step
+  replaces what was there. `decode_cve_status`: Scarthgap `split(':', 1)`: detail before the
+  first `:`, description after it, stripped; Wrynose `split(':', 4)`: `detail: cpe:vendor:
+  product: description` gives vendor and product (with exactly four parts the code indexes
+  a fifth and fails), `detail: cpe...` with fewer parts warns "Invalid CPE information" and
+  keeps `*`; otherwise as Scarthgap. The detail is **not stripped** before
+  `getVarFlag("CVE_CHECK_STATUSMAP", detail)`; an unknown detail warns and maps to
+  `Unpatched`. `CVE_CHECK_STATUSMAP` is in `conf/cve-check-map.conf`, `require`d by
+  `bitbake.conf`: Patched (`patched`, `backported-patch`, `cpe-stable-backport`,
+  `fixed-version`, and on Wrynose `fix-file-included`, `version-not-in-range`), Unpatched
+  (`unpatched`, `vulnerable-investigating`, Wrynose `version-in-range`), Ignored
+  (`ignored`, `cpe-incorrect`, `disputed`, `not-applicable-config`,
+  `not-applicable-platform`, `upstream-wontfix`), Wrynose `unknown` = Unknown. Wrynose's
+  `get_patched_cves` keeps a `CVE_STATUS` entry only when `has_cve_product_match` (some
+  `CVE_PRODUCT` word, `vendor:product` or `product`, matches, `*` matching anything), and
+  an entry for a CVE a patch already fixes replaces it with a warning ("is overwriting
+  previous status"); Scarthgap adds the `Patched` ones to the patched set and
+  `check_cves` treats `Ignored` ones as ignored. All flags of `CVE_STATUS` are decoded,
+  whatever their name.
+- **Patches that fix CVEs** (`get_patched_cves` over `oe.patch.src_patches`: the patches of
+  `SRC_URI` as above, matched on their **local path**): the file name gives the last
+  `CVE-YYYY-N` in the path, case-insensitive, upper-cased (Wrynose
+  `parse_cve_from_filename`, `\d{4,}` after the year; Scarthgap and Kirkstone `\d+`); the
+  contents (only when the path is a file, so not a remote or compressed patch; UTF-8, else
+  ISO-8859-1): Wrynose `parse_cves_from_patch_contents`: every `CVE-\d{4}-\d{4,}` on each
+  line that **starts with** `CVE:` (any separator); Scarthgap and Kirkstone:
+  `CVE:( CVE-\d{4}-\d+)+` matched **anywhere** in the text, the ids separated by single
+  spaces after `CVE: `. sous-chef reads which of these the workspace's OE-core has from
+  its `lib/oe/cve_check.py` (`def decode_cve_status`, `== "cpe"`, `def
+  parse_cves_from_patch_contents`) rather than from the release, because no
+  `release::Feature` covers it.
+- **Reports.** Per recipe `CVE_CHECK_RECIPE_FILE_JSON ?= "${CVE_CHECK_DIR}/${PN}_cve.json"`,
+  `CVE_CHECK_DIR ??= "${DEPLOY_DIR}/cve"` (same in `cve-check` on Kirkstone and Scarthgap
+  and in `vex`); a copy in `${CVE_CHECK_SUMMARY_DIR}` (`${LOG_DIR}/cve`) indexed by
+  `cve-summary-index.txt` and merged at `BuildCompleted` into `cve-summary.json` (a
+  symlink to `cve-summary-<timestamp>.json`). Schema (`cve_write_data_json`): `{"version":
+  "1", "package": [{"name", "layer", "version", "products": [{"product", "cvesInRecord"}],
+  "issue": [...]}]}`; `cve-check` issues have `id`, `summary`, `scorev2`, `scorev3`,
+  `scorev4` (also on the `kirkstone` branch tip), `vector`, `vectorString`, `status`
+  (`Patched` / `Unpatched` / `Ignored`), `link`, and `detail` / `description` from
+  `CVE_STATUS`; `vex` issues have `id`, `status` (the mapping), `link`, `detail`,
+  `description`, `patch-file` and the NVD fields only when present, plus `cpes` on the
+  package. `sbom-cve-check` writes `${IMAGE_NAME}` / `${SPDX_RECIPE_SBOM_NAME}` (`${PN}-recipe-sbom`)
+  `.sbom-cve-check.yocto.json` into `DEPLOY_DIR_IMAGE`, "in the same format as the
+  cve-check class" by its doc flag; that tool's output was not read.
+
 ## Tasks
 
 Checked against BitBake `5495a54` (`lib/bb/parse/ast.py` `AddTaskNode`, `DelTaskNode`,
@@ -1625,6 +1694,99 @@ reproduces it from the indexed statements:
     `ERROR: Fatal QA errors were found, failing task.` (`meta/lib/oe/qa.py`).
   - The compiler, configure, make, wget and quilt messages inside logs are those tools'
     own formats; they were not checked against a source.
+
+### Task signatures
+
+What the `sigs` tool relies on (x4). Read in BitBake 2.18 `6e260eb6` (`lib/bb/siggen.py`
+`SignatureGeneratorBasic.dump_sigtask`, `compare_sigfiles`, `dump_sigfile`, `build_pnid`;
+`bin/bitbake-diffsigs`), with `git show` on the `2.0` (Kirkstone) and `2.8` (Scarthgap)
+branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
+
+- **On-disk format.** `dump_sigtask` writes `json.dump(data, sort_keys=True,
+  separators=(",", ":"), cls=SetEncoder)` through `bb.compress.zstd.open(..., "wt")` on all
+  three branches (sets as `{"_set_object": [...]}`): zstd-compressed JSON, not pickle (the
+  `pickle` import in `bitbake-diffsigs` is only for the `UnpicklingError` handler).
+  **Confirmed on a real file**: the live build's
+  `tmp/stamps/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0.do_fetch.sigdata.<hash>` begins
+  with the zstd magic `28 b5 2f fd`. Keys: `task`, `basehash_ignore_vars`,
+  `taskhash_ignore_tasks`, `taskdeps`, `basehash`, `gendeps`, `varvals`, and with a task
+  hash `runtaskdeps`, `runtaskhashes`, `file_checksum_values`, `taint`, `unihash`.
+  sous-chef has no zstd decoder (no new dependency), so it reads none of this itself.
+- **Names.** In the stamps directory `<STAMP>.<task>.sigdata.<unihash>` (with a task hash)
+  or `.sigbasedata.<basehash>`, `STAMP = "${STAMPS_DIR}/${MULTIMACH_TARGET_SYS}/${PN}/${PV}"`,
+  `STAMPS_DIR ?= "${TMPDIR}/stamps"`; in the sstate cache `<SSTATE_PKG>.siginfo` (the hash
+  after the last `:`, before `_`). `find_siginfo` globs the stamps directory first
+  (`MULTIMACH_TARGET_SYS`, `PV`, `PR` as `*`), then the sstate cache.
+- **`bitbake-diffsigs -t <pn> <task>`** (`do_` added when missing) takes the two newest
+  signatures by mtime; with one it prints `ERROR: Only one matching sigdata file found for
+  the specified task (<pn> <task>)` and exits 1; with none `No sigdata files found
+  matching <pn> <task>`. `-c never` turns colours off (default `auto`). It starts a
+  config-only tinfoil; it does not run tasks. `-s <from> <to>` picks signatures by hash.
+- **`compare_sigfiles` output** (the same messages on 2.0, 2.8 and 2.18): `basehash_ignore_vars
+  changed from ...`, `taskhash_ignore_tasks changed from ...`, `Task dependencies changed
+  from:\n<list>\nto:\n<list>`, `basehash changed from A to B`, `List of dependencies for
+  variable X changed from '...' to '...'` (+ `changed items: ...`), `Dependency on
+  variable X was added`, `Dependency on Variable X was removed` (capital V), `Variable X
+  value changed:` followed by a unified diff (a value with a newline) or a word diff
+  `"a [-old-] {+new+}"` (a value with a space; `(whitespace changed)` when only spacing
+  did), else `Variable X value changed from 'A' to 'B'`; `Checksum for file F changed
+  from A to B`, `Dependency on checksum of file F was added/removed`, `runtaskdeps
+  changed:`, `Number of task dependencies changed`, `Dependency on task T was added/removed
+  with hash H`, `Hash for task dependency T changed from A to B`, `Taint (by
+  forced/invalidated task) changed from A to B` (`nostamp:` shown as `nostamp(uuid4):`).
+  Varvals are **unexpanded** values. When a dependency's hash changed and the recursion
+  callback finds both signatures, the output so far is **replaced** by that line plus the
+  dependency's own comparison, each line indented by four spaces (`recursecb` in
+  `bitbake-diffsigs`), and the loop stops: so the deepest lines are the root cause. A
+  failed lookup prints `Unable to find matching sigdata for <key> with hash(es) ...`.
+- **Task names.** 2.8 and 2.18: `runtaskdeps` / `runtaskhashes` keys are `<pn>:<task>` or
+  `mc:<mc>:<pn>:<task>` (`build_pnid`). 2.0 (Kirkstone): recipe file ids shortened by
+  `clean_basepath` to `<dir>/<file>.bb:<task>`, with `:virtual:<class>...` (and
+  `:mc:<name>`) after the task for a variant.
+- Never checked against two real signatures: the live build ran only two fetches, so it
+  holds one signature per task; the tests use output hand-written from the code above.
+
+### Package data
+
+What the `pkgdata` tool reads (x4). Read in OE-core Wrynose `33a6bd6c`
+(`meta/lib/oe/packagedata.py` `emit_pkgdata`, `read_pkgdatafile`;
+`meta/classes-global/package.bbclass` `PKGDATA_VARS`, `emit_pkgdata[dirs]`;
+`scripts/oe-pkgdata-util`; `meta/conf/bitbake.conf`), with `git show` on `scarthgap`
+(the same `packagedata.py` / `package.bbclass`) and `kirkstone` (`emit_pkgdata` in
+`meta/classes/package.bbclass`, the same format). Never checked against a build: the live
+build directory has no package data.
+
+- **Where.** `PKGDATA_DIR = "${TMPDIR}/pkgdata/${MACHINE}"` (`bitbake.conf`), filled by
+  `do_packagedata`'s sstate (`sstate-outputdirs = "${PKGDATA_DIR}"`).
+- **Files.** `<pn>`: `PACKAGES: <list>`. `runtime/<pkg>`: for each `PKGDATA_VARS` word
+  (`PN PE PV PR PKGE PKGV PKGR LICENSE DESCRIPTION SUMMARY RDEPENDS RPROVIDES RRECOMMENDS
+  RSUGGESTS RREPLACES RCONFLICTS SECTION PKG ALLOW_EMPTY FILES CONFFILES FILES_INFO
+  PACKAGE_ADD_METADATA pkg_postinst pkg_postrm pkg_preinst pkg_prerm`, the same on all
+  three) `write_if_exists` writes `VAR:<pkg>: value` when `VAR:<pkg>` is set, else `VAR:
+  value` when `VAR` is set, else nothing; then `FILERPROVIDESFLIST`, `FILERPROVIDES:<file>`,
+  `FILERDEPENDSFLIST`, `FILERDEPENDS:<file>`, and `PKGSIZE:<pkg>: <bytes>` (hard links
+  counted once). `PKG:<pkg>` is always set (to `<pkg>` when nothing renamed it).
+  `FILES_INFO:<pkg>` is `json.dumps({"/path": st_size}, sort_keys=True)` (paths relative to
+  the package root with a leading `/`; ASCII, non-ASCII as `\uXXXX`). Values are encoded
+  with `codecs.getencoder("unicode_escape")` and decoded with the matching decoder
+  (`read_pkgdatafile`: each line matching `(^.+?):\s+(.*)`), so a backslash, a newline or
+  the `\u` of the JSON are written escaped (`\\u00e9`, `\\"`, `\n`). `runtime/<pkg>.packaged`
+  (empty) when the package root is not empty or `ALLOW_EMPTY` is `1`; only then the symlink
+  `runtime-reverse/<PKG:pkg>` -> `../runtime/<pkg>`. For each word of `RPROVIDES:<pkg>`
+  (else `RPROVIDES`) the symlink `runtime-rprovides/<word>/<pkg>`. Also
+  `extended/<pkg>.json.zstd` (per-file sizes and debug sources): zstd, not read.
+  Multilib / allarch variants add `<variant>-<pn>` files and `runtime/<variant>-<pkg>`
+  files holding only `PKG:<variant>-<pkg>: <pkg>`.
+- **`oe-pkgdata-util`** (Wrynose; Kirkstone differs only in error messages and in checking
+  `os.path.exists` instead of a non-empty `runtime-rprovides/<name>`): `find-path` walks
+  `runtime/`, `json.loads` the raw `FILES_INFO:` value (**not** unicode-escape decoded) and
+  prints `<pkg>: <path>` for each path matching `fnmatch.fnmatchcase`; `list-pkg-files -p
+  <pkg>` reads `runtime-rprovides/<pkg>/` entries, else `runtime/<pkg>` (`-r`: by runtime
+  name via `runtime-reverse/`); `lookup-recipe <pkg>` reads `runtime-rprovides/<pkg>/`
+  entries (printing `<pkg> is in the RPROVIDES of <f>:` for each other one), else
+  `runtime-reverse/<pkg>`, and prints the `PN:` line; `package-info` prints
+  `<pkg> [PKGE:]PKGV[-PKGR] PN [PE:]PV[-PR] PKGSIZE`; `list-pkgs -p <pn>` reads `<pn>`'s
+  `PACKAGES` and keeps those with a `.packaged` marker.
 
 ### `bitbake -e` output
 

@@ -1,0 +1,12 @@
+---
+source: tests/sigs.rs
+expression: mask(&out)
+---
+kind	item	detail	loc
+task	hello_1.0.bb -> hello_1.1.bb	differs: its own inputs changed (basehash)	-
+cause	variables	the task's variable dependencies changed: added EXTRA_OEMAKE; removed none	-
+cause	EXTRA_OEMAKE	dependency on the variable added	-
+cause	EXTRA_OEMAKE	value changed from '' to 'V=1'	-
+cause	hello:do_prepare_recipe_sysroot	dependency on the task added	-
+cause	taint	forced or invalidated task: taint None -> nostamp(uuid4):1b2e3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d	-
+note: from `bitbake-diffsigs -c never meta-core:recipes-core/hello/hello_1.0.bb meta-core:recipes-core/hello/hello_1.1.bb` (BitBake's own comparison; nothing was built); full output h:HANDLE (600 bytes): slice handle=h:HANDLE

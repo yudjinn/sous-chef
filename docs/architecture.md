@@ -49,6 +49,9 @@ src/
     jobs.rs            background jobs
     envdump.rs         parse `bitbake -e`
     logs.rs            log digests
+    cve.rs             OE-core CVE rules and CVE check JSON (x4, `recipe show=cve`)
+    sigs.rs            digest of `bitbake-diffsigs` (x4, `sigs`)
+    pkgdata.rs         package data reader (x4, `pkgdata`)
   handles.rs           handle store, digest, slice
   render.rs            Table, budget, pointer formatting
   lint/
@@ -1342,6 +1345,19 @@ Jobs (w10): `JobTable::start_or_queue` (a new job waits up to `QUEUE_WAIT` = 30 
 running read-only job, `env` or `layers`, then starts; behind a build, task, clean or
 devtool job it is refused at once) and `wait_with`; the `bitbake` tool's `wait` argument
 (0 to `MAX_WAIT_SECS` = 300 s) answers once the job has ended, with progress meanwhile.
+
+Build views (x4): three read-only views of what a build left, none of which builds:
+`recipe show=cve` (a `views::cve` in `tools/recipe.rs` over `bitbake::cve`; the CVE rules
+are chosen from the workspace's `lib/oe/cve_check.py`, since no `release::Feature` covers
+them), `sigs` (`tools/sigs.rs` over `bitbake::sigs`: signature files are zstd JSON and
+sous-chef has no zstd decoder, so it digests `bitbake-diffsigs` output; the runner is the
+`bitbake::sigs::DiffSigs` trait, `EnvDiffSigs` through `BbEnv::output` in production, a
+fake script in tests, and `bitbake-diffsigs` must be in `env::ALLOWED_PROGRAMS` for the
+production one to run) and `pkgdata` (`tools/pkgdata.rs` over `bitbake::pkgdata`, plain
+files read through `Workspace::confine`). Two deferred tools rather than one `build` tool
+with modes: their inputs (a recipe and a task, or a file path and a package) and their
+backends (a subprocess digest, a file reader) share nothing but the build directory.
+`TOOLS` now has 18 rows: 6 always loaded, 12 deferred.
 
 Hooks: unchanged since wave 5: four handlers (`GrepRead`, `BashDigest`, `BashGrep`,
 `EditFollowUp`) and the `[hooks]` switches `grep_read`, `bash`, `edit`.

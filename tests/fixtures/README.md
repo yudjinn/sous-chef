@@ -332,6 +332,8 @@ it. `oe-init-build-env` sets `BUILDDIR`; `init-with-env` also reads per-test set
 `$BUILDDIR/fakebb.env`; `init-build-env` is a fake bitbake-setup script ending in `set --`,
 like the real one; `kasbin/kas` is a fake kas (see its header). Used by
 `tests/bitbake_env.rs`, `bitbake_jobs.rs`, `bitbake_kas.rs` and `var_authoritative.rs`.
+`bin/bitbake-diffsigs` (x4) also links to it; `tests/sigs.rs` runs it with
+`FAKEBB_OUTPUT` / `FAKEBB_STDERR` set to a file of `outputs/sigs/`.
 
 ## `outputs/`: recorded output
 
@@ -340,6 +342,20 @@ like the real one; `kasbin/kas` is a fake kas (see its header). Used by
   `bitbake-*.out`), for `bitbake::logs` and the `log` tool.
 - `envdump/`: a trimmed real `bitbake -e curl` from the live environment, for the
   `bitbake -e` parser and authoritative `var` (its README says how it was trimmed).
+- `sigs/` (x4): `bitbake-diffsigs` output, **hand-written** from BitBake's
+  `compare_sigfiles` and `bin/bitbake-diffsigs` (docs/bitbake-semantics.md "Task
+  signatures"), for `tests/sigs.rs`: a variable change one dependency down
+  (`diffsigs-hello-compile.out`), Kirkstone-style task names three dependencies down
+  (`diffsigs-kirkstone-patch.out`), a task's own inputs, a taint
+  (`diffsigs-files.out`), and the "only one signature" error (`diffsigs-only-one.err`).
+- `pkgdata/qemux86/` (x4): a package data tree **hand-written** in the format of
+  OE-core's `emit_pkgdata` (generated once with Python's `unicode_escape` encoder and
+  `json.dumps(sort_keys=True)`, as OE-core writes it; docs/bitbake-semantics.md "Package
+  data"), for `tests/pkgdata.rs`: `hello` (four packages, `hello-dev` empty without
+  `.packaged`, `hello-doc` with the escaped name `café "notes".txt`) and `libfoo`
+  (`libfoo` renamed `libfoo2` by `PKG:`, `RPROVIDES` `libfoo-compat`, 47 files), with the
+  `runtime-reverse/` and `runtime-rprovides/` symlinks. Tests copy it into a temporary
+  `build/tmp/pkgdata/qemux86`.
 - `live/`: real output recorded on the live environment (kas, bitbake-setup, the
   verification's fetches, hook events built for real files, the differential report), with
   the live prefix replaced by `{{LIVE}}`; its README lists every file and command.
