@@ -650,6 +650,26 @@ release build, no BitBake or kas process started (outputs in
 - `SOUS_CHEF_LIVE=... cargo test --release --test live_verify --test audit --test
   release_diff --test skip_live -- --ignored`: all pass (14, 1, 1, 1).
 
+`w12-final` took the kas work directory from the configuration instead of the working
+directory, computed the `nativesdk` and multilib `PROVIDES` filters, and made the
+`features_check` and `RecipeParsed` checks decide on certain words only. Re-measured with
+the release build, no BitBake or kas process started (outputs in
+`{{LIVE}}/runs/w12-final/`, `TMPDIR` and `XDG_CACHE_HOME` there too):
+
+- Lint run from `runs/w12-final/` (not the kas project directory) with
+  `runs/w12-final/sous-chef-kas.toml`: `--rule org/generated-conf-edit build` 3 warnings
+  before (the remote repositories' `BBLAYERS` entries), 0 after; default 1 finding in 13
+  files; `--all` 625 findings in 1718 files, the same lines as the w11 run from the project
+  directory (lint-rules.md).
+- Differential on the existing dumps: 1090 compared, 702 equal (+0 after whitespace), 357
+  flagged, 31 known gap, 0 bug; `nativesdk-zlib` `PROVIDES` moved from equal after
+  whitespace (flagged) to equal (differential.md, "After w12-final").
+- Skip comparison (`tests/skip_live.rs`): from static values alone "would skip" 13, none of
+  them a recipe BitBake parsed, and "may skip" 274, unchanged; recipes not decidable with
+  BitBake's values 36 (42 before: the `nativesdk` recipes' `PROVIDES` is no longer
+  "changed by python"); agreement with `show-appends` 21 of 24.
+- The four live tests above: all pass (14, 1, 1, 1).
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,

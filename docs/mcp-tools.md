@@ -45,7 +45,8 @@ Common to every tool:
   provides a `virtual/` name whose `PREFERRED_PROVIDER_` names another recipe) makes BitBake skip,
   when that is decided from static values, gives `note: BitBake would skip this recipe:
   ...`; when the check fails on what is known but values that are not known (python,
-  undefined variables) could still decide it, `note: BitBake may skip this recipe: ...`
+  undefined variables, a word only possibly present because an override decision on it is
+  not certain) could still decide it, `note: BitBake may skip this recipe: ...`
   names them (`COMPATIBLE_MACHINE = "^qemu.*$" matches none of the known machine overrides
   (none is known); 1 part of MACHINEOVERRIDES is not evaluated`); a check that passes on
   known values (a match on a known `MACHINEOVERRIDES` entry) says nothing. An evaluation

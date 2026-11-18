@@ -1067,11 +1067,13 @@ fn static_value(ds: &DataStore, name: &str) -> Option<Option<String>> {
 
 /// What is known of the list value `name` ([`skips::Words`]): unset is empty and known; a
 /// value anonymous python or a handler changes by name is not known at all; otherwise its
-/// known words, complete when it holds no python and no undefined variable.
+/// known words, complete when it holds no python and no undefined variable, and the ones
+/// certainly in it ([`certain_words`]).
 fn words_of(ds: &DataStore, name: &str) -> skips::Words {
     if ds.replay().python_vars.contains(name) {
         return skips::Words {
             known: BTreeSet::new(),
+            certain: BTreeSet::new(),
             complete: false,
             why: Some(unknown_why(ds, name)),
         };
@@ -1088,11 +1090,91 @@ fn words_of(ds: &DataStore, name: &str) -> skips::Words {
     let complete = !v.unevaluated_python
         && v.unresolved.is_empty()
         && all.iter().all(|w| !pwords::is_unevaluated(w));
+    let certain = if complete {
+        known.clone()
+    } else {
+        certain_words(ds, name, &known)
+    };
     skips::Words {
         known,
+        certain,
         complete,
         why: (!complete).then(|| unknown_why(ds, name)),
     }
+}
+
+/// The words of `known` (the known words of the flagged value `name`) that are certainly in
+/// it, read from its history: a word some operation contributed that is `Applied` with no
+/// uncertain override decision on it (no override condition, `OVERRIDES` itself is certain,
+/// or every element of the condition is written in `OVERRIDES`), taken from the operation's
+/// expanded text when that is certain, else from its
+/// literal words; less the words a `:remove` whose decision or text is not certain may take
+/// out. None at all when a statement the replay could not apply, or an uncertain reference,
+/// may set it (`unresolved_vars`, `uncertain_vars`), when an override variant of it that is
+/// inactive may be active and replace the value, or when an uncertain `:remove`'s text is
+/// not known.
+fn certain_words(ds: &DataStore, name: &str, known: &BTreeSet<String>) -> BTreeSet<String> {
+    let notes = ds.replay();
+    if notes.uncertain_vars.contains(name) || notes.unresolved_vars.contains_key(name) {
+        return BTreeSet::new();
+    }
+    let ovr = ds.value("OVERRIDES").unwrap_or_default();
+    let ovr_certain = !ovr.unevaluated_python && ovr.unresolved.is_empty();
+    // Entries written in OVERRIDES are in it whatever its python adds.
+    let present: BTreeSet<&str> = pwords::colon_parts(&ovr.text)
+        .into_iter()
+        .filter(|e| !e.is_empty() && !pwords::is_unevaluated(e))
+        .collect();
+    let keyword = |o: &str| matches!(o, "append" | "prepend" | "remove");
+    let mut certain = BTreeSet::new();
+    let mut removable = BTreeSet::new();
+    for (op, st) in ds.history(name) {
+        if op.var.flag.is_some() || op.var.legacy_syntax {
+            continue;
+        }
+        let remove = op.var.overrides.iter().any(|o| o == "remove");
+        let has_keyword = op.var.overrides.iter().any(|o| keyword(o));
+        let conditional = op.var.overrides.iter().any(|o| !keyword(o));
+        // The override decision is certain: no condition, OVERRIDES is certain, or every
+        // element of the condition is written in OVERRIDES (so active for sure).
+        let decided = !conditional
+            || ovr_certain
+            || op
+                .var
+                .overrides
+                .iter()
+                .filter(|o| !keyword(o))
+                .flat_map(|o| o.split(':'))
+                .all(|e| present.contains(e));
+        let e = ds.expand(&op.value);
+        let e_certain = !e.unevaluated_python && e.unresolved.is_empty();
+        if remove {
+            // An applied, certain remove took its words out already; one whose decision or
+            // text is not certain may take words out.
+            if decided && st == OpStatus::InactiveOverride {
+                continue;
+            }
+            if !e_certain {
+                return BTreeSet::new();
+            }
+            if !decided {
+                removable.extend(pwords::known_words(&e.text).into_iter().map(str::to_string));
+            }
+            continue;
+        }
+        if conditional && !has_keyword && st == OpStatus::InactiveOverride && !decided {
+            return BTreeSet::new();
+        }
+        if st == OpStatus::Applied && decided {
+            let text = if e_certain { e.text } else { op.value.clone() };
+            certain.extend(pwords::known_words(&text).into_iter().map(str::to_string));
+        }
+    }
+    certain
+        .intersection(known)
+        .filter(|w| !removable.contains(*w))
+        .cloned()
+        .collect()
 }
 
 /// The reasons BitBake would, or may, skip the recipe, as `note:` lines. OE-core
@@ -1270,8 +1352,14 @@ fn unknown_why(ds: &DataStore, name: &str) -> String {
     if ds.replay().python_vars.contains(name) {
         return "anonymous python sets it".into();
     }
+    if ds.replay().uncertain_vars.contains(name) {
+        return "a file reached through a reference that is not certain sets it".into();
+    }
     match ds.value(name) {
-        Some(v) if v.unevaluated_python => "it holds python".into(),
+        Some(v) if v.unevaluated_python && v.text.contains("${@") => "it holds python".into(),
+        Some(v) if v.unevaluated_python => {
+            "an override decision on it depends on OVERRIDES, which is not known statically".into()
+        }
         Some(v) if !v.unresolved.is_empty() => {
             format!("it uses undefined variables: {}", v.unresolved.join(", "))
         }
@@ -3713,7 +3801,7 @@ impl Replay<'_> {
         let pn = static_value(&self.ds, "PN").flatten();
         let mut unknown = Vec::new();
         for p in provides.known.iter().filter(|p| p.starts_with("virtual/")) {
-            if allowed.known.contains(p) {
+            if allowed.certain.contains(p) {
                 continue;
             }
             let pref_name = format!("PREFERRED_PROVIDER_{p}");
@@ -3740,7 +3828,13 @@ impl Replay<'_> {
                 continue;
             };
             let mut why = Vec::new();
-            if !allowed.complete {
+            if !provides.certain.contains(p) {
+                why.push(format!(
+                    "{p} is only possibly in PROVIDES ({})",
+                    provides.why.as_deref().unwrap_or("not certain")
+                ));
+            }
+            if !allowed.complete || allowed.known.contains(p) {
                 why.push(format!(
                     "BB_MULTI_PROVIDER_ALLOWED is not known statically ({}), and could list {p}",
                     allowed.why.as_deref().unwrap_or("not evaluated")

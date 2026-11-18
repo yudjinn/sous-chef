@@ -2184,7 +2184,23 @@ in the live environment:
     note adds that BitBake may give that reason instead), "may skip" naming the list that is
     not known (python, undefined variables, a value anonymous python or a handler changes),
     nothing when every check passes on known words. Message word order: Python joins a
-    `set`; here the words are sorted.
+    `set`; here the words are sorted. (w12) "Known words" are taken as present only when
+    they are certain (`skips::Words::certain`, from `DataStore::history`): every word of a
+    value that is not flagged; for a flagged value, a word some operation contributed that
+    is `Applied` with no uncertain override decision on it (no override condition, or
+    every element of it written in `OVERRIDES`, or `OVERRIDES` itself certain), taken from
+    the operation's expanded text when that is certain and else from its literal words, and
+    that no `:remove` whose condition is not certain can take out. No word is certain when
+    an override variant of the value that is inactive may be active (it would replace the
+    whole value), when a `:remove` with python or undefined variables may apply, or when a
+    statement the replay could not apply, or a file reached through an uncertain
+    reference, may set it. A check whose outcome depends on a word that is only possibly
+    present (in the features or in the `REQUIRED_` / `CONFLICT_` / `ANY_OF_` lists) gives
+    "may skip" naming it ("'x11' only possibly in DISTRO_FEATURES (an override decision on
+    it depends on OVERRIDES, which is not known statically)"), never "would skip" and never
+    silence. A value flagged only because it holds inline python keeps its literal words as
+    certain, as before. The `RecipeParsed` check below decides on the certain `virtual/`
+    words of `PROVIDES` and `BB_MULTI_PROVIDER_ALLOWED` the same way.
   - **`base_eventhandler` on `RecipeParsed`** (OE-core Wrynose `classes-global/base.bbclass`;
     Kirkstone and Scarthgap the same code with `SOURCE_MIRROR_FETCH` tested as a plain
     string): unless `SOURCE_MIRROR_FETCH` is true, for each word `p` of the recipe's final
@@ -2204,7 +2220,10 @@ in the live environment:
   newlib, picolibc, mesa-gl, linux-dummy, linux-yocto-dev, linux-yocto-rt, linux-yocto-tiny
   for their virtual providers; systemd for `CONFLICT_DISTRO_FEATURES = "sysvinit"`), none of
   them one BitBake parsed; most `features_check` notes are "may skip" because the static
-  `DISTRO_FEATURES` there holds python.
+  `DISTRO_FEATURES` there holds python. (w12) With the certain-words rule the counts there
+  are unchanged (13 "would skip", 274 "may skip"): the words those notes decide on come from
+  operations applied with no uncertain override decision, and no uncertain `:remove` or
+  override variant of the `*_FEATURES` values applies.
 - **`INCOMPATIBLE_LICENSE`** (OE-core Wrynose `33a6bd6c`, `classes-global/base.bbclass`
   anonymous python lines 591-621, only when neither `SOURCE_MIRROR_FETCH` nor
   `PARSE_ALL_RECIPES` is true; `lib/oe/license.py` `skip_incompatible_package_licenses`,
@@ -2267,7 +2286,11 @@ against BitBake's behaviour or output:
 - The variant class order on Scarthgap ("Class-extended variants") and the `native`
   `PROVIDES` filter: from the BitBake / OE-core source and fixture tests; the filter's
   result matched `bitbake -e gmp-native` (`PROVIDES`, differential.md "After w11-final");
-  no Scarthgap workspace was run.
+  no Scarthgap workspace was run. (w12) The `nativesdk` and multilib `PROVIDES` filters:
+  from the OE-core source (`lib/oe/classextend.py`, `nativesdk.bbclass`,
+  `multilib.bbclass`) and fixture tests; the `nativesdk` result matched `bitbake -e
+  nativesdk-zlib` (differential.md "After w12-final"); the multilib one was not compared
+  (the live workspace has no multilib configuration).
 - The class type of an `inherit` in an `.inc` that a `.conf` or a global class reaches
   ("Which handler parses an included file"): from the source and tests; no such `inherit`
   exists on yocto-kiss (every `inherit` in an `.inc` there is reached from recipes only).

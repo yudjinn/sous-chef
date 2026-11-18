@@ -436,7 +436,8 @@ carrying kas's `CACHEDIR.TAG`, else the directory of sous-chef.toml (a guess, un
 (bitbake-semantics.md, "kas"). Re-measured for `w12-final` run from
 `runs/w12-final/` with `runs/w12-final/sous-chef-kas.toml`: `--rule
 org/generated-conf-edit build` 3 warnings before, 0 after; the default run 1 finding in 13
-files, as from the project directory. Since w11 the `lint` tool and the audit's lint stage report MCP progress per file.
+files, and `--all` 625 findings in 1718 files, identical line for line to the w11 run
+from the project directory. Since w11 the `lint` tool and the audit's lint stage report MCP progress per file.
 
 What the rules still get wrong there, as far as it was checked:
 

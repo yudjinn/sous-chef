@@ -322,3 +322,185 @@ fn suffix_filter_follows_classextend() {
     );
     assert!(multilib_provides_forms("lib32-x", &[]).is_empty());
 }
+
+// ---------------------------------------------------------------------------------------
+// Item 3: features_check decides on certain words only
+// ---------------------------------------------------------------------------------------
+
+/// OE-core Wrynose `classes-recipe/features_check.bbclass`, its anonymous python verbatim
+/// (as in tests/eval_w11.rs).
+const FEATURES_CHECK: &str = r#"python () {
+    if bb.utils.to_boolean(d.getVar('PARSE_ALL_RECIPES', False)):
+        return
+
+    unused = True
+
+    for kind in ['DISTRO', 'MACHINE', 'COMBINED', 'IMAGE', 'TUNE']:
+        if d.getVar('ANY_OF_' + kind + '_FEATURES') is None and not d.hasOverrides('ANY_OF_' + kind + '_FEATURES') and \
+           d.getVar('REQUIRED_' + kind + '_FEATURES') is None and not d.hasOverrides('REQUIRED_' + kind + '_FEATURES') and \
+           d.getVar('CONFLICT_' + kind + '_FEATURES') is None and not d.hasOverrides('CONFLICT_' + kind + '_FEATURES'):
+            continue
+
+        unused = False
+
+        # Assume at least one var is set.
+        features = set((d.getVar(kind + '_FEATURES') or '').split())
+
+        any_of_features = set((d.getVar('ANY_OF_' + kind + '_FEATURES') or '').split())
+        if any_of_features:
+            if set.isdisjoint(any_of_features, features):
+                raise bb.parse.SkipRecipe("one of '%s' needs to be in %s_FEATURES"
+                    % (' '.join(any_of_features), kind))
+
+        required_features = set((d.getVar('REQUIRED_' + kind + '_FEATURES') or '').split())
+        if required_features:
+            missing = set.difference(required_features, features)
+            if missing:
+                if kind == 'DISTRO':
+                    raise bb.parse.SkipRecipe("using %s '%s', which is missing required %s_FEATURES: '%s'"
+                        % (kind, d.getVar(kind), kind, ' '.join(missing)))
+                else:
+                    raise bb.parse.SkipRecipe("missing required %s feature%s '%s' (not in %s_FEATURES)"
+                        % (kind.lower(), 's' if len(missing) > 1 else '', ' '.join(missing), kind))
+
+        conflict_features = set((d.getVar('CONFLICT_' + kind + '_FEATURES') or '').split())
+        if conflict_features:
+            conflicts = set.intersection(conflict_features, features)
+            if conflicts:
+                raise bb.parse.SkipRecipe("conflicting %s feature%s '%s' (in %s_FEATURES)"
+                    % (kind.lower(), 's' if len(conflicts) > 1 else '', ' '.join(conflicts), kind))
+
+    if unused:
+        bb.warn("Recipe inherits features_check but doesn't use it")
+}
+"#;
+
+fn recipe(root: &Path, pn: &str, body: &str) {
+    write(
+        root,
+        &format!("meta-mine/recipes-app/{pn}/{pn}_1.0.bb"),
+        &format!("LICENSE = \"CLOSED\"\ninherit features_check\n{body}"),
+    );
+}
+
+fn skip_notes(fx: &Fx, recipe: &str) -> Vec<String> {
+    eval(fx, recipe)
+        .replay()
+        .target_notes
+        .iter()
+        .filter(|n| n.contains("skip this recipe"))
+        .cloned()
+        .collect()
+}
+
+/// `OVERRIDES` holds python (through `DISTROOVERRIDES`), so an override not written in it
+/// may still be active: `DISTRO_FEATURES:remove:maybe` may take `x11` out, and with
+/// `replace` a `DISTRO_FEATURES:maybe` variant may replace the whole value. Without them
+/// the value is the same, and certain apart from the override decisions.
+fn uncertain_features(root: &Path, extra: &str) {
+    write(
+        root,
+        "meta-core/classes-recipe/features_check.bbclass",
+        FEATURES_CHECK,
+    );
+    append_to(
+        root,
+        "meta-core/conf/distro/testdistro.conf",
+        &format!(
+            "DISTROOVERRIDES = \"testdistro:${{@'maybe' if d.getVar('UNSET_X') else 'other'}}\"\n\
+             DISTRO_FEATURES = \"acl ipv4 x11\"\n\
+             DISTRO_FEATURES:append:testdistro = \" wayland\"\n{extra}"
+        ),
+    );
+    recipe(root, "nox11", "CONFLICT_DISTRO_FEATURES = \"x11\"\n");
+    recipe(root, "needsx11", "REQUIRED_DISTRO_FEATURES = \"x11\"\n");
+    recipe(
+        root,
+        "anyx11",
+        "ANY_OF_DISTRO_FEATURES = \"x11 directfb\"\n",
+    );
+    recipe(
+        root,
+        "needsacl",
+        "REQUIRED_DISTRO_FEATURES = \"acl wayland\"\n",
+    );
+    recipe(root, "noopengl", "CONFLICT_DISTRO_FEATURES = \"opengl\"\n");
+    recipe(root, "noacl", "CONFLICT_DISTRO_FEATURES = \"acl\"\n");
+}
+
+#[test]
+fn a_word_an_uncertain_remove_may_take_out_is_only_possibly_present() {
+    let fx = modified(|r| uncertain_features(r, "DISTRO_FEATURES:remove:maybe = \"x11\"\n"));
+    let ds = eval(&fx, "nox11");
+    let v = ds.value("DISTRO_FEATURES").unwrap();
+    assert!(
+        v.unevaluated_python,
+        "flagged for the override decision: {v:?}"
+    );
+    // w11: "would skip" (x11 is a known word). It may be removed: may skip.
+    let n = skip_notes(&fx, "nox11");
+    assert_eq!(n.len(), 1, "{n:?}");
+    assert!(
+        n[0].starts_with(
+            "note: BitBake may skip this recipe: features_check: CONFLICT_DISTRO_FEATURES = 'x11'"
+        ) && n[0].contains("'x11' only possibly in DISTRO_FEATURES"),
+        "{n:?}"
+    );
+    // w11: silence (passes on the known word). Now may skip, naming it.
+    for r in ["needsx11", "anyx11"] {
+        let n = skip_notes(&fx, r);
+        assert_eq!(n.len(), 1, "{r}: {n:?}");
+        assert!(
+            n[0].starts_with("note: BitBake may skip this recipe: features_check:")
+                && n[0].contains("'x11' only possibly in DISTRO_FEATURES"),
+            "{r}: {n:?}"
+        );
+    }
+    // Words no uncertain operation touches are certain: acl from the plain assignment,
+    // wayland from an append whose override is written in OVERRIDES.
+    assert!(skip_notes(&fx, "needsacl").is_empty());
+    assert_eq!(
+        skip_notes(&fx, "noacl"),
+        [
+            "note: BitBake would skip this recipe: conflicting distro feature 'acl' (in DISTRO_FEATURES) (features_check.bbclass; decided from static values)"
+        ]
+    );
+}
+
+#[test]
+fn a_variant_that_may_replace_the_value_leaves_no_word_certain() {
+    let fx = modified(|r| uncertain_features(r, "DISTRO_FEATURES:maybe = \"systemd\"\n"));
+    // Every word may be replaced: no pass, no "would skip" on any of them.
+    for r in ["needsacl", "noacl", "nox11"] {
+        let n = skip_notes(&fx, r);
+        assert_eq!(n.len(), 1, "{r}: {n:?}");
+        assert!(
+            n[0].starts_with("note: BitBake may skip this recipe: features_check:")
+                && n[0].contains(
+                    "only possibly in DISTRO_FEATURES (an override decision on it depends on OVERRIDES, which is not known statically)"
+                ),
+            "{r}: {n:?}"
+        );
+    }
+}
+
+#[test]
+fn without_uncertain_operations_the_known_words_still_decide() {
+    // The same value with only an uncertain :append (which can add, never take out): the
+    // known words are certain, as before.
+    let fx = modified(|r| uncertain_features(r, "DISTRO_FEATURES:append:maybe = \" opengl\"\n"));
+    let v = eval(&fx, "nox11").value("DISTRO_FEATURES").unwrap();
+    assert!(v.unevaluated_python, "{v:?}");
+    assert_eq!(
+        skip_notes(&fx, "nox11"),
+        [
+            "note: BitBake would skip this recipe: conflicting distro feature 'x11' (in DISTRO_FEATURES) (features_check.bbclass; decided from static values)"
+        ]
+    );
+    assert!(skip_notes(&fx, "needsx11").is_empty());
+    assert!(skip_notes(&fx, "needsacl").is_empty());
+    // opengl may be appended: the conflict is undecided (as in w11).
+    let n = skip_notes(&fx, "noopengl");
+    assert_eq!(n.len(), 1, "{n:?}");
+    assert!(n[0].contains("may skip"), "{n:?}");
+}

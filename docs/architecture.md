@@ -1300,7 +1300,10 @@ base's deferred inherits before making the variant for `BaseDeferredThenClass`
 Skip notes (w11, `eval::skips`, public): `Words`, `Check`, `KindLists`, `FEATURE_KINDS`,
 `features_kind`, `features_skip(kind, kind_value, any_of, required, conflict, features) ->
 Option<String>`, `virtual_provider_skip(p, preferred, pn) -> Option<String>`; the replay
-adds the `features_check.bbclass` and `base_eventhandler` `RecipeParsed` notes.
+adds the `features_check.bbclass` and `base_eventhandler` `RecipeParsed` notes. (w12)
+`Words` gained `certain: BTreeSet<String>` (the known words certainly in the value, from
+the history: `replay::certain_words`), and `features_kind` decides only on certain words
+(bitbake-semantics.md, "Skipped recipes").
 
 kas (w8, `workspace::kas`):
 
