@@ -1937,8 +1937,28 @@ branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
   `mc:<mc>:<pn>:<task>` (`build_pnid`). 2.0 (Kirkstone): recipe file ids shortened by
   `clean_basepath` to `<dir>/<file>.bb:<task>`, with `:virtual:<class>...` (and
   `:mc:<name>`) after the task for a variant.
-- Never checked against two real signatures: the live build ran only two fetches, so it
-  holds one signature per task; the tests use output hand-written from the code above.
+- **Confirmed on a real build** (y1-build, 2026-11-18; `tests/fixtures/outputs/live/y1-build/sigs/`,
+  `tests/live_build.rs`): after curl was built, then rebuilt with `EXTRA_OECONF:append = "
+  --disable-dict"` from a scratch bbappend, `bitbake-diffsigs -c never -t curl do_configure`
+  printed `basehash changed from A to B` and `Variable EXTRA_OECONF value changed:` followed
+  by a **unified diff** (the value starts with a newline): `@@ -1,4 +1,4 @@`, the whole old
+  value on one `-` line, the whole new one on one `+` line, then context lines `
+  PACKAGECONFIG{gnutls} = Unset` ... `PACKAGECONFIG{openssl} = Set` (one space first: the
+  `contains` entries of the value's varvals, for its `bb.utils.filter('PACKAGECONFIG', ...)`
+  python); no `---` / `+++` header. `-t curl do_compile` printed `Hash for task dependency
+  curl:do_configure changed from A to B` and that comparison indented by four spaces;
+  `do_install` two levels (eight spaces). Before the change: `ERROR: Only one matching
+  sigdata file found for the specified task (curl do_configure)` on stderr. The client's own
+  lines come first on stdout: `NOTE: Starting bitbake server...`, or, when the previous
+  client's server had not exited yet (a second `bitbake-diffsigs` 3 s after the first),
+  `NOTE: Reconnecting to bitbake server...` and `NOTE: Retrying server connection (#1)...
+  (<time>)` lines (seven seen). Stamp names: `<PV>.<task>.<taskhash>` (empty) and
+  `<PV>.<task>.sigdata.<hash>` in `tmp/stamps/<MULTIMACH_TARGET_SYS>/<PN>/`, both kept for
+  each run (the old ones stay, so two sigdata files exist after the rebuild); `do_packagedata`'s
+  stamp has the `stamp-extra-info` suffix (`.<taskhash>.dogbonedark`, `MACHINE`) but its
+  sigdata file has none; the noexec `do_build` has a stamp and no sigdata file. No change
+  reached curl through a dependency's hash in this round (none of curl's dependencies
+  changed), so that case is still checked only on hand-written output.
 
 ### Package data
 

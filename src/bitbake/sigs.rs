@@ -230,6 +230,12 @@ pub fn parse(stdout: &str, stderr: &str) -> Diff {
         if line.trim().is_empty() {
             continue;
         }
+        // The client's own lines (`NOTE: Starting bitbake server...`, `NOTE: Reconnecting
+        // to bitbake server...`, `NOTE: Retrying server connection (#1)...` when the
+        // previous client's server has not exited yet; seen live) are not comparison output.
+        if line.starts_with("NOTE: ") || line.starts_with("WARNING: ") {
+            continue;
+        }
         let spaces = line.len() - line.trim_start_matches(' ').len();
         let depth = spaces / 4;
         let text = line.get(depth * 4..).unwrap_or("").trim_end();
@@ -421,26 +427,69 @@ pub fn split_task(dep: &str) -> (Option<String>, String) {
     }
 }
 
-/// The words a word diff (`"a [-b-] {+c+}"`) adds.
+/// The words a word diff (`"a [-b-] {+c+}"`) or a unified diff adds: [`word_changes`]`.0`.
 pub fn added_words(diff: &[String]) -> Vec<String> {
-    let Ok(re) = Regex::new(r"\{\+(.*?)\+\}") else {
-        return Vec::new();
+    word_changes(diff).0
+}
+
+/// The words a change adds and removes. A word diff (`"a [-b-] {+c+}"`, a value with
+/// spaces) names them. A unified diff (a value with a newline: `@@ ...`, `-old line`,
+/// `+new line`, ` context`) gives whole lines, so the words are the difference of the `+`
+/// and the `-` lines, counted as multisets: on the live build an `EXTRA_OECONF:append = "
+/// --disable-dict"` printed the whole 1-line value twice, and the word added is
+/// `--disable-dict` alone.
+pub fn word_changes(diff: &[String]) -> (Vec<String>, Vec<String>) {
+    let (Ok(plus_re), Ok(minus_re)) = (Regex::new(r"\{\+(.*?)\+\}"), Regex::new(r"\[-(.*?)-\]"))
+    else {
+        return (Vec::new(), Vec::new());
     };
-    let mut out = Vec::new();
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
     for l in diff {
-        for c in re.captures_iter(l) {
-            out.extend(c[1].split_whitespace().map(str::to_string));
+        for c in plus_re.captures_iter(l) {
+            added.extend(c[1].split_whitespace().map(str::to_string));
+        }
+        for c in minus_re.captures_iter(l) {
+            removed.extend(c[1].split_whitespace().map(str::to_string));
         }
     }
     // Unified diff lines.
+    let mut plus: Vec<String> = Vec::new();
+    let mut minus: Vec<String> = Vec::new();
     for l in diff {
-        if let Some(rest) = l.strip_prefix('+')
-            && !rest.starts_with("++")
-        {
-            out.extend(rest.split_whitespace().map(str::to_string));
+        if is_diff_header(l) {
+            continue;
+        }
+        if let Some(rest) = l.strip_prefix('+') {
+            plus.extend(rest.split_whitespace().map(str::to_string));
+        } else if let Some(rest) = l.strip_prefix('-') {
+            minus.extend(rest.split_whitespace().map(str::to_string));
         }
     }
-    out
+    let less = |a: &[String], b: &[String]| -> Vec<String> {
+        let mut left: Vec<Option<&String>> = b.iter().map(Some).collect();
+        a.iter()
+            .filter(
+                |w| match left.iter_mut().find(|x| x.is_some_and(|x| x == *w)) {
+                    Some(slot) => {
+                        *slot = None;
+                        false
+                    }
+                    None => true,
+                },
+            )
+            .cloned()
+            .collect()
+    };
+    added.extend(less(&plus, &minus));
+    removed.extend(less(&minus, &plus));
+    (added, removed)
+}
+
+/// A unified diff's file header (`--- a` / `+++ b`); BitBake's output has none, but a
+/// value line `---x` (a removed `--x`) must not be taken for one.
+pub fn is_diff_header(l: &str) -> bool {
+    l == "---" || l == "+++" || l.starts_with("--- ") || l.starts_with("+++ ")
 }
 
 /// The signature files of `pn`'s `task` in the stamps directories of the build directory:

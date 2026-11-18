@@ -416,16 +416,30 @@ fn describe(c: &Change) -> (String, String, Option<String>, Vec<String>) {
                     lines => {
                         let plus = lines
                             .iter()
-                            .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+                            .filter(|l| l.starts_with('+') && !sigs::is_diff_header(l))
                             .count();
                         let minus = lines
                             .iter()
-                            .filter(|l| l.starts_with('-') && !l.starts_with("---"))
+                            .filter(|l| l.starts_with('-') && !sigs::is_diff_header(l))
                             .count();
-                        format!(
+                        // Lines changed in place (as many `-` as `+`): which words. Lines
+                        // only added or removed (a function body) keep the line counts.
+                        let (words_added, words_removed) = if plus == minus && plus > 0 {
+                            sigs::word_changes(lines)
+                        } else {
+                            (Vec::new(), Vec::new())
+                        };
+                        let mut d = format!(
                             "value changed: {plus} {} added, {minus} removed",
                             if plus == 1 { "line" } else { "lines" }
-                        )
+                        );
+                        if !words_added.is_empty() {
+                            d.push_str(&format!("; words added: {}", words_added.join(" ")));
+                        }
+                        if !words_removed.is_empty() {
+                            d.push_str(&format!("; words removed: {}", words_removed.join(" ")));
+                        }
+                        d
                     }
                 },
             };

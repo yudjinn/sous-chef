@@ -182,3 +182,81 @@ fn real_pkgdata_renamed_libcurl_and_lookups() {
         ]
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// sigs: `EXTRA_OECONF:append = " --disable-dict"` in a scratch bbappend, curl rebuilt.
+
+use sous_chef::bitbake::sigs::{self, Change};
+
+/// The real `bitbake-diffsigs -t curl do_configure` after the change: the task's own
+/// basehash and `EXTRA_OECONF`, printed as a unified diff (the value starts with a newline)
+/// whose `+` line is the whole value; the word added is `--disable-dict` alone.
+#[test]
+fn real_diffsigs_configure_unified_diff_word_added() {
+    let d = sigs::parse(&sample("sigs/diffsigs-curl-do_configure.out"), "");
+    assert_eq!(d.unknown, 0, "{d:?}");
+    assert!(d.own_basehash_changed());
+    assert_eq!(d.max_depth(), 0);
+    let causes = d.causes();
+    let Change::VarValue { var, diff, old, .. } = &causes
+        .iter()
+        .find(|i| matches!(i.change, Change::VarValue { .. }))
+        .unwrap()
+        .change
+    else {
+        unreachable!()
+    };
+    assert_eq!(var, "EXTRA_OECONF");
+    assert!(old.is_none());
+    assert_eq!(diff[0], "@@ -1,4 +1,4 @@");
+    // The context lines are the PACKAGECONFIG words the value's python tests.
+    assert_eq!(diff.last().unwrap(), " PACKAGECONFIG{openssl} = Set");
+    assert_eq!(
+        sigs::word_changes(diff),
+        (vec!["--disable-dict".to_string()], Vec::<String>::new())
+    );
+}
+
+/// `do_compile` and `do_install` re-ran because of `do_configure`: the recursion is
+/// indented four spaces per level, the root cause is the same `EXTRA_OECONF` change.
+#[test]
+fn real_diffsigs_compile_and_install_chain() {
+    let d = sigs::parse(&sample("sigs/diffsigs-curl-do_compile.out"), "");
+    assert_eq!(d.unknown, 0, "{d:?}");
+    assert!(!d.own_basehash_changed());
+    assert_eq!(
+        d.path(),
+        vec![(
+            "curl:do_configure",
+            "7ee05dbc4c2109710f0305e9cd4e5d8039f415e527fd25750d9eb14c37d610b6",
+            "8a1a4041e93f80660ce296a8dc8805c8827549a7be2be702db5fb4c6cc39e6cd"
+        )]
+    );
+    let d = sigs::parse(&sample("sigs/diffsigs-curl-do_install.out"), "");
+    assert_eq!(d.unknown, 0, "{d:?}");
+    assert_eq!(d.max_depth(), 2);
+    let path: Vec<&str> = d.path().iter().map(|p| p.0).collect();
+    assert_eq!(path, ["curl:do_compile", "curl:do_configure"]);
+    assert_eq!(d.causes()[0].depth, 2);
+    let var = d
+        .causes()
+        .into_iter()
+        .find_map(|i| match &i.change {
+            Change::VarValue { diff, .. } => Some(sigs::added_words(diff)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(var, ["--disable-dict"]);
+}
+
+/// When the previous client's server has not exited yet, `bitbake-diffsigs` prints
+/// `NOTE: Reconnecting to bitbake server...` and `NOTE: Retrying server connection (#1)...`
+/// lines first (seen live: 7 of them); they are not comparison output.
+#[test]
+fn real_diffsigs_client_notes_are_not_unknown_lines() {
+    let text = sample("sigs/diffsigs-curl-do_compile-reconnect.out");
+    assert!(text.starts_with("NOTE: Reconnecting to bitbake server..."));
+    let d = sigs::parse(&text, "");
+    assert_eq!(d.unknown, 0);
+    assert_eq!(d.path().len(), 1);
+}

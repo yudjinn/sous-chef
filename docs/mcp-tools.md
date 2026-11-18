@@ -1759,7 +1759,10 @@ Rows `kind item detail loc`:
   10 hex digits);
 - `cause`: the root-cause changes, deepest first (at most 6, then `+N more (limit=6)`):
   a variable or function value changed (the word diff `"a [-old-] {+new+}"`, or the line
-  counts of a multi-line diff) with the **pointer of the assignment that sets it now**
+  counts of a unified diff, and, when its lines were changed in place (as many `-` as `+`),
+  the words added and removed: `value changed: 1 line added, 1 removed; words added:
+  --disable-dict`, as for a real `EXTRA_OECONF:append` on curl, whose value BitBake prints
+  as a unified diff because it starts with a newline) with the **pointer of the assignment that sets it now**
   (the recipe the task belongs to is evaluated for the default machine and distro; the
   applied operation holding a word the change added, else the last applied one), a
   variable dependency added or removed, the task's variable list changed, a file checksum

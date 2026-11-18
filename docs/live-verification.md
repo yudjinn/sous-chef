@@ -757,6 +757,46 @@ After the build, every mode against `oe-pkgdata-util` in the same environment
   `(package, path)` pairs as `oe-pkgdata-util find-path '*'`; the sizes equal `list-pkg-files
   -l -p curl` and each `PKGSIZE` is their sum.
 
+### sigs: confirmed, two fixes
+
+Before any change, `sigs recipe=curl task=configure`: "only one signature: nothing to
+compare", as `bitbake-diffsigs` (`ERROR: Only one matching sigdata file found ...`). Then
+`scratch/meta-scratch/recipes-test/curl/curl_%.bbappend` with `EXTRA_OECONF:append = "
+--disable-dict"`, entered through `kas-scratch.yaml` (a dry run `bitbake -n curl` with the
+scratch layer and no bbappend first: "919 didn't need to be rerun", so adding the layer
+changes no signature), and `bitbake curl`: 39.7 s, 11 tasks ran (`do_configure` to
+`do_create_package_spdx`). The raw comparisons are in `y1-build/sigs/`.
+
+| Task | `bitbake-diffsigs -t curl <task>` | sous-chef `sigs` (after the fixes) |
+|---|---|---|
+| `do_configure` | `basehash changed from 470219a9... to ba225ab2...`, `Variable EXTRA_OECONF value changed:` and a unified diff: the whole old and new value, one line each, then three `PACKAGECONFIG{...} = Set/Unset` context lines | `re-ran: its own inputs changed (basehash)`; `cause EXTRA_OECONF value changed: 1 line added, 1 removed; words added: --disable-dict` at `meta-scratch:recipes-test/curl/curl_%.bbappend:2` |
+| `do_compile` | `Hash for task dependency curl:do_configure changed from 7ee05dbc... to 8a1a4041...`, then the configure comparison indented | `re-ran: ... by way of curl:do_configure`, `via curl:do_configure hash 7ee05dbc4c -> 8a1a4041e9`, the same cause `EXTRA_OECONF (curl)` with the same pointer |
+| `do_install` | two levels | `by way of curl:do_compile -> curl:do_configure`, two `via` rows, the same cause |
+
+Root cause, variable, pointer to the assignment in the scratch bbappend and the chain: all
+right. Two things were wrong and are fixed (tests in `tests/live_build.rs` on the recorded
+outputs):
+
+- **The word added was not named, and the pointer was right by luck.** A value that starts
+  with a newline (`EXTRA_OECONF = " \`...) is printed as a unified diff whose `-` and `+`
+  lines are the whole value; the digest said only "1 line added, 1 removed", and the
+  "words the change added" used to find the assignment were every word of the `+` line, so
+  any applied operation matched and the last one won. Now `bitbake::sigs::word_changes`
+  takes the multiset difference of the `+` and `-` words (`--disable-dict`), the detail
+  names it when lines were changed in place, and the pointer is the operation holding it.
+- **BitBake client lines counted as unrecognised output.** `NOTE: Starting bitbake
+  server...` (every run) and, when the previous `bitbake-diffsigs`'s server had not exited
+  yet, `NOTE: Reconnecting to bitbake server...` / `NOTE: Retrying server connection (#1)...`
+  (seven lines for the second call, 3 s after the first) gave "7 output lines were not
+  recognised". `NOTE:` and `WARNING:` lines are skipped now.
+
+Side observation: `--disable-dict` was already in `PACKAGECONFIG_CONFARGS` (curl's
+`PACKAGECONFIG` does not enable dict), so the configure line had it twice and the output
+did not change; the `do_packagedata` stamp kept its old hash (`db59de52...`), consistent
+with hash equivalence giving `do_package` its old unihash. No change reached curl through
+a dependency's hash in this round (nothing else changed); that case remains checked on
+hand-written output only.
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,
