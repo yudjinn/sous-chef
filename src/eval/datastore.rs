@@ -71,6 +71,16 @@ pub enum OpKind {
     /// provider. It does not replace what came before: the operations that made the old
     /// value keep the status they had, and the rewrite itself is `Applied`.
     VirtualProviderRewrite,
+    /// A value BitBake sets from code when it makes a `BBCLASSEXTEND` variant
+    /// (`ast.multi_finalize` `extendfunc`: `PN = "<pn>-<word>"`, `BBEXTENDCURR`,
+    /// `BBEXTENDVARIANT`): a plain `setVar`, `loc` the recipe. Replaces like
+    /// [`OpKind::VirtualProviderRewrite`].
+    ClassExtend,
+    /// A value an OE-core event handler sets while the recipe is finalised, reproduced by the
+    /// replay (`base_eventhandler`'s `CLASSOVERRIDE`, `nativesdk_virtclass_handler`'s `PN`
+    /// and `MLPREFIX`, `multilib_virtclass_handler`'s `PN`, `MLPREFIX`, `OVERRIDES`): a
+    /// plain `setVar`, `loc` the handler.
+    EventHandler,
 }
 
 impl OpKind {
@@ -85,6 +95,8 @@ impl OpKind {
         match self {
             OpKind::Statement => op.to_string(),
             OpKind::VirtualProviderRewrite => "rewrite".into(),
+            OpKind::ClassExtend => "class-extend".into(),
+            OpKind::EventHandler => "handler".into(),
         }
     }
 }

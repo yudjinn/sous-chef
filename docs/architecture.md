@@ -828,9 +828,10 @@ Provider selection (T3.7, `eval::providers`): `Providers::new(index, ws, machine
 index, ws, target, config)`, `best_version(pn, version) -> Option<Selection>`,
 `providers(name) -> ProviderSet`, `evaluate(&RecipeRow)`, `target_for(&RecipeRow)`,
 `setting(name) -> Option<Setting>`, `config()`; `Selection { recipe, reason: VersionReason
-{ Requested, Required, Preferred, Latest }, setting, default_preference, notes }` with
-`describe()`; `ProviderSet { name, providers, reason: ProviderReason { None, Only,
-PreferredProvider, SameName, FirstOfSeveral }, preferred_provider, excluded, notes }` with
+{ Requested, Required, Preferred, Latest }, setting, default_preference, notes, variant
+(w10) }` with `describe()`; `ProviderSet { name, providers, reason: ProviderReason { None,
+Only, PreferredProvider, PreferredProviders (w10), SameName, FirstOfSeveral },
+preferred_provider, excluded, notes }` with
 `selected()`; `Provider { pn, selection, provides_loc, python }`; `Setting { name, value, loc,
 python }`; `preferred_recipe(index, ws, pn, version, machine, distro)`;
 `recipes_using(index, &FileRow)` (the recipes a `.bb`, bbappend, include or class is part
@@ -840,8 +841,8 @@ honoured; a path target is resolved before it.** `query::preferred_recipe` (laye
 and version only, no configuration) was still what `item`, `search` and the `bbappend`
 generator used after wave 4; since wave 5 they use `recipe::resolve_selected` (provider
 selection), and `bitbake::logs` is the remaining user. Not handled by provider selection:
-`BBCLASSEXTEND` variants (`-native` names find no provider; since w6 the error names the
-base recipe), `SKIP_RECIPE`, `COMPATIBLE_*` and `INCOMPATIBLE_LICENSE` (since w6 / w8 only a
+`BBCLASSEXTEND` variants until w10 (`-native` names found no provider; since w10 a variant
+is a provider of its name, see "As implemented after wave 5"), `SKIP_RECIPE`, `COMPATIBLE_*` and `INCOMPATIBLE_LICENSE` (since w6 / w8 only a
 note on the evaluation). A file a static `BBMASK` masks is no candidate since w6 (the
 index's `not_collected` mark).
 
@@ -1088,7 +1089,9 @@ and Langdale workspaces). The fix rounds changed what several rules report (lint
 As for wave 5: the additions of the rounds after it (w6: `w6-audit`, `w6-fix`; w7:
 `w7-diff`, `w7-fix`; w8: `w8-tools`, `w8-eval`; w9: `w9-final`; w10: `w10-server`, which
 added MCP progress notifications (the MCP server section), `[handles]` retention
-("Configuration") and the job queue behind a read-only job ("Jobs", below)); the module docs in the
+("Configuration") and the job queue behind a read-only job ("Jobs", below), and
+`w10-eval`, which added class-extended variants, `PREFERRED_PROVIDERS` and the `BBMASK`
+inputs); the module docs in the
 named files are the detailed reference. Two tools were added (`audit`, `diff`, both
 deferred, so `TOOLS` has 16 rows: 6 always loaded, 10 deferred), each also a CLI subcommand.
 
@@ -1164,7 +1167,9 @@ seen). A rewrite replaces nothing: earlier operations keep their status, and
 (`ReplayNotes::target_notes`), each a `note: ...` line every evaluated view shows:
 `BitBake would skip this recipe: ...` (`SKIP_RECIPE[<pn>]`, `COMPATIBLE_MACHINE`,
 `COMPATIBLE_HOST`, `INCOMPATIBLE_LICENSE`, decided on static values;
-`replay::skip_reasons`, `license_skip`), `BitBake may skip this recipe: ...` (the check
+`replay::skip_reasons`, `license_skip`; since w10 the two matches are public,
+`eval::compatible_machine(need, entries) -> Option<bool>` and `eval::compatible_host(need,
+host_sys) -> Option<bool>`, `None` for a regular expression Rust cannot compile), `BitBake may skip this recipe: ...` (the check
 fails on what is known but unknown values could still decide it; names them), `BitBake
 would stop parsing this recipe: ...` (the license check's fatal cases), `BBMASK is set but
 sous-chef does not apply it (...)`, and, for an evaluation with an explicit `machine` or
@@ -1181,7 +1186,7 @@ fewer it is `Unknown` with an "unparsed line" diagnostic. The index records it a
 kind `addpylib` (`name` = the directory, `value` = the namespace) and makes **no edge**: it
 adds a python library directory, not a metadata file. `hygiene/parse-error` judges where it
 is (base configuration only) and the release (`Feature::AddPyLib`, BitBake 2.4 on;
-`Feature::ALL` has ten). The `.inc` split treats it as opaque; the release diff compares it
+`Feature::ALL` had ten then, twelve since w10). The `.inc` split treats it as opaque; the release diff compares it
 as a directive. `search`'s `kind` filter knows it (`search::KINDS`, public since w8: every
 kind the scanner stores, tested against a file with each).
 
@@ -1190,8 +1195,11 @@ Index (w6, w7, w9; schema version 4, `EDGES_VERSION` `inc-context-1`):
 - `files.not_collected`: `bbfiles` (no `BBFILES` glob matches the `.bb` / `.bbappend`),
   `dynamic` (only an inactive `BBFILES_DYNAMIC` glob does), `bbmask` (a static `BBMASK`,
   from the configuration with the default machine and distro, masks it;
-  `scan::apply_bbmask`, run after every full edge rebuild and after a `.conf` is
-  reindexed), `data` (a `.conf` / `.inc` / `.bbclass` that is no metadata). The first three
+  `scan::apply_bbmask`, run after every full refresh that changed anything and, since w10,
+  after `refresh_file` reindexes any file the configuration pass behind the marks read,
+  recorded in `meta.bbmask_inputs` (`schema::META_BBMASK_INPUTS`,
+  `query::bbmask_inputs` / `set_bbmask_inputs`; without the record any `.conf`, `.inc` or
+  `.bbclass` edit counts), and after a new or removed file), `data` (a `.conf` / `.inc` / `.bbclass` that is no metadata). The first three
   are `schema::NOT_COLLECTED_RECIPE_REASONS`: no recipe, no provider, no `bbappend` edge,
   not evaluated or linted (a `bbfiles` file gets one layer-scope finding, below).
 - `BBFILES_DYNAMIC` is folded into the collection (`resolve::collect`, `collect_masked`):
@@ -1229,10 +1237,32 @@ Result<Vec<OrderProblem>>` (`OrderProblem { layer, severity, message, loc }`): t
 bbappend, priority, matches, state: AppendState { Applies, NoMatch, NotCollected(why) },
 via_dynamic }`, and the notes): the `appends` view as typed rows. The view and the audit
 both use these two; the audit reads no view's JSON.
-`recipe::class_extend_hint(index, name) -> Result<Option<String>>`: for a name that is no
-recipe, whether it is the `<pn>-native`, `nativesdk-<pn>` or `<variant>-<pn>` variant of a
-recipe whose `BBCLASSEXTEND` lists the class; every tool that resolves a recipe name, and
-lint's target, give it as the error.
+`recipe::class_extend_variant(index, name) -> Result<Option<(RecipeRow, ClassExtend)>>`
+(w10): for a name that is no recipe, whether it is the `<pn>-native`, `nativesdk-<pn>` or
+`<variant>-<pn>` variant of a recipe whose `BBCLASSEXTEND` lists the class (static words, a
+cheap test before evaluating); `recipe::class_extend_hint` turns it into lint's error (the
+variant's files are the base recipe's). `recipe::resolve_selected_variant(index, ws, name,
+version) -> Result<(RecipeRow, Option<String>, Option<ClassExtend>)>` (w10; `resolve_selected`
+drops the third value): a variant resolves to its base recipe file plus the word;
+`recipe::eval_label(recipe, variant)` is the evaluation target (`virtual:<word>:<layer>:<path>`
+for a variant). `var::recipe_target` passes a variant name to the evaluator.
+
+Class-extended variants (w10, `eval::variant`, `eval::replay`): `ClassExtend { word }`
+(`class()`, `variant()`, `variant_name(pn)`, `virtual_prefix()`, `describe()`),
+`variant::name_forms(name)`, `variant::split_virtual(target)`. A `Target` names a variant by
+name or by the pointer `virtual:<word>:<recipe>`; `replay::recipe_pass` replays the base and
+its bbappends, finalises a fork to read `BBCLASSEXTEND` and `PN` (`multi_finalize`), then
+applies `extendfunc` to the unfinalised store and finalises (`Replay::finalize`: OE-core's
+`RecipePreDeferredInherits` `CLASSOVERRIDE`, deferred inherits, the class-extension handlers,
+`expand_keys`, the multilib post-key-expansion handler, virtual providers, skip notes).
+`ReplayNotes::variant: Option<ClassExtend>`. `OpKind::ClassExtend` (`class-extend` in a
+history row) and `OpKind::EventHandler` (`handler`) record the values BitBake and the
+emulated handlers set from code (replacing like `VirtualProviderRewrite`). Providers:
+`Selection::variant: Option<ClassExtend>`; `Providers::variant(name, version) ->
+Result<Option<(Selection, DataStore)>>`; `Providers::best_version` and `Providers::providers`
+fall back to it when no indexed recipe has the name; `Providers::evaluate_selection(&Selection)`.
+`Feature::ClassExtendDeferred`, `Feature::DeferredInheritsClassOverride` (`Feature::ALL` has
+twelve). bitbake-semantics.md, "Class-extended variants", has the rules.
 
 kas (w8, `workspace::kas`):
 

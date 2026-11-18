@@ -19,15 +19,17 @@
 //!   the selected one first, and the `PREFERRED_PROVIDER` / `PREFERRED_VERSION` assignments
 //!   that decided it.
 
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::var::{recipe_target, replay_notes};
 use crate::error::Result;
-use crate::eval::providers::{ProviderReason, ProviderSet, Providers, Setting, VersionReason};
-use crate::eval::{self, DataStore, OpStatus};
+use crate::eval::providers::{
+    ProviderReason, ProviderSet, Providers, Selection, Setting, VersionReason,
+};
+use crate::eval::{self, ClassExtend, DataStore, OpStatus};
 use crate::index::Index;
 use crate::index::query::{self, RecipeRow};
 use crate::mcp::Ctx;
@@ -388,7 +390,8 @@ fn packageconfig(ds: &DataStore) -> Table {
 
 struct Resolved {
     provider: String,
-    recipe: Option<RecipeRow>,
+    /// The selected provider (its file, or the class-extended variant made from it).
+    selection: Option<Selection>,
 }
 
 fn resolve_dep(
@@ -401,20 +404,26 @@ fn resolve_dep(
         let r = match set.selected() {
             None => Resolved {
                 provider: "-".into(),
-                recipe: None,
+                selection: None,
             },
             Some(sel) => {
                 let mut s = recipe_label(&sel.selection.recipe);
+                if let Some(ext) = &sel.selection.variant {
+                    s = format!("{} ({} of {s})", sel.pn, ext.describe());
+                }
                 match set.reason {
                     ProviderReason::PreferredProvider => {
                         s.push_str(&format!(" (PREFERRED_PROVIDER_{name})"))
+                    }
+                    ProviderReason::PreferredProviders => {
+                        s.push_str(&format!(" (PREFERRED_PROVIDERS {name}:{})", sel.pn))
                     }
                     ProviderReason::FirstOfSeveral => s.push_str(" (first of several providers)"),
                     _ => {}
                 }
                 Resolved {
                     provider: s,
-                    recipe: Some(sel.selection.recipe.clone()),
+                    selection: Some(sel.selection.clone()),
                 }
             }
         };
@@ -428,12 +437,12 @@ fn build(index: &Index, ws: &Workspace, ds: &DataStore, depth: u32) -> Result<Ta
     let p = Providers::new(index, ws, None, None)?;
     let mut cache: HashMap<String, Resolved> = HashMap::new();
     let mut queue: VecDeque<(u32, DataStore)> = VecDeque::from([(1, ds.clone())]);
-    let mut seen: BTreeSet<i64> = BTreeSet::new();
+    let mut seen: HashSet<(i64, Option<ClassExtend>)> = HashSet::new();
     let mut python = 0;
     let mut pkgconfig = false;
     let mut missing = 0;
     while let Some((d, data)) = queue.pop_front() {
-        let mut next: Vec<RecipeRow> = Vec::new();
+        let mut next: Vec<Selection> = Vec::new();
         let value = data.value("DEPENDS");
         if value.as_ref().is_some_and(|v| v.unevaluated_python) {
             python += 1;
@@ -475,22 +484,22 @@ fn build(index: &Index, ws: &Workspace, ds: &DataStore, depth: u32) -> Result<Ta
                 missing += 1;
             }
             t.row(&[&d.to_string(), &w, &provider, &source, &loc_str(loc)]);
-            if let Some(r) = cache.get(&w).and_then(|r| r.recipe.clone())
+            if let Some(r) = cache.get(&w).and_then(|r| r.selection.clone())
                 && d < depth
-                && seen.insert(r.file.id)
+                && seen.insert((r.recipe.file.id, r.variant.clone()))
             {
                 next.push(r);
             }
         }
         for r in next {
-            queue.push_back((d + 1, p.evaluate(&r)?));
+            queue.push_back((d + 1, p.evaluate_selection(&r)?));
         }
     }
     if pkgconfig {
         t.note(PACKAGECONFIG_NOTE);
     }
     if missing > 0 {
-        t.note("note: provider - means no recipe in the workspace provides the name (BBCLASSEXTEND variants such as -native are not resolved)");
+        t.note("note: provider - means no recipe in the workspace provides the name (a BBCLASSEXTEND variant such as -native is found by its name only, when its base recipe's BBCLASSEXTEND lists the class)");
     }
     if let Some(n) = render::python_note(python) {
         t.note(&n);
@@ -666,6 +675,9 @@ fn providers_table(index: &Index, ws: &Workspace, name: &str) -> Result<Table> {
                 ProviderReason::PreferredProvider => {
                     format!("selected by PREFERRED_PROVIDER_{name}")
                 }
+                ProviderReason::PreferredProviders => {
+                    format!("selected by PREFERRED_PROVIDERS ({name}:{})", prov.pn)
+                }
                 ProviderReason::Only => "selected (only provider)".into(),
                 ProviderReason::SameName => format!("selected (its PN is {name})"),
                 ProviderReason::FirstOfSeveral => format!(
@@ -688,7 +700,10 @@ fn providers_table(index: &Index, ws: &Workspace, name: &str) -> Result<Table> {
         t.row(&[&prov.pn, &version, &status, &loc]);
     }
     if let Some(pp) = &set.preferred_provider {
-        let used = set.reason == ProviderReason::PreferredProvider;
+        let used = matches!(
+            set.reason,
+            ProviderReason::PreferredProvider | ProviderReason::PreferredProviders
+        );
         setting_row(
             &mut t,
             pp,

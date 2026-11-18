@@ -164,6 +164,24 @@ pub fn recipe_target(
         Some(r) if !r.contains(':') && !query::find_recipes(index, r)?.is_empty() => {
             Some(r.to_string())
         }
+        // A variant pointer (`virtual:native:<layer>:<path>`): the evaluator takes it.
+        Some(r) if eval::variant::split_virtual(r).is_some() => {
+            let (ext, file) = eval::variant::split_virtual(r).ok_or_else(|| Error::Invalid {
+                msg: format!("bad variant pointer {r:?}"),
+            })?;
+            let row = recipe::resolve_recipe(index, file, None)?;
+            Some(format!(
+                "{}{}:{}",
+                ext.virtual_prefix(),
+                row.file.layer,
+                row.file.path.display()
+            ))
+        }
+        // A class-extended variant (`gmp-native`): the evaluator makes it from the base
+        // recipe as BitBake does (eval::variant).
+        Some(r) if !r.contains(':') && recipe::class_extend_variant(index, r)?.is_some() => {
+            Some(r.to_string())
+        }
         Some(r) => {
             let row = recipe::resolve_recipe(index, r, None)?;
             Some(format!("{}:{}", row.file.layer, row.file.path.display()))
@@ -262,6 +280,16 @@ pub fn op_snippet(ds: &DataStore, op: &VarOp) -> String {
     let text = if op.kind == OpKind::VirtualProviderRewrite {
         format!(
             "{name} rewritten after parsing (BB_RECIPE_VIRTUAL_PROVIDERS) to \"{}\"",
+            op.value
+        )
+    } else if op.kind == OpKind::ClassExtend {
+        format!(
+            "{name} set by BitBake for the BBCLASSEXTEND variant to \"{}\"",
+            op.value
+        )
+    } else if op.kind == OpKind::EventHandler {
+        format!(
+            "{name} set by an event handler while finalising to \"{}\"",
             op.value
         )
     } else if is_function_op(ds, op) {

@@ -1,5 +1,5 @@
 
-## Files in the history (832 variables without overrides; same set of files: 830)
+## Files in the history (898 variables without overrides; same set of files: 896)
 
 ### Files only in BitBake's history (file, count, first uses)
 {{LIVE}}/yocto-kiss/openembedded-core/meta/classes-recipe/image_types_wic.bbclass	1	kiss-image:DEPENDS

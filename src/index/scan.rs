@@ -398,11 +398,12 @@ pub fn refresh_file(index: &mut Index, ws: &Workspace, abs: &Path) -> Result<Fil
                     _ => rebuild_edges(tx, ws),
                 }
             })?;
-            // A full rebuild drops the BBMASK marks, and a configuration file may set it.
+            // A full rebuild drops the BBMASK marks, and any file the configuration pass
+            // read (a `.conf`, an `.inc` it includes, a global class) may set BBMASK.
             if existing.is_none()
                 || layer_conf
                 || stale_release
-                || FileKind::from_path(abs) == Some(FileKind::Conf)
+                || bbmask_input_changed(index, &loc, abs)?
             {
                 apply_bbmask(index, ws)?;
             }
@@ -1261,8 +1262,10 @@ fn apply_collection(
 /// index when it is static ([`crate::eval::bbmask`]): the collection is recomputed with it,
 /// so masked files are `not_collected = 'bbmask'` and take part in no `bbappend` edge. A
 /// value sous-chef cannot apply leaves the collection unmasked (the evaluation notes say so).
-/// Runs after every full edge rebuild and after a `.conf` is reindexed; a configuration that
-/// cannot be evaluated changes nothing.
+/// Runs after every full edge rebuild and, from [`refresh_file`], after an edit to a file
+/// the configuration pass read ([`bbmask_input_changed`]); a configuration that cannot be
+/// evaluated changes nothing. The files that pass read are recorded
+/// ([`super::schema::META_BBMASK_INPUTS`]).
 fn apply_bbmask(index: &mut Index, ws: &Workspace) -> Result<()> {
     let cfg = crate::eval::evaluate_with(
         &crate::eval::ConfigCache::new(),
@@ -1270,6 +1273,13 @@ fn apply_bbmask(index: &mut Index, ws: &Workspace) -> Result<()> {
         ws,
         &crate::eval::Target::default(),
     );
+    let inputs: Option<Vec<(String, PathBuf)>> = cfg.as_ref().ok().map(|ds| {
+        ds.files()
+            .iter()
+            .map(|v| (v.loc.layer.clone(), v.loc.path.clone()))
+            .collect()
+    });
+    super::query::set_bbmask_inputs(index, inputs.as_deref())?;
     let mask = match cfg.as_ref().map(crate::eval::bbmask) {
         Ok(crate::eval::BbMask::Static(re)) => Some(re),
         _ => None,
@@ -1286,6 +1296,19 @@ fn apply_bbmask(index: &mut Index, ws: &Workspace) -> Result<()> {
         tx.execute("DELETE FROM edges WHERE kind = 'bbappend'", [])?;
         let ecx = edge_ctx(tx, ws)?;
         apply_collection(tx, ws, &ecx, mask.as_ref())
+    })
+}
+
+/// Whether the file at `loc` was read by the configuration pass behind the index's `BBMASK`
+/// marks ([`super::query::bbmask_inputs`]), so that an edit to it may change `BBMASK`. With
+/// nothing recorded, any `.conf`, `.inc` or `.bbclass` counts.
+fn bbmask_input_changed(index: &Index, loc: &Loc, abs: &Path) -> Result<bool> {
+    Ok(match super::query::bbmask_inputs(index)? {
+        Some(files) => files.iter().any(|(l, p)| *l == loc.layer && *p == loc.path),
+        None => matches!(
+            FileKind::from_path(abs),
+            Some(FileKind::Conf | FileKind::Include | FileKind::Class)
+        ),
     })
 }
 

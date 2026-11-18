@@ -242,18 +242,22 @@ edit = false       # the reindex and lint after an edit
   `${@...}` expressions, anonymous python and `d.setVar` in classes. Values that depend on
   them are marked (`depends on python, not evaluated`), and anonymous python that changes a
   variable is named in a warning. Measured against `bitbake -e` on a real Wrynose workspace
-  (23 recipes, 1019 values, [docs/differential.md](docs/differential.md)): 656 (64%) were
-  exactly BitBake's; the other 363 differed and said so (336 flagged as depending on python
-  or unresolved references) or were one documented path-spelling gap (27); no value
-  differed without a flag or a documented cause.
+  (25 recipes, two of them `BBCLASSEXTEND` variants, 1090 values,
+  [docs/differential.md](docs/differential.md)): 700 (64%) were exactly BitBake's, 2 more
+  after normalising whitespace; the other 388 differed and said so (357 flagged as depending
+  on python or unresolved references) or were a documented gap (29 path spellings, 2
+  `FILE_LAYERNAME` of a variant, which `bitbake -e` shows differently from a build); no
+  value differed without a flag or a documented cause.
 - **Needs BitBake.** `bitbake`, `log`, and `var` with `authoritative: true` (which runs
   `bitbake -e` as a background job and caches the dump until the metadata changes) need a
   build environment: an OE `oe-init-build-env`, a bitbake-setup `init-build-env`, an
   environment the server was started in, or a kas project with `kas` on `PATH` and an
   existing build directory (not when a kas file includes another repository's file, see
   "kas projects") (`status` shows which).
-- **Not modelled.** `BBCLASSEXTEND` variants such as `-native` (named as class-extended
-  variants, no provider, not evaluated); `PREFERRED_PROVIDERS`. Partly: a static `BBMASK`
+- **Partly modelled.** `BBCLASSEXTEND` variants such as
+  `gmp-native` are evaluated as BitBake makes them, but what OE-core's class-extension
+  handlers and anonymous python filter (`DEPENDS`, `PACKAGES`, `PROVIDES`, ...) is flagged,
+  not computed; a static `BBMASK`
   marks the files it masks (with the default machine and distro; an evaluation for another
   machine or distro says which files its own mask would treat differently), and
   `SKIP_RECIPE`, `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST` and `INCOMPATIBLE_LICENSE` give a

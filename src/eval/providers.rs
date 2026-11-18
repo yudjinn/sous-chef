@@ -33,6 +33,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use serde::Serialize;
 
 use super::replay::{ConfigCache, evaluate_with, global_cache};
+use super::variant::{self, ClassExtend};
 use super::{DataStore, OpStatus, Target};
 use crate::error::{Error, Result};
 use crate::index::Index;
@@ -80,6 +81,10 @@ pub struct Selection {
     /// `DEFAULT_PREFERENCE` of the chosen file (0 when unset).
     pub default_preference: i64,
     pub notes: Vec<String>,
+    /// Set when the name is a class-extended variant of `recipe` (`BBCLASSEXTEND`): BitBake
+    /// makes it from the chosen file, which stays its `FILE`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant: Option<ClassExtend>,
 }
 
 impl Selection {
@@ -121,6 +126,9 @@ pub enum ProviderReason {
     Only,
     /// `PREFERRED_PROVIDER_<name>` names it.
     PreferredProvider,
+    /// The `PREFERRED_PROVIDERS` entry `<name>:<pn>` names it (no
+    /// `PREFERRED_PROVIDER_<name>` is set).
+    PreferredProviders,
     /// The recipe's `PN` is the name.
     SameName,
     /// Several providers and no `PREFERRED_PROVIDER_<name>`: BitBake reports "multiple
@@ -134,7 +142,8 @@ pub struct ProviderSet {
     pub name: String,
     pub providers: Vec<Provider>,
     pub reason: ProviderReason,
-    /// `PREFERRED_PROVIDER_<name>`, if set.
+    /// `PREFERRED_PROVIDER_<name>`, if set; else the `PREFERRED_PROVIDERS` entry for the name
+    /// (a [`Setting`] named `PREFERRED_PROVIDERS` whose value is the provider), if any.
     pub preferred_provider: Option<Setting>,
     /// Candidates from the index that do not provide the name once evaluated (`PN`).
     pub excluded: Vec<RecipeRow>,
@@ -231,13 +240,62 @@ impl<'a> Providers<'a> {
         evaluate_with(self.cache, self.index, self.ws, &self.target_for(recipe))
     }
 
+    /// Evaluates a selection: its recipe file, or the class-extended variant made from it
+    /// when [`Selection::variant`] is set (target `virtual:<word>:<layer>:<path>`).
+    pub fn evaluate_selection(&self, sel: &Selection) -> Result<DataStore> {
+        let mut t = self.target_for(&sel.recipe);
+        if let (Some(ext), Some(r)) = (&sel.variant, t.recipe.as_mut()) {
+            *r = format!("{}{r}", ext.virtual_prefix());
+        }
+        evaluate_with(self.cache, self.index, self.ws, &t)
+    }
+
     /// The recipe file BitBake uses for `pn` (`findBestProvider`), or the first file whose
     /// version matches `version` (`%` allowed, a leading `N:` is the epoch) in layer
     /// priority order. `None` when no file matches. A `REQUIRED_VERSION` that matches no
     /// file is an error, as in BitBake.
+    ///
+    /// A name no recipe has is tried as a class-extended variant ([`Providers::variant`]):
+    /// the selection is then the base recipe's, with [`Selection::variant`] set.
     pub fn best_version(&self, pn: &str, version: Option<&str>) -> Result<Option<Selection>> {
         let files = query::find_recipes(self.index, pn)?;
+        if files.is_empty() {
+            return Ok(self.variant(pn, version)?.map(|(s, _)| s));
+        }
         self.best_among(pn, files, version)
+    }
+
+    /// `name` as a class-extended variant (`<pn>-native`, `nativesdk-<pn>`,
+    /// `<variant>-<pn>`, see [`super::variant`]): the base recipe's file chosen as for its own
+    /// `PN`, when its finalised `BBCLASSEXTEND` (the base evaluated, as `multi_finalize`
+    /// reads it) lists the word and the variant's name from the base's `PN` is `name`. Also
+    /// the base's evaluation. `None` when no form fits.
+    pub fn variant(
+        &self,
+        name: &str,
+        version: Option<&str>,
+    ) -> Result<Option<(Selection, DataStore)>> {
+        for (base, ext) in variant::name_forms(name) {
+            let files = query::find_recipes(self.index, &base)?;
+            let Some(mut sel) = self.best_among(&base, files, version)? else {
+                continue;
+            };
+            let ds = self.evaluate(&sel.recipe)?;
+            let words = ds
+                .value("BBCLASSEXTEND")
+                .map(|v| v.text)
+                .unwrap_or_default();
+            if !words::known_words(&words).contains(&ext.word.as_str()) {
+                continue;
+            }
+            let pn = ds.value("PN").map(|v| v.text).unwrap_or_default();
+            if ext.variant_name(&pn).as_deref() != Some(name) {
+                continue;
+            }
+            sel.variant = Some(ext);
+            return Ok(Some((sel, ds)));
+        }
+        Ok(None)
     }
 
     fn best_among(
@@ -374,6 +432,73 @@ impl<'a> Providers<'a> {
         setting(&self.cfg, name)
     }
 
+    /// The preference `filterProviders` uses for `name`: `PREFERRED_PROVIDER_<name>` when
+    /// set (it replaces any `PREFERRED_PROVIDERS` entry), else the `PREFERRED_PROVIDERS`
+    /// entry for `name` (BitBake 2.18.0 `cooker.handlePrefProviders`: the words of the
+    /// configuration's value, each `providee:provider`, split on `:` into exactly two parts
+    /// or logged as malformed and ignored; for a providee given twice with different
+    /// providers an error is logged and the last one is kept). The [`Setting`] of a
+    /// `PREFERRED_PROVIDERS` entry is named `PREFERRED_PROVIDERS` and holds the provider.
+    fn preference(&self, name: &str, notes: &mut Vec<String>) -> Option<(Setting, ProviderReason)> {
+        let entry = self.preferred_providers_entry(name, notes);
+        if let Some(pp) = self.setting(&format!("PREFERRED_PROVIDER_{name}")) {
+            if let Some(e) = &entry
+                && e.value != pp.value
+            {
+                notes.push(format!(
+                    "PREFERRED_PROVIDERS names {} for {name}, but {} = \"{}\" replaces it (filterProviders)",
+                    e.value, pp.name, pp.value
+                ));
+            }
+            return Some((pp, ProviderReason::PreferredProvider));
+        }
+        entry.map(|e| (e, ProviderReason::PreferredProviders))
+    }
+
+    /// The `PREFERRED_PROVIDERS` entry for `name` (see [`Providers::preference`]), with notes
+    /// for what BitBake logs about it.
+    fn preferred_providers_entry(&self, name: &str, notes: &mut Vec<String>) -> Option<Setting> {
+        const VAR: &str = "PREFERRED_PROVIDERS";
+        let all = setting(&self.cfg, VAR)?;
+        let unknown = words::words(&all.value)
+            .iter()
+            .any(|w| words::is_unevaluated(w));
+        let mut found: Option<String> = None;
+        for w in words::known_words(&all.value) {
+            let parts: Vec<&str> = w.split(':').collect();
+            let [providee, provider] = parts.as_slice() else {
+                if w.contains(name) {
+                    notes.push(format!(
+                        "PREFERRED_PROVIDERS has the malformed word \"{w}\" (not providee:provider); BitBake logs it and ignores it"
+                    ));
+                }
+                continue;
+            };
+            if *providee != name {
+                continue;
+            }
+            if let Some(prev) = &found
+                && prev != provider
+            {
+                notes.push(format!(
+                    "PREFERRED_PROVIDERS names both {prev} and {provider} for {name}; BitBake logs \"conflicting preferences\" as an error and uses the last, {provider}"
+                ));
+            }
+            found = Some(provider.to_string());
+        }
+        if unknown || all.python {
+            notes.push(format!(
+                "PREFERRED_PROVIDERS depends on python that was not evaluated; an entry for {name} may be missing or different"
+            ));
+        }
+        found.map(|provider| Setting {
+            name: VAR.to_string(),
+            value: provider,
+            loc: all.loc.clone(),
+            python: all.python || unknown,
+        })
+    }
+
     /// The providers of `name`, the selected one first (`filterProviders`).
     pub fn providers(&self, name: &str) -> Result<ProviderSet> {
         let mut notes = Vec::new();
@@ -385,6 +510,43 @@ impl<'a> Providers<'a> {
                     candidates.push(r);
                 }
             }
+        }
+        // No indexed recipe names it: a class-extended variant whose PN is the name.
+        if candidates.is_empty()
+            && let Some((sel, _)) = self.variant(name, None)?
+        {
+            let preferred_provider = self.preference(name, &mut notes);
+            let mut reason = ProviderReason::Only;
+            if let Some((pp, why)) = &preferred_provider {
+                if pp.value == name {
+                    reason = *why;
+                } else {
+                    notes.push(no_provider_note(pp, name));
+                }
+            }
+            let preferred_provider = preferred_provider.map(|(s, _)| s);
+            if let Some(ext) = &sel.variant {
+                notes.push(format!(
+                    "{name} is {} of {} (BBCLASSEXTEND `{}`), made by BitBake from {}; variants are found by their PN only, not by the PROVIDES their classes rewrite",
+                    ext.describe(),
+                    sel.recipe.pn,
+                    ext.word,
+                    file_label(&sel.recipe.file)
+                ));
+            }
+            return Ok(ProviderSet {
+                name: name.to_string(),
+                providers: vec![Provider {
+                    pn: name.to_string(),
+                    selection: sel,
+                    provides_loc: None,
+                    python: false,
+                }],
+                reason,
+                preferred_provider,
+                excluded: Vec::new(),
+                notes,
+            });
         }
         // Confirm each candidate by evaluating it; group by PN.
         let mut by_pn: BTreeMap<String, Vec<(Info, Option<Loc>, bool)>> = BTreeMap::new();
@@ -483,22 +645,18 @@ impl<'a> Providers<'a> {
                 reason = ProviderReason::SameName;
             }
         }
-        let preferred_provider = self.setting(&format!("PREFERRED_PROVIDER_{name}"));
-        if let Some(pp) = &preferred_provider {
+        let preferred_provider = self.preference(name, &mut notes);
+        if let Some((pp, why)) = &preferred_provider {
             match eligible.iter().position(|p| p.pn == pp.value) {
                 Some(i) => {
                     let p = eligible.remove(i);
                     eligible.insert(0, p);
-                    reason = ProviderReason::PreferredProvider;
+                    reason = *why;
                 }
-                None => notes.push(format!(
-                    "{} = \"{}\"{} names no recipe that provides {name}",
-                    pp.name,
-                    pp.value,
-                    pp.loc.as_ref().map_or(String::new(), |l| format!(" ({l})"))
-                )),
+                None => notes.push(no_provider_note(pp, name)),
             }
         }
+        let preferred_provider = preferred_provider.map(|(s, _)| s);
         if eligible.iter().any(|p| p.python) {
             notes.push(format!(
                 "some PROVIDES values depend on python; whether those recipes provide {name} is not certain"
@@ -540,6 +698,7 @@ fn selection(
         setting,
         default_preference: i.dp,
         notes,
+        variant: None,
     }
 }
 
@@ -561,6 +720,19 @@ fn setting(cfg: &DataStore, name: &str) -> Option<Setting> {
         loc,
         python: v.unevaluated_python,
     })
+}
+
+/// `<setting> names no recipe that provides <name>`.
+fn no_provider_note(pp: &Setting, name: &str) -> String {
+    let what = if pp.name == "PREFERRED_PROVIDERS" {
+        format!("PREFERRED_PROVIDERS entry {name}:{}", pp.value)
+    } else {
+        format!("{} = \"{}\"", pp.name, pp.value)
+    };
+    format!(
+        "{what}{} names no recipe that provides {name}",
+        pp.loc.as_ref().map_or(String::new(), |l| format!(" ({l})"))
+    )
 }
 
 fn sort_infos(v: &mut [Info]) {

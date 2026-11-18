@@ -28,6 +28,18 @@
 //! "unparsed line"): it is recorded in [`ReplayNotes::references`] as
 //! [`RefProblem::NotInRelease`] and nothing is inherited.
 //!
+//! **Class-extended variants** (`BBCLASSEXTEND`, see [`super::variant`]): after the
+//! bbappends the store is forked and the base finalised on the fork (`multi_finalize`), which
+//! gives `BBCLASSEXTEND` and `PN`; the variant then starts again from the unfinalised store,
+//! gets `PN` / `BBEXTENDCURR` / `BBEXTENDVARIANT` ([`OpKind::ClassExtend`]) and its class
+//! (deferred from BitBake 2.16, [`Feature::ClassExtendDeferred`]), and is finalised. In the
+//! finalisation (`Replay::finalize`) the OE-core handlers BitBake runs at parse time for
+//! class extension are emulated when the class defines them: `base_eventhandler` on
+//! `RecipePreDeferredInherits` ([`Feature::DeferredInheritsClassOverride`]),
+//! `native_virtclass_handler`, `nativesdk_virtclass_handler`, `multilib_virtclass_handler`
+//! (and `_postkeyexp`): plain code on known values is reproduced ([`OpKind::EventHandler`]),
+//! filters and renames flag the variables with a note.
+//!
 //! **`FILE` and the values computed from it.** BitBake sets `FILE` to every `.conf`, `.bb`,
 //! `.inc` and `.bbappend` while it is parsed and restores it afterwards (not for classes).
 //! OE-Core computes `PN`, `PV` (`bb.parse.vars_from_file(FILE)`), `BPN`
@@ -69,6 +81,7 @@ use sha2::{Digest, Sha256};
 use super::datastore::{Content, OpKind, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
 use super::license;
+use super::variant::ClassExtend;
 use super::{DataStore, FileVisit, OpStatus, Overlay, Target, VarOp};
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
@@ -137,6 +150,10 @@ pub struct ReplayNotes {
     /// [`DataStore::tasks`]).
     #[serde(skip)]
     pub(crate) tasks: Vec<String>,
+    /// The `BBCLASSEXTEND` word of a class-extended variant (see [`super::variant`]);
+    /// `None` for the base recipe and the configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant: Option<ClassExtend>,
     /// `__inherit_cache`: class files already parsed (absolute paths).
     #[serde(skip)]
     pub(crate) inherit_cache: Vec<PathBuf>,
@@ -406,18 +423,32 @@ fn evaluate_inner(
     let Some(name) = &target.recipe else {
         return config(cache);
     };
+    // A variant pointer: `virtual:<word>:<recipe file>` (bb.cache.realfn2virtual).
+    if let Some((ext, file)) = super::variant::split_virtual(name) {
+        let r = find_recipe_file(index, ws, file)?.ok_or_else(|| recipe_not_found(name, None))?;
+        let config = config(cache)?;
+        return recipe_pass(index, ws, &files, &config, &r, overlay, Some(&ext));
+    }
     // A path is resolved before the configuration pass; a recipe name needs it, because
     // the choice of file reads PREFERRED_VERSION (providers.rs).
     if let Some(r) = find_recipe_file(index, ws, name)? {
         let config = config(cache)?;
-        return recipe_pass(index, ws, &files, &config, &r, overlay);
+        return recipe_pass(index, ws, &files, &config, &r, overlay, None);
     }
     let config = config(cache)?;
     let version = target.version.as_deref();
     let chosen = super::providers::Providers::with_config(cache, index, ws, target, config.fork())?
         .best_version(name, version)?
         .ok_or_else(|| recipe_not_found(name, version))?;
-    recipe_pass(index, ws, &files, &config, &chosen.recipe.file, overlay)
+    recipe_pass(
+        index,
+        ws,
+        &files,
+        &config,
+        &chosen.recipe.file,
+        overlay,
+        chosen.variant.as_ref(),
+    )
 }
 
 /// Most files listed by name in the `BBMASK` note.
@@ -890,6 +921,7 @@ fn recipe_pass(
     config: &DataStore,
     recipe: &FileRow,
     overlay: Option<&Overlay>,
+    variant: Option<&ClassExtend>,
 ) -> Result<DataStore> {
     let mut r = Replay::new(index, ws, files, config.fork(), false, true, Vec::new());
     r.overlay = overlay;
@@ -931,29 +963,60 @@ fn recipe_pass(
         r.visit(&aabs, FileKind::Append, vec![recipe_loc.clone()], true)?;
     }
 
-    // Deferred inherits (ast.finalize), first in first out; more may be added meanwhile.
-    loop {
-        let next = {
-            let notes = Arc::make_mut(&mut r.ds.notes);
-            if notes.deferred.is_empty() {
-                None
-            } else {
-                Some(notes.deferred.remove(0))
-            }
-        };
-        let Some(d) = next else { break };
-        r.inherit(&d.text, d.loc.as_ref(), &d.via, true, "inherit_defer")?;
+    let Some(ext) = variant else {
+        r.finalize(&recipe_loc)?;
+        return Ok(r.ds);
+    };
+    // ast.multi_finalize: the base is finalised on a copy, and BBCLASSEXTEND and PN are
+    // read from it; the variant starts again from the datastore before finalisation.
+    let safe = r.ds.fork();
+    r.finalize(&recipe_loc)?;
+    let label = format!("{}:{}", recipe.layer, recipe.path.display());
+    let base_pn = match static_value(&r.ds, "PN") {
+        Some(Some(pn)) => pn,
+        _ => {
+            return Err(Error::NotFound {
+                what: format!(
+                    "the {} variant of {label}: the base recipe's PN is not known statically",
+                    ext.word
+                ),
+            });
+        }
+    };
+    let extend = r.ds.value("BBCLASSEXTEND").unwrap_or_default();
+    let words = pwords::known_words(&extend.text);
+    if !words.contains(&ext.word.as_str()) {
+        let unsure = extend.unevaluated_python
+            || !extend.unresolved.is_empty()
+            || r.ds.replay().python_vars.contains("BBCLASSEXTEND");
+        return Err(Error::NotFound {
+            what: format!(
+                "{} of {base_pn} ({label}): its BBCLASSEXTEND (\"{}\") does not list `{}`{}",
+                ext.describe(),
+                extend.text,
+                ext.word,
+                if unsure {
+                    "; the value depends on python that was not evaluated, so BitBake may still make the variant"
+                } else {
+                    ""
+                }
+            ),
+        });
     }
-
-    let incomplete = r.ds.expand_keys();
-    Arc::make_mut(&mut r.ds.notes).incomplete_keys = incomplete;
-    // (BitBake runs anonymous python here, which the replay does not.)
-    if ws.release.release.has(Feature::RecipeVirtualProviders) {
-        virtual_recipe_providers(&mut r.ds, &recipe_loc);
-    }
-    let skip = skip_reasons(&r.ds);
-    if !skip.is_empty() {
-        Arc::make_mut(&mut r.ds.notes).target_notes.extend(skip);
+    r.ds = safe;
+    r.extend_variant(ext, &base_pn, &recipe_loc)?;
+    r.finalize(&recipe_loc)?;
+    // The name comes from OE-core's naming (eval::variant); the variant's PN is what its
+    // class made of it.
+    if let Some(name) = ext.variant_name(&base_pn) {
+        let pn = r.ds.value("PN").map(|v| v.text).unwrap_or_default();
+        if pn != name {
+            Arc::make_mut(&mut r.ds.notes).target_notes.push(format!(
+                "note: this is {} of {base_pn}, which OE-core names {name}, but the evaluated PN is \"{pn}\": the `{}` class here does not rename it as OE-core's does, so BitBake may know this variant only as \"{pn}\"",
+                ext.describe(),
+                ext.class()
+            ));
+        }
     }
     Ok(r.ds)
 }
@@ -1019,7 +1082,6 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
         ));
     }
     const MAY: &str = "note: BitBake may skip this recipe:";
-    let anchored = |re: &str| regex::Regex::new(&format!("^(?:{re})")).ok();
     let parse_all = static_bool(ds, "PARSE_ALL_RECIPES");
     match static_value(ds, "COMPATIBLE_MACHINE") {
         _ if parse_all == Some(true) => {}
@@ -1029,21 +1091,21 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
             "{MAY} COMPATIBLE_MACHINE is set but not known statically ({}), so whether it matches MACHINEOVERRIDES cannot be told",
             unknown_why(ds, "COMPATIBLE_MACHINE")
         )),
-        Some(Some(need)) => match anchored(&need) {
+        Some(Some(need)) => {
+            let mo = ds.value("MACHINEOVERRIDES").unwrap_or_default();
+            let entries = pwords::colon_parts(&mo.text);
+            let known: Vec<&str> = entries
+                .iter()
+                .copied()
+                .filter(|e| !pwords::is_unevaluated(e))
+                .collect();
+            match compatible_machine(&need, known.iter().copied()) {
             None => out.push(format!(
                 "{MAY} COMPATIBLE_MACHINE = \"{need}\" is a regular expression sous-chef cannot compile, so whether it matches MACHINEOVERRIDES cannot be told"
             )),
-            Some(re) => {
-                let mo = ds.value("MACHINEOVERRIDES").unwrap_or_default();
-                let entries = pwords::colon_parts(&mo.text);
-                let known: Vec<&str> = entries
-                    .iter()
-                    .copied()
-                    .filter(|e| !pwords::is_unevaluated(e))
-                    .collect();
+            Some(hit) => {
                 let unknown = entries.len() - known.len();
                 let by_python = ds.replay().python_vars.contains("MACHINEOVERRIDES");
-                let hit = known.iter().any(|e| re.is_match(e));
                 if hit {
                     // A match on a known entry is a match: not skipped.
                 } else if unknown > 0 || by_python || parse_all.is_none() {
@@ -1078,7 +1140,8 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
                     ));
                 }
             }
-        },
+            }
+        }
     }
     let mirror = static_bool(ds, "SOURCE_MIRROR_FETCH");
     let host_checked = match (parse_all, mirror) {
@@ -1112,8 +1175,8 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
             (Some(_), Some(None)) => out.push(format!(
                 "{MAY} COMPATIBLE_HOST = \"{need}\"; HOST_SYS is not set (BitBake's re.match would raise)"
             )),
-            (Some(re), Some(Some(host))) => {
-                if !re.is_match(&host) {
+            (Some(_), Some(Some(host))) => {
+                if compatible_host(&need, &host) == Some(false) {
                     if host_checked.is_none() {
                         out.push(format!(
                             "{MAY} COMPATIBLE_HOST = \"{need}\" does not match HOST_SYS = \"{host}\"{unsure_check}"
@@ -1129,6 +1192,32 @@ fn skip_reasons(ds: &DataStore) -> Vec<String> {
     }
     out.extend(license_skip(ds, host_checked.is_none()));
     out
+}
+
+/// `re.match(need, ...)`: the regular expression anchored at the start only; `None` when
+/// Rust's `regex` cannot compile it (Python's `re` may: lookaround, backreferences).
+fn anchored(need: &str) -> Option<Regex> {
+    Regex::new(&format!("^(?:{need})")).ok()
+}
+
+/// OE-core `classes-global/base.bbclass` (Wrynose `33a6bd6c`, anonymous python): a non-empty
+/// `COMPATIBLE_MACHINE` is compatible when `re.match(COMPATIBLE_MACHINE, m)` for some entry
+/// `m` of `MACHINEOVERRIDES.split(":")` (given here as `entries`). `None` when the regular
+/// expression cannot be compiled. The check the skip notes make, callable with given values.
+pub fn compatible_machine<'a>(
+    need: &str,
+    entries: impl IntoIterator<Item = &'a str>,
+) -> Option<bool> {
+    let re = anchored(need)?;
+    Some(entries.into_iter().any(|e| re.is_match(e)))
+}
+
+/// OE-core `classes-global/base.bbclass` (Wrynose `33a6bd6c`, anonymous python): a non-empty
+/// `COMPATIBLE_HOST` is compatible when `re.match(COMPATIBLE_HOST, HOST_SYS)`. `None` when
+/// the regular expression cannot be compiled. The check the skip notes make, callable with
+/// given values.
+pub fn compatible_host(need: &str, host_sys: &str) -> Option<bool> {
+    Some(anchored(need)?.is_match(host_sys))
 }
 
 /// Why `name`'s value is not static, for a note.
@@ -2283,6 +2372,15 @@ impl<'a> Replay<'a> {
             let e = self.ds.expand(s);
             bases.push(base_of(&e.text).to_string());
         }
+        // `ClassExtender.rename_package_variables(PACKAGEVARS...)` renames `<VAR>:<pkg>` for
+        // each variable the caller lists, read from `PACKAGEVARS` when the function runs.
+        if body
+            .as_deref()
+            .is_some_and(|b| b.contains(".rename_package_variables("))
+            && let Some(v) = self.ds.value("PACKAGEVARS")
+        {
+            bases.extend(pwords::known_words(&v.text).into_iter().map(str::to_string));
+        }
         let notes = Arc::make_mut(&mut self.ds.notes);
         notes.python_vars.extend(bases);
         notes.anonymous.push(AnonPython {
@@ -3020,6 +3118,535 @@ impl<'a> Replay<'a> {
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Finalisation and class-extended variants
+// ---------------------------------------------------------------------------------------
+
+/// Variables OE-core's `native_virtclass_handler` (`classes-recipe/native.bbclass`, Wrynose
+/// `33a6bd6c`) filters with `d.setVarFilter` (`native_filter`) when `BBCLASSEXTEND` contains
+/// `native`; it also renames `<VAR>:<pkg>` package variables of `RDEPENDS` and the others.
+const NATIVE_FILTERED: &[&str] = &[
+    "DEPENDS",
+    "RDEPENDS",
+    "RRECOMMENDS",
+    "RSUGGESTS",
+    "RPROVIDES",
+    "RREPLACES",
+    "PACKAGES",
+    "PACKAGES_DYNAMIC",
+    "PROVIDES",
+];
+
+/// `oe.classextend.ClassExtender.map_packagevars` (OE-core Wrynose `lib/oe/classextend.py`):
+/// a `suffix_filter_deps` filter on each.
+const MAP_PACKAGEVARS: &[&str] = &[
+    "RDEPENDS",
+    "RRECOMMENDS",
+    "RSUGGESTS",
+    "RPROVIDES",
+    "RREPLACES",
+    "RCONFLICTS",
+    "PKG",
+];
+
+fn strings(v: &[&str]) -> Vec<String> {
+    v.iter().map(|x| x.to_string()).collect()
+}
+
+impl Replay<'_> {
+    /// `ast.finalize` up to the task processing: OE-core's `RecipePreDeferredInherits`
+    /// handler ([`Feature::DeferredInheritsClassOverride`]), the deferred inherits (first in
+    /// first out, more may be added meanwhile), the `RecipePreFinalise` handlers of the
+    /// class-extension classes ([`Replay::class_extend_handlers`]), `expandKeys`, the
+    /// `RecipePostKeyExpansion` handler of `multilib.bbclass`, (anonymous python, not run),
+    /// `handleVirtRecipeProviders`; then the skip notes.
+    fn finalize(&mut self, recipe: &Loc) -> Result<()> {
+        // OE-core base.bbclass `base_eventhandler` on RecipePreDeferredInherits: the first of
+        // native, nativesdk, crosssdk, cross that is among the deferred inherits (as written)
+        // sets CLASSOVERRIDE.
+        if self
+            .ws
+            .release
+            .release
+            .has(Feature::DeferredInheritsClassOverride)
+            && self.handles("base_eventhandler", "RecipePreDeferredInherits")
+        {
+            let inherits: Vec<String> = self
+                .ds
+                .notes
+                .deferred
+                .iter()
+                .map(|d| d.text.clone())
+                .collect();
+            if let Some(c) = ["native", "nativesdk", "crosssdk", "cross"]
+                .into_iter()
+                .find(|c| inherits.iter().any(|i| i == c))
+            {
+                let loc = self.handler_loc("base_eventhandler", recipe);
+                self.ds.rewrite(
+                    "CLASSOVERRIDE",
+                    format!("class-{c}"),
+                    loc,
+                    OpKind::EventHandler,
+                );
+            }
+        }
+        loop {
+            let next = {
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                if notes.deferred.is_empty() {
+                    None
+                } else {
+                    Some(notes.deferred.remove(0))
+                }
+            };
+            let Some(d) = next else { break };
+            self.inherit(&d.text, d.loc.as_ref(), &d.via, true, "inherit_defer")?;
+        }
+        self.class_extend_handlers(recipe);
+        let incomplete = self.ds.expand_keys();
+        Arc::make_mut(&mut self.ds.notes).incomplete_keys = incomplete;
+        self.multilib_postkeyexp(recipe);
+        // (BitBake runs anonymous python here, which the replay does not.)
+        if self.ws.release.release.has(Feature::RecipeVirtualProviders) {
+            virtual_recipe_providers(&mut self.ds, recipe);
+        }
+        let skip = skip_reasons(&self.ds);
+        if !skip.is_empty() {
+            Arc::make_mut(&mut self.ds.notes).target_notes.extend(skip);
+        }
+        Ok(())
+    }
+
+    /// `extendfunc` of `ast.multi_finalize` on the copy of the datastore before
+    /// finalisation: `BBEXTENDCURR` / `BBEXTENDVARIANT` for a word with an argument, else
+    /// `PN = "<pn>-<word>"`; then the class, deferred ([`Feature::ClassExtendDeferred`]) or
+    /// at once.
+    fn extend_variant(&mut self, ext: &ClassExtend, pn: &str, recipe: &Loc) -> Result<()> {
+        match ext.variant() {
+            Some(v) => {
+                self.ds.rewrite(
+                    "BBEXTENDCURR",
+                    ext.class().to_string(),
+                    recipe.clone(),
+                    OpKind::ClassExtend,
+                );
+                self.ds.rewrite(
+                    "BBEXTENDVARIANT",
+                    v.to_string(),
+                    recipe.clone(),
+                    OpKind::ClassExtend,
+                );
+            }
+            None => self.set_pn(
+                format!("{pn}-{}", ext.word),
+                recipe.clone(),
+                OpKind::ClassExtend,
+            ),
+        }
+        let name = ext
+            .variant_name(pn)
+            .unwrap_or_else(|| format!("{pn}-{}", ext.word));
+        let set = match ext.variant() {
+            Some(v) => format!(
+                "BBEXTENDCURR = \"{}\", BBEXTENDVARIANT = \"{v}\"",
+                ext.class()
+            ),
+            None => format!("PN = \"{pn}-{}\"", ext.word),
+        };
+        let mut notes = vec![format!(
+            "note: {name} is {} of {pn} (BBCLASSEXTEND `{}`), evaluated as BitBake makes it: the base recipe and its bbappends, then {set}, `inherit {}` and finalisation; FILE is the base recipe; what OE-core's class-extension handlers and anonymous python change is flagged, not guessed",
+            ext.describe(),
+            ext.word,
+            ext.class()
+        )];
+        let deferred_before = !self.ds.notes.deferred.is_empty();
+        if self.ws.release.release.has(Feature::ClassExtendDeferred) {
+            Arc::make_mut(&mut self.ds.notes).deferred.push(Deferred {
+                text: ext.class().to_string(),
+                loc: None,
+                via: Vec::new(),
+            });
+        } else {
+            if deferred_before && self.ws.release.release.has(Feature::InheritDefer) {
+                notes.push(format!(
+                    "note: on this release BitBake inherits `{}` at once, before the recipe's deferred inherits (BitBake before 2.16); the Scarthgap point releases from 5.0.11 (BitBake 2.8 with 139f61fe9) defer it after them, as 2.16 does, which this evaluation does not follow",
+                    ext.class()
+                ));
+            }
+            self.inherit(ext.class(), None, &[], false, "BBCLASSEXTEND")?;
+        }
+        let n = Arc::make_mut(&mut self.ds.notes);
+        n.variant = Some(ext.clone());
+        n.target_notes.extend(notes);
+        Ok(())
+    }
+
+    /// A plain `setVar("PN", ...)` from code: the value is no longer computed from `FILE`,
+    /// and the values computed from `PN` (`BPN`) follow it.
+    fn set_pn(&mut self, pn: String, loc: Loc, kind: OpKind) {
+        self.ds.rewrite("PN", pn, loc, kind);
+        Arc::make_mut(&mut self.ds.notes).computed.remove("PN");
+        self.refresh_computed();
+    }
+
+    /// Whether `name` is a function whose `eventmask` flag names `bb.event.<event>`: an
+    /// event handler BitBake runs for that event (registered by `addhandler`).
+    fn handles(&self, name: &str, event: &str) -> bool {
+        self.ds.is_function(name)
+            && self.ds.flag(name, "eventmask").is_some_and(|m| {
+                m.text
+                    .split_whitespace()
+                    .any(|w| w == format!("bb.event.{event}"))
+            })
+    }
+
+    /// Where a handler function is defined (its first piece), else `fallback`.
+    fn handler_loc(&self, name: &str, fallback: &Loc) -> Loc {
+        self.ds
+            .function(name)
+            .and_then(|p| p.first().map(|p| p.loc.clone()))
+            .unwrap_or_else(|| fallback.clone())
+    }
+
+    /// `bb.data.inherits_class`: a class file named `<klass>.bbclass` in `__inherit_cache`.
+    fn inherits_class(&self, klass: &str) -> bool {
+        let needle = format!("{klass}.bbclass");
+        self.ds
+            .notes
+            .inherit_cache
+            .iter()
+            .any(|p| p.file_name().is_some_and(|f| f.to_string_lossy() == needle))
+    }
+
+    /// Flags `vars` as changed by event handler `handler` (not run): their values carry
+    /// `unevaluated_python`, and each gets a note.
+    fn handler_flags(&mut self, handler: &str, loc: &Loc, vars: &[String], how: &str) {
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        for v in vars {
+            notes.python_vars.insert(v.clone());
+            let line = format!(
+                "note: {handler} (an OE-core event handler at {loc}, run before finalisation) {how} {v}; it is not run, so the value shown is the one before it"
+            );
+            let e = notes.var_notes.entry(v.clone()).or_default();
+            if !e.contains(&line) {
+                e.push(line);
+            }
+        }
+        self.ds.ovr_cache = OnceLock::new();
+    }
+
+    /// The `RecipePreFinalise` handlers of OE-core's class-extension classes (Wrynose
+    /// `33a6bd6c`), when the class defines them: `native_virtclass_handler`
+    /// (`classes-recipe/native.bbclass`), `nativesdk_virtclass_handler`
+    /// (`classes-recipe/nativesdk.bbclass`), `multilib_virtclass_handler`
+    /// (`classes/multilib.bbclass`). What is plain code on known values is reproduced (the
+    /// `PN` and `MLPREFIX` renames, the `OVERRIDES` additions); filters
+    /// (`d.setVarFilter`, `oe.utils.set_class_filter`) and renames of package variables
+    /// are flagged.
+    fn class_extend_handlers(&mut self, recipe: &Loc) {
+        // native.bbclass: PN must end with -native; DISTRO_FEATURES goes through
+        // set_class_filter; with "native" in BBCLASSEXTEND (a substring test) the filters.
+        const NATIVE: &str = "native_virtclass_handler";
+        if self.handles(NATIVE, "RecipePreFinalise") {
+            let loc = self.handler_loc(NATIVE, recipe);
+            match static_value(&self.ds, "PN") {
+                Some(Some(pn)) if !pn.ends_with("-native") => {}
+                pn => {
+                    let mut vars = strings(&["DISTRO_FEATURES"]);
+                    let ce = self.ds.value("BBCLASSEXTEND").unwrap_or_default();
+                    let unsure = ce.unevaluated_python || !ce.unresolved.is_empty();
+                    if ce.text.contains("native") || unsure || pn.is_none() {
+                        vars.extend(strings(NATIVE_FILTERED));
+                    }
+                    self.handler_flags(NATIVE, &loc, &vars, "filters");
+                }
+            }
+        }
+        const NATIVESDK: &str = "nativesdk_virtclass_handler";
+        if self.handles(NATIVESDK, "RecipePreFinalise") {
+            let loc = self.handler_loc(NATIVESDK, recipe);
+            match static_value(&self.ds, "PN") {
+                Some(Some(pn)) if pn.ends_with("-nativesdk") || pn.starts_with("nativesdk-") => {
+                    self.handler_flags(NATIVESDK, &loc, &strings(&["DISTRO_FEATURES"]), "filters");
+                    self.ds.rewrite(
+                        "MLPREFIX",
+                        "nativesdk-".into(),
+                        loc.clone(),
+                        OpKind::EventHandler,
+                    );
+                    let new = format!(
+                        "nativesdk-{}",
+                        pn.replace("-nativesdk", "").replace("nativesdk-", "")
+                    );
+                    self.set_pn(new, loc, OpKind::EventHandler);
+                }
+                Some(_) => {}
+                None => self.handler_flags(
+                    NATIVESDK,
+                    &loc,
+                    &strings(&["DISTRO_FEATURES", "MLPREFIX", "PN"]),
+                    "may set",
+                ),
+            }
+        }
+        self.multilib_handler(recipe);
+    }
+
+    /// `BBEXTENDCURR` and `BBEXTENDVARIANT` when they are `multilib` and a variant name:
+    /// `Ok(Some(variant))`; `Ok(None)` when they are known and not; `Err(())` when not known.
+    fn multilib_variant(&self) -> std::result::Result<Option<String>, ()> {
+        let cls = static_value(&self.ds, "BBEXTENDCURR").ok_or(())?;
+        let var = static_value(&self.ds, "BBEXTENDVARIANT").ok_or(())?;
+        Ok(match (cls, var) {
+            (Some(c), Some(v)) if c == "multilib" && !v.is_empty() => Some(v),
+            _ => None,
+        })
+    }
+
+    /// `OVERRIDES = OVERRIDES (raw) + ":virtclass-multilib-<variant>"`.
+    fn add_override(&mut self, name: &str, loc: &Loc) {
+        let ov = self.ds.raw("OVERRIDES").unwrap_or_default();
+        self.ds.rewrite(
+            "OVERRIDES",
+            format!("{ov}:{name}"),
+            loc.clone(),
+            OpKind::EventHandler,
+        );
+    }
+
+    /// `MLPREFIX = "<variant>-"` and `PN = "<variant>-" + PN (raw)`.
+    fn multilib_rename(&mut self, variant: &str, raw_pn: &str, loc: &Loc) {
+        self.ds.rewrite(
+            "MLPREFIX",
+            format!("{variant}-"),
+            loc.clone(),
+            OpKind::EventHandler,
+        );
+        self.set_pn(
+            format!("{variant}-{raw_pn}"),
+            loc.clone(),
+            OpKind::EventHandler,
+        );
+    }
+
+    /// `multilib_virtclass_handler` (OE-core Wrynose `classes/multilib.bbclass`), on
+    /// `RecipePreFinalise`.
+    fn multilib_handler(&mut self, recipe: &Loc) {
+        const H: &str = "multilib_virtclass_handler";
+        if !self.handles(H, "RecipePreFinalise") {
+            return;
+        }
+        let loc = self.handler_loc(H, recipe);
+        let variant = match self.multilib_variant() {
+            Ok(Some(v)) => v,
+            Ok(None) => return,
+            Err(()) => {
+                self.handler_flags(
+                    H,
+                    &loc,
+                    &strings(&["PN", "MLPREFIX", "OVERRIDES"]),
+                    "may set (BBEXTENDCURR or BBEXTENDVARIANT is not known statically)",
+                );
+                return;
+            }
+        };
+        // Values copied from others that change later, or computed by python.
+        let mut flagged = strings(&[
+            "STAGING_KERNEL_DIR",
+            "SSTATE_ARCHS_TUNEPKG",
+            "ALL_MULTILIB_PACKAGE_ARCHS",
+        ]);
+        if let Some(v) = self.ds.value("MULTILIB_SAVE_VARNAME") {
+            flagged.extend(
+                pwords::known_words(&v.text)
+                    .into_iter()
+                    .map(|n| format!("{n}_MULTILIB_ORIGINAL")),
+            );
+        }
+        self.handler_flags(H, &loc, &flagged, "sets");
+
+        // The skips, in the handler's order.
+        let mut skip: Option<String> = None;
+        let mut unsure: Vec<String> = Vec::new();
+        let bpn = self.ds.value("BPN").map(|v| v.text).unwrap_or_default();
+        let provides = self.ds.value("PROVIDES").unwrap_or_default();
+        let non_ml = static_value(&self.ds, "NON_MULTILIB_RECIPES");
+        if pwords::known_words(&provides.text).contains(&"virtual/kernel")
+            || self.inherits_class("module-base")
+            || self.inherits_class("kernel-fit-image")
+            || matches!(&non_ml, Some(Some(n)) if pwords::words(n).contains(&bpn.as_str()))
+        {
+            skip = Some(format!("We shouldn't have multilib variants for {bpn}"));
+        } else {
+            if provides.unevaluated_python || self.ds.notes.python_vars.contains("PROVIDES") {
+                unsure.push("PROVIDES depends on python".into());
+            }
+            if non_ml.is_none() {
+                unsure.push("NON_MULTILIB_RECIPES is not known statically".into());
+            }
+        }
+        let override_name = format!("virtclass-multilib-{variant}");
+        let raw_pn = self.ds.raw("PN").unwrap_or_default();
+        if skip.is_none() {
+            // `OVERRIDES.replace("pn-${PN}", "pn-${PN}:pn-" + pn)` on the raw values.
+            let ov = self.ds.raw("OVERRIDES").unwrap_or_default();
+            self.ds.rewrite(
+                "OVERRIDES",
+                ov.replace("pn-${PN}", &format!("pn-${{PN}}:pn-{raw_pn}")),
+                loc.clone(),
+                OpKind::EventHandler,
+            );
+        }
+        let image = self.inherits_class("image");
+        let canadian = self.inherits_class("cross-canadian");
+        if skip.is_none() && !image && !canadian {
+            if self.inherits_class("native") {
+                skip = Some("We can't extend native recipes".into());
+            } else if self.inherits_class("nativesdk") || self.inherits_class("crosssdk") {
+                skip = Some("We can't extend nativesdk recipes".into());
+            } else if self.inherits_class("allarch") && !self.inherits_class("packagegroup") {
+                match static_value(&self.ds, "MULTILIB_VARIANTS") {
+                    Some(v) if v.as_deref().unwrap_or("").is_empty() => {
+                        skip =
+                            Some("Don't extend allarch recipes which are not packagegroups".into())
+                    }
+                    Some(_) => {}
+                    None => unsure.push("MULTILIB_VARIANTS is not known statically".into()),
+                }
+            }
+        }
+        if let Some(msg) = skip {
+            Arc::make_mut(&mut self.ds.notes).target_notes.push(format!(
+                "note: BitBake would skip this recipe: {msg} (multilib_virtclass_handler at {loc}, decided from static values)"
+            ));
+            return;
+        }
+        if !unsure.is_empty() {
+            Arc::make_mut(&mut self.ds.notes).target_notes.push(format!(
+                "note: BitBake may skip this recipe: multilib_virtclass_handler at {loc} skips some recipes, and {}",
+                unsure.join("; ")
+            ));
+        }
+        if image {
+            self.multilib_rename(&variant, &raw_pn, &loc);
+            self.handler_flags(H, &loc, &strings(&["SDKTARGETSYSROOT"]), "sets");
+            self.add_override(&override_name, &loc);
+            if let Some(tv) = self.ds.raw(&format!("TARGET_VENDOR:{override_name}"))
+                && !tv.is_empty()
+            {
+                self.ds
+                    .rewrite("TARGET_VENDOR", tv, loc.clone(), OpKind::EventHandler);
+            }
+            return;
+        }
+        if canadian {
+            for v in ["RECIPE_SYSROOT", "STAGING_DIR_TARGET", "STAGING_DIR_HOST"] {
+                self.ds.rewrite(
+                    v,
+                    "${WORKDIR}/recipe-sysroot".into(),
+                    loc.clone(),
+                    OpKind::EventHandler,
+                );
+            }
+            self.ds.rewrite(
+                "RECIPE_SYSROOT_MANIFEST_SUBDIR",
+                format!("nativesdk-{variant}"),
+                loc.clone(),
+                OpKind::EventHandler,
+            );
+            self.ds.rewrite(
+                "MLPREFIX",
+                format!("{variant}-"),
+                loc.clone(),
+                OpKind::EventHandler,
+            );
+            self.add_override(&override_name, &loc);
+            return;
+        }
+        // SKIP_RECIPE[pn] is copied to SKIP_RECIPE[<variant>-pn] when that is unset.
+        if let Some(Some(pn)) = static_value(&self.ds, "PN")
+            && let Some(msg) = self.ds.raw_flag("SKIP_RECIPE", &pn)
+            && !msg.is_empty()
+        {
+            let new = format!("{variant}-{pn}");
+            if self.ds.raw_flag("SKIP_RECIPE", &new).is_none() {
+                put_flag(&mut self.ds, "SKIP_RECIPE", &new, &msg);
+            }
+        }
+        self.multilib_rename(&variant, &raw_pn, &loc);
+        self.add_override(&override_name, &loc);
+        match static_value(&self.ds, "INCOMPATIBLE_LICENSE_EXCEPTIONS") {
+            Some(Some(pkgs)) if !pkgs.is_empty() => {
+                let mut out = pkgs.clone();
+                for p in pkgs.split_whitespace() {
+                    out.push_str(&format!(" {variant}-{p}"));
+                }
+                self.ds.rewrite(
+                    "INCOMPATIBLE_LICENSE_EXCEPTIONS",
+                    out,
+                    loc.clone(),
+                    OpKind::EventHandler,
+                );
+            }
+            Some(_) => {}
+            None => self.handler_flags(
+                H,
+                &loc,
+                &strings(&["INCOMPATIBLE_LICENSE_EXCEPTIONS"]),
+                "extends",
+            ),
+        }
+        if let Some(t) = self.ds.raw(&format!("DEFAULTTUNE:{override_name}"))
+            && !t.is_empty()
+        {
+            self.ds
+                .rewrite("DEFAULTTUNE", t, loc.clone(), OpKind::EventHandler);
+        }
+    }
+
+    /// `multilib_virtclass_handler_postkeyexp` (OE-core Wrynose `classes/multilib.bbclass`),
+    /// on `RecipePostKeyExpansion`: `ClassExtender` filters and package variable renames, all
+    /// flagged.
+    fn multilib_postkeyexp(&mut self, recipe: &Loc) {
+        const H: &str = "multilib_virtclass_handler_postkeyexp";
+        if !self.handles(H, "RecipePostKeyExpansion") {
+            return;
+        }
+        if matches!(self.multilib_variant(), Ok(None)) || self.inherits_class("image") {
+            return;
+        }
+        let loc = self.handler_loc(H, recipe);
+        let mut vars = strings(&["DEPENDS", "PACKAGE_WRITE_DEPS", "PROVIDES"]);
+        if !self.inherits_class("cross-canadian") {
+            vars.extend(strings(&["PACKAGES", "PACKAGES_DYNAMIC"]));
+            if let Some(v) = self.ds.value("PACKAGEVARS") {
+                vars.extend(pwords::known_words(&v.text).into_iter().map(str::to_string));
+            }
+            vars.extend(strings(MAP_PACKAGEVARS));
+            vars.extend(strings(&[
+                "INITSCRIPT_PACKAGES",
+                "USERADD_PACKAGES",
+                "SYSTEMD_PACKAGES",
+                "UPDATERCPN",
+            ]));
+            if self.inherits_class("update-alternatives") {
+                vars.push("ALTERNATIVE_PRIORITY".into());
+                if let Some(p) = self.ds.value("PACKAGES") {
+                    vars.extend(
+                        pwords::known_words(&p.text)
+                            .into_iter()
+                            .map(|p| format!("ALTERNATIVE_PRIORITY_{p}")),
+                    );
+                }
+            }
+        }
+        vars.sort();
+        vars.dedup();
+        self.handler_flags(H, &loc, &vars, "filters or renames");
+    }
+}
+
 /// `bb.build.ensure_task_prefix`.
 fn task_name(name: &str) -> String {
     if name.starts_with("do_") {
@@ -3046,7 +3673,7 @@ fn is_exported(st: &StatementRow) -> bool {
 fn python_writes(body: &str) -> (Vec<String>, bool) {
     static WRITE: LazyLock<Option<Regex>> = LazyLock::new(|| {
         Regex::new(
-            r#"\bd\.(?:setVar|appendVar|prependVar|delVar|renameVar|setVarFlag|setVarFlags|appendVarFlag|prependVarFlag|delVarFlag|delVarFlags)\s*\(\s*(?:'([^'\\]*)'|"([^"\\]*)")?"#,
+            r#"\bd\.(?:setVar|setVarFilter|appendVar|prependVar|delVar|renameVar|setVarFlag|setVarFlags|appendVarFlag|prependVarFlag|delVarFlag|delVarFlags)\s*\(\s*(?:'([^'\\]*)'|"([^"\\]*)")?"#,
         )
         .ok()
     });
@@ -3070,6 +3697,33 @@ fn python_writes(body: &str) -> (Vec<String>, bool) {
     }
     if pass_d.is_match(body) {
         opaque = true;
+    }
+    // OE-core's `oe.classextend.ClassExtender` (Wrynose `lib/oe/classextend.py`):
+    // `set_filter(var, ...)` is `d.setVarFilter(var, ...)`; `map_packagevars()` filters the
+    // runtime package variables; `rename_package_variables(...)` filters `PACKAGES` and
+    // `PACKAGES_DYNAMIC` (and renames per-package variables, which the caller adds).
+    static SET_FILTER: LazyLock<Option<Regex>> =
+        LazyLock::new(|| Regex::new(r#"\.set_filter\s*\(\s*(?:'([^'\\]*)'|"([^"\\]*)")"#).ok());
+    let mut add = |n: &str| {
+        if !sets.iter().any(|s| s == n) {
+            sets.push(n.to_string());
+        }
+    };
+    if let Some(re) = SET_FILTER.as_ref() {
+        for c in re.captures_iter(body) {
+            if let Some(m) = c.get(1).or_else(|| c.get(2)) {
+                add(m.as_str());
+            }
+        }
+    }
+    if body.contains(".map_packagevars(") {
+        for n in MAP_PACKAGEVARS {
+            add(n);
+        }
+    }
+    if body.contains(".rename_package_variables(") {
+        add("PACKAGES");
+        add("PACKAGES_DYNAMIC");
     }
     (sets, opaque)
 }
@@ -3112,6 +3766,18 @@ mod tests {
         assert!(opaque);
         let (_, opaque) = python_writes("    x = d.getVar('A')");
         assert!(!opaque);
+    }
+
+    #[test]
+    fn python_writes_sees_class_extender_filters() {
+        // nativesdk.bbclass's anonymous python (OE-core Wrynose).
+        let (sets, opaque) = python_writes(
+            "    clsextend = oe.classextend.ClassExtender(\"nativesdk\", [], d)\n    clsextend.rename_package_variables((d.getVar(\"PACKAGEVARS\") or \"\").split())\n    clsextend.set_filter(\"DEPENDS\", deps=True)\n    clsextend.set_filter('PROVIDES', deps=False)\n    clsextend.map_packagevars()\n    d.setVarFilter(\"X\", \"f(val)\")\n",
+        );
+        assert!(opaque);
+        for n in ["DEPENDS", "PROVIDES", "RDEPENDS", "PKG", "PACKAGES", "X"] {
+            assert!(sets.iter().any(|s| s == n), "{n}: {sets:?}");
+        }
     }
 
     #[test]

@@ -88,6 +88,42 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After w10-eval
+
+Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/w10-eval/`, release build) after class-extended variants
+became evaluable (bitbake-semantics.md, "Class-extended variants"):
+
+| | Compared | Equal (+ after whitespace) | Flagged (of which literal differs) | Known gap | Bug |
+|---|---|---|---|---|---|
+| Sample, explicit machine and distro: before | 1019 | 656 | 336 (20) | 27 | 0 |
+| Sample, explicit machine and distro: after | 1090 | 700 (+2) | 357 (25) | 31 | 0 |
+| `gmp-native` (new) | 36 | 22 (+1) | 11 (3) | 2 | 0 |
+| `nativesdk-zlib` (new) | 35 | 22 (+1) | 10 (2) | 2 | 0 |
+
+- **The two targets that were `NotFound` are evaluated and compared**, with no unflagged
+  difference. Equal: `PN` (`gmp-native`, `nativesdk-zlib`: the `extendfunc` and
+  `nativesdk_virtclass_handler` renames), `PV`, `PR`, `LICENSE`, `INHERIT`, `TMPDIR`,
+  `BBCLASSEXTEND`, `MACHINEOVERRIDES` (`""` from the class), `SRC_URI`, the recipes' own
+  variables (`nativesdk-zlib` `EXTRA_OECONF` too); `PROVIDES` equal after normalising
+  whitespace. Flagged: `DEPENDS`, `PACKAGES`, `FILES:<pn>` (the handlers' filters and
+  `nativesdk.bbclass`'s `ClassExtender`, plus python already in the base), `OVERRIDES`,
+  `DISTROOVERRIDES`, `S`, `B`, `WORKDIR`, `CFLAGS`, `FILESPATH` (as for every target), and
+  `gmp-native` `EXTRA_OECONF`. Of the 700 equal values 149 carry a flag (135 before). Literal
+  differs: `gmp-native` `PACKAGES` (BitBake's `native_filter` renames), `OVERRIDES`,
+  `EXTRA_OECONF`; `nativesdk-zlib` `DEPENDS` (the `virtual/nativesdk-*` and
+  `gcc-crosssdk` names the class filters and virtual providers give), `OVERRIDES`.
+  `OVERRIDES` carries `pn-<variant>`, `class-native` / `class-nativesdk` and
+  `toolchain-gcc` on both sides.
+- **Known gaps** per variant: `FILE` (the `LAYERDIR` spelling, as for every target) and the
+  new `variant-layername`: `bitbake -e <variant>` parses the virtual file name, which no
+  `BBFILE_PATTERN` matches, so BitBake's `FILE_LAYERNAME` is `None` there (and its
+  `OVERRIDES` keeps a literal `layer-${FILE_LAYERNAME}`), while a build, and sous-chef,
+  give the layer's collection (`core`).
+- **No other class moved**: the 23 earlier targets and the `@default` probe have the same
+  rows in `classes.tsv`; only the 76 rows of the two variants were added. Files in the
+  history: same set for 896 of 898 names (the 66 new names all agree).
+
 ## After w9-final
 
 Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
@@ -188,7 +224,8 @@ documented cause**. Since w5-fix-eval2 no flagged value lists `TCOVERRIDE` (156 
 20 flagged values (was 22) differ even outside their unevaluated parts.
 
 Open, as documented gaps rather than bugs: `BBCLASSEXTEND` variants (`gmp-native`,
-`nativesdk-zlib` are refused, not evaluated); `LAYERDIR` is the canonical path, not the
+`nativesdk-zlib` were refused, not evaluated; evaluated since w10, see "After w10-eval");
+`LAYERDIR` is the canonical path, not the
 `BBLAYERS` text; anonymous python and python in `OVERRIDES` (behind most flags). (The task
 `depends` flags and the whitespace of an unchanged `DEPENDS` in the virtual-provider
 rewrite, open here at first, were done in w8: "After w8-eval".) Not measured: other
@@ -281,8 +318,8 @@ and the report gives both sides' last operation.
 | opencsd | 31 | 19 | 11 | 1 | 0 |
 | virtual/kernel (linux-kiss) | 27 | 13 | 12 (2) | 2 | 0 |
 | virtual/bootloader (u-boot-kiss) | 46 | 29 | 16 (1) | 1 | 0 |
-| gmp-native | 0 | | | not evaluable: `BBCLASSEXTEND` | |
-| nativesdk-zlib | 0 | | | not evaluable: `BBCLASSEXTEND` | |
+| gmp-native | 0 | | | not evaluable: `BBCLASSEXTEND` (evaluated since w10) | |
+| nativesdk-zlib | 0 | | | not evaluable: `BBCLASSEXTEND` (evaluated since w10) | |
 | **Total** | **1019** | **656** | **336 (22)** | **27** | **0** |
 
 No value was equal only after whitespace normalisation. 58 names were unset on both sides
@@ -396,7 +433,7 @@ static value is a pointer list; the test recognises functions by the value's sha
 | Gap (where documented) | Occurrences |
 |---|---|
 | `LAYERDIR` is the canonical layer root, not the `BBLAYERS` text (wave 3 "Open items", Replay) | 27 unflagged values: `FILE` in all 23 targets, `FILESEXTRAPATHS` in 4 (linux-kiss, virtual/kernel, systemd-boot, util-linux). bitbake-setup's `layers/` entries are symlinks; BitBake keeps the symlinked path, sous-chef the target. The files are the same. Paths that BitBake prints through `layers/` (also in `FILESPATH`, `THISDIR`) will not match textually. |
-| `BBCLASSEXTEND` variants not resolved (wave 3 Replay, wave 4 Provider resolution) | 2 targets: `gmp-native`, `nativesdk-zlib` give `NotFound` ("recipe gmp-native; list recipes with the recipe tool"). A refusal, not a wrong answer; the message could say why. |
+| `BBCLASSEXTEND` variants not resolved (wave 3 Replay, wave 4 Provider resolution; closed in w10) | 2 targets: `gmp-native`, `nativesdk-zlib` gave `NotFound` ("recipe gmp-native; list recipes with the recipe tool"). A refusal, not a wrong answer. Since w10 both are evaluated ("After w10-eval"). |
 | Python in `OVERRIDES` (wave 2) | Behind most flags: `OVERRIDES` itself is flagged in all 23 targets (`TARGET_OS`, `TRANSLATED_TARGET_ARCH`, the tune `MACHINEOVERRIDES` are python). (The rest of this cell is the first measurement; since w5-fix-eval2 the toolchain class is followed, see "After w5-fix-eval2".) The replay also reports `inherit_defer toolchain/${TOOLCHAIN}` (base.bbclass:36; `TOOLCHAIN ??= "${PREFERRED_TOOLCHAIN}"`, which has `class-*` override variants) as needing python in 19 of the 23 targets (not in linux-kiss, u-boot-kiss and their two `virtual/` aliases, where `kernel-arch.bbclass:84` sets `TOOLCHAIN = "gcc"`), so `toolchain/gcc.bbclass` is not replayed and `TCOVERRIDE` stays unresolved (which part of the chain is python was not traced further): 156 of the 336 flagged values list `TCOVERRIDE` in `unresolved`. |
 | Anonymous python and `d.setVar` in classes not run (wave 3 Replay; bitbake-semantics.md "What the static evaluator cannot do") | Every target has 10 to 17 anonymous functions (7 to 12 opaque). Of the 22 flagged-literal-differs values, the BitBake history names the python that made the difference for 15: `kernel.bbclass` / `kernel-devicetree.bbclass` adding `kernel-image-zimage kernel-devicetree` to `PACKAGES`; `packagegroup.bbclass` adding `-dbg -dev`; `base.bbclass:508` (`appendVar`, `PACKAGECONFIG` dependencies) and `update-alternatives.bbclass:78` (`ua_extend_depends`) to `DEPENDS`; python3's manifest function to `PACKAGES`, `FILES:*`, `RDEPENDS:*`; busybox's anonymous function to `configmangle`. Of the other 7, 2 are bug 3 (`linux-kiss` and `virtual/kernel` `DEPENDS`) and 5 are values built from python-set variables or classes the replay could not inherit (`EXTRA_OECONF` of curl, dropbear and python3, `EXTRA_OEMESON` of dbus, `DEPENDS` of kiss-image). No unflagged value was caused by python. |
 | `inherit` / `inherit_defer` whose argument needs python (bitbake-semantics.md) | Every target: `require ${@...multiconfig...}` and `include conf/machine-sdk/${SDKMACHINE}.conf` (bitbake.conf:824, 826), `inherit_defer toolchain/${TOOLCHAIN}`; `kiss-image` also `${IMGCLASSES}` and `${SDK_CLASSES}`. All reported in `ReplayNotes.references`. |
@@ -416,6 +453,33 @@ static value is a pointer list; the test recognises functions by the value's sha
   as BitBake. Without an explicit machine, `virtual/kernel` is wrong (bug 1).
 - **Recipe files**: 1034 on both sides once the `BBFILES` globs are applied; the index
   holds one more (bug 4).
+- **Skip checks** (w10, `tests/skip_live.rs`, ignored without `SOUS_CHEF_LIVE`; no BitBake
+  run): the `COMPATIBLE_MACHINE` / `COMPATIBLE_HOST` / `SKIP_RECIPE` checks the skip notes
+  make (`eval::compatible_machine`, `eval::compatible_host`) run on every collected recipe
+  (evaluated statically for `dogbonedark` / `kiss`) with the `MACHINEOVERRIDES` and
+  `HOST_SYS` BitBake computed, taken from the dumps as a check, not as an input: `curl`'s
+  (`armv7a:ti-soc:ti33x:dogbonedark`, `arm-oe-linux-gnueabi`) for target recipes,
+  `gmp-native`'s (`""`, `x86_64-linux`) for those that inherit `native`,
+  `nativesdk-zlib`'s (`""`, `x86_64-oesdk-linux`) for `nativesdk`; the 20 cross recipes are
+  left out (no dump has their values). Of 1014 recipes, **83 would be skipped** (65 by
+  `COMPATIBLE_HOST`, 18 by `COMPATIBLE_MACHINE`, none by `SKIP_RECIPE`), 30 cannot be
+  decided statically (`COMPATIBLE_MACHINE` / `COMPATIBLE_HOST` with python or override
+  variants on python `OVERRIDES`; two lookahead expressions Rust's `regex` cannot compile,
+  `gn`, `ghostscript`). Against BitBake: **no recipe judged skipped was parsed by BitBake**
+  (the 20 recipe files with a target `bitbake -e` dump), and of the 24 recipe files
+  `show-appends` lists, 16 agree (`trusted-firmware-a` x4, `libts`, `ts-sp-smm-gateway`,
+  `linux-yocto-rt`, `linux-yocto-tiny` skipped on both sides; `linux-kiss`, `base-files`,
+  `busybox`, `systemd-boot`, ... parsed on both sides). The other 8 BitBake skipped where
+  these checks do not: 5 have a `COMPATIBLE_MACHINE` that is not static here
+  (`linux-yocto`, `linux-yocto-dev`, `edk2-firmware`, `optee-os` x2), and 3 are skipped by
+  checks the notes do not model: `u-boot_2026.01.bb` and `musl_git.bb` provide
+  `virtual/bootloader` / `virtual/libc` whose `PREFERRED_PROVIDER` names another recipe
+  (OE-core `base_eventhandler` on `RecipeParsed` skips such providers), `systemd_259.5.bb`
+  has `REQUIRED_DISTRO_FEATURES` (`features_check.bbclass`); the source names these causes,
+  they were not confirmed recipe by recipe. BitBake's total, 435 skipped, counts variants
+  and every reason, so it is not comparable with the 83. The notes as they stand (static
+  values only, `MACHINEOVERRIDES` holding python): "would skip" on no recipe, "may skip" on
+  124, among them all 83; no recipe the real values skip lacks a note.
 
 ## How far to trust static mode
 

@@ -11,13 +11,15 @@ pub mod overlay;
 pub mod overrides;
 pub mod providers;
 pub mod replay;
+pub mod variant;
 
 pub use datastore::{DataStore, OpKind, OpStatus, UnsetRecord, VarOp};
 pub use overlay::Overlay;
 pub use replay::{
     AnonPython, ConfigCache, FunctionPiece, RefIssue, RefProblem, ReplayNotes, UncertainRef,
-    evaluate_overlay_with, evaluate_with, global_cache,
+    compatible_host, compatible_machine, evaluate_overlay_with, evaluate_with, global_cache,
 };
+pub use variant::ClassExtend;
 
 use serde::Serialize;
 

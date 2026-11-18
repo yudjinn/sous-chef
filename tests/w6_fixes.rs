@@ -512,14 +512,17 @@ fn class_extend(root: &Path) {
     );
 }
 
+/// Since w10 a variant is evaluated (tests/eval_w10.rs); here, the names: every tool that
+/// resolves a recipe name takes the variant as such, and lint's target resolution, which
+/// works on files, names the base recipe.
 #[tokio::test]
 async fn class_extended_variants_are_named_as_such() {
     use sous_chef::mcp::tools::{deps, item, recipe, var};
     let fx = modified(class_extend);
     let ctx = ctx_for(&fx);
-    let err = |r: sous_chef::error::Result<String>| match r {
-        Ok(out) => panic!("expected an error, got\n{out}"),
-        Err(e) => e.to_string(),
+    let ok = |r: sous_chef::error::Result<String>| match r {
+        Ok(out) => out,
+        Err(e) => panic!("expected output, got {e}"),
     };
     let rec = |name: &str| recipe::Args {
         name: name.into(),
@@ -528,29 +531,34 @@ async fn class_extended_variants_are_named_as_such() {
         budget_tokens: Some(4000),
         format: None,
     };
-    let e = err(recipe::run(&ctx, rec("libfoo-native")).await);
+    let out = ok(recipe::run(&ctx, rec("libfoo-native")).await);
     assert!(
-        e.contains("`libfoo-native` is the `native` variant of `libfoo`")
-            && e.contains("BBCLASSEXTEND")
-            && e.contains("sous-chef does not evaluate class-extended variants")
-            && e.contains("`recipe libfoo` shows the base recipe"),
-        "{e}"
+        out.contains("the `native` variant of libfoo, BBCLASSEXTEND `native`"),
+        "{out}"
     );
-    let e = err(recipe::run(&ctx, rec("nativesdk-libfoo")).await);
-    assert!(e.contains("the `nativesdk` variant of `libfoo`"), "{e}");
-    let e = err(recipe::run(&ctx, rec("lib32-libfoo")).await);
+    let out = ok(recipe::run(&ctx, rec("nativesdk-libfoo")).await);
+    assert!(out.contains("the `nativesdk` variant of libfoo"), "{out}");
+    // No nativesdk class here renames PN as OE-core's handler does: said.
     assert!(
-        e.contains("the `lib32` multilib variant of `libfoo`"),
-        "{e}"
+        out.contains("the evaluated PN is \"libfoo-nativesdk\""),
+        "{out}"
+    );
+    let out = ok(recipe::run(&ctx, rec("lib32-libfoo")).await);
+    assert!(
+        out.contains("the `lib32` multilib variant of libfoo"),
+        "{out}"
     );
     // A recipe whose BBCLASSEXTEND does not list the class: no claim.
-    let e = err(recipe::run(&ctx, rec("hello-native")).await);
+    let e = recipe::run(&ctx, rec("hello-native"))
+        .await
+        .unwrap_err()
+        .to_string();
     assert!(!e.contains("variant"), "{e}");
 
-    let e = err(var::run(
+    let out = ok(var::run(
         &ctx,
         var::Args {
-            name: "DEPENDS".into(),
+            name: "PN".into(),
             recipe: Some("libfoo-native".into()),
             machine: None,
             distro: None,
@@ -561,8 +569,8 @@ async fn class_extended_variants_are_named_as_such() {
         },
     )
     .await);
-    assert!(e.contains("`native` variant of `libfoo`"), "{e}");
-    let e = err(deps::run(
+    assert!(out.contains("libfoo-native"), "{out}");
+    let out = ok(deps::run(
         &ctx,
         deps::Args {
             recipe: "nativesdk-libfoo".into(),
@@ -573,26 +581,30 @@ async fn class_extended_variants_are_named_as_such() {
         },
     )
     .await);
-    assert!(e.contains("`nativesdk` variant of `libfoo`"), "{e}");
-    let e = err(item::run(
+    assert!(out.contains("`nativesdk` variant of libfoo"), "{out}");
+    // item looks in the variant's files, which are the base recipe's.
+    let out = ok(item::run(
         &ctx,
         item::Args {
             loc: None,
             recipe: Some("libfoo-native".into()),
             file: None,
-            name: Some("DEPENDS".into()),
+            name: Some("PROVIDES".into()),
             context: 0,
             budget_tokens: Some(4000),
             format: None,
         },
     )
     .await);
-    assert!(e.contains("`native` variant of `libfoo`"), "{e}");
-    // Lint's target resolution says the same.
+    assert!(out.contains("libfoo_2.0.bb"), "{out}");
+    // Lint's target resolution names the base recipe.
     let e = lint::resolve_target(&fx.ws, &fx.idx, Some("libfoo-native"), &fx.root)
         .unwrap_err()
         .to_string();
-    assert!(e.contains("`native` variant of `libfoo`"), "{e}");
+    assert!(
+        e.contains("`native` variant of `libfoo`") && e.contains("give `libfoo`"),
+        "{e}"
+    );
 }
 
 #[test]

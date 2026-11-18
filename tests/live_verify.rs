@@ -530,8 +530,10 @@ fn live_providers_match_bitbake() {
     assert!(k[2].starts_with("selected by PREFERRED_PROVIDER_virtual/kernel"));
     let b = first(&t[1]);
     assert_eq!(b[0], "u-boot-kiss");
-    // Known gap: BBCLASSEXTEND variants are not providers (BitBake: curl_8.19.0.bb).
-    assert!(t[2].contains("no recipe in the workspace provides curl-native"));
+    // Since w10 a BBCLASSEXTEND variant is a provider of its name (BitBake: curl_8.19.0.bb).
+    let c = first(&t[2]);
+    assert_eq!(c[0], "curl-native", "{}", t[2]);
+    assert!(t[2].contains("the `native` variant of curl"), "{}", t[2]);
 }
 
 /// `deps kind=build` splits `DEPENDS` on whitespace inside `${@...}` and lists fragments

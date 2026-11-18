@@ -169,6 +169,11 @@ impl Class {
 const GAP_PYTHON_RUN: &str = "python-at-parse"; // anonymous python, handlers, d.setVar in classes
 const GAP_LAYERDIR: &str = "layerdir-canonical"; // LAYERDIR is the canonical root, not BBLAYERS text
 const GAP_BBCLASSEXTEND: &str = "bbclassextend"; // variants not resolved
+/// `bitbake -e <variant>` parses the virtual file name (`virtual:native:<file>`), which no
+/// `BBFILE_PATTERN` matches, so `FILE_LAYERNAME` is `None` there; a build parses the real
+/// file name and every variant has the layer's name, which the static side gives
+/// (BitBake 2.18.0 `cooker.py` `buildFile` / `CookerParser`, `calc_bbfile_priority`).
+const GAP_VARIANT_LAYERNAME: &str = "variant-layername";
 
 /// The static `DEPENDS` still holds a `BB_RECIPE_VIRTUAL_PROVIDERS` word, which BitBake
 /// replaces (`ast.handleVirtRecipeProviders`, reproduced by the replay since differential
@@ -357,6 +362,20 @@ impl Ctx<'_> {
                 }
             }
             return (Class::Flagged(ok), why);
+        }
+        if bb_name == "FILE_LAYERNAME"
+            && self.ds.replay().variant.is_some()
+            && bv.is_some_and(|v| {
+                v.value.is_none()
+                    && v.ops
+                        .last()
+                        .is_some_and(|o| o.func.as_deref() == Some("_parse_recipe"))
+            })
+        {
+            return (
+                Class::Gap(GAP_VARIANT_LAYERNAME),
+                "bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build".into(),
+            );
         }
         if norm_ws(&self.canon(b)) == norm_ws(&self.canon(s)) {
             return (

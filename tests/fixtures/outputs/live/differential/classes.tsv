@@ -666,6 +666,82 @@ util-linux	SYSTEMD_AUTO_ENABLE:util-linux-fstrim	equal
 util-linux	SYSTEMD_SERVICE:util-linux-fstrim	equal	
 util-linux	SYSTEMD_SERVICE:util-linux-uuidd	equal	
 util-linux	UTIL_LINUX_LIBDIR	flagged	unevaluated_python
+gmp-native	PN	equal	
+gmp-native	PV	equal	
+gmp-native	PR	equal	
+gmp-native	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
+gmp-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+gmp-native	SRC_URI	equal	
+gmp-native	DEPENDS	flagged	unevaluated_python
+gmp-native	RDEPENDS:gmp-native	unset	
+gmp-native	PACKAGECONFIG	equal	
+gmp-native	PACKAGES	flagged-literal-differs	unevaluated_python
+gmp-native	FILES:gmp-native	flagged	unevaluated_python
+gmp-native	OVERRIDES	flagged-literal-differs	unevaluated_python
+gmp-native	MACHINEOVERRIDES	equal	
+gmp-native	DISTROOVERRIDES	flagged	unevaluated_python
+gmp-native	S	flagged	unevaluated_python
+gmp-native	B	flagged	unevaluated_python
+gmp-native	WORKDIR	flagged	unevaluated_python
+gmp-native	LICENSE	equal	
+gmp-native	INHERIT	equal	
+gmp-native	PROVIDES	equal-ws	
+gmp-native	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+gmp-native	EXTRA_OECMAKE	unset	
+gmp-native	CFLAGS	flagged	unevaluated_python
+gmp-native	FILESPATH	flagged	unevaluated_python
+gmp-native	MACHINE	equal	
+gmp-native	DISTRO	equal	
+gmp-native	TMPDIR	equal	
+gmp-native	ARM_INSTRUCTION_SET	equal	
+gmp-native	BBCLASSEXTEND	equal	
+gmp-native	DESCRIPTION	equal	
+gmp-native	FILES	equal	
+gmp-native	HOMEPAGE	equal	
+gmp-native	LIC_FILES_CHKSUM	equal	
+gmp-native	MIPS_INSTRUCTION_SET	equal	
+gmp-native	REVISION	equal	
+gmp-native	SECTION	equal	
+gmp-native	SSTATE_SCAN_FILES	equal	
+gmp-native	SUMMARY	equal	
+nativesdk-zlib	PN	equal	
+nativesdk-zlib	PV	equal	
+nativesdk-zlib	PR	equal	
+nativesdk-zlib	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
+nativesdk-zlib	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+nativesdk-zlib	SRC_URI	equal	
+nativesdk-zlib	DEPENDS	flagged-literal-differs	unevaluated_python
+nativesdk-zlib	RDEPENDS:nativesdk-zlib	unset	
+nativesdk-zlib	PACKAGECONFIG	unset	
+nativesdk-zlib	PACKAGES	flagged	unevaluated_python
+nativesdk-zlib	FILES:nativesdk-zlib	flagged	unevaluated_python
+nativesdk-zlib	OVERRIDES	flagged-literal-differs	unevaluated_python
+nativesdk-zlib	MACHINEOVERRIDES	equal	
+nativesdk-zlib	DISTROOVERRIDES	flagged	unevaluated_python
+nativesdk-zlib	S	flagged	unevaluated_python
+nativesdk-zlib	B	flagged	unevaluated_python
+nativesdk-zlib	WORKDIR	flagged	unevaluated_python
+nativesdk-zlib	LICENSE	equal	
+nativesdk-zlib	INHERIT	equal	
+nativesdk-zlib	PROVIDES	equal-ws	
+nativesdk-zlib	EXTRA_OECONF	equal	
+nativesdk-zlib	EXTRA_OECMAKE	unset	
+nativesdk-zlib	CFLAGS	flagged	unevaluated_python
+nativesdk-zlib	FILESPATH	flagged	unevaluated_python
+nativesdk-zlib	MACHINE	equal	
+nativesdk-zlib	DISTRO	equal	
+nativesdk-zlib	TMPDIR	equal	
+nativesdk-zlib	BBCLASSEXTEND	equal	
+nativesdk-zlib	CVE_PRODUCT	equal	
+nativesdk-zlib	DESCRIPTION	equal	
+nativesdk-zlib	HOMEPAGE	equal	
+nativesdk-zlib	LDFLAGS	equal	
+nativesdk-zlib	LIC_FILES_CHKSUM	equal	
+nativesdk-zlib	PREMIRRORS	equal	
+nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	
+nativesdk-zlib	SECTION	equal	
+nativesdk-zlib	SUMMARY	equal	
+nativesdk-zlib	UPSTREAM_CHECK_URI	equal	
 quilt-native	PN	equal	
 quilt-native	PV	equal	
 quilt-native	PR	equal	

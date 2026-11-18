@@ -22,13 +22,18 @@ Common to every tool:
   names the file BitBake would use, through provider selection (`PREFERRED_VERSION`,
   `DEFAULT_PREFERENCE`, layer priority, version; see "Providers and versions" in
   bitbake-semantics.md).
+- Class-extended variants (since w10; bitbake-semantics.md "Class-extended variants"): a
+  name that is no recipe but has the form of a variant of one whose `BBCLASSEXTEND` lists the
+  class (`<pn>-native`, `nativesdk-<pn>`, `<variant>-<pn>` for `multilib:<variant>`) names
+  that variant: `var`, `overrides`, `deps` and the evaluated `recipe` views evaluate it as
+  BitBake makes it (the base recipe and its bbappends, then the class, finalised; `FILE` is
+  the base file), with a target note saying so and the values the class-extension handlers
+  filter flagged; `recipe` shows a `variant` row (its evaluation target
+  `virtual:<word>:<layer>:<path>`, which every evaluating tool also accepts as `recipe`);
+  `item`, `search` and the `bbappend` generator work on the base file; `deps` resolves a
+  variant as the provider of its name. Lint's target is the base recipe (an error says so).
 - Provider gaps, said in the output (bitbake-semantics.md "What the static evaluator cannot
-  do"): a name that is no recipe but has the form of a class-extended variant of one whose
-  `BBCLASSEXTEND` lists the class (`<pn>-native`, `nativesdk-<pn>`, `<variant>-<pn>` for
-  `multilib:<variant>`) is an error saying so ("`curl-native` is the `native` variant of
-  `curl`, which `BBCLASSEXTEND` provides ...; sous-chef does not evaluate class-extended
-  variants; `recipe curl` shows the base recipe"), in every tool that resolves a recipe name
-  and in lint's target; a `BBMASK` the evaluator cannot apply (python, undefined variables, a
+  do"): a `BBMASK` the evaluator cannot apply (python, undefined variables, a
   regular expression Rust cannot compile) gives `note: BBMASK is set but sous-chef does not
   apply it (...)` in every evaluated view; a recipe that `SKIP_RECIPE[<pn>]`,
   `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST` or `INCOMPATIBLE_LICENSE` makes BitBake skip,
@@ -606,8 +611,8 @@ the flags of the selected options, with a note.
 - `build`: rows `depth dep provider source loc`: the words of the evaluated `DEPENDS`, each
   with the assignment that adds it (a class's `DEPENDS:prepend` points into the class) and
   the recipe that provides it (provider selection; `-` when no recipe of the workspace
-  does: `BBCLASSEXTEND` variants such as `-native` are not resolved as providers; asked for
-  by name they are an error naming the base recipe), then the build
+  does; a `BBCLASSEXTEND` variant such as `-native` is the provider of its name, shown as
+  `curl-native (the `native` variant of curl 8.19.0)`, when no recipe has that name), then the build
   dependencies of the selected `PACKAGECONFIG` options. `depth` follows the selected
   providers.
 - `runtime`: rows `package dep source loc`: per package of `PACKAGES`, the words of
@@ -632,7 +637,12 @@ the flags of the selected options, with a note.
 - `providers`: rows `name version status loc`: every recipe that provides the name, the
   selected one first, with the reason for its version and for the choice; then the
   `PREFERRED_PROVIDER` / `PREFERRED_VERSION` assignments that decided it. Candidates are
-  recipes whose `PN` or static `PROVIDES` names it, confirmed by evaluating each.
+  recipes whose `PN` or static `PROVIDES` names it, confirmed by evaluating each, or, when
+  none is, the class-extended variant of that name. A `PREFERRED_PROVIDERS` entry
+  `<name>:<pn>` is used when no `PREFERRED_PROVIDER_<name>` is set (status `selected by
+  PREFERRED_PROVIDERS (<name>:<pn>)`, and a `PREFERRED_PROVIDERS` row whose value is the
+  provider); a malformed word, conflicting entries and an entry `PREFERRED_PROVIDER_<name>`
+  replaces are notes.
 
 ```
 depth	dep	provider	source	loc
@@ -641,7 +651,7 @@ depth	dep	provider	source	loc
 2	automake-native	-	DEPENDS	meta-core:classes-recipe/autotoolsish.bbclass:11
 2	zlib	-	PACKAGECONFIG[zlib]	meta-core:recipes-core/libfoo/libfoo_2.0.bb:15
 note: PACKAGECONFIG rows: OE-Core's base.bbclass adds the build (field 3) and runtime (field 4) dependencies of the selected options with anonymous python, which is not run; they are listed from the flags
-note: provider - means no recipe in the workspace provides the name (BBCLASSEXTEND variants such as -native are not resolved)
+note: provider - means no recipe in the workspace provides the name (a BBCLASSEXTEND variant such as -native is found by its name only, when its base recipe's BBCLASSEXTEND lists the class)
 note: 1 anonymous python function was not run (none changes DEPENDS by name)
 ```
 
