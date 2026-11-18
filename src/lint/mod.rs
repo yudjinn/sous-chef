@@ -1236,7 +1236,8 @@ pub fn render_report(report: &Report, format: Format, budget_tokens: usize) -> S
 /// without touching `main.rs`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
 pub struct LintCliArgs {
-    /// A recipe, a file pointer, a layer name or a path; default: the whole workspace.
+    /// A recipe, a file pointer, a layer name or a path; default: the writable layers and
+    /// the build configuration (with --all: every layer).
     pub target: Option<String>,
     /// Rule ids or groups to run (repeatable).
     #[arg(long = "rule", value_name = "ID")]
