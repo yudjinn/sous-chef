@@ -23,7 +23,7 @@ BitBake's parse order, layer priority and override chain, which a grep does not.
 | Build / runtime / PACKAGECONFIG deps, reverse deps, providers | `deps` (`kind`) |
 | Convention and syntax problems | `lint` (`target`: recipe, layer, pointer or path) |
 | New recipe, bbappend, layer, class; an `.inc` for shared versions; where a change belongs | `scaffold` (`kind`: `recipe`, `bbappend`, `layer`, `class`, `inc_split`, `where`) |
-| Run bitbake, devtool, bitbake-layers | `bitbake` (`op`), then `op: status` to poll |
+| Run bitbake, devtool, bitbake-layers | `bitbake` (`op`), then `op: status` to poll, or `wait` seconds for the end |
 | Why a task failed | `log` |
 | Read stored output | `slice` |
 | Workspace roots, release, index, build environment | `status` |
