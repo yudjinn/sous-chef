@@ -11,6 +11,7 @@ pub mod overlay;
 pub mod overrides;
 pub mod providers;
 pub mod replay;
+pub mod skips;
 pub mod variant;
 
 pub use datastore::{DataStore, OpKind, OpStatus, UnsetRecord, VarOp};

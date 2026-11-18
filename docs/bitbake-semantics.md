@@ -2074,10 +2074,50 @@ in the live environment:
   `SKIP_RECIPE` is said only when its flag is static. (w10) The two matches are public as
   `eval::compatible_machine(need, entries)` and `eval::compatible_host(need, host_sys)` so
   they can be run with given values (`tests/skip_live.rs` runs them with BitBake's).
-  Skips the notes do not model: OE-core `base_eventhandler` on `RecipeParsed` skips a
-  recipe that provides a `virtual/` name (not in `BB_MULTI_PROVIDER_ALLOWED`) whose
-  `PREFERRED_PROVIDER_` names another `PN` ("PREFERRED_PROVIDER_x set to y, not z");
-  `features_check.bbclass` skips on `REQUIRED_DISTRO_FEATURES` and the like.
+  (w11) Two more skips, in the same three-way notes (`eval::skips`, `Replay::features_check_notes`,
+  `Replay::virtual_provider_notes`):
+  - **`features_check.bbclass`** (OE-core Wrynose `33a6bd6cc8`
+    `classes-recipe/features_check.bbclass`, anonymous python; Whinlatter the same;
+    `origin/scarthgap` has no `TUNE` kind, tests `PARSE_ALL_RECIPES` as a plain string, not
+    `bb.utils.to_boolean`, and words the `DISTRO` message like the others): unless
+    `PARSE_ALL_RECIPES` is true, for each kind of `DISTRO`, `MACHINE`, `COMBINED`, `IMAGE`,
+    `TUNE` in that order, with `features = set(<kind>_FEATURES.split())`: a non-empty
+    `ANY_OF_<kind>_FEATURES` disjoint from it skips ("one of '<any>' needs to be in
+    <kind>_FEATURES"), then the words of `REQUIRED_<kind>_FEATURES` missing from it ("using
+    DISTRO '<DISTRO>', which is missing required DISTRO_FEATURES: '<missing>'"; for the other
+    kinds "missing required <kind> feature[s] '<missing>' (not in <kind>_FEATURES)"), then
+    the words of `CONFLICT_<kind>_FEATURES` in it ("conflicting <kind> feature[s] '<x>' (in
+    <kind>_FEATURES)"); the first raise ends it. A kind with none of the three set is passed
+    over (only the "doesn't use it" warning depends on that). sous-chef runs it when the
+    recipe inherits the class, reading the kinds list (`for kind in [...]`), the
+    `PARSE_ALL_RECIPES` test and the `DISTRO` wording from the workspace's own class: "would
+    skip" when a check fails on known words (a required word missing from a value known
+    completely, a conflicting word among the known words, an `ANY_OF` list disjoint from a
+    value known completely; when an earlier check of the class's order is undecided, the
+    note adds that BitBake may give that reason instead), "may skip" naming the list that is
+    not known (python, undefined variables, a value anonymous python or a handler changes),
+    nothing when every check passes on known words. Message word order: Python joins a
+    `set`; here the words are sorted.
+  - **`base_eventhandler` on `RecipeParsed`** (OE-core Wrynose `classes-global/base.bbclass`;
+    Kirkstone and Scarthgap the same code with `SOURCE_MIRROR_FETCH` tested as a plain
+    string): unless `SOURCE_MIRROR_FETCH` is true, for each word `p` of the recipe's final
+    `PROVIDES` that starts with `virtual/` and is not in `BB_MULTI_PROVIDER_ALLOWED`,
+    `PREFERRED_PROVIDER_<p>` **as the recipe's own datastore expands it** that is non-empty
+    and not the recipe's `PN` skips it ("PREFERRED_PROVIDER_<p> set to <x>, not <pn>"). It
+    reads neither `PREFERRED_PROVIDERS` nor other recipes: it is not provider selection,
+    so sous-chef decides it from the evaluated recipe, not from `eval::providers`. Run when
+    the workspace's `base_eventhandler` handles `RecipeParsed` with that code (`"PREFERRED_PROVIDER_"
+    + p` in its body). "Would skip" on static values; "may skip" when the preference, `PN`
+    or `BB_MULTI_PROVIDER_ALLOWED` is not known, or when `PROVIDES` is not known and its
+    python part (or, for a value python changes, its known words) mentions `virtual/`; a
+    `PROVIDES` word python makes from text without `virtual/` is not considered.
+
+  On yocto-kiss (w11, `tests/skip_live.rs`): the static notes say "would skip" for 13
+  recipes (barebox, u-boot, edk2-firmware for `virtual/bootloader`; musl, musl-locales,
+  newlib, picolibc, mesa-gl, linux-dummy, linux-yocto-dev, linux-yocto-rt, linux-yocto-tiny
+  for their virtual providers; systemd for `CONFLICT_DISTRO_FEATURES = "sysvinit"`), none of
+  them one BitBake parsed; most `features_check` notes are "may skip" because the static
+  `DISTRO_FEATURES` there holds python.
 - **`INCOMPATIBLE_LICENSE`** (OE-core Wrynose `33a6bd6c`, `classes-global/base.bbclass`
   anonymous python lines 591-621, only when neither `SOURCE_MIRROR_FETCH` nor
   `PARSE_ALL_RECIPES` is true; `lib/oe/license.py` `skip_incompatible_package_licenses`,
