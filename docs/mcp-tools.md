@@ -1222,17 +1222,17 @@ handle masked):
 
 ```
 field	value
-summary	workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled; 21 indexed files; findings in own layers: 0 error, 3 warning, 1 info; in upstream layers: 0 error, 1 warning, 2 info; 3 items worth attention
+summary	workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled; 21 indexed files; findings in own layers: 0 error, 3 warning, 1 info; in upstream layers: 1 error, 1 warning, 2 info; 3 items worth attention
 workspace	root .; release wrynose (LAYERSERIES_CORENAMES); build build
 1 inventory	3 layers enabled (1 own, 2 upstream), 1 present but not enabled; 0 repositories
 2 releases	workspace release wrynose (LAYERSERIES_CORENAMES); every enabled layer claims it; 1 layer present but not enabled does not
 3 structure	layer.conf and BBLAYERS order: 0 (0 error, 0 warning, 0 info); shadowed recipe or class names: 0; bbappends matching no recipe: 1 (1 in own layers); bbappends not collected: 0; over-broad bbappends and duplicate versions: 1
-4 lint	7 findings in 21 files: own layers and build directory 4 (0 error, 3 warning, 1 info); upstream layers 3 (0 error, 1 warning, 2 info)
+4 lint	8 findings in 21 files: own layers and build directory 4 (0 error, 3 warning, 1 info); upstream layers 4 (1 error, 1 warning, 2 info)
 5 parse	0 unparsed statements, 4 unresolved include/require, 0 unresolved inherits, 0 indexed files BitBake does not collect
 6 not checked	build environment not found; anonymous python, which is not run, in 1 recipe and 0 classes; layers present but not enabled, not analysed: 1
 attention 1	warning hygiene/release-syntax x1 (meta-mine): meta-mine:recipes-app/app/app_0.1.bb:22 `${WORKDIR}/app.c`: from styhead on, ...
 ...
-report h:XXXXXXXXXX: 168 lines, 10083 bytes of Markdown; attention items are chosen by: errors in own layers, then layer structure errors, then warnings in own layers
+report h:XXXXXXXXXX: 171 lines, 10433 bytes of Markdown; attention items are chosen by: errors in own layers, then layer structure errors, then warnings in own layers
 slice handle=h:XXXXXXXXXX page=1 | grep=RE | lines=A-B
 ```
 

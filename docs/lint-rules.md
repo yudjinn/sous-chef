@@ -243,7 +243,7 @@ Notes:
   | no `BBFILE_COLLECTIONS` | W |
   | a collection another layer of the workspace also adds | E |
   | `LAYERSERIES_COMPAT_<c>` not set or empty | W |
-  | `LAYERSERIES_COMPAT_<c>` copies `${LAYERSERIES_COMPAT_...}`: BitBake 2.4 (Mickledore) and later delete each layer's value after its `layer.conf`, so the reference stays literal and BitBake stops; the message lists the release names to write | E (W when the workspace release is Kirkstone or Langdale, whose BitBake 2.0 / 2.2 expands the copy and accepts the layer) |
+  | `LAYERSERIES_COMPAT_<c>` copies `${LAYERSERIES_COMPAT_...}`: BitBake 2.4 (Mickledore) and later delete each layer's value after its `layer.conf`, so the reference stays literal and BitBake stops; the message lists the release names to write | E (W when the workspace release is Kirkstone or Langdale, whose BitBake 2.0 / 2.2 expands the copy and accepts the layer, and no `--as-release` adds a later one; `Feature::KeptUntilLangdale`) |
   | shares no name with the core layer's `LAYERSERIES_CORENAMES` | E |
   | no core layer in the workspace, and the compat does not name the workspace release, unless that release was only assumed | W |
   | names a release older than Kirkstone | I |
@@ -269,13 +269,14 @@ Notes:
 |---|---|---|---|
 | `hygiene/missing-metadata` | W/I | recipe | No `SUMMARY` or `LICENSE`, or no `LIC_FILES_CHKSUM` when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (W, one finding); no `HOMEPAGE` (I) when the recipe has an upstream: a `SRC_URI` entry that is not `file://`, and not an image or a packagegroup. Configuration defaults do not count as set. Values that depend on python are not reported. |
 | `hygiene/autorev` | W | file | `SRCREV` or `SRCREV_<name>` (any operator or override, not a flag) whose value contains `${AUTOREV}`, outside `local.conf` and `auto.conf`. `SRCREV_FORMAT` is not checked. |
-| `hygiene/src-uri-checksum` | W | recipe | Remote download (`http`, `https`, `ftp`) in the evaluated `SRC_URI` without a checksum; `git://` / `gitsm://` URL without a revision, or without `branch=` (or `nobranch=1`) unless a `tag=` is given. Not reported when `SRC_URI` depends on python, or for an entry still containing `${` after expansion. |
+| `hygiene/src-uri-checksum` | W | recipe | Remote download (`http`, `https`, `ftp`) in the evaluated `SRC_URI` without a checksum; `git://` / `gitsm://` URL without a revision, or without `branch=` (or `nobranch=1`) unless a `tag=` is given. E for a recipe checked against Walnascar or later (BitBake 2.12 stops on it): a git URL without `branch=` / `nobranch=1` / `usehead=1`, a `tag=` notwithstanding, or with several comma-separated branches; the message names those releases. Not reported when `SRC_URI` depends on python, or for an entry still containing `${` after expansion. |
 | `hygiene/host-path` | W | file | Absolute host paths (`/usr/lib`, `/etc`, `/home/...`) at the start of a word in `do_<task>` shell bodies, instead of `${D}`, `${S}`, `${bindir}` and friends; a `do_install` that never references `${D}` while running a command that writes files itself. Not scanned: other functions, comments, here-documents, the command word, values after `=`; `/dev`, `/proc`, `/sys`, `/tmp` are never reported. Data is not host access: the arguments of `echo`, `printf` and `bb*` messages, quoted arguments of `sed`, `grep`, `awk`, `perl` (expressions, patterns, shebangs), the target of `ln -s`; a redirection target always is. |
 | `hygiene/workdir-s` | E | file | `S = "${WORKDIR}"` (or `${WORKDIR}/`), reported only when the file's releases include one that rejects it (Styhead and later), naming them. A layer checked only against releases that accept it gets nothing. |
 | `hygiene/variable-order` | I | file | In a `.bb`, the first statement out of the OE style guide order (description block, license, dependencies, `SRC_URI`, `S`, inherit, `PACKAGECONFIG` and build options, tasks, packaging), once per file. Off by default: runs only when selected by its id, the alias `style/variable-order` or the alias group `style`. |
 | `hygiene/tabs` | I | file | Tabs in shell task bodies mixed with spaces; python bodies not indented with 4 spaces. At most one finding per function. |
 | `hygiene/continuation` | W | file | Whitespace after a trailing `\`; a blank line that ends a continued statement before its closing quote. A comment line inside a continued statement is reported by `hygiene/parse-error`, not here. |
 | `hygiene/release-syntax` | E/W | file | A construct that one of the releases the file is checked against lacks, from the `Feature` table: `inherit_defer` before Scarthgap (not in a `.conf`, where `hygiene/parse-error` reports it), `include_all` before Walnascar, a class in `classes-recipe/` or `classes-global/` on Kirkstone, `${UNPACKDIR}` before Styhead (unless some file assigns `UNPACKDIR`). Warning: `${WORKDIR}/<file>` for a `file://` entry of the same file's `SRC_URI` on Styhead and later (unpacked into `UNPACKDIR`). The message names the releases. |
+| `hygiene/release-removed` | E/W | file | Something a release the file is checked against removed, renamed or deprecated, from one table (`REMOVALS` in the rule's file, one `KeptUntil*` `Feature` per migration guide; see "Release removals" below): a renamed variable (`BB_RENAMED_VARIABLES`, BitBake's own renames; E: BitBake stops), a variable OE-core dropped (W), an `inherit` (or `INHERIT`-style list word) of a removed class (E, unless a layer other than the core layer has the class), a removed word in `IMAGE_FEATURES` (`debug-tweaks`, E) or a QA list (`license-incompatible`, W), an old virtual toolchain provider name (W), a `SRC_URI` scheme whose fetcher is gone (E); `S` below `${WORKDIR}` or `S = "${UNPACKDIR}/git"` from Whinlatter (E); `LAYERSERIES_COMPAT_<c> = "${LAYERSERIES_CORENAMES}"` from Mickledore (E); an obsolete license name in `LICENSE` (W, E from Styhead); an assignment without whitespace around its operator from Whinlatter (W). The message names the releases. |
 | `hygiene/parse-error` | E/W | file | Any `Unknown` statement no parser diagnostic covers, and parser diagnostics. Not reported: whitespace after a trailing `\` (left to `hygiene/continuation`). `addfragments` with three or more arguments and `addpylib` with two or more are statements of their own; with fewer each is an unparsed line. `addpylib` is an error outside the base configuration (`conf/layer.conf`, `conf/bitbake.conf`, `conf/bblayers.conf`; BitBake rejects it in a recipe, a class, an `.inc` and any `.conf` those include), and in the base configuration on a release before Mickledore (BitBake 2.4), which has no such directive. Data files are not linted. Warning: the `addtask` quirk that joins two `before`/`after` groups into one task name. Error: everything else. In a `.conf` file, a function, `def`, `inherit`, `inherit_defer`, `addtask`, `deltask`, `addhandler` or `EXPORT_FUNCTIONS` is an error (BitBake's configuration parser rejects them). |
 
 Notes:
@@ -317,6 +318,20 @@ Notes:
   reported): a quoted file name given to `sed` / `grep` (`sed -i '...' "/etc/x"`), and a
   path that another command only prints or stores; a path glued to a redirection
   (`>/etc/x`) is not at the start of a word and is missed.
+- **`release-removed`.** One table drives most of it (`REMOVALS` in
+  `src/lint/rules/hygiene_release_removed.rs`): kind, name, the `KeptUntil*` `Feature`
+  whose last release still has it (none: a rename older than Kirkstone), severity, what to
+  write instead. "Release removals" below lists every migration-guide change from 4.1 to
+  6.0 and where it is covered. A renamed variable is reported on any assignment (a flag
+  included: `setVarFlag` checks too). A dropped variable is reported on an assignment
+  without a flag (no effect) and on a `${NAME}` reference, unless the file or a layer other
+  than the core layer assigns it. A removed class is reported on `inherit` / `inherit_defer`
+  and on a word of `INHERIT`, `USER_CLASSES`, `IMAGE_CLASSES`, `KERNEL_CLASSES` or
+  `PACKAGE_CLASSES`, unless a layer other than the core layer has a class of that name. A
+  removed value word is not reported in a `:remove` operation. `S` checks skip `.conf`
+  files (the default comes with the release's core layer) and conditional names. The
+  whitespace check reads the first line of an assignment as BitBake 2.16's
+  `__config_regexp__` does (`FOO="x"`, `FOO= "x"`, `FOO ="x"`).
 - **`workdir-s`.** Matched: an assignment to `S` (no flag; not `+=`-style, not `:append`,
   `:prepend` or `:remove`) whose value is `${WORKDIR}` or `${WORKDIR}/`. Since every layer
   is checked against the workspace's release, a Styhead or later workspace reports it
@@ -344,16 +359,19 @@ warning	org/append-no-match	meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1	o
 note: not checked: 2 layers that are not writable (meta-core, meta-vendor); name one as the target or pass --all
 ```
 
-`sous-chef lint --all` adds three findings in the other layers (`7 findings in 21 files: 0
+`sous-chef lint --all` adds four findings in the other layers (`8 findings in 21 files: 1
 error, 4 warning, 3 info`):
 
 ```
 info	org/class-location	meta-core:classes/base.bbclass:1	class base is in classes/, but every release this layer is checked against (wrynose) searches classes-recipe/ and classes-global/ first; move it to classes-global/ (it is used through INHERIT) and keep the name
+error	hygiene/release-removed	meta-core:recipes-core/libfoo/libfoo_2.0.bb:10	`S = "${WORKDIR}/git"`: from whinlatter on OE-core's do_qa_unpack stops on it, and this layer is checked against wrynose; remove the assignment: the git fetcher unpacks into `${UNPACKDIR}/${BP}` there, which the default S names
 info	org/append-wildcard-broad	meta-vendor:recipes-core/hello/hello_%.bbappend:4	hello_%.bbappend applies to hello 1.0 and 1.1 but pins a patch, which usually fits one version; name the append after that version (hello_1.1.bbappend), or check that it fits every version
 warning	override/dead	meta-vendor:recipes-core/hello/hello_%.bbappend:9	override `boradx` in `EXTRA_OECONF:append:boradx` is no machine, distro, class, package or OVERRIDES entry in the workspace, so this never applies; fix the name (`boardx`?) or remove the line
 ```
 
-The `override/dead` finding appears only with `--all` because it comes from linting the
+The `hygiene/release-removed` finding is true for Wrynose: from Whinlatter OE-core's
+`do_qa_unpack` stops on `S = "${WORKDIR}/git"` (the fixture's `libfoo` predates it). The
+`override/dead` finding appears only with `--all` because it comes from linting the
 `hello` recipes in `meta-core`; it is located in `meta-vendor`'s bbappend. Every finding is
 intended by the fixtures: `local.conf:13` is parsed before `testdistro.conf:5`, `boradx` is
 a deliberate typo of `boardx`. The tests pin these lists per group

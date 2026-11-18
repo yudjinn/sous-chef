@@ -225,16 +225,36 @@ expression: masked_json(&a)
       "info": 1,
       "warning": 3
     },
-    "summary": "7 findings in 21 files: own layers and build directory 4 (0 error, 3 warning, 1 info); upstream layers 3 (0 error, 1 warning, 2 info)",
+    "summary": "8 findings in 21 files: own layers and build directory 4 (0 error, 3 warning, 1 info); upstream layers 4 (1 error, 1 warning, 2 info)",
     "upstream": [
       {
         "counts": {
-          "error": 0,
+          "error": 1,
           "info": 1,
           "warning": 0
         },
         "layer": "meta-core",
         "rules": [
+          {
+            "command": null,
+            "count": 1,
+            "counts": {
+              "error": 1,
+              "info": 0,
+              "warning": 0
+            },
+            "findings": [
+              {
+                "message": "`S = \"${WORKDIR}/git\"`: from whinlatter on OE-core's do_qa_unpack stops on it, and this layer is checked against wrynose; remove the assignment: the git fetcher unpacks into `${UNPACKDIR}/${BP}` there, which the default S names",
+                "pointer": "meta-core:recipes-core/libfoo/libfoo_2.0.bb:10",
+                "rule": "hygiene/release-removed",
+                "severity": "error"
+              }
+            ],
+            "more": 0,
+            "rule": "hygiene/release-removed",
+            "severity": "error"
+          },
           {
             "command": null,
             "count": 1,
@@ -309,7 +329,7 @@ expression: masked_json(&a)
       }
     ],
     "upstream_total": {
-      "error": 0,
+      "error": 1,
       "info": 2,
       "warning": 1
     }
@@ -520,7 +540,7 @@ expression: masked_json(&a)
         "warning": 3
       },
       "findings_upstream": {
-        "error": 0,
+        "error": 1,
         "info": 2,
         "warning": 1
       },
@@ -530,7 +550,7 @@ expression: masked_json(&a)
       "layers_upstream": 2
     },
     "kas_files": [],
-    "line": "workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled; 21 indexed files; findings in own layers: 0 error, 3 warning, 1 info; in upstream layers: 0 error, 1 warning, 2 info; 3 items worth attention",
+    "line": "workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled; 21 indexed files; findings in own layers: 0 error, 3 warning, 1 info; in upstream layers: 1 error, 1 warning, 2 info; 3 items worth attention",
     "release": "wrynose",
     "release_note": null,
     "release_source": "LAYERSERIES_CORENAMES",

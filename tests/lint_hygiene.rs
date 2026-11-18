@@ -801,23 +801,62 @@ fn src_uri_checksum_bad() {
     assert_eq!(
         rows,
         [
+            "error hygiene/src-uri-checksum meta-mine:recipes-test/bad/bad_1.0.bb:2-4",
+            "warning hygiene/src-uri-checksum meta-mine:recipes-test/bad/bad_1.0.bb:2-4",
+            "error hygiene/src-uri-checksum meta-mine:recipes-test/bad/bad_1.0.bb:7",
+        ],
+        "{got:#?}"
+    );
+    // meta-mine claims kirkstone, scarthgap and wrynose: BitBake 2.12 (Walnascar) and later
+    // stop on a git URL without `branch=`, so that is an error naming wrynose.
+    let msgs: Vec<&str> = got.iter().map(|(_, m)| m.as_str()).collect();
+    assert_eq!(
+        msgs,
+        [
+            "`git://example.org/lib.git`: git URL without `branch=`: from walnascar on BitBake \
+             stops on it (\"The url does not set any branch parameter or set nobranch=1.\", a \
+             `tag=` is not enough), and this layer is checked against wrynose; add \
+             `;branch=<branch>` (or `;nobranch=1` for a commit on no branch) and set \
+             SRCREV_lib = \"<commit hash>\"",
+            "`https://example.org/releases/bad-1.0.tar.gz`: remote download without a \
+             checksum; add SRC_URI[sha256sum] = \"<sha256 of the file>\"",
+            "`git://example.org/tools.git`: git URL without `branch=`: from walnascar on \
+             BitBake stops on it (\"The url does not set any branch parameter or set \
+             nobranch=1.\", a `tag=` is not enough), and this layer is checked against \
+             wrynose; add `;branch=<branch>` (or `;nobranch=1` for a commit on no branch)",
+        ]
+    );
+}
+
+#[test]
+fn src_uri_checksum_branch_is_a_warning_for_a_layer_claiming_only_older_releases() {
+    let rel = "meta-mine/recipes-test/bad/bad_1.0.bb";
+    let w = ws_with(&[(&format!("{SC}/bad.bb"), rel)], |root| {
+        let p = root.join("meta-mine/conf/layer.conf");
+        let t = fs::read_to_string(&p).unwrap().replace(
+            "LAYERSERIES_COMPAT_mine = \"kirkstone scarthgap wrynose\"",
+            "LAYERSERIES_COMPAT_mine = \"scarthgap\"",
+        );
+        fs::write(&p, t).unwrap();
+        // The workspace release comes from the core layer's LAYERSERIES_CORENAMES.
+        let core = root.join("meta-core/conf/layer.conf");
+        let t = fs::read_to_string(&core).unwrap().replace(
+            "LAYERSERIES_CORENAMES = \"wrynose\"",
+            "LAYERSERIES_CORENAMES = \"scarthgap\"",
+        );
+        fs::write(&core, t).unwrap();
+    });
+    assert_eq!(w.ws.release.release, Release::Scarthgap);
+    let got = w.lint("hygiene/src-uri-checksum", rel);
+    let rows: Vec<&str> = got.iter().map(|(r, _)| r.as_str()).collect();
+    assert_eq!(
+        rows,
+        [
             "warning hygiene/src-uri-checksum meta-mine:recipes-test/bad/bad_1.0.bb:2-4",
             "warning hygiene/src-uri-checksum meta-mine:recipes-test/bad/bad_1.0.bb:2-4",
             "warning hygiene/src-uri-checksum meta-mine:recipes-test/bad/bad_1.0.bb:7",
         ],
         "{got:#?}"
-    );
-    let msgs: Vec<&str> = got.iter().map(|(_, m)| m.as_str()).collect();
-    assert_eq!(
-        msgs,
-        [
-            "`git://example.org/lib.git`: git URL without a revision or `branch=`; add \
-             `;branch=<branch>` and set SRCREV_lib = \"<commit hash>\"",
-            "`https://example.org/releases/bad-1.0.tar.gz`: remote download without a \
-             checksum; add SRC_URI[sha256sum] = \"<sha256 of the file>\"",
-            "`git://example.org/tools.git`: git URL without `branch=`; add `;branch=<branch>` \
-             (or `;nobranch=1` for a commit on no branch)",
-        ]
     );
 }
 

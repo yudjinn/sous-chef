@@ -15,6 +15,10 @@
 //!   `INVALID` default (`SRCREV ??= "INVALID"` in `bitbake.conf`); a value from python
 //!   (`${AUTOREV}`) counts as set. A branch is `branch=`, or `nobranch=1`; not checked when a
 //!   `tag=` is given.
+//! - Release-aware (`Feature::KeptUntilStyhead`): for a recipe checked against Walnascar or
+//!   later, a git URL without `branch=` / `nobranch=1` (a `tag=` included) or with several
+//!   comma-separated branches is an error naming those releases; BitBake 2.12 stops on both
+//!   ([`strict_git_problem`]).
 //!
 //! The finding is placed on the assignment that contributed the entry (the last applied
 //! `SRC_URI` operation whose expanded value contains it), which may be in an `.inc` or a
@@ -24,6 +28,7 @@ use crate::eval::{DataStore, OpStatus};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::words;
+use crate::release::Feature;
 use crate::types::{LineSpan, Loc};
 
 pub struct HygieneSrcUriChecksum;
@@ -43,6 +48,70 @@ fn split_url(entry: &str) -> Option<(&str, Vec<(&str, &str)>)> {
 
 fn param<'a>(params: &[(&'a str, &'a str)], key: &str) -> Option<&'a str> {
     params.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+}
+
+/// The entry as shown in a message: the URL without its parameters, at most 80 characters.
+fn short_entry(entry: &str) -> String {
+    entry
+        .split(';')
+        .next()
+        .unwrap_or(entry)
+        .chars()
+        .take(80)
+        .collect()
+}
+
+/// A git URL problem that stops BitBake in one of the context's releases: from Walnascar
+/// (BitBake 2.12, `2515fbd10` "fetch: Drop multiple branch/revision support for single git
+/// urls") `fetch2/git.py` raises "The url does not set any branch parameter or set
+/// nobranch=1." for a URL without `branch=` or `nobranch=1` (a `tag=` does not help), and a
+/// `branch=` with several comma-separated names is no longer split (5.2 migration guide,
+/// "Git fetcher: support for multiple revisions per URL removed"). Before, the first is a
+/// warning and the second is accepted. `None` when no release of the context is affected.
+fn strict_git_problem(
+    cx: &LintContext<'_>,
+    params: &[(&str, &str)],
+    rev: bool,
+    name: Option<&str>,
+) -> Option<String> {
+    let strict = helpers::releases_lacking(cx, Feature::KeptUntilStyhead);
+    if strict.is_empty() {
+        return None;
+    }
+    let from = Feature::KeptUntilStyhead
+        .removed_in()
+        .map_or("", |r| r.codename());
+    let branch = param(params, "branch");
+    // `usehead=1` implies `nobranch` (`git.py`, `urldata_init`).
+    if branch.is_none()
+        && param(params, "nobranch") != Some("1")
+        && param(params, "usehead") != Some("1")
+    {
+        let rev_hint = if rev {
+            String::new()
+        } else {
+            format!(
+                " and set {} = \"<commit hash>\"",
+                name.map_or("SRCREV".to_string(), |n| format!("SRCREV_{n}"))
+            )
+        };
+        return Some(format!(
+            "git URL without `branch=`: from {from} on BitBake stops on it (\"The url does not \
+             set any branch parameter or set nobranch=1.\", a `tag=` is not enough), and this \
+             layer is checked against {}; add `;branch=<branch>` (or `;nobranch=1` for a \
+             commit on no branch){rev_hint}",
+            helpers::release_list(&strict)
+        ));
+    }
+    if branch.is_some_and(|b| b.contains(',')) {
+        return Some(format!(
+            "git URL with several branches in `branch=`: from {from} on one git URL fetches \
+             one branch, and this layer is checked against {}; write one SRC_URI entry per \
+             branch, each with its own `name=` and SRCREV_<name>",
+            helpers::release_list(&strict)
+        ));
+    }
+    None
 }
 
 /// Whether a revision variable has a usable value (or one from python).
@@ -123,6 +192,17 @@ impl Rule for HygieneSrcUriChecksum {
                         || param(&params, "tag").is_some()
                         || name.is_some_and(|n| has_rev(data, &format!("SRCREV_{n}")))
                         || has_rev(data, "SRCREV");
+                    if let Some(message) = strict_git_problem(cx, &params, rev, name) {
+                        let loc = origin(data, entry)
+                            .unwrap_or_else(|| helpers::loc_at(cx, LineSpan::line(1)));
+                        out.push(Finding {
+                            rule: self.id(),
+                            severity: Severity::Error,
+                            loc,
+                            message: format!("`{}`: {message}", short_entry(entry)),
+                        });
+                        continue;
+                    }
                     let branch = param(&params, "branch").is_some()
                         || param(&params, "nobranch") == Some("1")
                         || param(&params, "tag").is_some();
