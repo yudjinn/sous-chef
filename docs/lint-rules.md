@@ -329,6 +329,96 @@ Notes:
   bodies are skipped. Python and `def`: a tab anywhere in the indentation, or a first
   indented code line not indented by exactly 4 spaces.
 
+## Fixes
+
+`sous-chef lint --fix [TARGET]` (the `lint` tool: `fix: true`) is a dry run: per file a
+unified diff of what it would change, and a summary (fixes available, safe and suggested, by
+rule). `--write` (`write: true`) applies; `--fix-suggested` (`fix_suggested: true`) also
+applies the suggested fixes. Target, `--rule` and `--severity` select the findings as for
+lint; only a finding the run reports (after suppression and filters) is fixed. The engine
+is `src/lint/fix.rs`; the exit status is that of the findings left.
+
+A rule attaches a fix to a finding (`Rule::fixes`): edits of one file (byte ranges of the
+text as it was read, located from the parsed statement and read back against it), a
+one-line description and a class:
+
+- **safe**: preserves what the metadata means, or is exactly what BitBake requires (the
+  rule's own correction). `--fix` applies it.
+- **suggested**: changes meaning the way the rule recommends, or needs a human look. Shown
+  with its own diff; applied only with `--fix-suggested`.
+
+Applying: the edits of one file become one scaffold `Modify` (writable layers only,
+`Workspace::confine`, the file must still hash to what was read and to what the index
+holds, temporary file and rename); a file in a layer that is not writable, or in the build
+directory, is never touched and its fixes are listed. Fixes whose edits overlap one already
+taken wait (dry run: "re-run after applying"). After writing, the index is refreshed and the
+changed files are linted again; fixes that became available there (an overlap, a finding a
+fix made visible) are applied in further rounds, at most five, so a second `--fix --write`
+changes nothing. The report gives, for the changed files, the findings fixed and remaining,
+**new** ones (a new finding is a bug in a fix and is reported as such) and **revealed** ones:
+findings on a line whose legacy name a fix converted, which the other rules could not see
+before because they skip legacy names (`EXTRA_OECONF_remove` in a recipe becomes
+`override/remove-in-recipe`'s `:remove`). Everything outside an edit is kept byte for byte
+(line endings, trailing whitespace, comments).
+
+Per rule (proofs: `tests/lint_fix.rs`; a `bad.*` or `fixable.*` fixture is fixed into the
+`fixed.*` beside it byte for byte, the result has no finding of the rule and no new finding
+of any file-scope rule, and fixing it again changes nothing):
+
+| Rule | Fix | Transformation, and why it is safe or only suggested |
+|---|---|---|
+| override/legacy-syntax | safe; suggested for a machine / distro suffix alone | The name as written becomes the current syntax, `_` to `:` at exactly the split the rule reports and nothing else (flag, operator, value, function body unchanged): `VAR_append` `VAR:append`, `RDEPENDS_${PN}` `RDEPENDS:${PN}`, `do_install_append()` `do_install:append()`, `VAR_append_qemux86` `VAR:append:qemux86`; a parser-detected name whose base ends in a machine, distro, `class-*` or `pn-*` element gets those too (`VAR_qemux86_append` `VAR:qemux86:append`, what the old name meant; the message says `VAR_qemux86:append`). Safe: pre-honister BitBake used `_` with exactly the rules `:` has now, and the old spelling is fatal (`_append`, `_prepend`, `_remove`) or a variable nothing reads. A suffix-only name (`KERNEL_DEVICETREE_qemux86`) is safe for `class-*` / `pn-*` elements, suggested for a machine or distro name (a current layer may read `FOO_${MACHINE}` as a variable of its own). Proof: `bad.bb`, `bad.conf`, `bad-more.bb` (and CRLF) to `fixed*`; the evaluation test `legacy_syntax_fix_gives_what_the_legacy_file_meant`. References in values and python (`${RDEPENDS_${PN}}`, `d.getVar('X_' + pkg)`) are not touched: the rule does not report them |
+| override/append-no-space | safe | One space after the opening quote (`:append`) or before the closing one (`:prepend`) of a space-list variable: the separator BitBake does not add. Proof: `bad.bb`, `bad-ref.bb`; evaluation `DEPENDS` `basezlib` to `base zlib` |
+| override/plus-equals-with-override | suggested | `VAR:foo += "x"` to `VAR:append:foo = " x"` (`=+`: `:prepend` with the trailing space; `.=` / `=.` without a space); the rule's point, and a meaning change (`VAR:foo` set elsewhere no longer gets this part) |
+| override/remove-in-recipe | none | Needs a decision: where to leave the item out instead (the value is set elsewhere, or belongs behind a variable or `PACKAGECONFIG`) |
+| override/dead | none | The intended override is a guess (the suggestion is the closest known name, which may be wrong); renaming or removing the line is the author's call |
+| override/shadowed | none | Recipe scope, judged from one evaluation; removing the assignment must hold for every machine, distro and variant that reaches the file |
+| override/weak-after-default | safe | The `??=` statement's whole lines are removed. It never applies: the name already has a value from the earlier `=` / `:=` / `?=` of the file, a weak default is used only for a name without one, and the `unset` that would clear the value clears the default with it. Not for `export NAME ??=` (it also sets the export flag). Evaluation: every value equal |
+| override/missing-package | suggested | `:${PN}` after the base name (`RDEPENDS =` `RDEPENDS:${PN} =`, `pkg_postinst()` `pkg_postinst:${PN}()`); which package is meant is a decision |
+| override/append-vs-plus-equals | suggested | `VAR:append = " x"` to `VAR += "x"` (one leading space taken out, the one `+=` adds), else `VAR .= "x"`; the same value at the end of the file, not when a bbappend or conf later sets `VAR` or an override of it |
+| override/plus-equals-on-default | suggested | `VAR += "x"` to `VAR:append = " x"` (`=+` to `:prepend`, `.=` / `=.` without a space), as the message says; keeps the `?=` default, and also survives a later plain `VAR =`. Usually in the build directory's `local.conf`, which is never written: the fix is shown |
+| override/filesextrapaths | safe; suggested for `:=` with other references and for a replaced list | The missing colon inserted at the quote (safe: the separator; not when a blank sits between quote and path). `=` to `:=` on `:prepend` / `:append` (safe when the value refers only to `${THISDIR}`, `${FILE_DIRNAME}`, `${FILE}`; suggested when it refers to more, which `:=` freezes too: `${PN}` in a bbappend comes from the append's file name, in an `.inc` it is `defaultpkgname`, never a `BBCLASSEXTEND` variant's). A plain unconditional `FILESEXTRAPATHS =` / `:=` outside a `.conf` to `FILESEXTRAPATHS:prepend :=` (suggested). Other operators, conditional names and `.conf` forms: none. Proof: `fixable.bbappend`, `bad-dot.bb` |
+| org/recipe-path | none | Would rename or move files |
+| org/duplicate-versions | none | Restructures several files into a new `.inc` (`scaffold kind=inc_split` does it with a plan to review) |
+| org/inc-has-version-data | none | Moves version data from a shared `.inc` into each `.bb`: several files and a decision |
+| org/inc-unused | none | Would delete a file another layer may still use through a path the index cannot resolve |
+| org/include-must-exist | safe (`include` only) | `include` to `require` for a file the index resolved: BitBake reads a found file the same way (`IncludeNode.eval` passes `error_out`, which matters only when the file is missing), so a missing file now stops the parse, the rule's correction. A `require` that does not resolve: none (the right path is unknown) |
+| org/repeated-logic | none | Needs a new class or `.inc` and edits to several recipes |
+| org/class-recipe-specific | none | Needs a decision (`?=`, or moving the setting to the recipes) |
+| org/class-export-functions | suggested | `EXPORT_FUNCTIONS do_<task>` as a line after the function (after: `ExportFuncsNode.eval` copies the `python` flag when the line is parsed), and for a `do_<task>` defined directly the rename to `<class>_do_<task>`. On OE-core's classes the findings are mostly false (a class's own tasks used as `postfuncs`): review before `--fix-suggested` |
+| org/class-location | none | Would move a file |
+| org/inherit-defer | suggested | `inherit` to `inherit_defer`: the class is chosen by the final value, and is parsed after the recipe (its plain assignments now win over the recipe's) |
+| org/append-no-match | none | Removing the append or adding a layer is a decision |
+| org/append-wildcard-broad | none | Would rename a file |
+| org/append-missing-filesextrapaths | none | Which directory holds the files (`files/`, `${PN}/`, `${BP}/`) is the layer's layout, not the rule's |
+| org/policy-in-recipe | none | Moves policy to a distro or machine conf: another file and a decision |
+| org/recipe-change-in-local-conf | none | Moves the change to a new bbappend; `local.conf` is in the build directory, which is never written |
+| org/generated-conf-edit | none | The kas file is outside the writable layers |
+| org/layer-conf | suggested for two checks | `BBPATH .= ":${LAYERDIR}"` before the first statement of `conf/layer.conf` when `BBPATH` is not extended; the line the message names, `LAYERDEPENDS_<c> += "<other>"`, after the last `LAYERDEPENDS_<c>` when a class comes from a layer it does not depend on. The other checks need a decision (a collection name, the releases to claim, a glob) |
+| org/upstream-edit | none | The layer is not writable by definition |
+| hygiene/missing-metadata | none | The values (summary, license, checksum) are not known |
+| hygiene/autorev | none | Needs a real revision |
+| hygiene/src-uri-checksum | none | Needs the download's checksum |
+| hygiene/host-path | none | Which variable (`${D}`, `${sysconfdir}`, ...) is meant is a decision |
+| hygiene/workdir-s | none yet | (Another task's file.) Should get: `S = "${WORKDIR}"` / `"${WORKDIR}/"` to `S = "${UNPACKDIR}"`, safe only when every release the file is checked against has `UNPACKDIR` (Styhead and later); none when one does not |
+| hygiene/variable-order | none | Moving statements changes parse order (`?=`, `+=`, `:=` depend on it) |
+| hygiene/tabs | none | Not exact: the tab width is unknown, python indentation is syntax, here-documents are content |
+| hygiene/continuation | safe (whitespace only) | The whitespace between a trailing `\` and the end of the line is removed (the terminator stays): BitBake right-strips every line before joining, so it reads the file exactly as before. Evaluation: every value equal. The blank line ending a statement: none (the blank line or the `\` may be the mistake) |
+| hygiene/release-syntax | none yet | (Another task's file.) The `${WORKDIR}/<file>` case should get `${UNPACKDIR}/<file>` for a `file://` entry of the same file, safe only when every release the file is checked against has `UNPACKDIR`; the other cases need a decision (an older release is claimed) |
+| hygiene/parse-error | none | What an unparsed line meant is unknown |
+
+Compared with OE-core's `scripts/contrib/convert-overrides.py` (0.9.3), which rewrites any
+text that looks like an override with regular expressions (names, values, python strings,
+comments, function bodies) from a fixed list of overrides plus `--override`: on the
+fixtures and on a dozen old-style recipes the two agree on every name the rule reports. The
+script also converts the package variables its longer list has (`SYSTEMD_SERVICE_${PN}`,
+`INITSCRIPT_PARAMS_${PN}`; the parser's list lacks them, a miss of the rule) and rewrites
+text inside function bodies and comments (`: # do_install_append` in a shell body); it does
+not convert `PREFERRED_PROVIDER_virtual/kernel_<machine>` (its regular expression stops at
+`/`), which the rule reports and the fix converts (suggested). The script warns that its
+matching is loose (`_append` inside other names must be filtered by hand); the fix converts
+only names the parser or the suffix check identifies.
+
 ## Findings on the fixture workspace
 
 What the default rule set reports on `tests/fixtures/ws`, whose `sous-chef.toml` makes

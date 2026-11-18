@@ -782,6 +782,23 @@ Lint tool (T4.5, `mcp::tools::lint`): a wrapper over `lint::run` and `render_rep
 `rules_resource(config)` generates `sous-chef://rules` from the rule registry and the Flags
 column of lint-rules.md (so a row there must keep four cells).
 
+Lint fixes (x3, `lint::fix`; lint-rules.md "Fixes"): `Rule` gains `fixes(&LintContext) ->
+Vec<FixedFinding>` (default none), each a finding exactly as `check` reports it with a
+`Fix { layer, path, sha256, edits: Vec<Edit { bytes, replacement }>, description, safety:
+Safe | Suggested }`; `Finding` is unchanged. Edits are byte ranges of the text the rule
+saw, located with `fix::assign_parts` / `function_name` / `statement_lines`, which read
+the statement's span back and refuse when it does not say what the parser recorded.
+`fix::run(ws, &mut index, config, &Target, &Options, &FixOptions { suggested, write })`
+lints, keeps the fixes of reported findings, and turns the edits of one file into one
+scaffold `PlannedFile` (`Modify { before_sha }`) checked by `scaffold::check_plan` and
+written by `scaffold::apply_plan`: the scaffold engine's guarantees, not a second writer.
+After writing it refreshes the index, lints the changed files and repeats (deferred
+overlaps, findings a fix made visible) up to `MAX_ROUNDS`; `FixReport { report, available,
+rounds, suggested_skipped, not_writable, after: { fixed, remaining, new, revealed } }`.
+`fixes_in_text` / `fix_text` are the in-memory counterparts of `check_text` for fixture
+tests. CLI: `lint::cli_fix_with` (`--fix`, `--fix-suggested`, `--write`); tool: `fix`,
+`fix_suggested`, `write`.
+
 Jobs and the `bitbake` tool (T5.4, `bitbake::jobs`, `mcp::tools::bitbake`): `JobTable`
 (`new`, `start(&BbEnv, JobSpec, dir) -> Result<Started>`, `get`, `running`, `last`, `list`,
 `cancel`, `wait(id, timeout)`, `process_group`, `settle(&HandleStore)`), `JobInfo`,

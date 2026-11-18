@@ -720,6 +720,29 @@ warning	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:4	addtask: `bef
 error	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:5-6	function do_broken is never closed: no `}` in column 0 before end of file; close the function with `}` in column 0
 ```
 
+Fix mode (lint-rules.md, "Fixes"; the CLI's `--fix`, `--fix-suggested`, `--write`):
+
+| Arg | Notes |
+|---|---|
+| `fix` | `true`: fix what the rules can fix safely; a dry run unless `write` |
+| `fix_suggested` | `true`: also suggested fixes (they change meaning as the rule recommends); implies `fix` |
+| `write` | `true` with `fix`: write the fixes into the writable layers; `write` without `fix` is an error |
+
+`target`, `rules` and `severity` select the findings as above. Text: a `lint --fix` line
+(saying whether it is a dry run), the lint summary line, `fixes available: N for M findings
+(S safe, G suggested); by rule: ...`, then per round `applied N fixes in F files` (dry run:
+`would apply`) followed by a unified diff per file (`--- layer:path` / `+++ layer:path`),
+the fixes deferred because they overlap another (dry run: "re-run after applying"), the
+files refused (changed since indexed or read, refused by the scaffold checks), the
+suggested fixes not applied (each `pointer rule safety description` with its own diff), the
+fixes in layers that are not writable (never applied), and after a write `after: F files
+written; N findings fixed, R remaining, X new, V revealed in them` with the new and revealed
+findings listed. The text is cut at the budget on a line boundary, with a note. JSON: the
+whole report, `{write, suggested, report, available, rounds: [{changes: [{file, diff,
+fixes}], deferred, refused}], suggested_skipped: [{fixed, diff}], not_writable, after:
+{files, fixed, remaining, new, revealed, problems}}`, each fix as `{finding, fix: {layer,
+path, sha256, edits: [{bytes: {start, end}, replacement}], description, safety}}`.
+
 ### `scaffold`
 | Arg | Notes |
 |---|---|
