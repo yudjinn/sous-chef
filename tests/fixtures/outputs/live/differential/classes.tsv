@@ -13,15 +13,15 @@ curl	FILES:curl	equal
 curl	OVERRIDES	equal	
 curl	MACHINEOVERRIDES	equal	
 curl	DISTROOVERRIDES	equal	
-curl	S	flagged	unevaluated_python
-curl	B	flagged	unevaluated_python
-curl	WORKDIR	flagged	unevaluated_python
+curl	S	equal	
+curl	B	equal	
+curl	WORKDIR	equal	
 curl	LICENSE	equal	
 curl	INHERIT	equal	
 curl	PROVIDES	equal	
 curl	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 curl	EXTRA_OECMAKE	unset	
-curl	CFLAGS	flagged	unevaluated_python
+curl	CFLAGS	equal	
 curl	FILESPATH	flagged	unevaluated_python
 curl	MACHINE	equal	
 curl	DISTRO	equal	
@@ -54,15 +54,15 @@ sl	FILES:sl	equal
 sl	OVERRIDES	equal	
 sl	MACHINEOVERRIDES	equal	
 sl	DISTROOVERRIDES	equal	
-sl	S	flagged	unevaluated_python
-sl	B	flagged	unevaluated_python
-sl	WORKDIR	flagged	unevaluated_python
+sl	S	equal	
+sl	B	equal	
+sl	WORKDIR	equal	
 sl	LICENSE	equal	
 sl	INHERIT	equal	
 sl	PROVIDES	equal	
 sl	EXTRA_OECONF	equal	
 sl	EXTRA_OECMAKE	unset	
-sl	CFLAGS	flagged	unevaluated_python
+sl	CFLAGS	equal	
 sl	FILESPATH	flagged	unevaluated_python
 sl	MACHINE	equal	
 sl	DISTRO	equal	
@@ -227,15 +227,15 @@ zlib	FILES:zlib	equal
 zlib	OVERRIDES	equal	
 zlib	MACHINEOVERRIDES	equal	
 zlib	DISTROOVERRIDES	equal	
-zlib	S	flagged	unevaluated_python
-zlib	B	flagged	unevaluated_python
-zlib	WORKDIR	flagged	unevaluated_python
+zlib	S	equal	
+zlib	B	equal	
+zlib	WORKDIR	equal	
 zlib	LICENSE	equal	
 zlib	INHERIT	equal	
 zlib	PROVIDES	equal	
 zlib	EXTRA_OECONF	equal	
 zlib	EXTRA_OECMAKE	unset	
-zlib	CFLAGS	flagged	unevaluated_python
+zlib	CFLAGS	equal	
 zlib	FILESPATH	flagged	unevaluated_python
 zlib	MACHINE	equal	
 zlib	DISTRO	equal	
@@ -265,15 +265,15 @@ openssl	FILES:openssl	equal
 openssl	OVERRIDES	equal	
 openssl	MACHINEOVERRIDES	equal	
 openssl	DISTROOVERRIDES	equal	
-openssl	S	flagged	unevaluated_python
-openssl	B	flagged	unevaluated_python
-openssl	WORKDIR	flagged	unevaluated_python
+openssl	S	equal	
+openssl	B	equal	
+openssl	WORKDIR	equal	
 openssl	LICENSE	equal	
 openssl	INHERIT	equal	
 openssl	PROVIDES	equal	
 openssl	EXTRA_OECONF	equal	
 openssl	EXTRA_OECMAKE	unset	
-openssl	CFLAGS	flagged	unevaluated_python
+openssl	CFLAGS	equal	
 openssl	FILESPATH	flagged	unevaluated_python
 openssl	MACHINE	equal	
 openssl	DISTRO	equal	
@@ -317,15 +317,15 @@ busybox	FILES:busybox	equal
 busybox	OVERRIDES	equal	
 busybox	MACHINEOVERRIDES	equal	
 busybox	DISTROOVERRIDES	equal	
-busybox	S	flagged	unevaluated_python
-busybox	B	flagged	unevaluated_python
-busybox	WORKDIR	flagged	unevaluated_python
+busybox	S	equal	
+busybox	B	equal	
+busybox	WORKDIR	equal	
 busybox	LICENSE	equal	
 busybox	INHERIT	equal	
 busybox	PROVIDES	equal	
 busybox	EXTRA_OECONF	equal	
 busybox	EXTRA_OECMAKE	unset	
-busybox	CFLAGS	flagged	unevaluated_python
+busybox	CFLAGS	equal	
 busybox	FILESPATH	flagged	unevaluated_python
 busybox	MACHINE	equal	
 busybox	DISTRO	equal	
@@ -336,9 +336,9 @@ busybox	BUSYBOX_SPLIT_SUID	equal
 busybox	CONFFILES:busybox-mdev	equal	
 busybox	CONFFILES:busybox-syslog	equal	
 busybox	DESCRIPTION	equal	
-busybox	EXTRA_CFLAGS	flagged	unevaluated_python
+busybox	EXTRA_CFLAGS	equal	
 busybox	EXTRA_LDFLAGS	equal	
-busybox	EXTRA_OEMAKE	flagged	unevaluated_python
+busybox	EXTRA_OEMAKE	equal	
 busybox	FILES:busybox-httpd	equal	
 busybox	FILES:busybox-syslog	equal	
 busybox	FILES:busybox-mdev	equal	
@@ -383,15 +383,15 @@ dropbear	FILES:dropbear	equal
 dropbear	OVERRIDES	equal	
 dropbear	MACHINEOVERRIDES	equal	
 dropbear	DISTROOVERRIDES	equal	
-dropbear	S	flagged	unevaluated_python
-dropbear	B	flagged	unevaluated_python
-dropbear	WORKDIR	flagged	unevaluated_python
+dropbear	S	equal	
+dropbear	B	equal	
+dropbear	WORKDIR	equal	
 dropbear	LICENSE	equal	
 dropbear	INHERIT	equal	
 dropbear	PROVIDES	equal	
 dropbear	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 dropbear	EXTRA_OECMAKE	unset	
-dropbear	CFLAGS	flagged	unevaluated_python
+dropbear	CFLAGS	equal	
 dropbear	FILESPATH	flagged	unevaluated_python
 dropbear	MACHINE	equal	
 dropbear	DISTRO	equal	
@@ -431,15 +431,15 @@ ncurses	FILES:ncurses	equal
 ncurses	OVERRIDES	equal	
 ncurses	MACHINEOVERRIDES	equal	
 ncurses	DISTROOVERRIDES	equal	
-ncurses	S	flagged	unevaluated_python
-ncurses	B	flagged	unevaluated_python
-ncurses	WORKDIR	flagged	unevaluated_python
+ncurses	S	equal	
+ncurses	B	equal	
+ncurses	WORKDIR	equal	
 ncurses	LICENSE	equal	
 ncurses	INHERIT	equal	
 ncurses	PROVIDES	equal	
 ncurses	EXTRA_OECONF	equal	
 ncurses	EXTRA_OECMAKE	unset	
-ncurses	CFLAGS	flagged	unevaluated_python
+ncurses	CFLAGS	equal	
 ncurses	FILESPATH	flagged	unevaluated_python
 ncurses	MACHINE	equal	
 ncurses	DISTRO	equal	
@@ -471,7 +471,7 @@ ncurses	SRCREV	equal
 ncurses	SUMMARY	equal	
 ncurses	SYSROOT_DIRS	equal	
 ncurses	UPSTREAM_CHECK_GITTAGREGEX	equal	
-ncurses	_install_cfgs	flagged	unevaluated_python
+ncurses	_install_cfgs	equal	
 ncurses	_install_opts	equal	
 ncurses	_unifdef_cleanup	equal	
 ncurses	base_libdir	equal	
@@ -489,15 +489,15 @@ dbus	FILES:dbus	equal
 dbus	OVERRIDES	equal	
 dbus	MACHINEOVERRIDES	equal	
 dbus	DISTROOVERRIDES	equal	
-dbus	S	flagged	unevaluated_python
-dbus	B	flagged	unevaluated_python
-dbus	WORKDIR	flagged	unevaluated_python
+dbus	S	equal	
+dbus	B	equal	
+dbus	WORKDIR	equal	
 dbus	LICENSE	equal	
 dbus	INHERIT	equal	
 dbus	PROVIDES	equal	
 dbus	EXTRA_OECONF	flagged	unevaluated_python
 dbus	EXTRA_OECMAKE	unset	
-dbus	CFLAGS	flagged	unevaluated_python
+dbus	CFLAGS	equal	
 dbus	FILESPATH	flagged	unevaluated_python
 dbus	MACHINE	equal	
 dbus	DISTRO	equal	
@@ -536,15 +536,15 @@ systemd-boot	FILES:systemd-boot	flagged	unresolved: SYSTEMD_BOOT_IMAGE
 systemd-boot	OVERRIDES	equal	
 systemd-boot	MACHINEOVERRIDES	equal	
 systemd-boot	DISTROOVERRIDES	equal	
-systemd-boot	S	flagged	unevaluated_python
-systemd-boot	B	flagged	unevaluated_python
-systemd-boot	WORKDIR	flagged	unevaluated_python
+systemd-boot	S	equal	
+systemd-boot	B	equal	
+systemd-boot	WORKDIR	equal	
 systemd-boot	LICENSE	equal	
 systemd-boot	INHERIT	equal	
 systemd-boot	PROVIDES	equal	
 systemd-boot	EXTRA_OECONF	flagged	unevaluated_python
 systemd-boot	EXTRA_OECMAKE	unset	
-systemd-boot	CFLAGS	flagged	unevaluated_python
+systemd-boot	CFLAGS	equal	
 systemd-boot	FILESPATH	flagged	unevaluated_python
 systemd-boot	MACHINE	equal	
 systemd-boot	DISTRO	equal	
@@ -558,14 +558,14 @@ systemd-boot	FILESEXTRAPATHS	gap:layerdir-canonical	same after mapping layers/ s
 systemd-boot	HOMEPAGE	equal	
 systemd-boot	LDFLAGS	flagged	unevaluated_python
 systemd-boot	LIC_FILES_CHKSUM	equal	
-systemd-boot	MESON_CROSS_FILE	flagged	unevaluated_python
+systemd-boot	MESON_CROSS_FILE	equal	
 systemd-boot	MESON_TARGET	equal	
 systemd-boot	SRCBRANCH	equal	
 systemd-boot	SRCREV	equal	
 systemd-boot	STABLE_VERSION_PARTS	equal	
 systemd-boot	SUMMARY	equal	
 systemd-boot	TOOLCHAIN	equal	
-systemd-boot	TUNE_CCARGS	flagged	unevaluated_python
+systemd-boot	TUNE_CCARGS	equal	
 util-linux	PN	equal	
 util-linux	PV	equal	
 util-linux	PR	equal	
@@ -580,15 +580,15 @@ util-linux	FILES:util-linux	equal
 util-linux	OVERRIDES	equal	
 util-linux	MACHINEOVERRIDES	equal	
 util-linux	DISTROOVERRIDES	equal	
-util-linux	S	flagged	unevaluated_python
-util-linux	B	flagged	unevaluated_python
-util-linux	WORKDIR	flagged	unevaluated_python
+util-linux	S	equal	
+util-linux	B	equal	
+util-linux	WORKDIR	equal	
 util-linux	LICENSE	equal	
 util-linux	INHERIT	equal	
 util-linux	PROVIDES	equal	
 util-linux	EXTRA_OECONF	flagged	unevaluated_python
 util-linux	EXTRA_OECMAKE	unset	
-util-linux	CFLAGS	flagged	unevaluated_python
+util-linux	CFLAGS	equal	
 util-linux	FILESPATH	flagged	unevaluated_python
 util-linux	MACHINE	equal	
 util-linux	DISTRO	equal	
@@ -604,7 +604,7 @@ util-linux	CONFFILES:util-linux-su	equal
 util-linux	CVE_PRODUCT	equal	
 util-linux	DEFAULT_LICENSES	equal	
 util-linux	DESCRIPTION	equal	
-util-linux	EXTRA_OEMAKE	flagged	unevaluated_python
+util-linux	EXTRA_OEMAKE	equal	
 util-linux	FILES:util-linux-doc	equal	
 util-linux	FILES:util-linux-dev	equal	
 util-linux	FILES:util-linux-mount	equal	
@@ -796,15 +796,15 @@ expat	FILES:expat	equal
 expat	OVERRIDES	equal	
 expat	MACHINEOVERRIDES	equal	
 expat	DISTROOVERRIDES	equal	
-expat	S	flagged	unevaluated_python
-expat	B	flagged	unevaluated_python
-expat	WORKDIR	flagged	unevaluated_python
+expat	S	equal	
+expat	B	equal	
+expat	WORKDIR	equal	
 expat	LICENSE	equal	
 expat	INHERIT	equal	
 expat	PROVIDES	equal	
 expat	EXTRA_OECONF	equal	
 expat	EXTRA_OECMAKE	equal	
-expat	CFLAGS	flagged	unevaluated_python
+expat	CFLAGS	equal	
 expat	FILESPATH	flagged	unevaluated_python
 expat	MACHINE	equal	
 expat	DISTRO	equal	
@@ -834,15 +834,15 @@ glib-2.0	FILES:glib-2.0	equal
 glib-2.0	OVERRIDES	equal	
 glib-2.0	MACHINEOVERRIDES	equal	
 glib-2.0	DISTROOVERRIDES	equal	
-glib-2.0	S	flagged	unevaluated_python
-glib-2.0	B	flagged	unevaluated_python
-glib-2.0	WORKDIR	flagged	unevaluated_python
+glib-2.0	S	equal	
+glib-2.0	B	equal	
+glib-2.0	WORKDIR	equal	
 glib-2.0	LICENSE	equal	
 glib-2.0	INHERIT	equal	
 glib-2.0	PROVIDES	equal	
 glib-2.0	EXTRA_OECONF	flagged	unevaluated_python
 glib-2.0	EXTRA_OECMAKE	unset	
-glib-2.0	CFLAGS	flagged	unevaluated_python
+glib-2.0	CFLAGS	equal	
 glib-2.0	FILESPATH	flagged	unevaluated_python
 glib-2.0	MACHINE	equal	
 glib-2.0	DISTRO	equal	
@@ -938,15 +938,15 @@ python3	FILES:python3	equal
 python3	OVERRIDES	equal	
 python3	MACHINEOVERRIDES	equal	
 python3	DISTROOVERRIDES	equal	
-python3	S	flagged	unevaluated_python
-python3	B	flagged	unevaluated_python
-python3	WORKDIR	flagged	unevaluated_python
+python3	S	equal	
+python3	B	equal	
+python3	WORKDIR	equal	
 python3	LICENSE	equal	
 python3	INHERIT	equal	
 python3	PROVIDES	equal	
 python3	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 python3	EXTRA_OECMAKE	unset	
-python3	CFLAGS	flagged	unevaluated_python
+python3	CFLAGS	equal	
 python3	FILESPATH	flagged	unevaluated_python
 python3	MACHINE	equal	
 python3	DISTRO	equal	
@@ -954,13 +954,13 @@ python3	TMPDIR	equal
 python3	ALTERNATIVE:python3-dev	equal	
 python3	BBCLASSEXTEND	equal	
 python3	CACHED_CONFIGUREVARS	equal	
-python3	CPPFLAGS	flagged	unevaluated_python
-python3	CROSSPYTHONPATH	flagged	unevaluated_python
+python3	CPPFLAGS	equal	
+python3	CROSSPYTHONPATH	equal	
 python3	CVE_PRODUCT	equal	
 python3	DESCRIPTION	equal	
 python3	DEV_PKG_DEPENDENCY	equal	
 python3	EXTRANATIVEPATH	equal	
-python3	EXTRA_OEMAKE	flagged	unevaluated_python
+python3	EXTRA_OEMAKE	equal	
 python3	FILES:python3-pydoc	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:412 [__anon_436]
 python3	FILES:python3-idle	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]
 python3	FILES:python3-tkinter	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]
@@ -1011,15 +1011,15 @@ bash	FILES:bash	equal
 bash	OVERRIDES	equal	
 bash	MACHINEOVERRIDES	equal	
 bash	DISTROOVERRIDES	equal	
-bash	S	flagged	unevaluated_python
-bash	B	flagged	unevaluated_python
-bash	WORKDIR	flagged	unevaluated_python
+bash	S	equal	
+bash	B	equal	
+bash	WORKDIR	equal	
 bash	LICENSE	equal	
 bash	INHERIT	equal	
 bash	PROVIDES	equal	
 bash	EXTRA_OECONF	flagged	unevaluated_python
 bash	EXTRA_OECMAKE	unset	
-bash	CFLAGS	flagged	unevaluated_python
+bash	CFLAGS	equal	
 bash	FILESPATH	flagged	unevaluated_python
 bash	MACHINE	equal	
 bash	DISTRO	equal	
@@ -1027,7 +1027,7 @@ bash	TMPDIR	equal
 bash	ALTERNATIVE:bash	equal	
 bash	ALTERNATIVE_PRIORITY	equal	
 bash	BBCLASSEXTEND	equal	
-bash	BUILD_CFLAGS	flagged	unevaluated_python
+bash	BUILD_CFLAGS	equal	
 bash	CACHED_CONFIGUREVARS	equal	
 bash	DEBUG_OPTIMIZATION	equal	
 bash	DESCRIPTION	equal	
@@ -1055,22 +1055,22 @@ opencsd	FILES:opencsd	equal
 opencsd	OVERRIDES	equal	
 opencsd	MACHINEOVERRIDES	equal	
 opencsd	DISTROOVERRIDES	equal	
-opencsd	S	flagged	unevaluated_python
-opencsd	B	flagged	unevaluated_python
-opencsd	WORKDIR	flagged	unevaluated_python
+opencsd	S	equal	
+opencsd	B	equal	
+opencsd	WORKDIR	equal	
 opencsd	LICENSE	equal	
 opencsd	INHERIT	equal	
 opencsd	PROVIDES	equal	
 opencsd	EXTRA_OECONF	equal	
 opencsd	EXTRA_OECMAKE	unset	
-opencsd	CFLAGS	flagged	unevaluated_python
+opencsd	CFLAGS	equal	
 opencsd	FILESPATH	flagged	unevaluated_python
 opencsd	MACHINE	equal	
 opencsd	DISTRO	equal	
 opencsd	TMPDIR	equal	
 opencsd	BBCLASSEXTEND	equal	
 opencsd	COMPATIBLE_HOST	equal	
-opencsd	EXTRA_OEMAKE	flagged	unevaluated_python
+opencsd	EXTRA_OEMAKE	equal	
 opencsd	HOMEPAGE	equal	
 opencsd	LIC_FILES_CHKSUM	equal	
 opencsd	SRCREV	equal	
@@ -1166,15 +1166,15 @@ curl@default	FILES:curl	equal
 curl@default	OVERRIDES	equal	
 curl@default	MACHINEOVERRIDES	equal	
 curl@default	DISTROOVERRIDES	equal	
-curl@default	S	flagged	unevaluated_python
-curl@default	B	flagged	unevaluated_python
-curl@default	WORKDIR	flagged	unevaluated_python
+curl@default	S	equal	
+curl@default	B	equal	
+curl@default	WORKDIR	equal	
 curl@default	LICENSE	equal	
 curl@default	INHERIT	equal	
 curl@default	PROVIDES	equal	
 curl@default	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 curl@default	EXTRA_OECMAKE	unset	
-curl@default	CFLAGS	flagged	unevaluated_python
+curl@default	CFLAGS	equal	
 curl@default	FILESPATH	flagged	unevaluated_python
 curl@default	MACHINE	equal	
 curl@default	DISTRO	equal	
@@ -1207,15 +1207,15 @@ sl@default	FILES:sl	equal
 sl@default	OVERRIDES	equal	
 sl@default	MACHINEOVERRIDES	equal	
 sl@default	DISTROOVERRIDES	equal	
-sl@default	S	flagged	unevaluated_python
-sl@default	B	flagged	unevaluated_python
-sl@default	WORKDIR	flagged	unevaluated_python
+sl@default	S	equal	
+sl@default	B	equal	
+sl@default	WORKDIR	equal	
 sl@default	LICENSE	equal	
 sl@default	INHERIT	equal	
 sl@default	PROVIDES	equal	
 sl@default	EXTRA_OECONF	equal	
 sl@default	EXTRA_OECMAKE	unset	
-sl@default	CFLAGS	flagged	unevaluated_python
+sl@default	CFLAGS	equal	
 sl@default	FILESPATH	flagged	unevaluated_python
 sl@default	MACHINE	equal	
 sl@default	DISTRO	equal	

@@ -92,6 +92,11 @@ impl Rule for HygieneSrcUriChecksum {
         if src_uri.unevaluated_python {
             return;
         }
+        // BitBake skips the recipe under the configuration evaluated: it fetches nothing
+        // there, and the entries differ per machine (`name=gcc-${HOST_ARCH}`).
+        if super::hygiene_missing_metadata::helpers_would_skip(data) {
+            return;
+        }
         for entry in words::words(&src_uri.text) {
             if entry.contains("${") {
                 continue;

@@ -68,6 +68,14 @@ fn state(data: &DataStore, name: &str) -> State {
     }
 }
 
+/// The evaluation says BitBake would skip the recipe (decided from static values).
+pub(crate) fn helpers_would_skip(data: &DataStore) -> bool {
+    data.replay()
+        .target_notes
+        .iter()
+        .any(|n| n.starts_with("note: BitBake would skip this recipe"))
+}
+
 /// Whether the recipe fetches from an upstream (the `HOMEPAGE` condition): not an image or a
 /// packagegroup, and a statically known `SRC_URI` with an entry whose scheme is not `file`.
 fn has_upstream(cx: &LintContext<'_>, data: &DataStore) -> bool {
@@ -149,7 +157,15 @@ impl Rule for HygieneMissingMetadata {
         let fetches = src_uri
             .as_ref()
             .is_some_and(|v| !v.unevaluated_python && !v.text.trim().is_empty());
-        if license_known && !closed && fetches && state(data, "LIC_FILES_CHKSUM") == State::Missing
+        // BitBake skips the recipe under the configuration evaluated (a static "would skip"
+        // note): it runs no license QA there, and a value that differs per machine
+        // (`LIC_FILES_CHKSUM:x86-64`) says nothing about the others.
+        let skipped = helpers_would_skip(data);
+        if license_known
+            && !closed
+            && fetches
+            && !skipped
+            && state(data, "LIC_FILES_CHKSUM") == State::Missing
         {
             missing.push("LIC_FILES_CHKSUM");
         }
