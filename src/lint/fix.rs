@@ -1307,12 +1307,19 @@ fn fix_line(f: &FixedFinding) -> String {
 /// own diff.
 pub fn render_text(r: &FixReport) -> String {
     let mut out = String::new();
-    let mode = if r.write {
-        "lint --fix --write"
+    let flag = if r.suggested {
+        "--fix-suggested"
     } else {
-        "lint --fix (dry run: nothing written; pass --write to apply)"
+        "--fix"
     };
-    let _ = writeln!(out, "{mode}");
+    if r.write {
+        let _ = writeln!(out, "lint {flag} --write");
+    } else {
+        let _ = writeln!(
+            out,
+            "lint {flag} (dry run: nothing written; pass --write to apply)"
+        );
+    }
     let _ = writeln!(out, "lint: {}", lint::summary_line(&r.report));
     let (s, g) = counts(r.available.iter());
     if r.available.is_empty() {
