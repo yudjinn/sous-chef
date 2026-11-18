@@ -270,6 +270,14 @@ fn legacy_syntax_fixes() {
     );
     check_fixture(r, dir, "bad.conf", "fixed.conf", &[]);
     check_fixture(r, dir, "bad-more.bb", "fixed-more.bb", &[]);
+    // x7: convert-overrides.py's package variables; all safe (the old names are variables
+    // nothing reads).
+    check_fixture(r, dir, "package-vars.bb", "package-vars-fixed.bb", &[]);
+    assert!(
+        safeties(r, dir, "package-vars.bb")
+            .iter()
+            .all(|(_, s)| *s == S)
+    );
     // A machine or distro suffix alone is only suggested.
     assert_eq!(
         safeties(r, dir, "bad.bb"),

@@ -1,10 +1,12 @@
 //! `override/legacy-syntax`: Underscore override syntax (`VAR_append`, `RDEPENDS_${PN}`).
 //!
-//! See docs/lint-rules.md and docs/bitbake-semantics.md ("Legacy syntax"). Two sources:
+//! See docs/lint-rules.md and docs/bitbake-semantics.md ("Legacy syntax"). Three sources:
 //!
 //! - The parser's `VarRef.legacy_syntax`, set on assignment and function names when an
 //!   `_`-separated element is `append` / `prepend` / `remove`, or when a package-scoped
 //!   variable is followed by `_${PN}` or `_<lowercase package>` (`split_var`).
+//! - (Since x7) the package variables of OE-core's `convert-overrides.py` the parser's list
+//!   lacks ([`SCRIPT_PACKAGE_VARS`]), split the same way.
 //! - The form the parser cannot see alone: `VAR_<o>` where the trailing `_`-separated
 //!   elements are all machine or distro names of the workspace
 //!   ([`KnownOverrides::is_machine_or_distro`]), or `class-<variant>` / `pn-<recipe>`
@@ -81,15 +83,21 @@ impl OverrideLegacySyntax {
                 _ => continue,
             };
             let line = LineSpan::line(s.span.start);
+            // A package variable the parser's list lacks (convert-overrides.py's longer
+            // list), read as the parser reads the others.
+            let script_split = (!var.legacy_syntax)
+                .then(|| script_package_split(var))
+                .flatten();
+            let var = script_split.as_ref().unwrap_or(var);
             if var.legacy_syntax {
                 let written = written_name(helpers::statement_text(cx, s));
-                let finding = helpers::finding(self, cx, line, message(var, None, is_fn, written));
-                let fix = want_fix
-                    .then(|| {
-                        let (k, collections) = known.get_or_insert_with(|| load_known(cx));
-                        rename(cx, s, var, override_suffix(&var.base, k, collections), true)
-                    })
-                    .flatten();
+                // The suffix of the base (`VAR_qemux86_append`): the message says what the
+                // fix writes, `VAR:qemux86:append`.
+                let (k, collections) = known.get_or_insert_with(|| load_known(cx));
+                let cut = override_suffix(&var.base, k, collections);
+                let finding =
+                    helpers::finding(self, cx, line, message(var, cut, is_fn, written, true));
+                let fix = want_fix.then(|| rename(cx, s, var, cut, true)).flatten();
                 out.push((finding, fix));
                 continue;
             }
@@ -99,7 +107,7 @@ impl OverrideLegacySyntax {
             let (k, collections) = known.get_or_insert_with(|| load_known(cx));
             if let Some(cut) = override_suffix(&var.base, k, collections) {
                 let finding =
-                    helpers::finding(self, cx, line, message(var, Some(cut), is_fn, None));
+                    helpers::finding(self, cx, line, message(var, Some(cut), is_fn, None, false));
                 let fix = want_fix
                     .then(|| rename(cx, s, var, Some(cut), false))
                     .flatten();
@@ -238,31 +246,103 @@ fn split_outside_braces(s: &str) -> Vec<(usize, &str)> {
     out
 }
 
-/// The message: the name as written and the colon form to write instead.
-fn message(var: &VarRef, suffix_at: Option<usize>, is_fn: bool, written: Option<&str>) -> String {
+/// The package variables of OE-core's `scripts/contrib/convert-overrides.py` (`packagevars`
+/// and `imagevars`, wrynose) that the parser's [`crate::parse::parser::PACKAGE_VARS`] lacks. Each
+/// is read with `:<package>` (or `:<image type>`) by OE-core on wrynose: `package.bbclass`
+/// `PACKAGEVARS`, `systemd.bbclass`, `useradd.bbclass`, `update-alternatives.bbclass`
+/// (`ALTERNATIVE:%s`), `image_types.bbclass`. Not here, though the class reads them with
+/// `_<pkg>` on purpose: `ALTERNATIVE_TARGET_<pkg>` and `ALTERNATIVE_PRIORITY_<pkg>`
+/// (`update-alternatives.bbclass` on wrynose: `getVarFlag('ALTERNATIVE_PRIORITY_%s' % pkg,
+/// ...)`), which are current names, not legacy ones. The script's `shortvars` (`arc`,
+/// `mips`, `mipsel`, `sh4`), which it matches only in a restricted way because they are
+/// ambiguous, are overrides, not package variables, and play no part here.
+pub const SCRIPT_PACKAGE_VARS: &[&str] = &[
+    "INITSCRIPT_NAME",
+    "INITSCRIPT_PARAMS",
+    "DEBIAN_NOAUTONAME",
+    "ALTERNATIVE",
+    "PKGE",
+    "PKGV",
+    "PKGR",
+    "USERADD_PARAM",
+    "GROUPADD_PARAM",
+    "SYSTEMD_SERVICE",
+    "GROUPMEMS_PARAM",
+    "SYSTEMD_AUTO_ENABLE",
+    "SKIP_FILEDEPS",
+    "PRIVATE_LIBS",
+    "PACKAGE_ADD_METADATA",
+    "DEBIANNAME",
+    "SYSTEMD_SERVICE_ESCAPED",
+    "IMAGE_CMD",
+    "EXTRA_IMAGECMD",
+    "IMAGE_TYPEDEP",
+    "CONVERSION_CMD",
+    "COMPRESS_CMD",
+];
+
+/// `VAR_<package>` for a variable of [`SCRIPT_PACKAGE_VARS`], split as the parser splits its
+/// own package variables (`legacy_split`): the longest such prefix of at most three
+/// `_`-separated elements followed by a `${...}` or a lowercase element (OE package and
+/// image type names are lowercase; `SYSTEMD_SERVICE_ESCAPED` is not `SYSTEMD_SERVICE` of a
+/// package `ESCAPED`). `None` when the name is not one of them.
+fn script_package_split(var: &VarRef) -> Option<VarRef> {
+    let el = split_outside_braces(&var.base);
+    let package_like =
+        |e: &str| e.starts_with("${") || e.starts_with(|c: char| c.is_ascii_lowercase());
+    let known = |p: &str| {
+        SCRIPT_PACKAGE_VARS.contains(&p) || crate::parse::parser::PACKAGE_VARS.contains(&p)
+    };
+    for i in (1..el.len().min(4)).rev() {
+        let prefix = &var.base[..el[i].0 - 1];
+        if SCRIPT_PACKAGE_VARS.contains(&prefix) && package_like(el[i].1) {
+            // A longer known prefix wins (checked first, from the longest).
+            if (i + 1..el.len().min(4)).any(|j| known(&var.base[..el[j].0 - 1])) {
+                return None;
+            }
+            let mut overrides: Vec<String> = el[i..].iter().map(|(_, e)| e.to_string()).collect();
+            overrides.extend(var.overrides.iter().cloned());
+            return Some(VarRef {
+                base: prefix.to_string(),
+                overrides,
+                flag: var.flag.clone(),
+                legacy_syntax: true,
+            });
+        }
+    }
+    None
+}
+
+/// The message: the name as written and the colon form to write instead, which is what
+/// [`rename`] writes. `legacy`: a name the parser (or [`script_package_split`]) split;
+/// `suffix_at`: where the base's own override suffix starts (`VAR_qemux86`).
+fn message(
+    var: &VarRef,
+    suffix_at: Option<usize>,
+    is_fn: bool,
+    written: Option<&str>,
+    legacy: bool,
+) -> String {
     let flag = var
         .flag
         .as_ref()
         .map(|f| format!("[{f}]"))
         .unwrap_or_default();
-    let (written, modern) = match suffix_at {
-        None => {
-            // The parser split the legacy name: base + overrides (legacy ones first, then
-            // any written with `:`).
-            let written = written
-                .map(str::to_string)
-                .unwrap_or_else(|| helpers::joined(&var.base, &var.overrides, '_'));
-            (written, helpers::joined(&var.base, &var.overrides, ':'))
-        }
+    let modern = match suffix_at {
+        None => helpers::joined(&var.base, &var.overrides, ':'),
         Some(cut) => {
             let mut overrides: Vec<String> =
                 var.base[cut + 1..].split('_').map(str::to_string).collect();
             overrides.extend(var.overrides.iter().cloned());
-            (
-                helpers::joined(&var.base, &var.overrides, ':'),
-                helpers::joined(&var.base[..cut], &overrides, ':'),
-            )
+            helpers::joined(&var.base[..cut], &overrides, ':')
         }
+    };
+    let written = match written {
+        Some(w) => w.to_string(),
+        // The parser split the legacy name: base + overrides (legacy ones first, then any
+        // written with `:`).
+        None if legacy => helpers::joined(&var.base, &var.overrides, '_'),
+        None => helpers::joined(&var.base, &var.overrides, ':'),
     };
     let parens = if is_fn { "()" } else { "" };
     format!(
@@ -332,12 +412,12 @@ mod tests {
     fn written_forms() {
         let v = crate::parse::split_var("RDEPENDS_${PN}", None);
         assert_eq!(
-            message(&v, None, false, None),
+            message(&v, None, false, None, true),
             "legacy `_` override syntax in `RDEPENDS_${PN}`, which current BitBake rejects \
              or treats as a different variable; write `RDEPENDS:${PN}`"
         );
         let v = crate::parse::split_var("FOO_qemux86", None);
-        assert!(message(&v, Some(3), false, None).ends_with("write `FOO:qemux86`"));
+        assert!(message(&v, Some(3), false, None, false).ends_with("write `FOO:qemux86`"));
         assert_eq!(
             written_name("export DEPENDS_append = \" x\""),
             Some("DEPENDS_append")

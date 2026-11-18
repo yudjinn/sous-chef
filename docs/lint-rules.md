@@ -111,7 +111,7 @@ summary line and notes go to stderr.
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `override/legacy-syntax` | E | file | Underscore override syntax: a name the parser marks legacy (`VAR_append`, `VAR_remove`, `RDEPENDS_${PN}`, a package variable followed by `_<lowercase package>`), or `VAR_<o>` whose trailing `_` elements are all machine or distro names of the workspace, known `class-*` overrides or `pn-<name>`. Never flags `do_install`, the per-collection `layer.conf` names, `PREFERRED_*`, `SRCREV_<name>` or a suffix that is a collection name. Misses `VAR_<machine>` when that machine has no `.conf` in the workspace. |
+| `override/legacy-syntax` | E | file | Underscore override syntax: a name the parser marks legacy (`VAR_append`, `VAR_remove`, `RDEPENDS_${PN}`, a package variable followed by `_<lowercase package>`), or `VAR_<o>` whose trailing `_` elements are all machine or distro names of the workspace, known `class-*` overrides or `pn-<name>`. (Since x7) also the package variables of OE-core's `scripts/contrib/convert-overrides.py` that the parser's list lacks (`SYSTEMD_SERVICE_${PN}`, `INITSCRIPT_PARAMS_${PN}`, `INITSCRIPT_NAME`, `ALTERNATIVE`, `USERADD_PARAM`, `GROUPADD_PARAM`, `PKGV`, `IMAGE_CMD_<type>`, ...), but not `ALTERNATIVE_TARGET_<pkg>` / `ALTERNATIVE_PRIORITY_<pkg>`, which `update-alternatives.bbclass` still reads with `_`. Never flags `do_install`, the per-collection `layer.conf` names, a `PREFERRED_*` name itself (`PREFERRED_PROVIDER_virtual/kernel`, `PREFERRED_VERSION_<pn>`, `PREFERRED_PROVIDER_<machine>`), `SRCREV_<name>` or a suffix that is a collection name; a machine or distro suffix after the name a `PREFERRED_*` variable is keyed by is reported (`PREFERRED_PROVIDER_virtual/kernel_qemux86`, which the old syntax read as an override: write `PREFERRED_PROVIDER_virtual/kernel:qemux86`). The message names what the fix writes (`VAR_qemux86_append`: `VAR:qemux86:append`). Misses `VAR_<machine>` when that machine has no `.conf` in the workspace. |
 | `override/append-no-space` | W | file | `:append` value without a leading space, or `:prepend` without a trailing space, on a variable known to be a space-separated list. Not flagged: colon lists (`FILESEXTRAPATHS`), scalars, flags and unknown variables; values starting with `${@`, and a `:prepend` value ending in python; a value starting (`:append`) or ending (`:prepend`) with `${NAME}`, unless the file itself gives `NAME` a non-empty literal value without the space; `+=` / `=+` on an `:append` / `:prepend` name (they add the space); function bodies. |
 | `override/plus-equals-with-override` | W | file | `VAR:foo += "x"` (and `=+`, `.=`, `=.`): this builds the variable `VAR:foo`, which replaces `VAR` when `foo` is active, rather than appending to `VAR`. Suggests `VAR:append:foo`. Not flagged: the package override of a package-scoped variable (`FILES:${PN} +=`, `RDEPENDS:libfoo +=`), overrides containing `${` or not starting with `[a-z0-9]`, names with `:append` / `:prepend` / `:remove`. A condition after the package is flagged (`RDEPENDS:${PN}:qemux86 +=`). |
 | `override/remove-in-recipe` | W/I | file | `:remove` (not on a flag). Warning in a `.bb`, `.inc` or `.bbclass`: it is applied last, so no bbappend or conf can add the item back. Info in a `.bbappend`, a `.conf`, or an `.inc` under a `conf/` directory (configuration), where it is the usual tool. |
@@ -125,12 +125,16 @@ summary line and notes go to stderr.
 
 Notes:
 
-- **`legacy-syntax`.** Two sources: the parser's `VarRef.legacy_syntax` (see "Legacy
-  syntax" in bitbake-semantics.md) and the suffix check, which needs the index's machine and
-  distro conf names. The names never flagged by the suffix check start with
-  `BBFILE_PATTERN`, `BBFILE_PRIORITY`, `LAYERDEPENDS`, `LAYERRECOMMENDS`,
+- **`legacy-syntax`.** Three sources: the parser's `VarRef.legacy_syntax` (see "Legacy
+  syntax" in bitbake-semantics.md); (since x7) `SCRIPT_PACKAGE_VARS` in the rule's file, the
+  package variables of OE-core's `scripts/contrib/convert-overrides.py` the parser's list
+  lacks, each checked to be read with `:<package>` by OE-core on wrynose; and the suffix
+  check, which needs the index's machine and distro conf names. The suffix check never
+  reads what follows one of these prefixes as an override suffix: `BBFILE_PATTERN`, `BBFILE_PRIORITY`, `LAYERDEPENDS`, `LAYERRECOMMENDS`,
   `LAYERSERIES_COMPAT`, `LAYERVERSION`, `PREFERRED_PROVIDER`, `PREFERRED_RPROVIDER`,
-  `PREFERRED_VERSION` or `SRCREV`. Both forms are errors: BitBake rejects a name containing
+  `PREFERRED_VERSION` or `SRCREV` (so `PREFERRED_PROVIDER_qemux86` is a name, but a machine
+  suffix after the provided name, `PREFERRED_PROVIDER_virtual/kernel_qemux86`, is reported).
+  Both forms are errors: BitBake rejects a name containing
   `_append`, `_prepend` or `_remove`, and treats the others as a different variable.
 - **`plus-equals-with-override`.** The package-scoped variables are OE-core's `PACKAGEVARS`
   plus `INSANE_SKIP` and `QA_EMPTY_DIRS`. The first override of such a variable is taken as
@@ -455,8 +459,8 @@ Compared with OE-core's `scripts/contrib/convert-overrides.py` (0.9.3), which re
 text that looks like an override with regular expressions (names, values, python strings,
 comments, function bodies) from a fixed list of overrides plus `--override`: on the
 fixtures and on a dozen old-style recipes the two agree on every name the rule reports. The
-script also converts the package variables its longer list has (`SYSTEMD_SERVICE_${PN}`,
-`INITSCRIPT_PARAMS_${PN}`; the parser's list lacks them, a miss of the rule) and rewrites
+script's package variables (`packagevars`, `imagevars`) are the rule's too since x7
+(`SYSTEMD_SERVICE_${PN}`, `INITSCRIPT_PARAMS_${PN}`: until x7 a miss of the rule); the script rewrites
 text inside function bodies and comments (`: # do_install_append` in a shell body); it does
 not convert `PREFERRED_PROVIDER_virtual/kernel_<machine>` (its regular expression stops at
 `/`), which the rule reports and the fix converts (suggested). The script warns that its
