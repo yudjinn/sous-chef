@@ -20,6 +20,9 @@
 //! `isImage` and any others), puts the digest in `stdout` and empties `stderr`. If Claude
 //! Code rejects the replacement the original output stays: it fails safe.
 //!
+//! The digest's `function` row is mapped to the metadata as the `log` tool maps it, with
+//! the same functions (`mcp::tools::log::read_run_file`, `place_stub_function`).
+//!
 //! The replacement text: one line naming the handle and the size, then the T5.6 digest
 //! (`bitbake::logs::digest`, about 600 bytes, with the task definition from the index when
 //! the console names a recipe and task) when `bitbake::logs::detect` finds a failure, or
@@ -46,6 +49,7 @@ use super::{Ctx, Event, Handler, POST_TOOL_USE, Response};
 use crate::bitbake::logs;
 use crate::error::Result;
 use crate::handles::{Handle, HandleKind, HandleStore};
+use crate::mcp::tools::log as log_tool;
 use crate::render::{self, Format};
 
 /// Output at or below this many bytes (stdout plus stderr) passes through untouched.
@@ -65,6 +69,10 @@ const WRITE_BUSY: Duration = Duration::from_millis(50);
 
 /// Token budget of the rendered digest.
 const DIGEST_TOKENS: usize = 400;
+
+/// The time left in the hook's budget below which the `EXPORT_FUNCTIONS` stub's
+/// operation is not looked up ([`log_tool::place_stub_function`] evaluates the recipe).
+const STUB_BUDGET: Duration = Duration::from_millis(80);
 
 /// `PostToolUse` on `Bash`.
 pub struct BashDigest;
@@ -320,13 +328,29 @@ impl Handler for BashDigest {
                 (Some(r), Some(t)) => logs::task_definition(env.index, env.ws, r, t),
                 _ => None,
             };
-            let d = logs::digest(&logs::DigestInput {
+            // The failing function mapped to the metadata as the `log` tool maps it (the
+            // same code): the run file the trap names, read next to the task log the
+            // console names, and an `EXPORT_FUNCTIONS` stub's `:prepend` / `:append` placed
+            // at its operation.
+            let task_log = logs::failure_logfiles(&text).into_iter().next();
+            let run_script = logs::shell_trace(&text)
+                .and_then(|t| log_tool::read_run_file(env.ws, task_log.as_deref(), &t.run_file));
+            let mut d = logs::digest(&logs::DigestInput {
                 text: &text,
                 ws: Some(env.ws),
                 handle: Some(&handle),
                 definition: definition.as_ref(),
+                run_script: run_script.as_deref(),
                 ..logs::DigestInput::default()
             });
+            // Evaluating the recipe for that costs tens of milliseconds; a call over the
+            // hook's budget would give no output at all, so it is skipped when little is
+            // left (the row then says the frame is in the stub).
+            if env.remaining() >= STUB_BUDGET {
+                log_tool::place_stub_function(env.index, env.ws, &mut d, &text);
+            } else {
+                log_tool::place_stub_function_without_eval(&mut d);
+            }
             Some(d.render(Format::Text, DIGEST_TOKENS))
         };
         let mut replaced = ev.tool_response.clone();

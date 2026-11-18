@@ -306,6 +306,11 @@ pub struct Env<'c> {
 }
 
 impl Env<'_> {
+    /// The time left in the call's budget.
+    pub fn remaining(&self) -> Duration {
+        self.deadline.saturating_duration_since(Instant::now())
+    }
+
     /// `Err` once the call's budget is spent (the same clock as [`Ctx::check_budget`]).
     pub fn check_budget(&self) -> Result<()> {
         if Instant::now() > self.deadline {
