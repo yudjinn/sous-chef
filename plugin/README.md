@@ -341,8 +341,10 @@ The last row was measured later (same machine, 2026-11-17, median of 50 whole-pr
 runs, after the grep-through-Bash handler was added); the handler itself logged 24 ms in
 the debug build. `tests/hook_bash_grep.rs` runs it against the 150 ms budget.
 
-The handler itself (as logged in `hook.log`) takes 0 to 4 ms. A real poky workspace has
-more layers to discover; not measured yet (M8 scale check).
+The handler itself (as logged in `hook.log`) takes 0 to 4 ms. On the 1784-file live
+workspace (OE-core, meta-arm and two product layers) the Grep, Read and Edit hooks took
+4.6, 3.5 and 9.2 ms of process wall time (docs/performance.md, "After the later rounds");
+meta-openembedded scale was not measured.
 
 ## Not verified
 
