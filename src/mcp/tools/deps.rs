@@ -499,7 +499,7 @@ fn build(index: &Index, ws: &Workspace, ds: &DataStore, depth: u32) -> Result<Ta
         t.note(PACKAGECONFIG_NOTE);
     }
     if missing > 0 {
-        t.note("note: provider - means no recipe in the workspace provides the name (a BBCLASSEXTEND variant such as -native is found by its name only, when its base recipe's BBCLASSEXTEND lists the class)");
+        t.note("note: provider - means no recipe in the workspace provides the name (nor a BBCLASSEXTEND variant of a recipe whose BBCLASSEXTEND lists the class, by its name or through the PROVIDES its class rewrites)");
     }
     if let Some(n) = render::python_note(python) {
         t.note(&n);

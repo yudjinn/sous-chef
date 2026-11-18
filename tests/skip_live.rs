@@ -9,7 +9,10 @@
 //! of the bitbake-setup build is evaluated statically (machine `dogbonedark`, distro `kiss`)
 //! for its own `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST` and `SKIP_RECIPE[PN]`, and the checks
 //! the skip notes make (`eval::compatible_machine`, `eval::compatible_host`) are run with the
-//! real values. BitBake's answer: a recipe with a dump was parsed, so not skipped; the
+//! real values; (w11) also `features_check.bbclass` with the dumps' `<KIND>_FEATURES` and the
+//! `RecipeParsed` virtual-provider check with their `PREFERRED_PROVIDER_*` and
+//! `BB_MULTI_PROVIDER_ALLOWED` (`eval::skips`), and it fails when a static "would skip" note
+//! names a recipe BitBake parsed. BitBake's answer: a recipe with a dump was parsed, so not skipped; the
 //! `bitbake-layers show-appends` output (`runs/differential/show-appends.out`) marks
 //! recipes with bbappends `(skipped)` or not; the parse summary says how many were skipped
 //! in all (435, variants included, any reason).
@@ -27,6 +30,7 @@ use sous_chef::bitbake::envdump;
 use sous_chef::config::Config;
 use sous_chef::eval::{self, ConfigCache, DataStore, Target};
 use sous_chef::index::{Index, query};
+use sous_chef::parse::words;
 use sous_chef::types::FileKind;
 use sous_chef::workspace::Workspace;
 
@@ -40,11 +44,16 @@ fn build_dir(live: &Path) -> PathBuf {
         .unwrap_or_else(|| live.join("bitbake-builds/kiss-wrynose-dogbonedark/build"))
 }
 
-/// `(MACHINEOVERRIDES, HOST_SYS, FILE)` of a dump.
-fn real(live: &Path, target: &str) -> (String, String, String) {
+/// The dump of `target`.
+fn dump(live: &Path, target: &str) -> envdump::EnvDump {
     let text = fs::read_to_string(live.join(format!("runs/differential/env/{target}.env")))
         .unwrap_or_else(|e| panic!("dump of {target}: {e}"));
-    let d = envdump::parse_str(&text);
+    envdump::parse_str(&text)
+}
+
+/// `(MACHINEOVERRIDES, HOST_SYS, FILE)` of a dump.
+fn real(live: &Path, target: &str) -> (String, String, String) {
+    let d = dump(live, target);
     let get = |n: &str| d.value(n).unwrap_or("").to_string();
     (get("MACHINEOVERRIDES"), get("HOST_SYS"), get("FILE"))
 }
@@ -94,8 +103,12 @@ struct Verdict {
     unknown: Vec<String>,
 }
 
-/// The checks of OE-core's base.bbclass (Wrynose), with the real values for `kind`.
-fn verdict(ds: &DataStore, mo: &str, host: &str) -> Verdict {
+/// The checks of OE-core's base.bbclass (Wrynose), with the real values for `kind`: the
+/// machine and host checks, (w11) `features_check.bbclass` with BitBake's `<KIND>_FEATURES`
+/// and the `RecipeParsed` virtual-provider check with BitBake's `PREFERRED_PROVIDER_*` and
+/// `BB_MULTI_PROVIDER_ALLOWED` (both from the configuration in the dump; the recipe's own
+/// lists from its static evaluation).
+fn verdict(ds: &DataStore, mo: &str, host: &str, real: &envdump::EnvDump) -> Verdict {
     let mut v = Verdict::default();
     if let Some(Some(pn)) = static_text(ds, "PN")
         && let Some(msg) = ds.flag("SKIP_RECIPE", &pn)
@@ -125,6 +138,65 @@ fn verdict(ds: &DataStore, mo: &str, host: &str) -> Verdict {
                 .unknown
                 .push(format!("COMPATIBLE_HOST = \"{need}\" not compiled")),
         },
+    }
+    let get = |n: &str| real.value(n).unwrap_or("").to_string();
+    let inherits = |c: &str| {
+        ds.files()
+            .iter()
+            .any(|f| f.kind == FileKind::Class && f.loc.path.file_name().is_some_and(|x| x == c))
+    };
+    if inherits("features_check.bbclass") {
+        'kinds: for kind in eval::skips::FEATURE_KINDS {
+            let mut lists = Vec::new();
+            for pre in ["ANY_OF_", "REQUIRED_", "CONFLICT_"] {
+                let name = format!("{pre}{kind}_FEATURES");
+                match static_text(ds, &name) {
+                    Some(t) => lists.push(t.unwrap_or_default()),
+                    None => {
+                        v.unknown.push(format!("{name} not static"));
+                        continue 'kinds;
+                    }
+                }
+            }
+            if let Some(msg) = eval::skips::features_skip(
+                kind,
+                &get(kind),
+                &lists[0],
+                &lists[1],
+                &lists[2],
+                &get(&format!("{kind}_FEATURES")),
+            ) {
+                v.skip.push(format!("features_check: {msg}"));
+                break;
+            }
+        }
+    }
+    let allowed = get("BB_MULTI_PROVIDER_ALLOWED");
+    let allowed: Vec<&str> = allowed.split_whitespace().collect();
+    match (static_text(ds, "PN"), ds.value("PROVIDES")) {
+        (Some(Some(pn)), Some(p)) => {
+            if ds.replay().python_vars.contains("PROVIDES") {
+                v.unknown.push("PROVIDES changed by python".into());
+            }
+            for w in words::words(&p.text) {
+                if words::is_unevaluated(w) {
+                    if w.contains("virtual/") {
+                        v.unknown.push("PROVIDES not static".into());
+                    }
+                    continue;
+                }
+                if !w.starts_with("virtual/") || allowed.contains(&w) {
+                    continue;
+                }
+                let pref = real.value(&format!("PREFERRED_PROVIDER_{w}"));
+                if let Some(msg) = eval::skips::virtual_provider_skip(w, pref, &pn) {
+                    v.skip.push(msg);
+                    break;
+                }
+            }
+        }
+        (None, _) => v.unknown.push("PN not static".into()),
+        _ => {}
     }
     v
 }
@@ -168,6 +240,11 @@ fn skip_checks_agree_with_bitbake() {
     let (target_mo, target_host, _) = real(&live, "curl");
     let (native_mo, native_host, _) = real(&live, "gmp-native");
     let (sdk_mo, sdk_host, _) = real(&live, "nativesdk-zlib");
+    let (target_dump, native_dump, sdk_dump) = (
+        dump(&live, "curl"),
+        dump(&live, "gmp-native"),
+        dump(&live, "nativesdk-zlib"),
+    );
     println!(
         "real values: target MACHINEOVERRIDES={target_mo:?} HOST_SYS={target_host:?}; native {native_mo:?} {native_host:?}; nativesdk {sdk_mo:?} {sdk_host:?}"
     );
@@ -204,6 +281,7 @@ fn skip_checks_agree_with_bitbake() {
     let mut agree = 0;
     let mut notes_would = 0;
     let mut notes_may = 0;
+    let mut may_kinds: BTreeMap<String, usize> = BTreeMap::new();
     for f in &recipes {
         let label = format!("{}:{}", f.layer, f.path.display());
         let t = Target {
@@ -221,13 +299,13 @@ fn skip_checks_agree_with_bitbake() {
         };
         let k = kind(&ds);
         *by_kind.entry(k).or_default() += 1;
-        let (mo, host) = match k {
-            Kind::Target => (&target_mo, &target_host),
-            Kind::Native => (&native_mo, &native_host),
-            Kind::Nativesdk => (&sdk_mo, &sdk_host),
+        let (mo, host, real_dump) = match k {
+            Kind::Target => (&target_mo, &target_host, &target_dump),
+            Kind::Native => (&native_mo, &native_host, &native_dump),
+            Kind::Nativesdk => (&sdk_mo, &sdk_host, &sdk_dump),
             Kind::Cross => continue,
         };
-        let v = verdict(&ds, mo, host);
+        let v = verdict(&ds, mo, host, real_dump);
         // What the notes say today, from static values alone.
         let notes = &ds.replay().target_notes;
         let note_would = notes
@@ -238,6 +316,12 @@ fn skip_checks_agree_with_bitbake() {
             .any(|n| n.starts_with("note: BitBake may skip this recipe"));
         if note_would {
             notes_would += 1;
+            for n in notes
+                .iter()
+                .filter(|n| n.starts_with("note: BitBake would skip this recipe"))
+            {
+                println!("  note-would\t{label}\t{n}");
+            }
             if v.skip.is_empty() && v.unknown.is_empty() {
                 bugs.push(format!(
                     "{label}: the note says BitBake would skip it, the real values say it is compatible: {notes:?}"
@@ -245,6 +329,18 @@ fn skip_checks_agree_with_bitbake() {
             }
         } else if note_may {
             notes_may += 1;
+            for n in notes
+                .iter()
+                .filter(|n| n.starts_with("note: BitBake may skip this recipe"))
+            {
+                let rest = n.trim_start_matches("note: BitBake may skip this recipe: ");
+                let key: String = rest
+                    .split([' ', '=', ';', '('])
+                    .take(2)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                *may_kinds.entry(key).or_default() += 1;
+            }
         } else if !v.skip.is_empty() {
             bugs.push(format!(
                 "{label}: no skip note, but the real values skip it ({:?})",
@@ -264,6 +360,16 @@ fn skip_checks_agree_with_bitbake() {
             bugs.push(format!(
                 "{label}: would skip ({:?}) but BitBake parsed it (bitbake -e dump)",
                 v.skip
+            ));
+        }
+        if note_would && abs.as_ref().is_some_and(|a| parsed.contains(a)) {
+            bugs.push(format!(
+                "{label}: the note says BitBake would skip it, but BitBake parsed it (bitbake -e dump): {notes:?}"
+            ));
+        }
+        if note_would && appends.get(&file_name) == Some(&false) {
+            bugs.push(format!(
+                "{label}: the note says BitBake would skip it, but show-appends lists it as not skipped: {notes:?}"
             ));
         }
         if let Some(&bb_skipped) = appends.get(&file_name) {
@@ -299,12 +405,15 @@ fn skip_checks_agree_with_bitbake() {
     let mut reasons: BTreeMap<String, usize> = BTreeMap::new();
     for (_, _, r) in &skip {
         for x in r {
-            let key = x.split(" = ").next().unwrap_or(x).to_string();
+            let key = [" = ", " set to ", ": "]
+                .iter()
+                .fold(x.as_str(), |k, sep| k.split(sep).next().unwrap_or(k))
+                .to_string();
             *reasons.entry(key).or_default() += 1;
         }
     }
     println!(
-        "would skip with BitBake's MACHINEOVERRIDES / HOST_SYS: {} recipes ({reasons:?}); not decidable statically: {}",
+        "would skip with BitBake's values (MACHINEOVERRIDES, HOST_SYS, the *_FEATURES, PREFERRED_PROVIDER_*): {} recipes ({reasons:?}); not decidable statically: {}",
         skip.len(),
         unknown.len()
     );
@@ -321,7 +430,7 @@ fn skip_checks_agree_with_bitbake() {
         appends.values().filter(|s| **s).count()
     );
     println!(
-        "the notes from static values alone: would skip {notes_would}, may skip {notes_may} (of the target, native and nativesdk recipes)"
+        "the notes from static values alone: would skip {notes_would}, may skip {notes_may} (of the target, native and nativesdk recipes); may-skip notes by their first words: {may_kinds:?}"
     );
     for r in &reverse {
         println!("  reverse\t{r}");

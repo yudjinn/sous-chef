@@ -100,6 +100,139 @@ pub fn name_forms(name: &str) -> Vec<(String, ClassExtend)> {
     out
 }
 
+/// `bb.utils.explode_deps` (BitBake 2.18.0 `lib/bb/utils.py`): the whitespace-separated
+/// words, without the version constraints in parentheses (`a (>= 1.0) b` is `a b`).
+pub fn explode_deps(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut in_version = false;
+    for w in s.split_whitespace() {
+        if w.starts_with('(') {
+            in_version = true;
+        }
+        if !in_version {
+            out.push(w);
+        }
+        if in_version && w.ends_with(')') {
+            in_version = false;
+        }
+    }
+    out
+}
+
+/// `oe.classextend.native_filter(val, pn, bpn, regex=False, selfref=True)` (OE-core Wrynose
+/// `meta/lib/oe/classextend.py`), the filter `native_virtclass_handler` sets on `PROVIDES`
+/// (and others): each word of `explode_deps(val)` that is `pn` stays; one containing
+/// `-cross-` gets `-cross` replaced by `-native`; one not ending in `-native` becomes
+/// `word.replace(pn, bpn) + "-native"`; the rest stay; joined with one space. `None` for an
+/// empty value (the filter is not applied: `getVar` filters only a non-empty value) and
+/// `Some(Err(()))` when a word contains `pn` and `bpn` is not known.
+pub fn native_filter(val: &str, pn: &str, bpn: Option<&str>) -> Option<Result<String, ()>> {
+    if val.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for dep in explode_deps(val) {
+        if dep == pn {
+            out.push(dep.to_string());
+        } else if dep.contains("-cross-") {
+            out.push(dep.replace("-cross", "-native"));
+        } else if !dep.ends_with("-native") {
+            let replaced = if dep.contains(pn) {
+                match bpn {
+                    Some(b) => dep.replace(pn, b),
+                    None => return Some(Err(())),
+                }
+            } else {
+                dep.to_string()
+            };
+            out.push(format!("{replaced}-native"));
+        } else {
+            out.push(dep.to_string());
+        }
+    }
+    Some(Ok(out.join(" ")))
+}
+
+/// `oe.classextend.add_suffix(val, extname, prefixes)` (OE-core Wrynose
+/// `meta/lib/oe/classextend.py`): how `ClassExtender.set_filter(..., deps=False)`
+/// (`suffix_filter`) renames one word for the `nativesdk` and multilib variants.
+pub fn add_suffix(val: &str, extname: &str, prefixes: &[&str]) -> String {
+    if val.starts_with(&format!("{extname}-")) {
+        return val.to_string();
+    }
+    if val.ends_with("-native")
+        || val.ends_with("-native-runtime")
+        || val.contains("nativesdk-")
+        || val.contains("-cross-")
+        || val.contains("-crosssdk-")
+    {
+        return val.to_string();
+    }
+    if prefixes.iter().any(|p| val.starts_with(&format!("{p}-"))) {
+        return val.to_string();
+    }
+    if val.starts_with("kernel-") || val == "virtual/kernel" {
+        return val.to_string();
+    }
+    if val.starts_with("rtld") || val.ends_with("-crosssdk") {
+        return val.to_string();
+    }
+    let mut val = val.to_string();
+    let suffix = format!("-{extname}");
+    if val.ends_with(&suffix) {
+        val = val.replace(&suffix, "");
+    }
+    if let Some(subs) = val.strip_prefix("virtual/") {
+        if val.matches('-').count() >= 3 && val.ends_with("-go") {
+            return val;
+        }
+        if !subs.starts_with(extname) {
+            return format!("virtual/{extname}-{subs}");
+        }
+        return val;
+    }
+    if val.starts_with('/') || (val.starts_with("${") && val.ends_with('}')) {
+        return val;
+    }
+    if !val.starts_with(extname) {
+        return format!("{extname}-{val}");
+    }
+    val
+}
+
+/// `(base word, variant word)` pairs such that the variant of a recipe providing (or named)
+/// `base word` may provide `name` through the `PROVIDES` its class rewrites, or through its
+/// `PN` ([`name_forms`]): for `native`, `native_filter` turns `x` into `x-native` and keeps
+/// a word ending in `-native`, and turns `a-cross-b` into `a-native-b`; for `nativesdk`,
+/// `add_suffix` turns `x` into `nativesdk-x` and `virtual/x` into `virtual/nativesdk-x`, and
+/// keeps the words it passes through. Candidates only: the variant is evaluated to confirm.
+/// Multilib variants are found by their `PN` only (their prefixes come from
+/// `MULTILIB_VARIANTS`, and their `BBCLASSEXTEND` words from the configuration).
+pub fn provides_forms(name: &str) -> Vec<(String, ClassExtend)> {
+    let name = name.trim();
+    let mut out = name_forms(name);
+    let native = ClassExtend::new("native");
+    let sdk = ClassExtend::new("nativesdk");
+    if name.ends_with("-native") {
+        out.push((name.to_string(), native.clone()));
+    }
+    if name.contains("-native") {
+        let cross = name.replace("-native", "-cross");
+        if cross.contains("-cross-") && cross != name {
+            out.push((cross, native));
+        }
+    }
+    if let Some(rest) = name.strip_prefix("virtual/nativesdk-") {
+        out.push((format!("virtual/{rest}"), sdk.clone()));
+    }
+    if add_suffix(name, "nativesdk", &[]) == name {
+        out.push((name.to_string(), sdk));
+    }
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|(b, e)| !b.is_empty() && seen.insert((b.clone(), e.word.clone())));
+    out
+}
+
 /// A variant pointer `virtual:<word>:<recipe>` (`<recipe>` a `layer:path` or an absolute
 /// path to a `.bb`; the word is `multilib:<variant>` or one name): the word and the recipe
 /// part.
@@ -147,6 +280,51 @@ mod tests {
         assert_eq!((e.word.as_str(), r), ("multilib:lib32", "/abs/x.bb"));
         assert!(split_virtual("core:x.bb").is_none());
         assert!(split_virtual("virtual:native:").is_none());
+    }
+
+    #[test]
+    fn class_extension_filters() {
+        assert_eq!(explode_deps("a (>= 1.0) b (<< 2) c"), ["a", "b", "c"]);
+        let f = |v: &str, bpn: Option<&str>| native_filter(v, "gmp-native", bpn);
+        assert_eq!(f("", None), None);
+        assert_eq!(
+            f("virtual/gmp gmp-native x-cross-arm y-native", None),
+            Some(Ok(
+                "virtual/gmp-native gmp-native x-native-arm y-native".into()
+            ))
+        );
+        // A word holding pn needs bpn.
+        assert_eq!(f("gmp-native-extra", None), Some(Err(())));
+        assert_eq!(
+            f("gmp-native-extra", Some("gmp")),
+            Some(Ok("gmp-extra-native".into()))
+        );
+        assert_eq!(add_suffix("zlib", "nativesdk", &[]), "nativesdk-zlib");
+        assert_eq!(
+            add_suffix("virtual/libc", "nativesdk", &[]),
+            "virtual/nativesdk-libc"
+        );
+        assert_eq!(
+            add_suffix("virtual/kernel", "nativesdk", &[]),
+            "virtual/kernel"
+        );
+        assert_eq!(
+            add_suffix("zlib-nativesdk", "nativesdk", &[]),
+            "nativesdk-zlib"
+        );
+        assert_eq!(add_suffix("lib32-x", "lib32", &[]), "lib32-x");
+        assert_eq!(add_suffix("x", "lib32", &["lib64"]), "lib32-x");
+    }
+
+    #[test]
+    fn provides_forms_cover_the_filters() {
+        let f = provides_forms("virtual/foo-native");
+        assert!(f.contains(&("virtual/foo".into(), ClassExtend::new("native"))));
+        assert!(f.contains(&("virtual/foo-native".into(), ClassExtend::new("native"))));
+        let f = provides_forms("virtual/nativesdk-libc");
+        assert!(f.contains(&("virtual/libc".into(), ClassExtend::new("nativesdk"))));
+        let f = provides_forms("gcc-native-arm");
+        assert!(f.contains(&("gcc-cross-arm".into(), ClassExtend::new("native"))));
     }
 
     #[test]

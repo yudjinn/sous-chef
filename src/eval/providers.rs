@@ -26,6 +26,14 @@
 //! candidate only when some non-`.conf` file, or a `.conf` statement with an override, sets
 //! one of them; otherwise every candidate has the configuration's values and no recipe pass
 //! is needed. Anonymous python that sets them is not seen.
+//!
+//! Class-extended variants (w10, w11): BitBake registers each variant with its own `PN` and
+//! its finalised `PROVIDES` (`bb.cache.CoreRecipeInfo`). [`Providers::best_version`] counts
+//! the `native` / `nativesdk` variants as files of their `PN` beside real recipes of that
+//! name; [`Providers::providers`] finds variant candidates through
+//! [`super::variant::provides_forms`] and confirms them by evaluating the variant (whose
+//! `native` `PROVIDES` filter the replay computes). Multilib variants: by `PN`, when nothing
+//! else has the name.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet, VecDeque};
@@ -164,6 +172,8 @@ struct Info {
     pe: Option<String>,
     pr: Option<String>,
     dp: i64,
+    /// The class-extended variant of `recipe` this entry stands for (`virtual:<word>:<file>`).
+    variant: Option<ClassExtend>,
 }
 
 /// Provider and version selection against one configuration (machine, distro).
@@ -255,53 +265,87 @@ impl<'a> Providers<'a> {
     /// priority order. `None` when no file matches. A `REQUIRED_VERSION` that matches no
     /// file is an error, as in BitBake.
     ///
-    /// A name no recipe has is tried as a class-extended variant ([`Providers::variant`]):
-    /// the selection is then the base recipe's, with [`Selection::variant`] set.
+    /// Class-extended variants count as files of their own `PN` ([`Providers::variant_files`]),
+    /// as in BitBake, where `pkg_pn[<variant PN>]` holds the variants' virtual file names
+    /// beside any real recipe of that name: the choice is made among all of them (the
+    /// version variables of the variant's `PN`), and a chosen variant has
+    /// [`Selection::variant`] set. A real recipe of the same name does not hide a `native` /
+    /// `nativesdk` variant; a multilib variant is looked for only when no recipe has the
+    /// name.
     pub fn best_version(&self, pn: &str, version: Option<&str>) -> Result<Option<Selection>> {
-        let files = query::find_recipes(self.index, pn)?;
-        if files.is_empty() {
-            return Ok(self.variant(pn, version)?.map(|(s, _)| s));
+        let real = query::find_recipes(self.index, pn)?;
+        let only_pn_forms = !real.is_empty();
+        let mut files: Vec<(RecipeRow, Option<ClassExtend>)> =
+            real.into_iter().map(|r| (r, None)).collect();
+        for (r, ext) in self.variant_files(pn, only_pn_forms)? {
+            files.push((r, Some(ext)));
         }
         self.best_among(pn, files, version)
     }
 
-    /// `name` as a class-extended variant (`<pn>-native`, `nativesdk-<pn>`,
-    /// `<variant>-<pn>`, see [`super::variant`]): the base recipe's file chosen as for its own
-    /// `PN`, when its finalised `BBCLASSEXTEND` (the base evaluated, as `multi_finalize`
-    /// reads it) lists the word and the variant's name from the base's `PN` is `name`. Also
-    /// the base's evaluation. `None` when no form fits.
+    /// `name` as a class-extended variant only (`<pn>-native`, `nativesdk-<pn>`,
+    /// `<variant>-<pn>`, see [`super::variant`]): chosen among the base files that make it
+    /// ([`Providers::variant_files`]) as for the `PN` `name`; also the evaluation of the
+    /// chosen base file. `None` when no form fits.
     pub fn variant(
         &self,
         name: &str,
         version: Option<&str>,
     ) -> Result<Option<(Selection, DataStore)>> {
+        let files: Vec<(RecipeRow, Option<ClassExtend>)> = self
+            .variant_files(name, false)?
+            .into_iter()
+            .map(|(r, e)| (r, Some(e)))
+            .collect();
+        let Some(sel) = self.best_among(name, files, version)? else {
+            return Ok(None);
+        };
+        let ds = self.evaluate(&sel.recipe)?;
+        Ok(Some((sel, ds)))
+    }
+
+    /// The recipe files whose class-extended variant has the `PN` `name`: for each form of
+    /// the name ([`variant::name_forms`]; with `native_only`, only the `native` and
+    /// `nativesdk` forms), every file of the base `PN` whose finalised `BBCLASSEXTEND` (the
+    /// base evaluated, as `multi_finalize` reads it) lists the word and whose variant, named
+    /// from the evaluated `PN`, is `name`.
+    pub fn variant_files(
+        &self,
+        name: &str,
+        native_only: bool,
+    ) -> Result<Vec<(RecipeRow, ClassExtend)>> {
+        let mut out = Vec::new();
         for (base, ext) in variant::name_forms(name) {
-            let files = query::find_recipes(self.index, &base)?;
-            let Some(mut sel) = self.best_among(&base, files, version)? else {
-                continue;
-            };
-            let ds = self.evaluate(&sel.recipe)?;
-            let words = ds
-                .value("BBCLASSEXTEND")
-                .map(|v| v.text)
-                .unwrap_or_default();
-            if !words::known_words(&words).contains(&ext.word.as_str()) {
+            if native_only && ext.class() == "multilib" {
                 continue;
             }
-            let pn = ds.value("PN").map(|v| v.text).unwrap_or_default();
-            if ext.variant_name(&pn).as_deref() != Some(name) {
-                continue;
+            for r in query::find_recipes(self.index, &base)? {
+                let ds = self.evaluate(&r)?;
+                if !extends(&ds, &ext) {
+                    continue;
+                }
+                let pn = ds.value("PN").map(|v| v.text).unwrap_or_default();
+                if ext.variant_name(&pn).as_deref() == Some(name) {
+                    out.push((r, ext.clone()));
+                }
             }
-            sel.variant = Some(ext);
-            return Ok(Some((sel, ds)));
         }
-        Ok(None)
+        Ok(out)
+    }
+
+    /// Evaluates the variant `ext` of `recipe` (`virtual:<word>:<layer>:<path>`).
+    fn evaluate_variant(&self, recipe: &RecipeRow, ext: &ClassExtend) -> Result<DataStore> {
+        let mut t = self.target_for(recipe);
+        if let Some(r) = t.recipe.as_mut() {
+            *r = format!("{}{r}", ext.virtual_prefix());
+        }
+        evaluate_with(self.cache, self.index, self.ws, &t)
     }
 
     fn best_among(
         &self,
         pn: &str,
-        files: Vec<RecipeRow>,
+        files: Vec<(RecipeRow, Option<ClassExtend>)>,
         version: Option<&str>,
     ) -> Result<Option<Selection>> {
         if files.is_empty() {
@@ -366,23 +410,27 @@ impl<'a> Providers<'a> {
     /// priority alone (and its `PE` only matters for an epoch).
     fn ordered(
         &self,
-        files: Vec<RecipeRow>,
+        files: Vec<(RecipeRow, Option<ClassExtend>)>,
         epoch_wanted: bool,
         notes: &mut Vec<String>,
     ) -> Result<Vec<Info>> {
         let mut per_priority: BTreeMap<i32, usize> = BTreeMap::new();
-        for r in &files {
+        for (r, _) in &files {
             *per_priority.entry(r.file.priority).or_default() += 1;
         }
         let mut out = Vec::with_capacity(files.len());
-        for r in files {
+        for (r, ext) in files {
             let shared = per_priority.get(&r.file.priority).copied().unwrap_or(0) > 1;
-            let info = if self.per_recipe && (shared || epoch_wanted) {
-                let ds = self.evaluate(&r)?;
+            let mut info = if self.per_recipe && (shared || epoch_wanted) {
+                let ds = match &ext {
+                    Some(e) => self.evaluate_variant(&r, e)?,
+                    None => self.evaluate(&r)?,
+                };
                 self.info(r, &ds, notes)?
             } else {
                 self.info(r, &self.cfg, notes)?
             };
+            info.variant = ext;
             out.push(info);
         }
         sort_infos(&mut out);
@@ -412,7 +460,13 @@ impl<'a> Providers<'a> {
                 }
             },
         };
-        Ok(Info { recipe, pe, pr, dp })
+        Ok(Info {
+            recipe,
+            pe,
+            pr,
+            dp,
+            variant: None,
+        })
     }
 
     /// `versionVariableMatch(cfgData, keyword, pn)`.
@@ -511,42 +565,31 @@ impl<'a> Providers<'a> {
                 }
             }
         }
-        // No indexed recipe names it: a class-extended variant whose PN is the name.
-        if candidates.is_empty()
-            && let Some((sel, _)) = self.variant(name, None)?
-        {
-            let preferred_provider = self.preference(name, &mut notes);
-            let mut reason = ProviderReason::Only;
-            if let Some((pp, why)) = &preferred_provider {
-                if pp.value == name {
-                    reason = *why;
-                } else {
-                    notes.push(no_provider_note(pp, name));
+        // Class-extended variants (BBCLASSEXTEND): BitBake registers every variant with its
+        // own PN and its finalised PROVIDES (`bb.cache.CoreRecipeInfo` of the variant's
+        // datastore), beside the real recipes. Candidates: the recipes that provide (or are)
+        // a word the variant's class turns into the name (`variant::provides_forms`);
+        // multilib variants by their PN only, and only when nothing else provides the name.
+        let mut variant_candidates: Vec<(RecipeRow, ClassExtend)> = Vec::new();
+        let mut vseen = HashSet::new();
+        for (base, ext) in variant::provides_forms(name) {
+            if ext.class() == "multilib" {
+                continue;
+            }
+            for f in query::files_providing(self.index, &base)? {
+                for r in recipes_using(self.index, &f)? {
+                    if vseen.insert((r.file.id, ext.word.clone())) {
+                        variant_candidates.push((r, ext.clone()));
+                    }
                 }
             }
-            let preferred_provider = preferred_provider.map(|(s, _)| s);
-            if let Some(ext) = &sel.variant {
-                notes.push(format!(
-                    "{name} is {} of {} (BBCLASSEXTEND `{}`), made by BitBake from {}; variants are found by their PN only, not by the PROVIDES their classes rewrite",
-                    ext.describe(),
-                    sel.recipe.pn,
-                    ext.word,
-                    file_label(&sel.recipe.file)
-                ));
+        }
+        if candidates.is_empty() && variant_candidates.is_empty() {
+            for (r, ext) in self.variant_files(name, false)? {
+                if vseen.insert((r.file.id, ext.word.clone())) {
+                    variant_candidates.push((r, ext));
+                }
             }
-            return Ok(ProviderSet {
-                name: name.to_string(),
-                providers: vec![Provider {
-                    pn: name.to_string(),
-                    selection: sel,
-                    provides_loc: None,
-                    python: false,
-                }],
-                reason,
-                preferred_provider,
-                excluded: Vec::new(),
-                notes,
-            });
         }
         // Confirm each candidate by evaluating it; group by PN.
         let mut by_pn: BTreeMap<String, Vec<(Info, Option<Loc>, bool)>> = BTreeMap::new();
@@ -563,6 +606,69 @@ impl<'a> Providers<'a> {
                 .entry(info.recipe.pn.clone())
                 .or_default()
                 .push((info, loc, python));
+        }
+        for (r, ext) in variant_candidates {
+            let base = self.evaluate(&r)?;
+            if !extends(&base, &ext) {
+                continue;
+            }
+            let base_pn = base.value("PN").map(|v| v.text).unwrap_or_default();
+            let Some(vname) = ext.variant_name(&base_pn) else {
+                continue;
+            };
+            // Named by its PN: no need to evaluate the variant to know it provides.
+            let by_name = vname == name;
+            let vds = if by_name && !self.per_recipe {
+                None
+            } else {
+                match self.evaluate_variant(&r, &ext) {
+                    Ok(d) => Some(d),
+                    Err(Error::NotFound { .. }) => continue,
+                    Err(e) => return Err(e),
+                }
+            };
+            let (pn, provides, loc, python) = match &vds {
+                Some(d) => {
+                    let pn = d.value("PN").map(|v| v.text).unwrap_or(vname.clone());
+                    let (p, l, py) = if by_name {
+                        (true, None, false)
+                    } else {
+                        provides_name(d, &pn, name)
+                    };
+                    (pn, p, l, py)
+                }
+                None => (vname.clone(), true, None, false),
+            };
+            if !provides {
+                continue;
+            }
+            notes.push(if by_name {
+                format!(
+                    "{name} is {} of {} (BBCLASSEXTEND `{}`), made by BitBake from {}",
+                    ext.describe(),
+                    base_pn,
+                    ext.word,
+                    file_label(&r.file)
+                )
+            } else {
+                format!(
+                    "{pn} ({} of {base_pn}, BBCLASSEXTEND `{}`, made from {}) provides {name}{}",
+                    ext.describe(),
+                    ext.word,
+                    file_label(&r.file),
+                    if python {
+                        ": its PROVIDES goes through python that was not run (the class rewrites it), so this is not certain"
+                    } else {
+                        " through the PROVIDES its class rewrites"
+                    }
+                )
+            });
+            let mut info = match &vds {
+                Some(d) if self.per_recipe => self.info(r, d, &mut notes)?,
+                _ => self.info(r, &self.cfg, &mut notes)?,
+            };
+            info.variant = Some(ext);
+            by_pn.entry(pn).or_default().push((info, loc, python));
         }
         let mut preferred: Vec<Provider> = Vec::new();
         let mut rest: Vec<Provider> = Vec::new();
@@ -698,7 +804,7 @@ fn selection(
         setting,
         default_preference: i.dp,
         notes,
-        variant: None,
+        variant: i.variant.clone(),
     }
 }
 
@@ -811,6 +917,15 @@ fn vercmp3(a: &Info, b: &Info) -> Ordering {
     e(a).cmp(&e(b))
         .then_with(|| query::vercmp(&a.recipe.pv, &b.recipe.pv))
         .then_with(|| query::vercmp(a.pr.as_deref().unwrap_or(""), b.pr.as_deref().unwrap_or("")))
+}
+
+/// Whether a recipe's finalised `BBCLASSEXTEND` lists the word of `ext` (its known words).
+fn extends(ds: &DataStore, ext: &ClassExtend) -> bool {
+    let words = ds
+        .value("BBCLASSEXTEND")
+        .map(|v| v.text)
+        .unwrap_or_default();
+    words::known_words(&words).contains(&ext.word.as_str())
 }
 
 /// Whether an evaluated recipe provides `name`: its `PN` is the name, or the expanded

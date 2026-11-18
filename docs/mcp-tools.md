@@ -31,12 +31,18 @@ Common to every tool:
   filter flagged; `recipe` shows a `variant` row (its evaluation target
   `virtual:<word>:<layer>:<path>`, which every evaluating tool also accepts as `recipe`);
   `item`, `search` and the `bbappend` generator work on the base file; `deps` resolves a
-  variant as the provider of its name. Lint's target is the base recipe (an error says so).
+  variant as a provider of its name and (since w11) of the `PROVIDES` its class rewrites
+  (`virtual/x-native` for a native variant of a recipe providing `virtual/x`), beside any
+  real recipe of the same name (provider and version selection choose among them as
+  BitBake does). Lint's target is the base recipe (an error says so).
 - Provider gaps, said in the output (bitbake-semantics.md "What the static evaluator cannot
   do"): a `BBMASK` the evaluator cannot apply (python, undefined variables, a
   regular expression Rust cannot compile) gives `note: BBMASK is set but sous-chef does not
   apply it (...)` in every evaluated view; a recipe that `SKIP_RECIPE[<pn>]`,
-  `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST` or `INCOMPATIBLE_LICENSE` makes BitBake skip,
+  `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST`, `INCOMPATIBLE_LICENSE`, (since w11)
+  `features_check.bbclass` (`REQUIRED_` / `CONFLICT_` / `ANY_OF_DISTRO_FEATURES` and the
+  `MACHINE`, `COMBINED`, `IMAGE`, `TUNE` ones) or OE-core's `RecipeParsed` handler (it
+  provides a `virtual/` name whose `PREFERRED_PROVIDER_` names another recipe) makes BitBake skip,
   when that is decided from static values, gives `note: BitBake would skip this recipe:
   ...`; when the check fails on what is known but values that are not known (python,
   undefined variables) could still decide it, `note: BitBake may skip this recipe: ...`
@@ -61,13 +67,15 @@ Common to every tool:
 - **Progress.** A call whose request carries `_meta.progressToken` gets MCP
   `notifications/progress` while a long operation runs, before its result and never after
   it: `bitbake` with `wait` (and while a request waits behind a read-only job), the
-  authoritative `var` (waiting for its `bitbake -e`), and `audit` (one step per stage:
-  refreshing the index, finding layers and git facts, lint, lint done, parse problems).
-  `progress` increases with every notification (seconds since the call began for the waits,
-  a step count for `audit`); there is no `total`; `message` says what is happening. At most
-  four a second: intermediate updates are dropped, and the newest pending one is sent before
-  the result. A request without a token gets none. `lint` sends none (it would need a
-  per-file hook in the lint engine).
+  authoritative `var` (waiting for its `bitbake -e`), `lint` (since w11: the files checked,
+  `progress` = files done, `total` = files planned, message `lint: N of M files`), and
+  `audit` (one step per stage: refreshing the index, finding layers and git facts, lint,
+  lint done, parse problems; during the lint stage the files as for `lint`, with
+  `total`, message `audit: linting, N of M files`). `progress` increases with every
+  notification (seconds since the call began for the waits, a step count for the `audit`
+  stages, the file count for lint); only the lint updates have a `total`; `message` says
+  what is happening. At most four a second: intermediate updates are dropped, and the
+  newest pending one is sent before the result. A request without a token gets none.
 
 The first six are always loaded. The rest are deferred (short descriptions, loaded on demand).
 
@@ -611,8 +619,8 @@ the flags of the selected options, with a note.
 - `build`: rows `depth dep provider source loc`: the words of the evaluated `DEPENDS`, each
   with the assignment that adds it (a class's `DEPENDS:prepend` points into the class) and
   the recipe that provides it (provider selection; `-` when no recipe of the workspace
-  does; a `BBCLASSEXTEND` variant such as `-native` is the provider of its name, shown as
-  `curl-native (the `native` variant of curl 8.19.0)`, when no recipe has that name), then the build
+  does; a `BBCLASSEXTEND` variant such as `-native` is a provider of its name and of its
+  rewritten `PROVIDES`, shown as `curl-native (the `native` variant of curl 8.19.0)`), then the build
   dependencies of the selected `PACKAGECONFIG` options. `depth` follows the selected
   providers.
 - `runtime`: rows `package dep source loc`: per package of `PACKAGES`, the words of
@@ -637,8 +645,10 @@ the flags of the selected options, with a note.
 - `providers`: rows `name version status loc`: every recipe that provides the name, the
   selected one first, with the reason for its version and for the choice; then the
   `PREFERRED_PROVIDER` / `PREFERRED_VERSION` assignments that decided it. Candidates are
-  recipes whose `PN` or static `PROVIDES` names it, confirmed by evaluating each, or, when
-  none is, the class-extended variant of that name. A `PREFERRED_PROVIDERS` entry
+  recipes whose `PN` or static `PROVIDES` names it, confirmed by evaluating each, and the
+  `native` / `nativesdk` variants whose `PN` or rewritten `PROVIDES` names it (a
+  `nativesdk` variant's `PROVIDES` goes through python, so it is listed as uncertain, with a
+  note); multilib variants by their name only, when nothing else provides it. A `PREFERRED_PROVIDERS` entry
   `<name>:<pn>` is used when no `PREFERRED_PROVIDER_<name>` is set (status `selected by
   PREFERRED_PROVIDERS (<name>:<pn>)`, and a `PREFERRED_PROVIDERS` row whose value is the
   provider); a malformed word, conflicting entries and an entry `PREFERRED_PROVIDER_<name>`
@@ -651,7 +661,7 @@ depth	dep	provider	source	loc
 2	automake-native	-	DEPENDS	meta-core:classes-recipe/autotoolsish.bbclass:11
 2	zlib	-	PACKAGECONFIG[zlib]	meta-core:recipes-core/libfoo/libfoo_2.0.bb:15
 note: PACKAGECONFIG rows: OE-Core's base.bbclass adds the build (field 3) and runtime (field 4) dependencies of the selected options with anonymous python, which is not run; they are listed from the flags
-note: provider - means no recipe in the workspace provides the name (a BBCLASSEXTEND variant such as -native is found by its name only, when its base recipe's BBCLASSEXTEND lists the class)
+note: provider - means no recipe in the workspace provides the name (nor a BBCLASSEXTEND variant of a recipe whose BBCLASSEXTEND lists the class, by its name or through the PROVIDES its class rewrites)
 note: 1 anonymous python function was not run (none changes DEPENDS by name)
 ```
 

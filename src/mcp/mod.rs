@@ -153,6 +153,21 @@ pub mod progress {
         at(done as f64, Some(total as f64), message);
     }
 
+    /// Runs the synchronous, long `f` (a lint run) from a tool call. On a multi-threaded
+    /// runtime (the server's) it runs under `block_in_place`, which hands this worker's
+    /// queue to another thread meanwhile, so the forwarder and rmcp's service loop keep
+    /// running and notifications go out while `f` runs, not after it; the progress sink of
+    /// the call stays in scope. Elsewhere (a current-thread runtime, no runtime) `f` just
+    /// runs.
+    pub fn blocking<T>(f: impl FnOnce() -> T) -> T {
+        match tokio::runtime::Handle::try_current() {
+            Ok(h) if h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(f)
+            }
+            _ => f(),
+        }
+    }
+
     /// Reads updates from `rx` until it closes and hands them to `send`: the first at once,
     /// then at most one per `interval`, always the newest received (older ones waiting are
     /// dropped), and the newest pending one as soon as `rx` closes. Stops early when `send`

@@ -40,6 +40,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let root = resolve_root(ctx, args.root.as_deref())?;
     let opts = audit::Options {
         progress: Some(stage_progress),
+        lint_progress: Some(lint_file_progress),
         ..audit::Options::new(&root)
     };
     let build = audit::build(ctx, &opts);
@@ -78,6 +79,19 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
 /// discovery and git facts, lint, lint done, parse problems) is one MCP progress step.
 fn stage_progress(msg: &str) {
     crate::mcp::progress::step(&format!("audit: {msg}"));
+}
+
+/// `audit::Options::lint_progress`: the lint stage's files as `done` of `total` progress
+/// (values at or below the stage steps already sent are dropped, so progress still only
+/// increases; the step after lint continues from the file count).
+fn lint_file_progress(done: usize, total: usize) {
+    if crate::mcp::progress::active() {
+        crate::mcp::progress::of(
+            done as u64,
+            total as u64,
+            &format!("audit: linting, {done} of {total} files"),
+        );
+    }
 }
 
 /// The digest table: `field value` rows, most important first, so a small budget keeps

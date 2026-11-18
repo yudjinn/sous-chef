@@ -6,4 +6,4 @@ depth	dep	provider	source	loc
 1	autoconf-native	-	DEPENDS	meta-core:classes-recipe/autotoolsish.bbclass:11
 1	automake-native	-	DEPENDS	meta-core:classes-recipe/autotoolsish.bbclass:11
 1	virtual/foo	libfoo-alt 1.0 (PREFERRED_PROVIDER_virtual/foo)	DEPENDS	meta-core:recipes-core/hello/hello.inc:7
-note: provider - means no recipe in the workspace provides the name (a BBCLASSEXTEND variant such as -native is found by its name only, when its base recipe's BBCLASSEXTEND lists the class)
+note: provider - means no recipe in the workspace provides the name (nor a BBCLASSEXTEND variant of a recipe whose BBCLASSEXTEND lists the class, by its name or through the PROVIDES its class rewrites)

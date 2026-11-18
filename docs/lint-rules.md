@@ -418,6 +418,16 @@ overlay, the task `depends` rewrite, `BBMASK` per machine) nor this branch's `.i
 contexts changed a finding there (no `inherit` in an `.inc` of that workspace is reached
 from a `.conf` or a global class).
 
+Re-measured for branch `w11-final` (2026-11-18, same command and configuration,
+`runs/w11-final/sous-chef-kas.toml`, run from the kas project directory `yocto-kiss/`, no
+BitBake run): default 1 finding in 13 files; `--all` 625 findings in 1718 files (0 E,
+166 W, 459 I) in 14.5 s, every rule's count as above. The working directory matters: with
+`kas` set in `sous-chef.toml` the kas work directory, where kas checks out the remote
+repositories, is the working directory (or `KAS_WORK_DIR`), so run from elsewhere
+`org/generated-conf-edit` reports the `BBLAYERS` entries of the remote repositories
+(`meta-arm`, `openembedded-core`) as "in no kas file" (3 warnings in the default run).
+Since w11 the `lint` tool and the audit's lint stage report MCP progress per file.
+
 What the rules still get wrong there, as far as it was checked:
 
 - `hygiene/parse-error`: fixed in w6 (3 -> 0 with `--all`): the 3 errors were in

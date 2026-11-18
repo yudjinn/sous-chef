@@ -80,6 +80,8 @@ pub struct Options {
     pub generated: Option<String>,
     /// Progress lines (the CLI prints them to stderr; never part of the report).
     pub progress: Option<fn(&str)>,
+    /// Per-file progress of the lint stage, `(done, total)` ([`lint::Progress`]).
+    pub lint_progress: Option<fn(usize, usize)>,
 }
 
 impl Options {
@@ -88,6 +90,7 @@ impl Options {
             root: root.to_path_buf(),
             generated: None,
             progress: None,
+            lint_progress: None,
         }
     }
 
@@ -517,16 +520,14 @@ fn assemble(
         "linting every layer ({n_layers} layers, as `sous-chef lint --all`; about 15 s on a large workspace)"
     ));
     let started = Instant::now();
-    let report = lint::run(
-        ws,
-        index,
-        cfg,
-        &lint::Target::Workspace,
-        &lint::Options {
-            all: true,
-            ..lint::Options::default()
-        },
-    )?;
+    let lint_options = lint::Options {
+        all: true,
+        ..lint::Options::default()
+    };
+    let report = match opts.lint_progress {
+        Some(p) => lint::run_progress(ws, index, cfg, &lint::Target::Workspace, &lint_options, &p)?,
+        None => lint::run(ws, index, cfg, &lint::Target::Workspace, &lint_options)?,
+    };
     opts.say(&format!(
         "lint done: {} findings in {} files ({:.1} s)",
         report.findings.len(),

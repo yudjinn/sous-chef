@@ -685,7 +685,7 @@ gmp-native	B	flagged	unevaluated_python
 gmp-native	WORKDIR	flagged	unevaluated_python
 gmp-native	LICENSE	equal	
 gmp-native	INHERIT	equal	
-gmp-native	PROVIDES	equal-ws	
+gmp-native	PROVIDES	equal	
 gmp-native	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 gmp-native	EXTRA_OECMAKE	unset	
 gmp-native	CFLAGS	flagged	unevaluated_python

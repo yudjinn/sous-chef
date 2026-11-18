@@ -177,7 +177,7 @@ fakeroot do_install() {
 | `class` | Which class file wins, its interface and tasks; who inherits it |
 | `layers` | Layers, priorities and compatibility; shadowed recipes and classes; bbappend matches; compatibility, dependency and order problems |
 | `deps` | Build, runtime and `PACKAGECONFIG` dependencies; reverse dependencies; providers |
-| `lint` | Convention and syntax findings for a recipe, file, layer or the workspace |
+| `lint` | Convention and syntax findings for a recipe, file, layer or the workspace, with MCP progress per file if the client asks for it |
 | `scaffold` | A new recipe, bbappend, layer or class, or an `.inc` split, as a dry run or written; or where a change belongs |
 | `bitbake` | Runs bitbake, devtool or bitbake-layers as a background job, in the build environment (init script, bitbake-setup or kas); poll with `op=status`, or pass `wait` to answer when it ends, with MCP progress notifications meanwhile if the client asks for them |
 | `log` | A digest of a failed task's log |
@@ -243,7 +243,7 @@ edit = false       # the reindex and lint after an edit
   them are marked (`depends on python, not evaluated`), and anonymous python that changes a
   variable is named in a warning. Measured against `bitbake -e` on a real Wrynose workspace
   (25 recipes, two of them `BBCLASSEXTEND` variants, 1090 values,
-  [docs/differential.md](docs/differential.md)): 700 (64%) were exactly BitBake's, 2 more
+  [docs/differential.md](docs/differential.md)): 701 (64%) were exactly BitBake's, 1 more
   after normalising whitespace; the other 388 differed and said so (357 flagged as depending
   on python or unresolved references) or were a documented gap (29 path spellings, 2
   `FILE_LAYERNAME` of a variant, which `bitbake -e` shows differently from a build); no
@@ -256,11 +256,13 @@ edit = false       # the reindex and lint after an edit
   "kas projects") (`status` shows which).
 - **Partly modelled.** `BBCLASSEXTEND` variants such as
   `gmp-native` are evaluated as BitBake makes them, but what OE-core's class-extension
-  handlers and anonymous python filter (`DEPENDS`, `PACKAGES`, `PROVIDES`, ...) is flagged,
-  not computed; a static `BBMASK`
+  handlers and anonymous python filter (`DEPENDS`, `PACKAGES`, ...) is flagged, not
+  computed, except the `native` variant's `PROVIDES` (computed on a static value, so
+  `virtual/x-native` finds its provider); a static `BBMASK`
   marks the files it masks (with the default machine and distro; an evaluation for another
   machine or distro says which files its own mask would treat differently), and
-  `SKIP_RECIPE`, `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST` and `INCOMPATIBLE_LICENSE` give a
+  `SKIP_RECIPE`, `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST`, `INCOMPATIBLE_LICENSE`,
+  `features_check` and a `PREFERRED_PROVIDER_virtual/...` naming another recipe give a
   "BitBake would skip this recipe" note when the values involved are static, or "may skip"
   naming the unknown ones; nothing is hidden. `PACKAGECONFIG` dependencies are listed from
   the flags, since OE-core adds them with anonymous python. Reverse dependencies see

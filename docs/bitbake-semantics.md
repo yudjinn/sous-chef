@@ -1045,14 +1045,33 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
   over `datastores` before any variant is added), so they do not chain. A plain `setVar`
   from code drops the variable's `:append` / `:prepend` / `:remove` lists and its active
   override variants (`data_smart.setVar` without `parsing`).
-- **When the class is inherited** (by release): `BBHandler.inherit(class, fn, 0, d)` at
-  once on branches `2.0`, `2.6`, `2.10`, `2.12`; appended to the deferred inherits on
-  `2.16` and `2.18` (`BBHandler.inherit_defer`, from `8e741b2e8` "ast/BBHandler: Add support
-  for BB_DEFER_BBCLASSES", in `2.15.0`) and on the head of branch `2.8` (`139f61fe9` "ast:
-  Change deferred inherits to happen per recipe", in the Scarthgap point releases from
-  `yocto-5.0.11`). `Feature::ClassExtendDeferred` is Whinlatter (BitBake 2.16) on; on
-  Scarthgap the replay inherits at once and says, when the recipe has deferred inherits,
-  that the point releases from 5.0.11 order them the other way.
+- **When the class is inherited** (by release; corrected in w11 from the branches'
+  `lib/bb/parse/ast.py`). Before `139f61fe9` "ast: Change deferred inherits to happen per
+  recipe" (2025-06-06): `multi_finalize` runs the recipe's deferred inherits (`while True:
+  ... __BBDEFINHERITS ... BBHandler.inherit(..., deferred=True)`) **once, on the base
+  recipe after its bbappends, before `safe_d = d`**, so before any variant is made and with
+  the base's `PN` and overrides; `extendfunc` then inherits the class at once
+  (`BBHandler.inherit(extendedmap[name], fn, 0, d)`). That is the code of tag `yocto-5.0`
+  (BitBake 2.8.0) to `yocto-5.0.10` and of the heads of branches `2.10` (Styhead) and `2.12`
+  (Walnascar), which never got the change. With `139f61fe9` (branch `2.8` from tag
+  `yocto-5.0.11`; branches `2.16` and `2.18`, where it came with `8e741b2e8` "ast/BBHandler:
+  Add support for BB_DEFER_BBCLASSES"), the deferred inherits run in `finalize`, per
+  variant, and `extendfunc` appends the class to `__BBDEFINHERITS`, so the class comes
+  after the recipe's deferred inherits and those are expanded in the variant. (`2.6` has no
+  `inherit_defer`.) BitBake's `__version__` in `lib/bb/__init__.py` is `2.8.0` from
+  `yocto-5.0` to `yocto-5.0.12` and `2.8.1` from `yocto-5.0.13` (`1c9ec1ffd` "bitbake: Bump
+  version to 2.8.1", 2025-09-03, after `139f61fe9`), so on Scarthgap the version alone
+  cannot tell 5.0.11 and 5.0.12 from 5.0.10. **sous-chef** (w11, `release::ClassExtendOrder`,
+  `release::workspace_bitbake`, `release::class_extend_order`): Whinlatter on, per
+  variant; Styhead and Walnascar, base-then-class (no note: it is known); Scarthgap: the
+  workspace's BitBake checkout, found as OE-core's `scripts/oe-buildenv-internal` finds it
+  (`$OEROOT/bitbake`, else `$OEROOT/../bitbake`, `OEROOT` the directory above the layer of
+  collection `core`), decides by its `ast.py` line, else by a `__version__` from 2.8.1 on;
+  when neither tells (no checkout, or 2.8.0 with an `ast.py` not recognised), the replay
+  follows 5.0 to 5.0.10 and, only for a recipe that has deferred inherits, says that 5.0.11
+  and later order them the other way and why it could not tell.
+  `Feature::ClassExtendDeferred` is still Whinlatter on (used through
+  `class_extend_order`).
 - **`RecipePreDeferredInherits`** (BitBake `205d461c0` "event: Add event for deferred
   inherits", branches `2.16` on; OE-core `d58f94d568` "base: Add deferred class event
   handler", Whinlatter and Wrynose): `finalize` fires it with `inherits = [x[0] for x in
@@ -1085,7 +1104,8 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
     BBCLASSEXTEND` (a substring test, so `nativesdk` alone also passes) it `setVarFilter`s
     `DEPENDS`, `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RREPLACES`, `PACKAGES`,
     `PACKAGES_DYNAMIC`, `PROVIDES` (`native_filter`) and renames `<VAR>:${PN}-x` package
-    variables. Flagged, never computed.
+    variables. Flagged, never computed; except (w11) the `PROVIDES` filter, computed on a
+    static value (see "Providers and versions").
   - `nativesdk.bbclass`: plain assignments, replayed; `nativesdk_virtclass_handler` (the
     rename above, reproduced; `DISTRO_FEATURES` flagged); anonymous python (when `PN` starts
     with `nativesdk-`): `oe.classextend.ClassExtender` filters on `DEPENDS`,
@@ -1191,11 +1211,32 @@ found. The file order inside a bucket is layer then path, not BitBake's collecti
 `DEFAULT_PREFERENCE`, `PE` and `PR` come from evaluating each candidate only when some
 non-`.conf` file (or a `.conf` statement with an override) sets one of them; values set by
 anonymous python are not seen. `BBMASK`, `SKIP_RECIPE` and `COMPATIBLE_*` are not applied.
-(w10) A `BBCLASSEXTEND` variant (`-native`, `nativesdk-`, `<variant>-`) is a provider of its
-own name when no indexed recipe provides that name: the base recipe's file (chosen as for
-its `PN`), confirmed by evaluating the base (see "Class-extended variants"); it is not
-found through the `PROVIDES` its class rewrites (`native_filter`, `suffix_filter`), and a
-real recipe of the same name hides it.
+(w10, w11) `BBCLASSEXTEND` variants. **What BitBake does** (2.18.0 `lib/bb/cache.py`
+`CoreRecipeInfo.__init__` and `add_cacheData`, read for w11): every variant's finalised
+datastore gets its own cache entry, `provides = explode_deps(getVar("PROVIDES"))` read
+**after** finalisation (so through any filter its class set), `pn = getVar("PN")`;
+`fn_provides[virtualfn] = [pn] + provides`, and `pkg_pn[pn]` gets the virtual file name. A
+skipped variant is not added. So a variant is a provider of its `PN` and of its rewritten
+`PROVIDES`, beside any real recipe of the same name, and `findBestProvider(<variant PN>)`
+chooses among all files of that `PN` with the version variables of **the variant's**
+`PN` (`PREFERRED_VERSION_<pn>-native`). **sous-chef** (w11): `Providers::best_version`
+counts the `native` / `nativesdk` variants of the base recipes whose finalised
+`BBCLASSEXTEND` lists the word as files of the variant's `PN` beside real recipes of that
+name (multilib variants only when no recipe has the name); `Providers::providers` finds
+variant candidates through `variant::provides_forms` (the base words the class can turn
+into the name: `x` and `x-native` for `x-native`, `a-cross-b` for `a-native-b`,
+`virtual/x` and the passed-through words for `virtual/nativesdk-x` / `nativesdk-x`),
+evaluates each variant and confirms it as for a real recipe; multilib variants are found
+by their `PN` only, and only when nothing else provides the name. The variant's `PROVIDES`:
+for `native`, `native_virtclass_handler` sets `native_filter` (OE-core Wrynose
+`lib/oe/classextend.py`) on it, which BitBake applies to the expanded value on every read
+(`data_smart.getVarFlag` -> `bb.filter.apply_filters`, only for a non-empty value); the
+replay computes it when the value is static and no anonymous python sets `PROVIDES` by name
+(and `BPN` is static when a word holds the variant's `PN`), recorded as a `handler` row with
+a note, else flags it. For `nativesdk` the filter is set by the class's anonymous python
+(`ClassExtender.set_filter("PROVIDES")`, `suffix_filter` / `add_suffix`) and for multilib
+by `multilib_virtclass_handler_postkeyexp`: not computed, so such a variant is listed as an
+uncertain provider (`python`) with a note saying its `PROVIDES` goes through python.
 (w10) `PREFERRED_PROVIDERS` is read as above (`Providers::preference`,
 `ProviderReason::PreferredProviders`): from the configuration's value, its static words
 only (a value with python adds a note that an entry may be missing); a malformed word
@@ -1818,7 +1859,7 @@ and must not be used to report an error. No row is marked *verify* at present.
 | `BuiltinFragments` | `addfragments` takes a fourth argument, the built-in fragments variable (`machine/x` sets `MACHINE`); the three-argument form is an unparsed line | 5.3 whinlatter (BitBake 2.16) | (current) | `3b9d7bea9` "parse/ast: add support for 'built-in' fragments", first in tag `yocto-5.3`; the four-group regex on branches `2.16` (`713fbbdb9`) and `2.18`, the three-group one on `2.12` and `yocto-5.2.4` |
 | `RecipeVirtualProviders` | `DEPENDS` words in `BB_RECIPE_VIRTUAL_PROVIDERS` are replaced with `PREFERRED_PROVIDER_<word>` at finalisation | 5.2 walnascar (BitBake 2.12) | (current) | `ast.py` `handleVirtRecipeProviders`: absent on branch `2.10`, present on `2.12`, `2.16`, `2.18`; added by `fb119c788` "parse/ast: Add support for BB_RECIPE_VIRTUAL_PROVIDERS" (2025-01-21, in tag `2.12.0`) (see "Replay") |
 | `AddPyLib` | the `addpylib` directive (base configuration only) | 4.2 mickledore (BitBake 2.4) | (current) | BitBake `ConfHandler.py` `feeder`: absent on branches `2.0` and `2.2`, present on `2.4` and `2.18`; added by `afb8478d3` (`2.3.1~96`) (see "Directives") |
-| `ClassExtendDeferred` | a `BBCLASSEXTEND` variant's class is deferred (`extendfunc` calls `BBHandler.inherit_defer`), so it is parsed after the recipe's own deferred inherits; before, it is inherited at once | 5.3 whinlatter (BitBake 2.16) | (current) | `ast.py` `multi_finalize` `extendfunc`: `inherit` on branches `2.0`, `2.6`, `2.10`, `2.12`; `inherit_defer` on `2.16`, `2.18` (`8e741b2e8`, in `2.15.0`); the head of `2.8` defers too (`139f61fe9`, Scarthgap point releases from `yocto-5.0.11`), which the table cannot tell apart, so Scarthgap is "at once" with a note (see "Class-extended variants") |
+| `ClassExtendDeferred` | a `BBCLASSEXTEND` variant's class is deferred (`extendfunc` calls `BBHandler.inherit_defer`), so it is parsed after the recipe's own deferred inherits; before, it is inherited at once | 5.3 whinlatter (BitBake 2.16) | (current) | `ast.py` `multi_finalize` `extendfunc`: `inherit` on branches `2.0`, `2.6`, `2.10`, `2.12`; `inherit_defer` on `2.16`, `2.18` (`8e741b2e8`, in `2.15.0`); the head of `2.8` defers too (`139f61fe9`, Scarthgap point releases from `yocto-5.0.11`), which the release alone cannot tell apart: on Scarthgap `release::class_extend_order` reads the workspace's BitBake (see "Class-extended variants") |
 | `DeferredInheritsClassOverride` | OE-core's `base_eventhandler` sets `CLASSOVERRIDE = "class-<c>"` on `RecipePreDeferredInherits` when `native`, `nativesdk`, `crosssdk` or `cross` is a deferred inherit | 5.3 whinlatter | (current) | OE-core `d58f94d568` "base: Add deferred class event handler" (branches `whinlatter`, `wrynose`, not `walnascar` or `scarthgap`); BitBake `205d461c0` "event: Add event for deferred inherits" (branches `2.16`, `2.18`) |
 | `PrInWorkdir` | `WORKDIR` ends in `${EXTENDPE}${PV}-${PR}` (later: `${PV}`) | 4.0 kirkstone (floor) | 4.2 mickledore | OE-core `meta/conf/bitbake.conf` on branches `kirkstone`, `langdale`, `mickledore` (`.../${PN}/${EXTENDPE}${PV}-${PR}`) and `nanbield`, `scarthgap` (`.../${PN}/${PV}`); Yocto migration guide 4.3, "Versioning changes" ("PE and PR are no longer included in the work directory path") |
 
@@ -2074,10 +2115,50 @@ in the live environment:
   `SKIP_RECIPE` is said only when its flag is static. (w10) The two matches are public as
   `eval::compatible_machine(need, entries)` and `eval::compatible_host(need, host_sys)` so
   they can be run with given values (`tests/skip_live.rs` runs them with BitBake's).
-  Skips the notes do not model: OE-core `base_eventhandler` on `RecipeParsed` skips a
-  recipe that provides a `virtual/` name (not in `BB_MULTI_PROVIDER_ALLOWED`) whose
-  `PREFERRED_PROVIDER_` names another `PN` ("PREFERRED_PROVIDER_x set to y, not z");
-  `features_check.bbclass` skips on `REQUIRED_DISTRO_FEATURES` and the like.
+  (w11) Two more skips, in the same three-way notes (`eval::skips`, `Replay::features_check_notes`,
+  `Replay::virtual_provider_notes`):
+  - **`features_check.bbclass`** (OE-core Wrynose `33a6bd6cc8`
+    `classes-recipe/features_check.bbclass`, anonymous python; Whinlatter the same;
+    `origin/scarthgap` has no `TUNE` kind, tests `PARSE_ALL_RECIPES` as a plain string, not
+    `bb.utils.to_boolean`, and words the `DISTRO` message like the others): unless
+    `PARSE_ALL_RECIPES` is true, for each kind of `DISTRO`, `MACHINE`, `COMBINED`, `IMAGE`,
+    `TUNE` in that order, with `features = set(<kind>_FEATURES.split())`: a non-empty
+    `ANY_OF_<kind>_FEATURES` disjoint from it skips ("one of '<any>' needs to be in
+    <kind>_FEATURES"), then the words of `REQUIRED_<kind>_FEATURES` missing from it ("using
+    DISTRO '<DISTRO>', which is missing required DISTRO_FEATURES: '<missing>'"; for the other
+    kinds "missing required <kind> feature[s] '<missing>' (not in <kind>_FEATURES)"), then
+    the words of `CONFLICT_<kind>_FEATURES` in it ("conflicting <kind> feature[s] '<x>' (in
+    <kind>_FEATURES)"); the first raise ends it. A kind with none of the three set is passed
+    over (only the "doesn't use it" warning depends on that). sous-chef runs it when the
+    recipe inherits the class, reading the kinds list (`for kind in [...]`), the
+    `PARSE_ALL_RECIPES` test and the `DISTRO` wording from the workspace's own class: "would
+    skip" when a check fails on known words (a required word missing from a value known
+    completely, a conflicting word among the known words, an `ANY_OF` list disjoint from a
+    value known completely; when an earlier check of the class's order is undecided, the
+    note adds that BitBake may give that reason instead), "may skip" naming the list that is
+    not known (python, undefined variables, a value anonymous python or a handler changes),
+    nothing when every check passes on known words. Message word order: Python joins a
+    `set`; here the words are sorted.
+  - **`base_eventhandler` on `RecipeParsed`** (OE-core Wrynose `classes-global/base.bbclass`;
+    Kirkstone and Scarthgap the same code with `SOURCE_MIRROR_FETCH` tested as a plain
+    string): unless `SOURCE_MIRROR_FETCH` is true, for each word `p` of the recipe's final
+    `PROVIDES` that starts with `virtual/` and is not in `BB_MULTI_PROVIDER_ALLOWED`,
+    `PREFERRED_PROVIDER_<p>` **as the recipe's own datastore expands it** that is non-empty
+    and not the recipe's `PN` skips it ("PREFERRED_PROVIDER_<p> set to <x>, not <pn>"). It
+    reads neither `PREFERRED_PROVIDERS` nor other recipes: it is not provider selection,
+    so sous-chef decides it from the evaluated recipe, not from `eval::providers`. Run when
+    the workspace's `base_eventhandler` handles `RecipeParsed` with that code (`"PREFERRED_PROVIDER_"
+    + p` in its body). "Would skip" on static values; "may skip" when the preference, `PN`
+    or `BB_MULTI_PROVIDER_ALLOWED` is not known, or when `PROVIDES` is not known and its
+    python part (or, for a value python changes, its known words) mentions `virtual/`; a
+    `PROVIDES` word python makes from text without `virtual/` is not considered.
+
+  On yocto-kiss (w11, `tests/skip_live.rs`): the static notes say "would skip" for 13
+  recipes (barebox, u-boot, edk2-firmware for `virtual/bootloader`; musl, musl-locales,
+  newlib, picolibc, mesa-gl, linux-dummy, linux-yocto-dev, linux-yocto-rt, linux-yocto-tiny
+  for their virtual providers; systemd for `CONFLICT_DISTRO_FEATURES = "sysvinit"`), none of
+  them one BitBake parsed; most `features_check` notes are "may skip" because the static
+  `DISTRO_FEATURES` there holds python.
 - **`INCOMPATIBLE_LICENSE`** (OE-core Wrynose `33a6bd6c`, `classes-global/base.bbclass`
   anonymous python lines 591-621, only when neither `SOURCE_MIRROR_FETCH` nor
   `PARSE_ALL_RECIPES` is true; `lib/oe/license.py` `skip_incompatible_package_licenses`,
@@ -2124,14 +2205,23 @@ against BitBake's behaviour or output:
   (the live environment ran only `kas checkout`, `kas dump` and `kas shell -c`); the kas
   keys sous-chef does not read (`env`, `patches`, ...) were not looked at.
 - The skip and license notes ("Skipped recipes", `INCOMPATIBLE_LICENSE`, the `BBMASK`
-  difference note): from the BitBake and OE-core source and fixture tests. No "would skip"
-  note fires on yocto-kiss (its `MACHINEOVERRIDES` holds python, `INCOMPATIBLE_LICENSE` is
-  unset). (w10) The machine and host checks themselves were compared with BitBake by
+  difference note): from the BitBake and OE-core source and fixture tests. (w11) On
+  yocto-kiss 13 "would skip" notes fire (the virtual-provider and `features_check` checks),
+  none for a recipe BitBake parsed and none for one `show-appends` lists as not skipped;
+  the machine and host checks there still give "may skip" only (`MACHINEOVERRIDES` holds
+  python), and `INCOMPATIBLE_LICENSE` is unset. (w10) The machine and host checks themselves were compared with BitBake by
   running them with the `MACHINEOVERRIDES` / `HOST_SYS` from the `bitbake -e` dumps
   (differential.md, "Workspace-level comparisons", skip checks): 83 recipes judged skipped,
   none of them one BitBake parsed, 16 of 24 `show-appends` verdicts the same and the other
-  8 skipped by BitBake for values or checks outside them. The license check and a "would
-  skip" note on real static values remain uncompared.
+  8 skipped by BitBake for values or checks outside them. (w11) With the `features_check`
+  and virtual-provider checks added: 21 of 24 the same; the 3 left have a
+  `COMPATIBLE_MACHINE` that is not static. Not compared: the license check, and the
+  reason BitBake gives (the comparison sees only skipped or not, so a "would skip" note
+  naming a later check than the one BitBake raises first is not caught).
+- The variant class order on Scarthgap ("Class-extended variants") and the `native`
+  `PROVIDES` filter: from the BitBake / OE-core source and fixture tests; the filter's
+  result matched `bitbake -e gmp-native` (`PROVIDES`, differential.md "After w11-final");
+  no Scarthgap workspace was run.
 - The class type of an `inherit` in an `.inc` that a `.conf` or a global class reaches
   ("Which handler parses an included file"): from the source and tests; no such `inherit`
   exists on yocto-kiss (every `inherit` in an `.inc` there is reached from recipes only).

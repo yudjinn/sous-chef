@@ -81,13 +81,14 @@ use sha2::{Digest, Sha256};
 use super::datastore::{Content, OpKind, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
 use super::license;
+use super::skips;
 use super::variant::ClassExtend;
 use super::{DataStore, FileVisit, OpStatus, Overlay, Target, VarOp};
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
 use crate::index::{self, Index};
 use crate::parse::words as pwords;
-use crate::release::Feature;
+use crate::release::{ClassExtendOrder, Feature};
 use crate::types::{AssignOp, FileKind, LineSpan, Loc, VarRef};
 use crate::workspace::Workspace;
 use crate::workspace::resolve::{self, Resolver};
@@ -967,6 +968,14 @@ fn recipe_pass(
         r.finalize(&recipe_loc)?;
         return Ok(r.ds);
     };
+    // Before BitBake's 139f61fe9 (release::ClassExtendOrder), multi_finalize runs the
+    // deferred inherits here, on the base recipe, before the variants are made.
+    let bb = crate::release::workspace_bitbake(&ws.layers);
+    let (order, order_note) = crate::release::class_extend_order(ws.release.release, bb.as_deref());
+    let had_deferred = !r.ds.notes.deferred.is_empty();
+    if order == ClassExtendOrder::BaseDeferredThenClass {
+        r.run_deferred()?;
+    }
     // ast.multi_finalize: the base is finalised on a copy, and BBCLASSEXTEND and PN are
     // read from it; the variant starts again from the datastore before finalisation.
     let safe = r.ds.fork();
@@ -1004,7 +1013,7 @@ fn recipe_pass(
         });
     }
     r.ds = safe;
-    r.extend_variant(ext, &base_pn, &recipe_loc)?;
+    r.extend_variant(ext, &base_pn, &recipe_loc, order, order_note, had_deferred)?;
     r.finalize(&recipe_loc)?;
     // The name comes from OE-core's naming (eval::variant); the variant's PN is what its
     // class made of it.
@@ -1047,6 +1056,36 @@ fn static_value(ds: &DataStore, name: &str) -> Option<Option<String>> {
         None => Some(None),
         Some(v) if v.unevaluated_python || !v.unresolved.is_empty() => None,
         Some(v) => Some(Some(v.text)),
+    }
+}
+
+/// What is known of the list value `name` ([`skips::Words`]): unset is empty and known; a
+/// value anonymous python or a handler changes by name is not known at all; otherwise its
+/// known words, complete when it holds no python and no undefined variable.
+fn words_of(ds: &DataStore, name: &str) -> skips::Words {
+    if ds.replay().python_vars.contains(name) {
+        return skips::Words {
+            known: BTreeSet::new(),
+            complete: false,
+            why: Some(unknown_why(ds, name)),
+        };
+    }
+    let Some(v) = ds.value(name) else {
+        return skips::Words::of("");
+    };
+    let all = pwords::words(&v.text);
+    let known: BTreeSet<String> = all
+        .iter()
+        .filter(|w| !pwords::is_unevaluated(w))
+        .map(|w| w.to_string())
+        .collect();
+    let complete = !v.unevaluated_python
+        && v.unresolved.is_empty()
+        && all.iter().all(|w| !pwords::is_unevaluated(w));
+    skips::Words {
+        known,
+        complete,
+        why: (!complete).then(|| unknown_why(ds, name)),
     }
 }
 
@@ -1919,6 +1958,9 @@ struct Replay<'a> {
     /// `(variable, value, origin)` kas would write into `local.conf` as `VAR ??= "value"`,
     /// still to be applied (a kas project without a build directory; see `config_pass`).
     kas_local: Vec<(String, String, String)>,
+    /// `native_virtclass_handler` set its `native_filter` on `PROVIDES`: `(pn, bpn, where)`
+    /// as the handler captured them (`bpn` `None` when not known statically).
+    native_provides: Option<(String, Option<String>, Loc)>,
 }
 
 impl<'a> Replay<'a> {
@@ -1944,6 +1986,7 @@ impl<'a> Replay<'a> {
             taint: Vec::new(),
             overlay: None,
             kas_local: Vec::new(),
+            native_provides: None,
         }
     }
 
@@ -3191,6 +3234,27 @@ impl Replay<'_> {
                 );
             }
         }
+        self.run_deferred()?;
+        self.class_extend_handlers(recipe);
+        let incomplete = self.ds.expand_keys();
+        Arc::make_mut(&mut self.ds.notes).incomplete_keys = incomplete;
+        self.multilib_postkeyexp(recipe);
+        // (BitBake runs anonymous python here, which the replay does not.)
+        if self.ws.release.release.has(Feature::RecipeVirtualProviders) {
+            virtual_recipe_providers(&mut self.ds, recipe);
+        }
+        self.apply_native_provides_filter();
+        let mut skip = skip_reasons(&self.ds);
+        skip.extend(self.features_check_notes());
+        skip.extend(self.virtual_provider_notes());
+        if !skip.is_empty() {
+            Arc::make_mut(&mut self.ds.notes).target_notes.extend(skip);
+        }
+        Ok(())
+    }
+
+    /// The deferred inherits, first in first out (more may be added meanwhile).
+    fn run_deferred(&mut self) -> Result<()> {
         loop {
             let next = {
                 let notes = Arc::make_mut(&mut self.ds.notes);
@@ -3203,26 +3267,23 @@ impl Replay<'_> {
             let Some(d) = next else { break };
             self.inherit(&d.text, d.loc.as_ref(), &d.via, true, "inherit_defer")?;
         }
-        self.class_extend_handlers(recipe);
-        let incomplete = self.ds.expand_keys();
-        Arc::make_mut(&mut self.ds.notes).incomplete_keys = incomplete;
-        self.multilib_postkeyexp(recipe);
-        // (BitBake runs anonymous python here, which the replay does not.)
-        if self.ws.release.release.has(Feature::RecipeVirtualProviders) {
-            virtual_recipe_providers(&mut self.ds, recipe);
-        }
-        let skip = skip_reasons(&self.ds);
-        if !skip.is_empty() {
-            Arc::make_mut(&mut self.ds.notes).target_notes.extend(skip);
-        }
         Ok(())
     }
 
     /// `extendfunc` of `ast.multi_finalize` on the copy of the datastore before
     /// finalisation: `BBEXTENDCURR` / `BBEXTENDVARIANT` for a word with an argument, else
-    /// `PN = "<pn>-<word>"`; then the class, deferred ([`Feature::ClassExtendDeferred`]) or
-    /// at once.
-    fn extend_variant(&mut self, ext: &ClassExtend, pn: &str, recipe: &Loc) -> Result<()> {
+    /// `PN = "<pn>-<word>"`; then the class, appended to the deferred inherits
+    /// ([`ClassExtendOrder::PerVariantDeferred`]) or inherited at once (the base's deferred
+    /// inherits already ran, in `recipe_pass`). `order_note`: why the order is not known.
+    fn extend_variant(
+        &mut self,
+        ext: &ClassExtend,
+        pn: &str,
+        recipe: &Loc,
+        order: ClassExtendOrder,
+        order_note: Option<String>,
+        had_deferred: bool,
+    ) -> Result<()> {
         match ext.variant() {
             Some(v) => {
                 self.ds.rewrite(
@@ -3260,21 +3321,25 @@ impl Replay<'_> {
             ext.word,
             ext.class()
         )];
-        let deferred_before = !self.ds.notes.deferred.is_empty();
-        if self.ws.release.release.has(Feature::ClassExtendDeferred) {
-            Arc::make_mut(&mut self.ds.notes).deferred.push(Deferred {
-                text: ext.class().to_string(),
-                loc: None,
-                via: Vec::new(),
-            });
-        } else {
-            if deferred_before && self.ws.release.release.has(Feature::InheritDefer) {
-                notes.push(format!(
-                    "note: on this release BitBake inherits `{}` at once, before the recipe's deferred inherits (BitBake before 2.16); the Scarthgap point releases from 5.0.11 (BitBake 2.8 with 139f61fe9) defer it after them, as 2.16 does, which this evaluation does not follow",
-                    ext.class()
-                ));
+        if let Some(why) = order_note
+            && had_deferred
+        {
+            notes.push(format!(
+                "note: the recipe has deferred inherits, and the order of `{}` against them is not known: {why}",
+                ext.class()
+            ));
+        }
+        match order {
+            ClassExtendOrder::PerVariantDeferred => {
+                Arc::make_mut(&mut self.ds.notes).deferred.push(Deferred {
+                    text: ext.class().to_string(),
+                    loc: None,
+                    via: Vec::new(),
+                });
             }
-            self.inherit(ext.class(), None, &[], false, "BBCLASSEXTEND")?;
+            ClassExtendOrder::BaseDeferredThenClass => {
+                self.inherit(ext.class(), None, &[], false, "BBCLASSEXTEND")?;
+            }
         }
         let n = Arc::make_mut(&mut self.ds.notes);
         n.variant = Some(ext.clone());
@@ -3319,6 +3384,246 @@ impl Replay<'_> {
             .any(|p| p.file_name().is_some_and(|f| f.to_string_lossy() == needle))
     }
 
+    /// `native_virtclass_handler`'s `d.setVarFilter("PROVIDES", "native_filter(val, pn,
+    /// bpn)")`: BitBake applies the filter to the expanded value on every `getVar` (BitBake
+    /// 2.18.0 `data_smart.getVarFlag`, `bb.filter.apply_filters`, only for a non-empty
+    /// value), so the final `PROVIDES`, the one `bb.cache.CoreRecipeInfo` registers for the
+    /// variant, is `native_filter(<final expanded value>)`. Computed here when that value is
+    /// static and no anonymous python sets `PROVIDES` by name; then recorded as a handler
+    /// operation with a note. Otherwise `PROVIDES` is flagged, as before w11.
+    fn apply_native_provides_filter(&mut self) {
+        const NATIVE: &str = "native_virtclass_handler";
+        let Some((pn, bpn, loc)) = self.native_provides.take() else {
+            return;
+        };
+        let v = self.ds.value("PROVIDES").unwrap_or_default();
+        let by_python = self.ds.notes.python_vars.contains("PROVIDES");
+        let computed = if by_python || v.unevaluated_python || !v.unresolved.is_empty() {
+            None
+        } else {
+            match super::variant::native_filter(&v.text, &pn, bpn.as_deref()) {
+                None => return,
+                Some(Ok(t)) => Some(t),
+                Some(Err(())) => None,
+            }
+        };
+        match computed {
+            Some(t) => {
+                let note = format!(
+                    "note: {NATIVE} (an OE-core event handler at {loc}) filters PROVIDES with native_filter (OE-core lib/oe/classextend.py), which BitBake applies when the value is read: \"{}\" becomes \"{t}\" (computed from the static value)",
+                    v.text
+                );
+                self.ds
+                    .rewrite("PROVIDES", t, loc.clone(), OpKind::EventHandler);
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                notes
+                    .var_notes
+                    .entry("PROVIDES".into())
+                    .or_default()
+                    .push(note);
+            }
+            None => self.handler_flags(NATIVE, &loc, &strings(&["PROVIDES"]), "filters"),
+        }
+    }
+
+    /// The text of the anonymous python function defined in class `<class>.bbclass`.
+    fn class_anonymous_body(&self, class: &str) -> Option<String> {
+        let file = format!("{class}.bbclass");
+        let anon = self.ds.notes.anonymous.iter().find(|a| {
+            a.loc
+                .path
+                .file_name()
+                .is_some_and(|f| f.to_string_lossy() == file)
+        })?;
+        self.body_text(&anon.loc)
+    }
+
+    /// OE-core `features_check.bbclass` (see [`super::skips`]), when the recipe inherits
+    /// it: "would skip" when a check fails on known values, "may skip" naming what is not
+    /// known, nothing when every check passes. What the class compares and how it reads
+    /// `PARSE_ALL_RECIPES` are read from the workspace's own class (its `for kind in [...]`
+    /// list; `bb.utils.to_boolean` or a plain string; the `DISTRO` wording).
+    fn features_check_notes(&self) -> Vec<String> {
+        const TAIL: &str = "(features_check.bbclass; decided from static values)";
+        const MAY: &str = "note: BitBake may skip this recipe:";
+        if !self.inherits_class("features_check") {
+            return Vec::new();
+        }
+        let Some(body) = self.class_anonymous_body("features_check") else {
+            return vec![format!(
+                "{MAY} it inherits features_check, whose anonymous python could not be read, so its REQUIRED / CONFLICT / ANY_OF feature checks were not made"
+            )];
+        };
+        static KINDS: LazyLock<Option<Regex>> =
+            LazyLock::new(|| Regex::new(r"for\s+kind\s+in\s+\[([^\]]*)\]").ok());
+        let kinds: Vec<String> = KINDS
+            .as_ref()
+            .and_then(|re| re.captures(&body))
+            .and_then(|c| c.get(1))
+            .map(|m| {
+                m.as_str()
+                    .split(',')
+                    .map(|k| k.trim().trim_matches(['\'', '"']).to_string())
+                    .filter(|k| !k.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if kinds.is_empty() {
+            return vec![format!(
+                "{MAY} it inherits features_check, whose anonymous python is not the one sous-chef knows (no `for kind in [...]` list), so its feature checks were not made"
+            )];
+        }
+        let parse_all = if body.contains("to_boolean(d.getVar('PARSE_ALL_RECIPES'") {
+            static_bool(&self.ds, "PARSE_ALL_RECIPES")
+        } else {
+            static_value(&self.ds, "PARSE_ALL_RECIPES").map(|v| v.is_some_and(|t| !t.is_empty()))
+        };
+        if parse_all == Some(true) {
+            return Vec::new();
+        }
+        let distro_message = body.contains("which is missing required");
+        let mut unknown = Vec::new();
+        for kind in &kinds {
+            let lists = skips::KindLists {
+                any_of: words_of(&self.ds, &format!("ANY_OF_{kind}_FEATURES")),
+                required: words_of(&self.ds, &format!("REQUIRED_{kind}_FEATURES")),
+                conflict: words_of(&self.ds, &format!("CONFLICT_{kind}_FEATURES")),
+                features: words_of(&self.ds, &format!("{kind}_FEATURES")),
+                kind_value: self.ds.value(kind).map(|v| v.text).unwrap_or_default(),
+            };
+            for c in skips::features_kind(kind, &lists, distro_message) {
+                match c {
+                    skips::Check::Pass => {}
+                    skips::Check::Skip(msg) if parse_all == Some(false) => {
+                        // Certain; but a check BitBake makes first may raise first, with
+                        // its own message.
+                        let earlier = if unknown.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                "; BitBake may give an earlier reason instead ({})",
+                                unknown.join("; ")
+                            )
+                        };
+                        return vec![format!(
+                            "note: BitBake would skip this recipe: {msg} {TAIL}{earlier}"
+                        )];
+                    }
+                    skips::Check::Skip(msg) => unknown.push(format!(
+                        "features_check: {msg}, unless PARSE_ALL_RECIPES is true (not known statically)"
+                    )),
+                    skips::Check::Unknown(why) => unknown.push(why),
+                }
+            }
+        }
+        unknown.into_iter().map(|u| format!("{MAY} {u}")).collect()
+    }
+
+    /// OE-core `base_eventhandler` on `RecipeParsed` (see [`super::skips`]): a recipe that
+    /// provides a `virtual/` name whose `PREFERRED_PROVIDER_` (the recipe's own value)
+    /// names another `PN` is skipped. Only when the workspace's handler handles
+    /// `RecipeParsed` with that code (`"PREFERRED_PROVIDER_" + p` in its body).
+    fn virtual_provider_notes(&self) -> Vec<String> {
+        const TAIL: &str = "(base_eventhandler on RecipeParsed; decided from static values)";
+        const MAY: &str = "note: BitBake may skip this recipe:";
+        const H: &str = "base_eventhandler";
+        if !self.handles(H, "RecipeParsed") {
+            return Vec::new();
+        }
+        let Some(body) = self
+            .ds
+            .function(H)
+            .and_then(|p| p.first().map(|p| p.loc.clone()))
+            .and_then(|loc| self.body_text(&loc))
+        else {
+            return Vec::new();
+        };
+        if !body.contains("\"PREFERRED_PROVIDER_\" + p") {
+            return Vec::new();
+        }
+        let mirror = if body.contains("to_boolean(d.getVar('SOURCE_MIRROR_FETCH'") {
+            static_bool(&self.ds, "SOURCE_MIRROR_FETCH")
+        } else {
+            static_value(&self.ds, "SOURCE_MIRROR_FETCH").map(|v| v.is_some_and(|t| !t.is_empty()))
+        };
+        if mirror == Some(true) {
+            return Vec::new();
+        }
+        let provides = words_of(&self.ds, "PROVIDES");
+        let allowed = words_of(&self.ds, "BB_MULTI_PROVIDER_ALLOWED");
+        let pn = static_value(&self.ds, "PN").flatten();
+        let mut unknown = Vec::new();
+        for p in provides.known.iter().filter(|p| p.starts_with("virtual/")) {
+            if allowed.known.contains(p) {
+                continue;
+            }
+            let pref_name = format!("PREFERRED_PROVIDER_{p}");
+            let pref = match static_value(&self.ds, &pref_name) {
+                Some(v) => v,
+                None => {
+                    unknown.push(format!(
+                        "it provides {p}, and {pref_name} is not known statically ({})",
+                        unknown_why(&self.ds, &pref_name)
+                    ));
+                    continue;
+                }
+            };
+            let Some(x) = pref.filter(|x| !x.is_empty()) else {
+                continue;
+            };
+            let Some(pn) = pn.as_deref() else {
+                unknown.push(format!(
+                    "it provides {p} and {pref_name} = \"{x}\", but its PN is not known statically"
+                ));
+                continue;
+            };
+            let Some(msg) = skips::virtual_provider_skip(p, Some(&x), pn) else {
+                continue;
+            };
+            let mut why = Vec::new();
+            if !allowed.complete {
+                why.push(format!(
+                    "BB_MULTI_PROVIDER_ALLOWED is not known statically ({}), and could list {p}",
+                    allowed.why.as_deref().unwrap_or("not evaluated")
+                ));
+            }
+            if mirror.is_none() {
+                why.push("SOURCE_MIRROR_FETCH is not known statically".into());
+            }
+            if why.is_empty() {
+                return vec![format!(
+                    "note: BitBake would skip this recipe: {msg} {TAIL}"
+                )];
+            }
+            unknown.push(format!("{msg}, unless {}", why.join("; ")));
+        }
+        // PROVIDES words python makes are not seen; say so only when they may be virtual.
+        if !provides.complete {
+            let raw = self
+                .ds
+                .value("PROVIDES")
+                .map(|v| v.text)
+                .unwrap_or_default();
+            let maybe_virtual = pwords::words(&raw)
+                .iter()
+                .any(|w| pwords::is_unevaluated(w) && w.contains("virtual/"))
+                || (self.ds.notes.python_vars.contains("PROVIDES")
+                    && pwords::known_words(&raw)
+                        .iter()
+                        .any(|w| w.starts_with("virtual/")));
+            if maybe_virtual {
+                unknown.push(format!(
+                    "PROVIDES is not known statically ({}), and a virtual/ name it provides may have a PREFERRED_PROVIDER_ naming another recipe",
+                    provides.why.as_deref().unwrap_or("not evaluated")
+                ));
+            }
+        }
+        unknown
+            .into_iter()
+            .map(|u| format!("{MAY} {u} (base_eventhandler on RecipeParsed)"))
+            .collect()
+    }
+
     /// Flags `vars` as changed by event handler `handler` (not run): their values carry
     /// `unevaluated_python`, and each gets a note.
     fn handler_flags(&mut self, handler: &str, loc: &Loc, vars: &[String], how: &str) {
@@ -3357,7 +3662,23 @@ impl Replay<'_> {
                     let ce = self.ds.value("BBCLASSEXTEND").unwrap_or_default();
                     let unsure = ce.unevaluated_python || !ce.unresolved.is_empty();
                     if ce.text.contains("native") || unsure || pn.is_none() {
-                        vars.extend(strings(NATIVE_FILTERED));
+                        // The PROVIDES filter is computed at the end of finalisation
+                        // ([`Replay::apply_native_provides_filter`]) when PN is known and
+                        // the filter certainly applies; otherwise flagged with the rest.
+                        let certain = !unsure && ce.text.contains("native");
+                        match (&pn, certain) {
+                            (Some(Some(p)), true) => {
+                                let bpn = static_value(&self.ds, "BPN").flatten();
+                                vars.extend(
+                                    NATIVE_FILTERED
+                                        .iter()
+                                        .filter(|v| **v != "PROVIDES")
+                                        .map(|v| v.to_string()),
+                                );
+                                self.native_provides = Some((p.clone(), bpn, loc.clone()));
+                            }
+                            _ => vars.extend(strings(NATIVE_FILTERED)),
+                        }
                     }
                     self.handler_flags(NATIVE, &loc, &vars, "filters");
                 }

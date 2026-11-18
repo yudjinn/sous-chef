@@ -481,6 +481,33 @@ pub fn run(
     run_with(ws, index, config, target, options, all_rules(), &Replay)
 }
 
+/// Called by the engine as it goes through the files of a lint run with `(done, total)`:
+/// the files finished and the files planned. Called before each file (from `(0, total)`)
+/// and once after the last with `(total, total)`; never when no file is planned.
+pub type Progress<'a> = &'a dyn Fn(usize, usize);
+
+/// [`run`] reporting each file to `progress` (the `lint` and `audit` tools turn it into
+/// MCP progress notifications).
+pub fn run_progress(
+    ws: &Workspace,
+    index: &Index,
+    config: &Config,
+    target: &Target,
+    options: &Options,
+    progress: Progress<'_>,
+) -> Result<Report> {
+    run_with_progress(
+        ws,
+        index,
+        config,
+        target,
+        options,
+        all_rules(),
+        &Replay,
+        Some(progress),
+    )
+}
+
 /// [`run`] with the rule set and the evaluator given (tests).
 pub fn run_with(
     ws: &Workspace,
@@ -490,6 +517,21 @@ pub fn run_with(
     options: &Options,
     rules: &[&dyn Rule],
     eval: &dyn Evaluate,
+) -> Result<Report> {
+    run_with_progress(ws, index, config, target, options, rules, eval, None)
+}
+
+/// [`run_with`] with an optional per-file [`Progress`] hook.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_progress(
+    ws: &Workspace,
+    index: &Index,
+    config: &Config,
+    target: &Target,
+    options: &Options,
+    rules: &[&dyn Rule],
+    eval: &dyn Evaluate,
+    progress: Option<Progress<'_>>,
 ) -> Result<Report> {
     let mut report = Report::default();
     let selected = select_rules(config, options, rules, &mut report.notes)?;
@@ -520,7 +562,16 @@ pub fn run_with(
         .map(|(f, _)| (f.layer, f.path))
         .collect();
 
-    for abs in &plan.files {
+    let total = plan.files.len();
+    let tell = |done: usize| {
+        if let Some(p) = progress
+            && total > 0
+        {
+            p(done, total);
+        }
+    };
+    for (done, abs) in plan.files.iter().enumerate() {
+        tell(done);
         let Some(loc0) = ws.loc_for(abs, LineSpan::line(1)) else {
             report.notes.push(format!(
                 "skipped {}: not inside a layer or the build directory",
@@ -602,6 +653,7 @@ pub fn run_with(
             )),
         }
     }
+    tell(total);
     if eval_unavailable {
         let ids: Vec<&str> = recipe_rules.iter().map(|r| r.id()).collect();
         report.notes.push(format!(

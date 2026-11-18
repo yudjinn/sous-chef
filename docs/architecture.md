@@ -537,8 +537,15 @@ per `MIN_INTERVAL` (250 ms), the newest update, and the pending one when the too
 `call_tool` waits for it (at most `FLUSH_WAIT`, 2 s, then aborts it) before returning, so no
 notification follows the result. Senders: `bitbake::job_progress()` / `queue_progress()`
 (ticks for `JobTable::wait_with` / `start_or_queue`, used by `bitbake` with `wait` and the
-authoritative `var`), and the `audit` tool's stage hook (the audit runs in `block_in_place`
-on the multi-threaded runtime, so the forwarder runs while lint blocks its thread).
+authoritative `var`), the `audit` tool's stage hook (the audit runs in `block_in_place`
+on the multi-threaded runtime, so the forwarder runs while lint blocks its thread), and
+(w11) the lint engine's per-file hook: `lint::run_progress(ws, index, config, target,
+options, progress: lint::Progress)` and `lint::run_with_progress(..., rules, eval,
+Option<Progress>)` (`lint::Progress<'a> = &'a dyn Fn(usize, usize)`, called with `(done,
+total)` before each planned file and once with `(total, total)`; `lint::run` and
+`run_with` are unchanged), used by the `lint` tool (`tools::lint::file_progress`, run
+through `progress::blocking`, the `block_in_place` wrapper) and the audit's lint stage
+(`audit::Options::lint_progress: Option<fn(usize, usize)>`).
 
 As implemented in T2.5:
 
@@ -842,7 +849,7 @@ and version only, no configuration) was still what `item`, `search` and the `bba
 generator used after wave 4; since wave 5 they use `recipe::resolve_selected` (provider
 selection), and `bitbake::logs` is the remaining user. Not handled by provider selection:
 `BBCLASSEXTEND` variants until w10 (`-native` names found no provider; since w10 a variant
-is a provider of its name, see "As implemented after wave 5"), `SKIP_RECIPE`, `COMPATIBLE_*` and `INCOMPATIBLE_LICENSE` (since w6 / w8 only a
+is a provider of its name, since w11 also of its rewritten `PROVIDES`, see "As implemented after wave 5"), `SKIP_RECIPE`, `COMPATIBLE_*`, `INCOMPATIBLE_LICENSE`, `features_check` and the `RecipeParsed` virtual-provider skip (since w6 / w8 / w11 only a
 note on the evaluation). A file a static `BBMASK` masks is no candidate since w6 (the
 index's `not_collected` mark).
 
@@ -1091,7 +1098,9 @@ As for wave 5: the additions of the rounds after it (w6: `w6-audit`, `w6-fix`; w
 added MCP progress notifications (the MCP server section), `[handles]` retention
 ("Configuration") and the job queue behind a read-only job ("Jobs", below), and
 `w10-eval`, which added class-extended variants, `PREFERRED_PROVIDERS` and the `BBMASK`
-inputs); the module docs in the
+inputs; w11: `w11-final`, which added lint progress per file, the `features_check` and
+`RecipeParsed` skip notes, variants as providers through their rewritten `PROVIDES`, and
+the variant class order per BitBake branch); the module docs in the
 named files are the detailed reference. Two tools were added (`audit`, `diff`, both
 deferred, so `TOOLS` has 16 rows: 6 always loaded, 10 deferred), each also a CLI subcommand.
 
@@ -1263,6 +1272,26 @@ Result<Option<(Selection, DataStore)>>`; `Providers::best_version` and `Provider
 fall back to it when no indexed recipe has the name; `Providers::evaluate_selection(&Selection)`.
 `Feature::ClassExtendDeferred`, `Feature::DeferredInheritsClassOverride` (`Feature::ALL` has
 twelve). bitbake-semantics.md, "Class-extended variants", has the rules.
+(w11) Variants as providers: `Providers::best_version` counts `native` / `nativesdk`
+variants as files of their `PN` beside real recipes of that name (no longer only when no
+recipe has it), with the version variables of the variant's `PN`;
+`Providers::variant_files(name, native_only) -> Result<Vec<(RecipeRow, ClassExtend)>>`
+(new); `Providers::variant` chooses among those; `Providers::providers` finds variants
+through `variant::provides_forms(name)` (new, with `variant::native_filter`,
+`variant::add_suffix`, `variant::explode_deps`, OE-core's and BitBake's functions) and
+evaluates them. The replay computes `native_virtclass_handler`'s `PROVIDES` filter
+(`Replay::apply_native_provides_filter`) instead of flagging it, when the value is static.
+Variant class order (w11, `src/release.rs`): `ClassExtendOrder { BaseDeferredThenClass,
+PerVariantDeferred }`, `BitbakeSource { dir, version, order }`, `bitbake_version(init_py)`,
+`class_extend_order_in(ast_py)`, `workspace_bitbake(&[Layer]) ->
+Option<Arc<BitbakeSource>>` (cached per directory), `class_extend_order(Release,
+Option<&BitbakeSource>) -> (ClassExtendOrder, Option<String>)`; `replay::recipe_pass` runs the
+base's deferred inherits before making the variant for `BaseDeferredThenClass`
+(`Replay::run_deferred`), and `Replay::extend_variant` takes the order.
+Skip notes (w11, `eval::skips`, public): `Words`, `Check`, `KindLists`, `FEATURE_KINDS`,
+`features_kind`, `features_skip(kind, kind_value, any_of, required, conflict, features) ->
+Option<String>`, `virtual_provider_skip(p, preferred, pn) -> Option<String>`; the replay
+adds the `features_check.bbclass` and `base_eventhandler` `RecipeParsed` notes.
 
 kas (w8, `workspace::kas`):
 
