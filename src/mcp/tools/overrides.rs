@@ -99,6 +99,9 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
             what.join(" and ")
         ));
     }
+    for n in super::var::python_eval_notes(&ds.python_log("OVERRIDES")) {
+        t.note(&n.replacen("note: python", "note: OVERRIDES: python", 1));
+    }
     for n in replay_notes(&ds, "OVERRIDES") {
         if n.starts_with("warning: anonymous python") && n.contains("computed names") {
             t.note(&n);
@@ -238,8 +241,15 @@ fn attribute_text(
         let (out, from) = match &piece {
             Piece::Lit(s) => (s.clone(), None),
             Piece::Ref(n) if n.starts_with('@') => {
-                *python = true;
-                (String::new(), None)
+                // Python the evaluator computes statically (a pure helper reading certain
+                // values) contributes its text, credited to the assignment.
+                let v = ds.expand(&format!("${{{n}}}"));
+                if v.unevaluated_python || !v.unresolved.is_empty() {
+                    *python = true;
+                    (String::new(), None)
+                } else {
+                    (v.text, None)
+                }
             }
             Piece::Ref(n) => {
                 let v = ds.expand(&format!("${{{n}}}"));

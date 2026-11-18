@@ -465,7 +465,7 @@ fn override_dead_does_not_take_python_code_for_override_names() {
 /// place a rule splits one: no finding may be about a fragment of the expression.
 #[test]
 fn rules_do_not_split_python_expressions() {
-    const PY: &str = "${@' file://fix.patch' if d.getVar('X') else 'a:b'}";
+    const PY: &str = "${@' file://fix.patch' if oe.utils.read_file('x') else 'a:b'}";
     let fx = modified(|r| {
         append_to(
             r,
@@ -658,7 +658,7 @@ fn a_bbmask_with_python_is_said_to_be_unapplied() {
         append_to(
             r,
             "build/conf/local.conf",
-            "BBMASK = \"${@'meta-mine/recipes-app/' if d.getVar('X') else ''}\"\n",
+            "BBMASK = \"${@'meta-mine/recipes-app/' if oe.utils.read_file('x') else ''}\"\n",
         );
     });
     // Not applied: the recipe is still found.
@@ -742,7 +742,7 @@ fn an_undecidable_skip_check_says_bitbake_may_skip() {
         append_to(
             r,
             "meta-mine/recipes-app/app/app_0.1.bb",
-            "COMPATIBLE_MACHINE = \"${@'boardx' if d.getVar('X') else 'qemux86'}\"\nCOMPATIBLE_HOST = \"arm.*\"\n",
+            "COMPATIBLE_MACHINE = \"${@'boardx' if oe.utils.read_file('x') else 'qemux86'}\"\nCOMPATIBLE_HOST = \"arm.*\"\n",
         );
     });
     // Python in COMPATIBLE_MACHINE; HOST_SYS is not set in the fixture. (w8: said, not

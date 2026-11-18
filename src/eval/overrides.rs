@@ -32,7 +32,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::datastore::{Keyword, Piece, base_of, split_keyword};
-use super::expand::{Expander, Source};
+use super::expand::{Expander, PyEvent, Source};
 use super::{DataStore, OpStatus, Value, VarOp};
 use crate::parse::words;
 
@@ -478,6 +478,25 @@ fn split_keep_whitespace(s: &str) -> Vec<&str> {
     words::split_keep_whitespace(s)
 }
 
+/// What [`DataStore::python_log`] found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PythonLog {
+    /// Met expanding the value (and the values it references).
+    pub own: Vec<PyEvent>,
+    /// Met expanding `OVERRIDES`, when the value consulted an override.
+    pub overrides: Vec<PyEvent>,
+}
+
+fn dedupe(events: &[PyEvent]) -> Vec<PyEvent> {
+    let mut out: Vec<PyEvent> = Vec::new();
+    for e in events {
+        if !out.iter().any(|o| o.code == e.code) {
+            out.push(e.clone());
+        }
+    }
+    out
+}
+
 fn push_unique(v: &mut Vec<String>, s: &str) {
     if !v.iter().any(|x| x == s) {
         v.push(s.to_string());
@@ -507,6 +526,48 @@ impl DataStore {
             }
         }
         Some(v)
+    }
+
+    /// The `${@...}` expressions the expansion of `name`'s finalised value met, its own and
+    /// those of the values it references (each code once, first occurrence): which were
+    /// evaluated statically and why the others were not; and those of `OVERRIDES` when the
+    /// value consulted an override (its override decisions rest on them).
+    pub fn python_log(&self, name: &str) -> PythonLog {
+        let ovr = self.override_state();
+        let ev = Eval {
+            ds: self,
+            ovr: &ovr,
+        };
+        let mut exp = Expander::new();
+        let entered = exp.enter(name);
+        let mut trace = Trace::default();
+        let _ = ev.finalise(name, &mut exp, &mut trace);
+        exp.leave(entered);
+        let own = dedupe(exp.python_log());
+        let overrides = if trace.consulted && name != "OVERRIDES" {
+            let mut exp = Expander::new();
+            let entered = exp.enter("OVERRIDES");
+            let _ = ev.finalise("OVERRIDES", &mut exp, &mut Trace::default());
+            exp.leave(entered);
+            dedupe(exp.python_log())
+        } else {
+            Vec::new()
+        };
+        PythonLog { own, overrides }
+    }
+
+    /// [`DataStore::python_log`] for a text expanded against the store.
+    pub fn python_log_of_text(&self, text: &str) -> Vec<PyEvent> {
+        let ovr = self.override_state();
+        let mut exp = Expander::new();
+        let _ = exp.expand(
+            text,
+            &Eval {
+                ds: self,
+                ovr: &ovr,
+            },
+        );
+        dedupe(exp.python_log())
     }
 
     /// The known `OVERRIDES` entries, lowest priority first (empty entries dropped, and

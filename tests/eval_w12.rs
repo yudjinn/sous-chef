@@ -259,7 +259,7 @@ fn a_multilib_variant_provides_what_suffix_filter_makes_of_provides() {
 fn multilib_prefixes_from_python_leave_the_words_they_decide_flagged() {
     // OE-core computes MULTILIB_VARIANTS with python (`extend_variants`): a word with a `-`
     // that add_suffix decides through the prefixes is not known.
-    let python = "${@' '.join(['lib32'])}";
+    let python = "${@oe.utils.read_file('variants') or 'lib32'}";
     let fx = modified(|r| sdk_and_multilib(r, python, "libfoo-extra"));
     let ds = eval(&fx, "lib32-libfoo");
     let p = ds.value("PROVIDES").unwrap();
@@ -407,7 +407,7 @@ fn uncertain_features(root: &Path, extra: &str) {
         root,
         "meta-core/conf/distro/testdistro.conf",
         &format!(
-            "DISTROOVERRIDES = \"testdistro:${{@'maybe' if d.getVar('UNSET_X') else 'other'}}\"\n\
+            "DISTROOVERRIDES = \"testdistro:${{@'maybe' if oe.utils.read_file('x') else 'other'}}\"\n\
              DISTRO_FEATURES = \"acl ipv4 x11\"\n\
              DISTRO_FEATURES:append:testdistro = \" wayland\"\n{extra}"
         ),

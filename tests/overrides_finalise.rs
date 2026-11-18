@@ -490,6 +490,26 @@ fn python_in_overrides_flags_override_dependent_values_only() {
 }
 
 #[test]
+fn python_in_overrides_that_is_evaluated_decides_overrides() {
+    // OE-core's `TRANSLATED_TARGET_ARCH` shape with `TARGET_ARCH` set: the python is in
+    // the evaluated subset and reads a certain value, so the entry is known.
+    let ds = store(
+        "${TARGET_OS}:${@d.getVar('TARGET_ARCH').replace('_', '-')}:foo",
+        &[
+            ("TARGET_OS", "=", "linux"),
+            ("TARGET_ARCH", "=", "x86_64"),
+            ("VAR", "=", "a"),
+            ("VAR:x86-64", "=", "x"),
+        ],
+    );
+    assert_eq!(ds.overrides(), vec!["linux", "x86-64", "foo"]);
+    let v = ds.value("VAR").unwrap();
+    assert_eq!(v.text, "x");
+    assert!(!v.unevaluated_python && v.unresolved.is_empty(), "{v:?}");
+    assert!(!ds.overrides_value().unwrap().unevaluated_python);
+}
+
+#[test]
 fn undefined_in_overrides_reported_on_dependent_values() {
     let ds = store(
         "layer-${FILE_LAYERNAME}:foo",
@@ -521,13 +541,13 @@ fn value_flags_python_and_unresolved() {
     let ds = store(
         "foo",
         &[
-            ("A", "=", "${@d.getVar('X')} ${MISSING}"),
+            ("A", "=", "${@os.getcwd()} ${MISSING}"),
             ("A:append", "=", " ${B}"),
             ("B", "=", "b"),
         ],
     );
     let v = ds.value("A").unwrap();
-    assert_eq!(v.text, "${@d.getVar('X')} ${MISSING} b");
+    assert_eq!(v.text, "${@os.getcwd()} ${MISSING} b");
     assert!(v.unevaluated_python);
     assert_eq!(v.unresolved, vec!["MISSING"]);
 }

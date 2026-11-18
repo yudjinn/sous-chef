@@ -90,6 +90,13 @@ fn toolchain_ws(root: &Path) {
         "${CLASSOVERRIDE}${LIBCOVERRIDE}",
         "${CLASSOVERRIDE}:${TCOVERRIDE}${LIBCOVERRIDE}",
     );
+    // TUNE_FEATURES from python outside the evaluated subset (it reads a file), so the
+    // `bb.utils.contains` above cannot be evaluated and OVERRIDES is not known.
+    append_to(
+        root,
+        "meta-core/conf/bitbake.conf",
+        "\nTUNE_FEATURES = \"${@oe.utils.read_file('tune-features')}\"\n",
+    );
     append_to(
         root,
         "meta-core/classes/base.bbclass",
@@ -160,7 +167,7 @@ fn deferred_inherit_with_python_text_is_still_refused() {
         append_to(
             root,
             "meta-core/classes/base.bbclass",
-            "OTHER_CLASSES = \"${@'toolchain/clang'}\"\ninherit_defer ${OTHER_CLASSES}\n",
+            "OTHER_CLASSES = \"${@os.path.join('toolchain', 'clang')}\"\ninherit_defer ${OTHER_CLASSES}\n",
         );
     });
     let ds = eval(&fx, Some("hello"));
@@ -282,13 +289,15 @@ fn python_lists(root: &Path) {
         root,
         "meta-core/conf/bitbake.conf",
         "MACHINEOVERRIDES ?= \"${MACHINE}\"",
-        "MACHINEOVERRIDES ?= \"${@['', 'ti-soc:ti33x:'][d.getVar('SOC_FAMILY') != '']}${MACHINE}\"",
+        "MACHINEOVERRIDES ?= \"${@['', 'ti-soc:ti33x:']['${SOC_FAMILY}' != '']}${MACHINE}\"",
     );
     append_to(
         root,
         "meta-core/conf/bitbake.conf",
         "\nPACKAGECONFIG[vardepvalue] = \"${PACKAGECONFIG}\"\n\
-         PACKAGECONFIG[doc] = \"This variable provides a means of enabling or disabling features of a recipe on a per-recipe basis.\"\n",
+         PACKAGECONFIG[doc] = \"This variable provides a means of enabling or disabling features of a recipe on a per-recipe basis.\"\n\
+         PTEST_ENABLED = \"${@oe.utils.read_file('ptest-enabled')}\"\n\
+         DISTRO_FEATURES:append = \" ${@oe.utils.read_file('distro-features')}\"\n",
     );
     append_to(
         root,

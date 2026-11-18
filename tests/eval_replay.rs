@@ -468,9 +468,12 @@ fn python_values_are_flagged() {
     let fx = fixture();
     for machine in ["qemux86", "boardx"] {
         let ds = eval(&fx, &target(Some("app"), Some(machine)));
+        // `${@'hi' if d.getVar('MACHINE') == 'boardx' else 'hello'}` is in the evaluated
+        // subset and MACHINE is certain: evaluated statically.
         let g = ds.value("APP_GREETING").unwrap();
-        assert!(g.unevaluated_python);
-        assert!(g.text.starts_with("${@"));
+        assert!(!g.unevaluated_python, "{g:?}");
+        assert_eq!(g.text, if machine == "boardx" { "hi" } else { "hello" });
+        // Still flagged: anonymous python appends to it.
         let m = ds.value("EXTRA_OEMAKE").unwrap();
         assert!(m.unevaluated_python);
         assert!(ds.value("FILESPATH").unwrap().unevaluated_python);
@@ -637,7 +640,7 @@ fn unfollowed_references_are_recorded() {
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("refs_1.0.bb"),
-            "require missing.inc\ninclude also-missing.inc\ninclude ${@'x'}.inc\n\
+            "require missing.inc\ninclude also-missing.inc\ninclude ${@os.path.basename('x')}.inc\n\
              require ${NOT_SET}.inc\ninherit nosuchclass\ninherit autotoolsish autotoolsish\n\
              require refs_1.0.bb\nrequire self.inc\n",
         )

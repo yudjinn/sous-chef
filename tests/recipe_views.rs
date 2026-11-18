@@ -244,5 +244,7 @@ async fn packages_libfoo_and_dynamic() {
         "{out}"
     );
     assert!(out.contains("app\tRPROVIDES\tapp-bin\t"), "{out}");
-    assert!(out.contains("depends on python, not evaluated"), "{out}");
+    // `${@'app-extra' if True else ''}` is in the evaluated subset: the package is known.
+    assert!(!out.contains("depends on python, not evaluated"), "{out}");
+    assert!(out.contains("app-extra\tFILES\t"), "{out}");
 }

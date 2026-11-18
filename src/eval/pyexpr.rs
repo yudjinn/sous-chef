@@ -108,6 +108,34 @@ fn unsupported(why: impl Into<String>) -> Stop {
     Stop::Unsupported(why.into())
 }
 
+/// A short form of `code` for a note: whole when short, else the called name with its first
+/// argument (`bb.utils.contains('DISTRO_FEATURES', ...)`), else cut.
+pub fn short(code: &str) -> String {
+    const MAX: usize = 60;
+    let code = code.trim();
+    if code.chars().count() <= MAX {
+        return code.to_string();
+    }
+    let name_len = code
+        .bytes()
+        .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b'.')
+        .count();
+    if name_len > 0 && code.as_bytes().get(name_len) == Some(&b'(') {
+        let rest = &code[name_len + 1..];
+        let first: String = rest
+            .chars()
+            .take_while(|c| *c != ',' && *c != ')')
+            .collect();
+        let s = format!("{}({}, ...)", &code[..name_len], first.trim());
+        if s.chars().count() <= MAX + 10 {
+            return s;
+        }
+        return format!("{}(...)", &code[..name_len]);
+    }
+    let cut: String = code.chars().take(MAX - 3).collect();
+    format!("{cut}...")
+}
+
 // ---------------------------------------------------------------------------------------
 // Tokens
 

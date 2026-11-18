@@ -155,7 +155,7 @@ fn features_check(root: &Path) {
         root,
         "meta-core/conf/distro/testdistro.conf",
         "DISTRO_FEATURES = \"acl ipv4 ipv6 usbhost\"\n\
-         MACHINE_FEATURES = \"usbhost ${@'wifi' if d.getVar('X') else ''}\"\n",
+         MACHINE_FEATURES = \"usbhost ${@'wifi' if oe.utils.read_file('x') else ''}\"\n",
     );
     recipe(
         root,
@@ -288,7 +288,7 @@ fn a_provider_of_a_virtual_another_recipe_is_preferred_for_would_be_skipped() {
         recipe(
             r,
             "pyprov",
-            "LICENSE = \"CLOSED\"\nPROVIDES = \"virtual/py ${@'virtual/foo' if d.getVar('Z') else ''}\"\n",
+            "LICENSE = \"CLOSED\"\nPROVIDES = \"virtual/py ${@'virtual/foo' if oe.utils.read_file('z') else ''}\"\n",
         );
         append_to(
             r,
@@ -323,7 +323,7 @@ fn the_virtual_provider_skip_is_undecided_on_unknown_values_and_off_when_allowed
         recipe(
             r,
             "pyonly",
-            "LICENSE = \"CLOSED\"\nPROVIDES = \"${@'virtual/foo' if d.getVar('Z') else ''}\"\n",
+            "LICENSE = \"CLOSED\"\nPROVIDES = \"${@'virtual/foo' if oe.utils.read_file('z') else ''}\"\n",
         );
         append_to(
             r,
@@ -338,7 +338,7 @@ fn the_virtual_provider_skip_is_undecided_on_unknown_values_and_off_when_allowed
         recipe(
             r,
             "pyonly",
-            "LICENSE = \"CLOSED\"\nPROVIDES = \"${@'virtual/foo' if d.getVar('Z') else ''}\"\n",
+            "LICENSE = \"CLOSED\"\nPROVIDES = \"${@'virtual/foo' if oe.utils.read_file('z') else ''}\"\n",
         );
     });
     let n = skip_notes(&fx, "pyonly");
