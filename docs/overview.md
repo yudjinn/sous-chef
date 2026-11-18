@@ -52,7 +52,9 @@ and `bitbake -e` dumps into context. That has two costs:
 - Results are tab-separated tables of locations, with explicit truncation markers
   (`+N more (limit=L)`, `+N more over budget_tokens`).
 - Large output is stored whole under a content-addressed handle `h:<10 hex>`; the model gets
-  a digest of about 600 bytes ending with a hint line that shows how to slice it.
+  a short digest ending with a hint line that shows how to slice it (523 bytes for a real
+  task log, 716 for a BitBake console, README "Token savings"; a task log's digest is at
+  most 1000 bytes, `bitbake::logs::DIGEST_MAX_BYTES`).
 - Slices are capped (about 8 KB) and say how much they cut.
 - Search hits carry their enclosing item, e.g. `[do_install:append 41-58]`.
 - Hooks fail open: on any error the original tool result passes through unchanged.
