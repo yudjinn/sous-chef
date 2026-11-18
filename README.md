@@ -224,6 +224,73 @@ writable_layers = ["meta-mycompany"]
 
 All keys are under [Configuration](#configuration).
 
+### Example prompts
+
+You do not call the tools yourself: you ask the agent, and it picks them. Five common
+cases, with the tools an agent typically reaches for and what comes back. Recipe, layer and
+machine names are examples; use your own.
+
+**1. Why does a variable have this value?**
+
+> Why does `EXTRA_OECONF` for curl contain `--without-libpsl` on machine `dogbonedark`,
+> and which file adds each part?
+
+`var` (`name: "EXTRA_OECONF"`, `recipe: "curl"`, `machine: "dogbonedark"`) returns every
+operation in parse order, across the recipe, its `.inc` files, classes and bbappends, with
+a pointer each and whether it applies, and the final value; `overrides` shows the
+`OVERRIDES` chain when the answer turns on a machine or distro override. A part that
+depends on python sous-chef does not evaluate is flagged as such, not guessed.
+
+**2. Change an upstream recipe from my own layer.**
+
+> I want curl built with c-ares for our product. Where should that change go, and can you
+> set it up in `meta-mycompany`?
+
+`deps kind=packageconfig` (`recipe: "curl"`) shows that c-ares is the `ares` option of
+curl's `PACKAGECONFIG` and what it adds; `scaffold kind=where name=curl` says where the
+change belongs (a bbappend in your writable layer, with the reason, or an existing
+bbappend to add to) and the call that makes it; `scaffold kind=bbappend` then plans the
+file with `PACKAGECONFIG:append = " ares"`. It is a dry run that shows the
+content until you agree to `write: true`, and it writes only into layers listed in
+`writable_layers`. `recipe show=sources` and `item` show what the recipe has today.
+
+**3. A build failed.**
+
+> `bitbake curl` failed. What went wrong, and where is the code that failed?
+
+With the plugin's Bash hook, the large BitBake output is replaced by a digest: the failing
+recipe and task, the first error with context, and a pointer to the task's definition in
+the layers. The full output is kept under a handle that `slice` reads in parts. Without
+the hook, `log` (`recipe: "curl"`, `task: "compile"`) digests the task log the same way;
+`sigs` answers the related question "why did this task re-run at all".
+
+**4. What does this recipe pull in, and who provides it?**
+
+> Which kernel recipe is used for `dogbonedark`, and why that one? And what does curl
+> depend on at build time and at run time?
+
+`deps kind=providers` (`recipe: "virtual/kernel"`) names the chosen provider, the
+`PREFERRED_PROVIDER` that chose it with its pointer, and the others that were not chosen;
+`deps kind=build` and `kind=runtime` list curl's dependencies, each with the assignment
+that adds it; `deps kind=packageconfig` shows what each `PACKAGECONFIG` option would add.
+
+**5. Is my layer in good shape, and what breaks on the next release?**
+
+> Check `meta-mycompany` against Yocto conventions. We are moving from Scarthgap to Wrynose:
+> what will break, and what can be fixed automatically?
+
+`lint` reports findings with pointers, checked against every release the layer claims;
+`lint` with `migrate_to: "wrynose"` lists what is new with that release, the features it
+changed that the layer uses, and the `LAYERSERIES_COMPAT` line to write; `lint` with
+`fix: true` shows the safe fixes as a diff before anything is written. For the whole
+repository, `audit` writes one report over every layer.
+
+Other questions that work well: "what does `do_install` of busybox consist of, including
+its appends" (`recipe show=tasks`, `item`), "which package ships `/usr/bin/curl`"
+(`pkgdata`, after a build), "what changed in OE-core between `yocto-5.0` and `yocto-6.0`
+that affects our bbappends" (`diff`), "which CVEs does curl's metadata mark as patched"
+(`recipe show=cve`).
+
 ### First steps
 
 Ask the agent what you would ask a colleague who knows the layers: "what is `hello` and
