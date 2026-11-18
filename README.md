@@ -98,9 +98,13 @@ sessions used 1.28 times the tokens (1,919,410 against 1,505,217), 199 against 1
 and scored 0.60 against 0.83 on the reference facts. Per task the ratio ranged from 0.23 to
 2.52: sous-chef used fewer tokens on 8 tasks and more on 6, among them a simple search
 (4.3 times more). The plugin added 9,356 tokens to every session's context in the pilot
-(its sessions loaded every tool definition upfront); since then the `tools/list` payload
+(its sessions loaded every tool definition upfront). Since then the `tools/list` payload
 was cut from 31.5 KB to 14.1 KB and the six core tools are marked for upfront loading under
-Claude Code's tool search (docs/mcp-tools.md, "Context cost"), not re-measured in a session. One run per cell
+Claude Code's tool search (docs/mcp-tools.md, "Context cost"); re-measured the same way
+("Say ok.", Claude Code 2.1.327, Haiku 5.5, one session per condition), the plugin now adds
+3,694 tokens with tool search on, Claude Code's default (six tools upfront, ten deferred),
+and 5,693 with it off as in the pilot (docs/benchmark.md, "Plugin overhead after the
+definition cuts"). One run per cell
 is a pilot: single tasks moved by up to a factor of 2.3 between two runs. Part of the score
 gap comes from the workspace itself: its `.gitignore` lists the upstream layers, and Claude
 Code's Grep and Glob honour it, so three baseline sessions did not find OE-core at all.

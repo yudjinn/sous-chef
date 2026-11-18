@@ -116,6 +116,9 @@ and lists every enum value with its doc. Measured with `cargo test --test tools_
 --nocapture`: `tools/list` was 31,539 bytes (about 7,900 tokens at 4 bytes a token) for the
 18 tools before x7 and is 14,102 bytes (about 3,500 tokens) after; the test fails above
 15,000 bytes, above 800 bytes of server instructions, or above 3,000 bytes of the skill.
+In a Claude Code session the whole plugin (tools, instructions, skill entry) adds 3,694
+tokens with tool search on and 5,693 with it off, measured on 2026-11-18
+(docs/benchmark.md, "Plugin overhead after the definition cuts").
 
 ## Always loaded
 
