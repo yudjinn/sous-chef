@@ -65,7 +65,88 @@ fn args(target: Option<&str>) -> Args {
         severity: None,
         budget_tokens: None,
         format: None,
+        fix: None,
+        fix_suggested: None,
+        write: None,
     }
+}
+
+#[tokio::test]
+async fn fix_through_the_tool_is_a_dry_run_unless_write() {
+    let rel = "meta-mine/recipes-app/old/old_1.0.bb";
+    let old = "SUMMARY = \"old\"\nLICENSE = \"MIT\"\nDEPENDS_append = \" zlib\"\n";
+    let env = Env::new(&[(rel, old)], |_| {}).await;
+    let target = Some("meta-mine:recipes-app/old/old_1.0.bb");
+    let dry = tool::run(
+        &env.ctx,
+        Args {
+            fix: Some(true),
+            ..args(target)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(dry.starts_with("lint --fix (dry run"), "{dry}");
+    assert!(dry.contains("+DEPENDS:append = \" zlib\""), "{dry}");
+    assert_eq!(fs::read_to_string(env.root.join(rel)).unwrap(), old);
+    // A small budget cuts the text on a line boundary, with a note.
+    let cut = tool::run(
+        &env.ctx,
+        Args {
+            fix: Some(true),
+            budget_tokens: Some(60),
+            ..args(target)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(cut.len() < dry.len(), "{cut}");
+    assert!(
+        cut.ends_with("run `sous-chef lint --fix`\n") && cut.contains("note: output cut"),
+        "{cut}"
+    );
+    // `write` alone is refused.
+    let refused = tool::run(
+        &env.ctx,
+        Args {
+            write: Some(true),
+            ..args(target)
+        },
+    )
+    .await;
+    assert!(refused.is_err());
+    let wrote = tool::run(
+        &env.ctx,
+        Args {
+            fix: Some(true),
+            write: Some(true),
+            ..args(target)
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        wrote.contains("after: 1 file written; 1 finding fixed"),
+        "{wrote}"
+    );
+    assert_eq!(
+        fs::read_to_string(env.root.join(rel)).unwrap(),
+        old.replace("DEPENDS_append", "DEPENDS:append")
+    );
+    // JSON carries the whole report (after the write nothing is left to fix).
+    let json = tool::run(
+        &env.ctx,
+        Args {
+            fix: Some(true),
+            format: Some(Format::Json),
+            ..args(target)
+        },
+    )
+    .await
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(v["write"], false);
+    assert!(v["available"].as_array().unwrap().is_empty(), "{json}");
 }
 
 const BAD: &str = "\
