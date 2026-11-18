@@ -90,7 +90,9 @@ sessions used 1.28 times the tokens (1,919,410 against 1,505,217), 199 against 1
 and scored 0.60 against 0.83 on the reference facts. Per task the ratio ranged from 0.23 to
 2.52: sous-chef used fewer tokens on 8 tasks and more on 6, among them a simple search
 (4.3 times more). The plugin adds 9,356 tokens to every session's context. One run per cell
-is a pilot: single tasks moved by up to a factor of 2.3 between two runs.
+is a pilot: single tasks moved by up to a factor of 2.3 between two runs. Part of the score
+gap comes from the workspace itself: its `.gitignore` lists the upstream layers, and Claude
+Code's Grep and Glob honour it, so three baseline sessions did not find OE-core at all.
 
 ### Accuracy
 
