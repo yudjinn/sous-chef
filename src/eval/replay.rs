@@ -341,13 +341,20 @@ fn parse_piece(line: &str) -> Option<FunctionPiece> {
 /// Configuration passes, cached per index file, workspace, machine and distro. An entry is
 /// reused while every `.conf` file and every file the pass visited keep their sha256 and
 /// the set of `.bbclass` files is unchanged; otherwise the pass runs again.
+/// (Also per multiconfig, [`Target::mc`]: each is a configuration pass of its own.)
 #[derive(Debug, Default)]
 pub struct ConfigCache {
     entries: Mutex<HashMap<CacheKey, CacheEntry>>,
     passes: AtomicU64,
 }
 
-type CacheKey = (PathBuf, String, Option<String>, Option<String>);
+type CacheKey = (
+    PathBuf,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 #[derive(Debug)]
 struct CacheEntry {
@@ -419,11 +426,22 @@ fn evaluate_inner(
     overlay: Option<&Overlay>,
 ) -> Result<DataStore> {
     let overlay = overlay.filter(|o| !o.is_empty());
+    // Multiconfig (`eval::multiconfig`): `mc:<name>:<recipe>` split off, the name checked
+    // against the workspace's configurations.
+    let normalized = super::multiconfig::normalize_target(target)?;
+    let target = &normalized;
+    let mc_note = match &target.mc {
+        Some(mc) => super::multiconfig::check(cache, index, ws, target, mc)?,
+        None => None,
+    };
     let files = Files::load(index, ws)?;
     let config = |cache: &ConfigCache| -> Result<DataStore> {
         let mut c = configuration(cache, index, ws, &files, target, overlay)?;
-        if target.machine.is_some() || target.distro.is_some() {
+        if target.machine.is_some() || target.distro.is_some() || target.mc.is_some() {
             bbmask_note(index, ws, &mut c)?;
+        }
+        if let Some(n) = &mc_note {
+            Arc::make_mut(&mut c.notes).target_notes.push(n.clone());
         }
         Ok(c)
     };
@@ -583,6 +601,7 @@ fn cached_configuration(
         index::workspace_key(ws),
         target.machine.clone(),
         target.distro.clone(),
+        target.mc.clone(),
     );
     if let Some(e) = cache.lock().get(&key)
         && e.fingerprint == files.fingerprint(e.ds.files())
@@ -772,6 +791,11 @@ fn config_pass(
     for (name, value) in r.pins.clone() {
         put(&mut r.ds, name, &value);
     }
+    // A multiconfig pass: `parseConfigurationFiles(..., mc)` sets BB_CURRENT_MC on a fresh
+    // copy of the base datastore before any file is read (eval::multiconfig).
+    if let Some(mc) = &target.mc {
+        put(&mut r.ds, "BB_CURRENT_MC", mc);
+    }
 
     // bblayers.conf; TOPDIR is its build directory. BBPATH starts as the build directory:
     // OE-core's build environment exports `BBPATH=$BUILDDIR` (scripts/oe-buildenv-internal)
@@ -856,6 +880,9 @@ fn config_pass(
 
     // Where the machine came from, when not from the configuration or the arguments.
     let mut target_notes = Vec::new();
+    if let Some(mc) = &target.mc {
+        target_notes.push(super::multiconfig::pass_note(&r.ds, mc));
+    }
     for (name, value, from) in &kas {
         let ours = r.ds.vars.get(name.as_str()).is_some_and(|v| {
             v.content.is_none()
@@ -2815,6 +2842,10 @@ impl<'a> Replay<'a> {
     fn include(&mut self, st: &StatementRow, via: &[Loc], from: &Path) -> Result<()> {
         let mode = st.op.clone().unwrap_or_else(|| "include".into());
         let text = st.name.clone().unwrap_or_default();
+        // OE-core's multiconfig `require` in a multiconfig pass (eval::multiconfig).
+        if let Some(words) = super::multiconfig::oe_require_words(&text, &self.ds) {
+            return self.include_words(st, via, from, &mode, &text, &words);
+        }
         let Some((expanded, taint)) = self.expand_ref(&text, Some(&st.loc), via, &mode) else {
             return Ok(());
         };

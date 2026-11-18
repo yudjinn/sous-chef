@@ -634,6 +634,8 @@ pub fn run_with_progress(
             version: None,
             machine: None,
             distro: None,
+            // Lint evaluates in the default configuration only (docs/mcp-tools.md, `lint`).
+            mc: None,
         };
         match eval.evaluate(index, ws, &target) {
             Ok(Some(data)) => {

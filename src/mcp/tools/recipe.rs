@@ -88,6 +88,9 @@ pub struct Args {
     /// `summary` (default), `tree`, `outline`, `sources`, `tasks` or `packages`.
     #[serde(default)]
     pub show: Show,
+    /// Multiconfig for the version choice and the evaluated values (default: the default
+    /// configuration); `name` written `mc:<name>:<recipe>` also selects it.
+    pub mc: Option<String>,
     /// Output budget in tokens (default 600).
     pub budget_tokens: Option<usize>,
     /// `text` (default) or `json`.
@@ -97,8 +100,30 @@ pub struct Args {
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let mut index = ctx.index.lock().await;
     let report = index.refresh(&ctx.workspace)?;
-    let (recipe, chosen, variant) =
-        resolve_selected_variant(&index, &ctx.workspace, &args.name, args.version.as_deref())?;
+    let split = eval::multiconfig::normalize_target(&Target {
+        recipe: Some(args.name.clone()),
+        mc: args.mc.clone(),
+        ..Target::default()
+    })?;
+    let name = split.recipe.clone().unwrap_or_default();
+    let mc = split.mc;
+    if let Some(m) = &mc {
+        // An unknown name is an error listing the known ones, before anything is resolved.
+        eval::multiconfig::check(
+            eval::global_cache(),
+            &index,
+            &ctx.workspace,
+            &Target::default(),
+            m,
+        )?;
+    }
+    let (recipe, chosen, variant) = resolve_selected_variant_in(
+        &index,
+        &ctx.workspace,
+        &name,
+        args.version.as_deref(),
+        mc.as_deref(),
+    )?;
     let mut table = match args.show {
         Show::Summary => summary(
             &index,
@@ -107,12 +132,14 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
             args.version.as_deref(),
             chosen,
             variant.as_ref(),
+            mc.as_deref(),
         )?,
         Show::Tree => tree_table(&index, &recipe)?,
         Show::Outline => outline(&index, &recipe)?,
         Show::Sources | Show::Tasks | Show::Packages => {
             let target = Target {
                 recipe: Some(eval_label(&recipe, variant.as_ref())),
+                mc: mc.clone(),
                 ..Target::default()
             };
             let ds = eval::evaluate(&index, &ctx.workspace, &target)?;
@@ -137,10 +164,17 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     {
         table.note(&format!(
             "note: {} is {} of {}: its files are these, plus the class `{}` BitBake inherits for it at the end (deferred), and whatever that class pulls in",
-            args.name.trim(),
+            name.trim(),
             ext.describe(),
             recipe.pn,
             ext.class()
+        ));
+    }
+    if let Some(m) = &mc
+        && matches!(args.show, Show::Tree | Show::Outline)
+    {
+        table.note(&format!(
+            "note: multiconfig {m}: the file is the one provider selection picks there; the tree is static and the same in every configuration"
         ));
     }
     if let Some(line) = render::freshness_line(&report) {
@@ -265,6 +299,18 @@ pub fn resolve_selected_variant(
     name: &str,
     version: Option<&str>,
 ) -> Result<(RecipeRow, Option<String>, Option<ClassExtend>)> {
+    resolve_selected_variant_in(index, ws, name, version, None)
+}
+
+/// [`resolve_selected_variant`] with provider selection in multiconfig `mc` (`None`: the
+/// default configuration), whose `PREFERRED_VERSION` may differ.
+pub fn resolve_selected_variant_in(
+    index: &Index,
+    ws: &Workspace,
+    name: &str,
+    version: Option<&str>,
+    mc: Option<&str>,
+) -> Result<(RecipeRow, Option<String>, Option<ClassExtend>)> {
     let name = name.trim();
     if let Some((ext, file)) = eval::variant::split_virtual(name) {
         return Ok((resolve_recipe(index, file, version)?, None, Some(ext)));
@@ -272,7 +318,7 @@ pub fn resolve_selected_variant(
     if !name.contains(':')
         && query::find_recipes(index, name)?.is_empty()
         && class_extend_variant(index, name)?.is_some()
-        && let Some(sel) = providers::preferred_recipe(index, ws, name, version, None, None)?
+        && let Some(sel) = providers::preferred_recipe_in(index, ws, name, version, None, None, mc)?
         && let Some(ext) = sel.variant.clone()
     {
         let why = sel.describe();
@@ -282,7 +328,7 @@ pub fn resolve_selected_variant(
     if version.is_none()
         && !name.contains(':')
         && name == recipe.pn
-        && let Some(sel) = providers::preferred_recipe(index, ws, name, None, None, None)?
+        && let Some(sel) = providers::preferred_recipe_in(index, ws, name, None, None, None, mc)?
     {
         return Ok((sel.recipe.clone(), Some(sel.describe()), None));
     }
@@ -623,6 +669,7 @@ fn summary(
     version: Option<&str>,
     chosen: Option<String>,
     variant: Option<&ClassExtend>,
+    mc: Option<&str>,
 ) -> Result<Table> {
     let walk = walk_recipe(index, recipe)?;
     let mut t = Table::new(&["field", "value", "loc"]);
@@ -696,6 +743,7 @@ fn summary(
         version: None,
         machine: None,
         distro: None,
+        mc: mc.map(str::to_string),
     };
     let ds = eval::evaluate(index, ws, &target)?;
     let mut python = 0;

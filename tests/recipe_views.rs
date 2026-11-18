@@ -61,6 +61,7 @@ async fn show(f: &Fixture, name: &str, show: Show, budget: usize) -> String {
     let out = recipe::run(
         &f.ctx,
         recipe::Args {
+            mc: None,
             name: name.into(),
             version: None,
             show,
@@ -100,6 +101,7 @@ async fn sources_json_and_budget() {
     let out = recipe::run(
         &f.ctx,
         recipe::Args {
+            mc: None,
             name: "hello".into(),
             version: None,
             show: Show::Sources,

@@ -51,6 +51,7 @@ async fn preferred_version_is_honoured_everywhere() {
     let summary = recipe::run(
         &ctx,
         recipe::Args {
+            mc: None,
             name: "hello".into(),
             version: None,
             show: recipe::Show::Summary,

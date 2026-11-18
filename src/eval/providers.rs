@@ -178,13 +178,22 @@ struct Info {
     variant: Option<ClassExtend>,
 }
 
-/// Provider and version selection against one configuration (machine, distro).
+/// Provider and version selection against one configuration (machine, distro, multiconfig).
+///
+/// Per configuration, as in BitBake, which parses every recipe once per multiconfig on a copy
+/// of that configuration and keeps a recipe cache per multiconfig (BitBake 2.18.0
+/// `cookerdata.py` `parseRecipeVariants`, `cooker.py` `buildTaskData`:
+/// `taskdata[mc].add_provider(localdata[mc], self.recipecaches[mc], k)`): with
+/// [`Target::mc`] set, `PREFERRED_PROVIDER_*`, `PREFERRED_VERSION_*` and the candidates'
+/// evaluations are that multiconfig's. The candidate files are the index's, whose `BBMASK`
+/// marks are those of the default configuration.
 pub struct Providers<'a> {
     cache: &'a ConfigCache,
     index: &'a Index,
     ws: &'a Workspace,
     machine: Option<String>,
     distro: Option<String>,
+    mc: Option<String>,
     cfg: DataStore,
     per_recipe: bool,
 }
@@ -198,11 +207,23 @@ impl<'a> Providers<'a> {
         machine: Option<&str>,
         distro: Option<&str>,
     ) -> Result<Providers<'a>> {
+        Providers::new_in(index, ws, machine, distro, None)
+    }
+
+    /// [`Providers::new`] in multiconfig `mc` (`None` or empty: the default configuration).
+    pub fn new_in(
+        index: &'a Index,
+        ws: &'a Workspace,
+        machine: Option<&str>,
+        distro: Option<&str>,
+        mc: Option<&str>,
+    ) -> Result<Providers<'a>> {
         let target = Target {
             recipe: None,
             version: None,
             machine: machine.map(str::to_string),
             distro: distro.map(str::to_string),
+            mc: mc.filter(|m| !m.trim().is_empty()).map(str::to_string),
         };
         let cfg = evaluate_with(global_cache(), index, ws, &target)?;
         Providers::with_config(global_cache(), index, ws, &target, cfg)
@@ -223,6 +244,7 @@ impl<'a> Providers<'a> {
             ws,
             machine: target.machine.clone(),
             distro: target.distro.clone(),
+            mc: target.mc.clone(),
             per_recipe: per_recipe_values(index)?,
             cfg,
         })
@@ -233,7 +255,7 @@ impl<'a> Providers<'a> {
         &self.cfg
     }
 
-    /// `layer:path` target of a recipe file, with this machine and distro.
+    /// `layer:path` target of a recipe file, with this machine, distro and multiconfig.
     pub fn target_for(&self, recipe: &RecipeRow) -> Target {
         Target {
             recipe: Some(format!(
@@ -244,6 +266,7 @@ impl<'a> Providers<'a> {
             version: None,
             machine: self.machine.clone(),
             distro: self.distro.clone(),
+            mc: self.mc.clone(),
         }
     }
 
@@ -811,6 +834,19 @@ pub fn preferred_recipe(
     distro: Option<&str>,
 ) -> Result<Option<Selection>> {
     Providers::new(index, ws, machine, distro)?.best_version(pn, version)
+}
+
+/// [`preferred_recipe`] in multiconfig `mc` (`None`: the default configuration).
+pub fn preferred_recipe_in(
+    index: &Index,
+    ws: &Workspace,
+    pn: &str,
+    version: Option<&str>,
+    machine: Option<&str>,
+    distro: Option<&str>,
+    mc: Option<&str>,
+) -> Result<Option<Selection>> {
+    Providers::new_in(index, ws, machine, distro, mc)?.best_version(pn, version)
 }
 
 fn selection(

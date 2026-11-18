@@ -41,6 +41,7 @@ fn fixture() -> Fixture {
 
 fn vargs(name: &str, recipe: Option<&str>, machine: Option<&str>) -> var::Args {
     var::Args {
+        mc: None,
         name: name.into(),
         recipe: recipe.map(str::to_string),
         machine: machine.map(str::to_string),
@@ -54,6 +55,7 @@ fn vargs(name: &str, recipe: Option<&str>, machine: Option<&str>) -> var::Args {
 
 fn oargs(recipe: Option<&str>, machine: Option<&str>, show: overrides::Show) -> overrides::Args {
     overrides::Args {
+        mc: None,
         recipe: recipe.map(str::to_string),
         machine: machine.map(str::to_string),
         distro: None,
@@ -65,6 +67,7 @@ fn oargs(recipe: Option<&str>, machine: Option<&str>, show: overrides::Show) -> 
 
 fn dargs(recipe: &str, kind: deps::Kind) -> deps::Args {
     deps::Args {
+        mc: None,
         recipe: recipe.into(),
         kind,
         depth: None,
@@ -276,6 +279,7 @@ async fn providers_default_preference_and_preferred_version() {
     let summary = sous_chef::mcp::tools::recipe::run(
         &f.ctx,
         sous_chef::mcp::tools::recipe::Args {
+            mc: None,
             name: "hello".into(),
             version: None,
             show: sous_chef::mcp::tools::recipe::Show::Summary,

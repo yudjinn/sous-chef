@@ -429,7 +429,8 @@ fn walk_would_index(ws: &Workspace, layer: &str, rel: &Path) -> bool {
         return false;
     }
     if layer == BUILD_LAYER && ws.layer(BUILD_LAYER).is_none() {
-        return parts.len() == 2 && parts[0] == "conf";
+        return (parts.len() == 2 && parts[0] == "conf")
+            || (parts.len() == 3 && parts[0] == "conf" && parts[1] == "multiconfig");
     }
     let Some(root) = ws.layer(layer).map(|l| l.root.clone()) else {
         return false;
@@ -690,11 +691,17 @@ fn mtime_nanos(meta: &fs::Metadata) -> i64 {
 }
 
 /// `<build>/conf/*.conf`.
+/// The build directory's `conf/*.conf` and `conf/multiconfig/*.conf` (where BitBake's manual
+/// puts the multiconfig files; OE-core's `bitbake.conf` requires them along `BBPATH`, whose
+/// first entry is the build directory: see `eval::multiconfig`).
 fn walk_build_conf(ws: &Workspace, i: usize, build: &Path, out: &mut Vec<Found>) {
     let Ok(entries) = fs::read_dir(build.join("conf")) else {
         return;
     };
     let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    if let Ok(mc) = fs::read_dir(build.join("conf").join("multiconfig")) {
+        paths.extend(mc.flatten().map(|e| e.path()));
+    }
     paths.sort();
     for p in paths {
         if FileKind::from_path(&p) == Some(FileKind::Conf)

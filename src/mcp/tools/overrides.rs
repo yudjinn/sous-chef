@@ -28,7 +28,7 @@ use std::collections::{BTreeSet, HashMap};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::var::{op_snippet, recipe_target, replay_notes};
+use super::var::{mc_notes, op_snippet, recipe_target_in, replay_notes};
 use crate::error::Result;
 use crate::eval::{self, DataStore, OpStatus, Target, VarOp};
 use crate::index::{Index, query};
@@ -59,6 +59,9 @@ pub struct Args {
     pub machine: Option<String>,
     /// Default: `DISTRO` from local.conf.
     pub distro: Option<String>,
+    /// Multiconfig to evaluate in (default: the default configuration); a recipe written
+    /// `mc:<name>:<recipe>` also selects it.
+    pub mc: Option<String>,
     /// `chain` (default), `conditional` or `dead`.
     #[serde(default)]
     pub show: Show,
@@ -71,11 +74,12 @@ pub struct Args {
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let mut index = ctx.index.lock().await;
     let report = index.refresh(&ctx.workspace)?;
-    let target = recipe_target(
+    let target = recipe_target_in(
         &index,
         args.recipe.as_deref(),
         args.machine.as_deref(),
         args.distro.as_deref(),
+        args.mc.as_deref(),
     )?;
     let ds = eval::evaluate(&index, &ctx.workspace, &target)?;
     let mut t = match args.show {
@@ -103,6 +107,9 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         if n.starts_with("warning: anonymous python") && n.contains("computed names") {
             t.note(&n);
         }
+    }
+    for n in mc_notes(&ds) {
+        t.note(&n);
     }
     if target.recipe.is_none() {
         t.note("note: global configuration only (no recipe)");

@@ -180,6 +180,7 @@ async fn var_shows_the_rewrite_as_a_rewrite() {
     let out = var::run(
         &ctx,
         var::Args {
+            mc: None,
             name: "DEPENDS".into(),
             recipe: Some("app".into()),
             machine: None,
@@ -525,6 +526,7 @@ async fn class_extended_variants_are_named_as_such() {
         Err(e) => panic!("expected output, got {e}"),
     };
     let rec = |name: &str| recipe::Args {
+        mc: None,
         name: name.into(),
         version: None,
         show: recipe::Show::Summary,
@@ -558,6 +560,7 @@ async fn class_extended_variants_are_named_as_such() {
     let out = ok(var::run(
         &ctx,
         var::Args {
+            mc: None,
             name: "PN".into(),
             recipe: Some("libfoo-native".into()),
             machine: None,
@@ -573,6 +576,7 @@ async fn class_extended_variants_are_named_as_such() {
     let out = ok(deps::run(
         &ctx,
         deps::Args {
+            mc: None,
             recipe: "nativesdk-libfoo".into(),
             kind: deps::Kind::default(),
             depth: None,
@@ -775,6 +779,7 @@ async fn recipe_summary_shows_the_skip_note() {
     let out = recipe::run(
         &ctx,
         recipe::Args {
+            mc: None,
             name: "app".into(),
             version: None,
             show: recipe::Show::Summary,

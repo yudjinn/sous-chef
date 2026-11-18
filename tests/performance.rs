@@ -297,6 +297,7 @@ fn live_performance() {
         version: None,
         machine: Some("dogbonedark".into()),
         distro: Some("kiss".into()),
+        mc: None,
     };
     let mut cold_cfg = Vec::new();
     let mut cold = Vec::new();

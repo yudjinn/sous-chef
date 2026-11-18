@@ -48,6 +48,7 @@ fn modified(edit: impl FnOnce(&Path)) -> (Fx, std::path::PathBuf) {
 
 fn target(recipe: Option<&str>, machine: Option<&str>) -> Target {
     Target {
+        mc: None,
         recipe: recipe.map(str::to_string),
         version: None,
         machine: machine.map(str::to_string),

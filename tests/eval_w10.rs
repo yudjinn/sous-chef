@@ -296,6 +296,7 @@ async fn the_tools_show_a_variant() {
     let out = recipe::run(
         &ctx,
         recipe::Args {
+            mc: None,
             name: "libfoo-native".into(),
             version: None,
             show: recipe::Show::Summary,
@@ -316,6 +317,7 @@ async fn the_tools_show_a_variant() {
     let out = var::run(
         &ctx,
         var::Args {
+            mc: None,
             name: "FOO".into(),
             recipe: Some("libfoo-native".into()),
             machine: None,
@@ -334,6 +336,7 @@ async fn the_tools_show_a_variant() {
     let out = var::run(
         &ctx,
         var::Args {
+            mc: None,
             name: "PN".into(),
             recipe: Some(PTR.into()),
             machine: None,
@@ -350,6 +353,7 @@ async fn the_tools_show_a_variant() {
     let out = recipe::run(
         &ctx,
         recipe::Args {
+            mc: None,
             name: PTR.into(),
             version: None,
             show: recipe::Show::Summary,
@@ -363,6 +367,7 @@ async fn the_tools_show_a_variant() {
     let out = deps::run(
         &ctx,
         deps::Args {
+            mc: None,
             recipe: "app".into(),
             kind: deps::Kind::Build,
             depth: None,

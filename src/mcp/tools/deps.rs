@@ -18,13 +18,20 @@
 //! - `providers`: `recipe` is a name such as `virtual/kernel`; every recipe that provides it,
 //!   the selected one first, and the `PREFERRED_PROVIDER` / `PREFERRED_VERSION` assignments
 //!   that decided it.
-
+//! - `mcdepends`: the cross-configuration task dependencies of the recipe
+//!   (`do_x[mcdepends] = "mc:<from>:<to>:<recipe>:<task>"`, `eval::multiconfig::mcdepends`),
+//!   one row per entry with its pointer and whether it applies in the configuration
+//!   evaluated. They are listed, not followed: the other configuration is not evaluated.
+//!
+//! `mc` (or a recipe written `mc:<name>:<recipe>`) evaluates in that multiconfig, provider
+//! selection included (`eval::providers` per configuration). `reverse` stays static (the
+//! index, which is the same for every configuration).
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::var::{recipe_target, replay_notes};
+use super::var::{mc_notes, recipe_target_in, replay_notes};
 use crate::error::Result;
 use crate::eval::providers::{
     ProviderReason, ProviderSet, Providers, Selection, Setting, VersionReason,
@@ -53,15 +60,20 @@ pub enum Kind {
     Reverse,
     /// Providers of a name such as `virtual/kernel`, and the selected one.
     Providers,
+    /// Cross-configuration task dependencies (`mcdepends`), listed, not followed.
+    Mcdepends,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct Args {
     /// Recipe, or for `kind: providers` a provided name such as `virtual/kernel`.
     pub recipe: String,
-    /// `build` (default), `runtime`, `packageconfig`, `reverse` or `providers`.
+    /// `build` (default), `runtime`, `packageconfig`, `reverse`, `providers` or `mcdepends`.
     #[serde(default)]
     pub kind: Kind,
+    /// Multiconfig to evaluate in (default: the default configuration); a recipe written
+    /// `mc:<name>:<recipe>` also selects it.
+    pub mc: Option<String>,
     /// Depth (default 1).
     pub depth: Option<u32>,
     /// Output budget in tokens (default 600).
@@ -79,16 +91,47 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let report = index.refresh(&ctx.workspace)?;
     let ws = &ctx.workspace;
     let mut t = match args.kind {
-        Kind::Providers => providers_table(&index, ws, args.recipe.trim())?,
+        Kind::Providers => {
+            let split = eval::multiconfig::normalize_target(&eval::Target {
+                recipe: Some(args.recipe.trim().to_string()),
+                mc: args.mc.clone(),
+                ..eval::Target::default()
+            })?;
+            let name = split.recipe.clone().unwrap_or_default();
+            let mut t = providers_table(&index, ws, &name, split.mc.as_deref())?;
+            if split.mc.is_some() {
+                // The configuration Providers::new_in evaluated (cached), for its note.
+                let cfg = eval::evaluate(
+                    &index,
+                    ws,
+                    &eval::Target {
+                        recipe: None,
+                        ..split.clone()
+                    },
+                )?;
+                for n in mc_notes(&cfg) {
+                    t.note(&n);
+                }
+            }
+            t
+        }
         kind => {
-            let target = recipe_target(&index, Some(&args.recipe), None, None)?;
+            let target =
+                recipe_target_in(&index, Some(&args.recipe), None, None, args.mc.as_deref())?;
             let ds = eval::evaluate(&index, ws, &target)?;
+            let mc = target.mc.as_deref();
             let mut t = match kind {
-                Kind::Build => build(&index, ws, &ds, depth)?,
+                Kind::Build => build(&index, ws, &ds, depth, mc)?,
                 Kind::Runtime => runtime(&ds),
                 Kind::Packageconfig => packageconfig(&ds),
-                _ => reverse(&index, ws, &ds, depth)?,
+                Kind::Mcdepends => mcdepends_table(&ds),
+                _ => reverse(&index, ws, &ds, depth, mc)?,
             };
+            if kind == Kind::Reverse {
+                for n in mc_notes(&ds) {
+                    t.note(&n);
+                }
+            }
             if depth > 1 && matches!(kind, Kind::Runtime | Kind::Packageconfig) {
                 t.note("note: depth applies to build and reverse only");
             }
@@ -432,9 +475,15 @@ fn resolve_dep(
     Ok(cache.get(name).map_or("-".into(), |r| r.provider.clone()))
 }
 
-fn build(index: &Index, ws: &Workspace, ds: &DataStore, depth: u32) -> Result<Table> {
+fn build(
+    index: &Index,
+    ws: &Workspace,
+    ds: &DataStore,
+    depth: u32,
+    mc: Option<&str>,
+) -> Result<Table> {
     let mut t = Table::new(&["depth", "dep", "provider", "source", "loc"]);
-    let p = Providers::new(index, ws, None, None)?;
+    let p = Providers::new_in(index, ws, None, None, mc)?;
     let mut cache: HashMap<String, Resolved> = HashMap::new();
     let mut queue: VecDeque<(u32, DataStore)> = VecDeque::from([(1, ds.clone())]);
     let mut seen: HashSet<(i64, Option<ClassExtend>)> = HashSet::new();
@@ -504,7 +553,85 @@ fn build(index: &Index, ws: &Workspace, ds: &DataStore, depth: u32) -> Result<Ta
     if let Some(n) = render::python_note(python) {
         t.note(&n);
     }
+    let cross = eval::multiconfig::mcdepends(ds);
+    if !cross.is_empty() {
+        t.note(&format!(
+            "note: {} cross-configuration task {} (mcdepends) not listed here; kind=mcdepends lists {}",
+            cross.len(),
+            if cross.len() == 1 {
+                "dependency"
+            } else {
+                "dependencies"
+            },
+            if cross.len() == 1 { "it" } else { "them" }
+        ));
+    }
     Ok(t)
+}
+
+// ---- mcdepends ----
+
+/// One row per `mcdepends` entry of the recipe's tasks (`eval::multiconfig::mcdepends`).
+fn mcdepends_table(ds: &DataStore) -> Table {
+    let mut t = Table::new(&["task", "from", "to", "recipe", "dep_task", "status", "loc"]);
+    let current = ds
+        .value("BB_CURRENT_MC")
+        .map(|v| v.text)
+        .unwrap_or_default();
+    let all = eval::multiconfig::mcdepends(ds);
+    let dash = |s: &Option<String>| match s.as_deref() {
+        Some("") => "(default)".to_string(),
+        Some(v) => v.to_string(),
+        None => "-".to_string(),
+    };
+    for d in &all {
+        let mut status = if d.from.is_none() {
+            format!(
+                "invalid: {:?} does not have the form mc:<from>:<to>:<recipe>:<task> (BitBake stops: \"does not contain exactly four ':' characters\")",
+                d.entry
+            )
+        } else if d.applies {
+            "applies here".to_string()
+        } else {
+            format!(
+                "not in this configuration (BitBake adds it only when building in {})",
+                dash(&d.from)
+            )
+        };
+        if d.uncertain {
+            status.push_str("; depends on python or undefined variables, not evaluated");
+        }
+        let loc = if d.locs.is_empty() {
+            "-".to_string()
+        } else {
+            d.locs
+                .iter()
+                .map(Loc::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        t.row(&[
+            &d.task,
+            &dash(&d.from),
+            &dash(&d.to),
+            &dash(&d.recipe),
+            &dash(&d.dep_task),
+            &status,
+            &loc,
+        ]);
+    }
+    if all.is_empty() {
+        t.note("note: no task of this recipe has an mcdepends flag (tasks added by anonymous python are not seen)");
+    }
+    t.note(&format!(
+        "note: evaluated in {}; the dependencies are listed, not followed: the recipe each names is resolved by BitBake with the providers of the `to` configuration (evaluate it with mc=<to>)",
+        if current.is_empty() {
+            "the default configuration".to_string()
+        } else {
+            format!("multiconfig {current}")
+        }
+    ));
+    t
 }
 
 // ---- runtime ----
@@ -581,9 +708,15 @@ fn runtime(ds: &DataStore) -> Table {
 
 // ---- reverse ----
 
-fn reverse(index: &Index, ws: &Workspace, ds: &DataStore, depth: u32) -> Result<Table> {
+fn reverse(
+    index: &Index,
+    ws: &Workspace,
+    ds: &DataStore,
+    depth: u32,
+    mc: Option<&str>,
+) -> Result<Table> {
     let mut t = Table::new(&["depth", "recipe", "kind", "target", "loc", "status"]);
-    let p = Providers::new(index, ws, None, None)?;
+    let p = Providers::new_in(index, ws, None, None, mc)?;
     let pn = ds.value("PN").map(|v| v.text).unwrap_or_default();
     let mut queue: VecDeque<(u32, String, Vec<String>)> = VecDeque::new();
     queue.push_back((1, pn.clone(), provided_names(ds, &pn)));
@@ -665,8 +798,8 @@ fn setting_row(t: &mut Table, s: &Setting, status: &str) {
     t.row(&[&s.name, &v, status, &loc_str(s.loc.clone())]);
 }
 
-fn providers_table(index: &Index, ws: &Workspace, name: &str) -> Result<Table> {
-    let p = Providers::new(index, ws, None, None)?;
+fn providers_table(index: &Index, ws: &Workspace, name: &str, mc: Option<&str>) -> Result<Table> {
+    let p = Providers::new_in(index, ws, None, None, mc)?;
     let set: ProviderSet = p.providers(name)?;
     let mut t = Table::new(&["name", "version", "status", "loc"]);
     for (i, prov) in set.providers.iter().enumerate() {

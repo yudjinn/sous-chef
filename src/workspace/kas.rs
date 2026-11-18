@@ -377,6 +377,38 @@ impl KasProject {
         })
     }
 
+    /// The multiconfig names kas writes into `local.conf` as `BBMULTICONFIG ?= "..."`
+    /// (kas 5.5 `config.py` `get_multiconfig`: the second `:` field of every target, of
+    /// [`KasProject::targets_or_default`], that starts with `multiconfig:` or `mc:`). kas
+    /// collects them in a Python `set`, so the order it writes is not defined; here they are
+    /// in target order, each once. kas has no other multiconfig setting.
+    pub fn multiconfigs(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for t in self.targets_or_default() {
+            if !(t.starts_with("multiconfig:") || t.starts_with("mc:")) {
+                continue;
+            }
+            // `target.split(':')[1]`
+            if let Some(name) = t.split(':').nth(1)
+                && !out.iter().any(|n| n == name)
+            {
+                out.push(name.to_string());
+            }
+        }
+        out
+    }
+
+    /// The `local_conf_header` entries (by id) whose text mentions `BBMULTICONFIG`: kas
+    /// writes them before its own `BBMULTICONFIG ?=` line, so such an entry decides the
+    /// value.
+    pub fn multiconfig_headers(&self) -> Vec<String> {
+        self.local_conf_header
+            .iter()
+            .filter(|h| h.text.contains("BBMULTICONFIG"))
+            .map(|h| h.id.clone())
+            .collect()
+    }
+
     /// The settings an environment variable overrides, in the order `KAS_MACHINE`,
     /// `KAS_DISTRO`, `KAS_TARGET`, `KAS_TASK` ([`KasOverrides`]). Empty when none is set.
     pub fn env_overrides(&self) -> Vec<EnvOverride> {
