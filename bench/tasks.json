@@ -1,0 +1,238 @@
+{
+  "workspace": "{{LIVE}}/yocto-kiss (kas project: OE-core, meta-arm, meta-kiss, meta-kiss-ti; Yocto Wrynose; MACHINE dogbonedark, DISTRO kiss)",
+  "reference_sources": "References were derived by hand from the layer files and, where marked 'bitbake', from real `bitbake -e` dumps ({{LIVE}}/runs/differential/env/<target>.env, bitbake-setup build of the same layers plus meta-yocto, which contributes nothing to the values used here) and `bitbake-layers show-layers` / `show-appends` of the kas build ({{LIVE}}/runs/show-layers.out, show-appends.out). sous-chef output was not used to write any reference.",
+  "overhead_prompt": "Say ok.",
+  "tasks": [
+    {
+      "id": "t01-curl-srcuri",
+      "category": "provenance",
+      "prompt": "What is the final value of SRC_URI for the curl recipe in this workspace (target build, machine dogbonedark), and which file contributes each entry? Is any entry added or removed by a bbappend or an override?",
+      "reference_source": "bitbake: curl.env ($SRC_URI history and final value)",
+      "facts": [
+        "The final SRC_URI has 30 entries: the tarball https://curl.se/download/curl-8.19.0.tar.xz plus 29 file:// entries (run-ptest, disable-tests, no-test-timeout.patch, mbedtls.patch and 25 CVE-*.patch files)",
+        "All 30 entries come from one SRC_URI assignment in openembedded-core meta/recipes-support/curl/curl_8.19.0.bb",
+        "SRC_URI:append:class-nativesdk (file://environment.d-curl.sh) does not apply to the target recipe",
+        "No bbappend applies to curl (nothing in meta-arm, meta-kiss or meta-kiss-ti changes it)",
+        "The tarball URL is written with ${BP} (curl-${PV}), PV 8.19.0 from the file name; SRC_URI[sha256sum] is set in the same recipe"
+      ],
+      "wrong": [
+        "file://environment.d-curl.sh is part of the target SRC_URI",
+        "A bbappend or a meta-kiss file contributes to curl's SRC_URI",
+        "A materially wrong entry count or a different version than 8.19.0"
+      ]
+    },
+    {
+      "id": "t02-providers",
+      "category": "override",
+      "prompt": "For machine dogbonedark, which PREFERRED_PROVIDER settings select the kernel and the bootloader, where exactly are they set (file and operator), and which recipe file and version does each resolve to?",
+      "reference_source": "bitbake: virtual_kernel.env, dropbear.env ($PREFERRED_PROVIDER_virtual/kernel, $PREFERRED_PROVIDER_virtual/bootloader history); layer files",
+      "facts": [
+        "PREFERRED_PROVIDER_virtual/kernel = linux-kiss",
+        "It is set in meta-kiss-ti/conf/machine/dogbonedark.conf with a weak assignment (?=), and nothing else sets it",
+        "linux-kiss resolves to meta-kiss/recipes-kernel/linux/linux-kiss_7.0.bb (version 7.0, with linux-kiss.inc)",
+        "PREFERRED_PROVIDER_virtual/bootloader = u-boot-kiss, set with ?= in the same dogbonedark.conf",
+        "u-boot-kiss resolves to meta-kiss/recipes-bsp/u-boot/u-boot-kiss_git.bb (U-Boot v2026.04 by its SRCREV; PV is 'git')"
+      ],
+      "wrong": [
+        "The kernel provider is linux-yocto or another recipe",
+        "The provider is set in local.conf, the kas file or meta-kiss/conf/machine/include/common.inc",
+        "The bootloader provider is plain u-boot"
+      ]
+    },
+    {
+      "id": "t03-linux-kiss-appends",
+      "category": "structure",
+      "prompt": "Which bbappends apply to the linux-kiss recipe, in what order, and what does each change? Where do the defconfig and the patch in its SRC_URI come from?",
+      "reference_source": "bitbake: show-appends.out (kas build), linux-kiss.env ($FILESEXTRAPATHS, $FILESPATH, $SRC_URI)",
+      "facts": [
+        "Exactly one bbappend applies: meta-kiss-ti/recipes-kernel/linux/linux-kiss_%.bbappend",
+        "It only does FILESEXTRAPATHS:prepend := \"${THISDIR}/${PN}:\" (adds meta-kiss-ti/recipes-kernel/linux/linux-kiss/ to the file search path)",
+        "file://defconfig is added in meta-kiss/recipes-kernel/linux/linux-kiss.inc and is found as meta-kiss-ti/recipes-kernel/linux/linux-kiss/defconfig (thanks to the bbappend)",
+        "file://0001-drm-panel-ilitek-ili9882t-...patch is added in linux-kiss_7.0.bb and found in meta-kiss/recipes-kernel/linux/linux-kiss-7.0/"
+      ],
+      "wrong": [
+        "Any other bbappend (for example a meta-arm linux-yocto bbappend) applies to linux-kiss",
+        "The bbappend adds SRC_URI entries or changes configuration itself",
+        "The defconfig lives in meta-kiss"
+      ]
+    },
+    {
+      "id": "t04-dropbear-classes",
+      "category": "structure",
+      "prompt": "Which classes does the dropbear recipe inherit, directly and indirectly (including the ones every recipe gets)?",
+      "reference_source": "bitbake: dropbear.env ($BBINCLUDED, $INHERIT); recipe and class files",
+      "facts": [
+        "Direct inherits in dropbear_2025.89.bb: autotools, update-rc.d, systemd (one inherit line) and update-alternatives (a second inherit line)",
+        "autotools inherits siteinfo",
+        "Every recipe gets base.bbclass, which inherits patch, staging, mirrors, utils, utility-tasks, logging, metadata_scm (and terminal via patch)",
+        "base.bbclass also inherit_defers the toolchain classes toolchain/gcc-native and toolchain/gcc",
+        "Global INHERIT adds package_ipk (with package, packagedata, chrpath, package_pkgdata, insane), debian, devshell, sstate, license, remove-libtool, create-spdx (create-spdx-3.0, spdx-common), buildstats, uninative and sanity"
+      ],
+      "wrong": [
+        "dropbear inherits a class it does not (for example pkgconfig, ptest, cmake, meson)",
+        "systemd or update-alternatives is said not to be inherited"
+      ]
+    },
+    {
+      "id": "t05-curl-deps",
+      "category": "dependencies",
+      "prompt": "What does curl depend on at build time in this workspace (target, machine dogbonedark), and where does each dependency come from? What would enabling its gnutls PACKAGECONFIG option add?",
+      "reference_source": "bitbake: curl.env ($DEPENDS history and final value, $PACKAGECONFIG, $PACKAGECONFIG_CONFARGS); curl_8.19.0.bb",
+      "facts": [
+        "libidn2, openssl and zlib come from the enabled PACKAGECONFIG options libidn, openssl and zlib (PACKAGECONFIG = basic-auth bearer-auth digest-auth ipfs negotiate-auth openssl proxy threaded-resolver verbose zlib ipv6 aws libidn)",
+        "The class dependencies: autoconf-native automake-native libtool-native libtool-cross (autotools), pkgconf-native (pkgconfig), virtual/update-alternatives (update-alternatives), and the toolchain gcc-cross-arm virtual/compilerlibs virtual/libc (base / BASEDEPENDS)",
+        "The recipe itself sets no plain DEPENDS; its DEPENDS:append:class-target adds openssl-native only with ptest enabled, which it is not here",
+        "Enabling gnutls adds gnutls to DEPENDS and passes --with-gnutls instead of --without-gnutls (PACKAGECONFIG[gnutls] = \"--with-gnutls,--without-gnutls,gnutls\" in curl_8.19.0.bb)",
+        "gnutls adds no runtime dependency (no fourth field) and does not by itself remove openssl"
+      ],
+      "wrong": [
+        "gnutls is already enabled",
+        "nghttp2, brotli, zstd, libssh2 or c-ares are current build dependencies",
+        "openssl-native is a current dependency"
+      ]
+    },
+    {
+      "id": "t06-gnutls-search",
+      "category": "search (control)",
+      "prompt": "Where is PACKAGECONFIG[gnutls] set across the enabled layers of this workspace? List each file.",
+      "reference_source": "grep over the five enabled layers",
+      "facts": [
+        "8 places, all in openembedded-core/meta (none in meta-arm, meta-kiss, meta-kiss-ti)",
+        "recipes-support/curl/curl_8.19.0.bb, recipes-extended/wget/wget_1.25.0.bb, recipes-support/gnupg/gnupg_2.5.17.bb, recipes-devtools/qemu/qemu.inc",
+        "recipes-connectivity/wpa-supplicant/wpa-supplicant_2.11.bb, recipes-core/glib-networking/glib-networking_2.80.1.bb, recipes-extended/cups/cups.inc, recipes-support/vte/vte_0.82.2.bb"
+      ],
+      "wrong": [
+        "A hit in a layer outside the enabled set (meta-openembedded, meta-kiss-nxp, ...) listed as enabled",
+        "A file listed that does not set PACKAGECONFIG[gnutls]"
+      ]
+    },
+    {
+      "id": "t07-busybox-install",
+      "category": "task composition",
+      "prompt": "What does do_install of busybox consist of in this workspace, including any appends, prepends or extra functions run with it? Summarize what it does for this distro.",
+      "reference_source": "bitbake: busybox.env (do_install body, $RMINITDIR, $INHERIT); busybox.inc; systemd.bbclass; remove-libtool.bbclass",
+      "facts": [
+        "do_install is defined once, in openembedded-core meta/recipes-core/busybox/busybox.inc (line 225); no bbappend, no do_install:append / :prepend anywhere",
+        "It rewrites the paths in busybox.links* with sed, installs the busybox binary (busybox, or busybox.suid / busybox.nosuid) and its links / alternatives, and installs init scripts and config files (syslog, hwclock, udhcpc, ...) according to what .config enables",
+        "Its inline python conditions resolve for this distro: the systemd branch is not taken (no systemd in DISTRO_FEATURES) and busybox init is not installed (VIRTUAL-RUNTIME_init_manager is sysvinit)",
+        "systemd.bbclass adds do_install[postfuncs] ${RMINITDIR} = rm_systemd_unitdir here (systemd is not a distro feature)",
+        "remove-libtool.bbclass (from INHERIT_DISTRO) adds remove_libtool_la as a postfunc"
+      ],
+      "wrong": [
+        "A do_install:append or bbappend for busybox exists",
+        "The systemd units are installed for this distro"
+      ]
+    },
+    {
+      "id": "t08-layers",
+      "category": "layers",
+      "prompt": "Which layers are enabled in this workspace, with their collection names and priorities, and which Yocto release does the workspace target?",
+      "reference_source": "bitbake: show-layers.out (kas build); layer.conf files",
+      "facts": [
+        "Five layers: meta-arm (meta-arm/meta-arm, priority 5), arm-toolchain (meta-arm/meta-arm-toolchain, priority 5), meta-kiss (priority 9), meta-kiss-ti (priority 9), core (openembedded-core/meta, priority 5)",
+        "The collection of meta-arm-toolchain is named arm-toolchain and that of openembedded-core/meta is core",
+        "The release is Wrynose (LAYERSERIES_CORENAMES = wrynose in OE-core; every layer has LAYERSERIES_COMPAT wrynose)",
+        "meta-kiss-amd, meta-kiss-nxp and meta-kiss-st exist in the checkout but are not enabled (build/conf/bblayers.conf, from the kas files kiss.yaml + dogbonedark.yaml)"
+      ],
+      "wrong": [
+        "meta-poky / meta-yocto / meta-openembedded listed as enabled",
+        "A wrong priority or a release other than Wrynose"
+      ]
+    },
+    {
+      "id": "t09-lint-meta-kiss",
+      "category": "lint",
+      "prompt": "Is there anything wrong with the layer meta-kiss by Yocto Project conventions? List concrete findings with file names.",
+      "reference_source": "by hand from the meta-kiss files and OE-core's insane.bbclass / bitbake.conf; bitbake: linux-kiss.env, sl.env, u-boot-kiss.env (SUMMARY, HOMEPAGE, PV)",
+      "facts": [
+        "linux-kiss (linux-kiss_7.0.bb / linux-kiss.inc) has no SUMMARY (BitBake gives the default 'linux-kiss version 7.0-r0') and no HOMEPAGE",
+        "sl_git.bb uses PV = \"1.0+git${SRCPV}\": SRCPV is obsolete (empty since 4.3), PV should be \"1.0+git\"",
+        "u-boot-kiss_git.bb sets no PV, so PV is just 'git' (no version number)",
+        "sl_git.bb skips the ldflags QA check (INSANE_SKIP:${PN} += \"ldflags\") instead of passing LDFLAGS to the build"
+      ],
+      "wrong": [
+        "LAYERSERIES_COMPAT, a license file or a README is missing from meta-kiss",
+        "The kernel patch has no Upstream-Status (it has one)",
+        "A syntax error in a meta-kiss file"
+      ]
+    },
+    {
+      "id": "t10-linux-kiss-srcuri",
+      "category": "python (uncertain)",
+      "prompt": "What exact kernel source URL does linux-kiss fetch, and how is it computed? Give the final SRC_URI of linux-kiss.",
+      "reference_source": "bitbake: linux-kiss.env ($SRC_URI, $MAJOR_VER, $KERNELORG_MIRROR, $PV)",
+      "facts": [
+        "Final SRC_URI = https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.0.tar.xz file://defconfig file://0001-drm-panel-ilitek-ili9882t-Select-DRM_DISPLAY_DSC_HEL.patch",
+        "The URL is ${KERNELORG_MIRROR}/linux/kernel/v${MAJOR_VER}.x/linux-${PV}.tar.xz in linux-kiss.inc, KERNELORG_MIRROR = https://cdn.kernel.org/pub (bitbake.conf)",
+        "MAJOR_VER is inline python, ${@d.getVar('PV').split('.')[0]}, which gives 7 for PV 7.0 (PV from the file name linux-kiss_7.0.bb); the answer either evaluates it or says it is python that a static reading does not run"
+      ],
+      "wrong": [
+        "A URL with v7.0.x, v6.x or another version",
+        "A git URL for the kernel"
+      ]
+    },
+    {
+      "id": "t11-distro-features",
+      "category": "python (uncertain)",
+      "prompt": "What is the final value of DISTRO_FEATURES for this workspace's distro, and which files and operations produce it? Does it include OE-core's default distro features?",
+      "reference_source": "bitbake: dropbear.env ($DISTRO_FEATURES history and final value)",
+      "facts": [
+        "kiss.conf (meta-kiss/conf/distro/kiss.conf) sets DISTRO_FEATURES = \"sysvinit ipv4 ipv6 wifi zeroconf usbgadget usbhost pni-names ldconfig\"",
+        "init-manager-sysvinit.inc (pulled in by INIT_MANAGER = sysvinit) appends \" sysvinit\", so sysvinit appears twice in the raw value",
+        "bitbake.conf appends ${@oe.utils.filter_default_features('DISTRO_FEATURES', d)}, python; with DISTRO_FEATURES_OPTED_OUT = \"*\" it adds nothing (BitBake's final value has no default features); an answer may instead say this python part cannot be evaluated without BitBake",
+        "Final value: sysvinit ipv4 ipv6 wifi zeroconf usbgadget usbhost pni-names ldconfig sysvinit (no acl, x11, systemd or other DISTRO_FEATURES_DEFAULTS)"
+      ],
+      "wrong": [
+        "DISTRO_FEATURES includes default features such as acl, xattr, x11, opengl or systemd",
+        "Stating as certain a python-derived part that is wrong"
+      ]
+    },
+    {
+      "id": "t12-kiss-image-install",
+      "category": "override",
+      "prompt": "What is the final IMAGE_INSTALL of kiss-image for machine dogbonedark, and where does each item come from? Does core-image's default IMAGE_INSTALL apply?",
+      "reference_source": "bitbake: kiss-image.env ($IMAGE_INSTALL history and final value)",
+      "facts": [
+        "Final IMAGE_INSTALL = packagegroup-core-boot dropbear sl u-boot-kiss",
+        "packagegroup-core-boot dropbear sl are set with = in meta-kiss/recipes-core/images/kiss-image.bb",
+        "u-boot-kiss comes from IMAGE_INSTALL:append = \" ${PREFERRED_PROVIDER_virtual/bootloader}\" in meta-kiss-ti/conf/machine/dogbonedark.conf",
+        "core-image.bbclass's IMAGE_INSTALL ?= \"${CORE_IMAGE_BASE_INSTALL}\" does not apply: the recipe has already set it before inherit core-image"
+      ],
+      "wrong": [
+        "CORE_IMAGE_BASE_INSTALL / packagegroup-base-extended is in IMAGE_INSTALL",
+        "u-boot-kiss is missing, or the append is said to be lost"
+      ]
+    },
+    {
+      "id": "t13-git-srcrevs",
+      "category": "search (control)",
+      "prompt": "Which recipes in the meta-kiss and meta-kiss-ti layers fetch their source from git, from which repository and branch, and at which SRCREV?",
+      "reference_source": "the two recipe files",
+      "facts": [
+        "u-boot-kiss (meta-kiss/recipes-bsp/u-boot/u-boot-kiss_git.bb): git://source.denx.de/u-boot/u-boot.git, branch master, SRCREV 88dc2788777babfd6322fa655df549a019aa1e69 (v2026.04)",
+        "sl (meta-kiss/recipes-games/sl/sl_git.bb): git://github.com/mtoyoda/sl.git, branch master, SRCREV 923e7d7ebc5c1f009755bdeb789ac25658ccce03",
+        "No other recipe of those layers fetches from git (linux-kiss fetches a kernel.org tarball; meta-kiss-ti has only a bbappend)"
+      ],
+      "wrong": [
+        "linux-kiss listed as fetched from git",
+        "A wrong SRCREV"
+      ]
+    },
+    {
+      "id": "t14-u-boot-kiss",
+      "category": "provenance",
+      "prompt": "What is the final SRC_URI of u-boot-kiss, which assignments to it are overridden, and does any bbappend in the workspace apply to u-boot-kiss?",
+      "reference_source": "bitbake: u-boot-kiss.env ($SRC_URI history), show-appends.out (kas build)",
+      "facts": [
+        "Final SRC_URI = git://source.denx.de/u-boot/u-boot.git;protocol=https;branch=master",
+        "It is set with = in meta-kiss/recipes-bsp/u-boot/u-boot-kiss_git.bb, replacing the SRC_URI of OE-core's u-boot-common.inc (which has ;tag=v${PV})",
+        "No bbappend applies to u-boot-kiss; meta-arm's u-boot_%.bbappend matches only the u-boot recipe",
+        "SRCREV = 88dc2788777babfd6322fa655df549a019aa1e69 (v2026.04) from the same recipe"
+      ],
+      "wrong": [
+        "meta-arm's u-boot_%.bbappend applies to u-boot-kiss",
+        "CVE patches or other entries from u-boot-common.inc remain in the final SRC_URI"
+      ]
+    }
+  ]
+}
