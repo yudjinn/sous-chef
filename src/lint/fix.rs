@@ -536,6 +536,12 @@ pub struct FileChange {
     pub diff: String,
     /// The fixes applied, by position in the file.
     pub fixes: Vec<FixedFinding>,
+    /// The text before the round and the edits applied to it (to follow lines across
+    /// rounds).
+    #[serde(skip)]
+    pub before: String,
+    #[serde(skip)]
+    pub edits: Vec<Edit>,
 }
 
 /// What one round did.
@@ -559,10 +565,14 @@ pub struct After {
     pub fixed: Vec<Finding>,
     /// Findings of the first run in those files that are still there.
     pub remaining: Vec<Finding>,
-    /// Findings in those files that the first run did not have: a fix introduced them (or
-    /// made them visible, as converting a legacy name does for the rules that skip legacy
-    /// names). Each is a bug in a fix or a problem the old spelling hid.
+    /// Findings in those files that the first run did not have, on a line no
+    /// `override/legacy-syntax` fix renamed: a fix introduced them, which is a bug in that
+    /// fix.
     pub new: Vec<Finding>,
+    /// Findings the first run did not have, on a line whose legacy name a fix converted:
+    /// the other rules skip legacy names, so the old spelling hid them (a `_remove` that
+    /// is now `override/remove-in-recipe`'s `:remove`). Not introduced by a fix.
+    pub revealed: Vec<Finding>,
     /// Problems after writing (index refresh or lint failed), one line each.
     pub problems: Vec<String>,
 }
@@ -619,6 +629,7 @@ impl FixReport {
             .collect();
         out.extend(after.remaining.iter().cloned());
         out.extend(after.new.iter().cloned());
+        out.extend(after.revealed.iter().cloned());
         lint::sort_findings(&mut out);
         out
     }
@@ -680,6 +691,8 @@ pub fn run_with(
     let mut written_keys: Vec<String> = Vec::new();
     let mut last: Option<Report> = None;
     let mut problems: Vec<String> = Vec::new();
+    // Per file (`layer:path`), the lines (current numbering) whose legacy name was renamed.
+    let mut legacy_lines: BTreeMap<String, Vec<u32>> = BTreeMap::new();
     for round_no in 1..=MAX_ROUNDS {
         let (round, plan, skipped, not_writable) = plan_round(ws, index, todo, fix);
         if round_no == 1 {
@@ -707,6 +720,22 @@ pub fn run_with(
         }
         let checked = scaffold::check_plan(ws, &plan)?;
         let files = scaffold::apply_plan(&plan, &checked)?;
+        // Follow the converted legacy lines into the new text.
+        if let Some(round) = out.rounds.last() {
+            for c in &round.changes {
+                let lines = legacy_lines.entry(c.file.clone()).or_default();
+                for l in lines.iter_mut() {
+                    *l = map_line(&c.before, &c.edits, *l);
+                }
+                for f in c
+                    .fixes
+                    .iter()
+                    .filter(|f| f.finding.rule == "override/legacy-syntax")
+                {
+                    lines.push(map_line(&c.before, &c.edits, f.finding.loc.lines.start));
+                }
+            }
+        }
         for (f, c) in files.iter().zip(&checked) {
             if !written.contains(f) {
                 written.push(f.clone());
@@ -746,7 +775,13 @@ pub fn run_with(
         }
     }
     if fix.write && !written.is_empty() {
-        out.after = Some(compare(&out.report, last.as_ref(), written_keys, problems));
+        out.after = Some(compare(
+            &out.report,
+            last.as_ref(),
+            written_keys,
+            problems,
+            &legacy_lines,
+        ));
     }
     Ok(out)
 }
@@ -1014,6 +1049,8 @@ fn plan_round(
             diff: unified_diff(&display, &text, &new),
             file: display,
             fixes: applied,
+            edits: taken.iter().map(|e| (*e).clone()).collect(),
+            before: text,
         });
         plan.files.extend(one.files);
     }
@@ -1038,11 +1075,32 @@ fn compare_key(f: &Finding) -> (String, String, String) {
     (f.rule.to_string(), file_key(&f.loc), msg)
 }
 
+/// Line `line` of `old` after `edits` (applied to `old`): moved by the line terminators the
+/// edits before it add or remove.
+fn map_line(old: &str, edits: &[Edit], line: u32) -> u32 {
+    let terminators = |s: &str| {
+        physical_lines(s)
+            .iter()
+            .filter(|l| l.next > l.content_end)
+            .count() as i64
+    };
+    let Some(start) = physical_line(old, line).map(|l| l.start) else {
+        return line;
+    };
+    let delta: i64 = edits
+        .iter()
+        .filter(|e| e.bytes.end <= start)
+        .map(|e| terminators(&e.replacement) - terminators(old.get(e.bytes.clone()).unwrap_or("")))
+        .sum();
+    u32::try_from((i64::from(line) + delta).max(1)).unwrap_or(line)
+}
+
 fn compare(
     before: &Report,
     after: Option<&Report>,
     files: Vec<String>,
     mut problems: Vec<String>,
+    legacy_lines: &BTreeMap<String, Vec<u32>>,
 ) -> After {
     let set: HashSet<&str> = files.iter().map(String::as_str).collect();
     let old: Vec<&Finding> = before
@@ -1064,11 +1122,20 @@ fn compare(
     }
     let mut remaining = Vec::new();
     let mut new = Vec::new();
+    let mut revealed = Vec::new();
     for f in &after.findings {
         match pool.get_mut(&compare_key(f)) {
             Some(n) if *n > 0 => {
                 *n -= 1;
                 remaining.push(f.clone());
+            }
+            // The legacy rule itself on a converted line is the fix's failure, not news.
+            _ if f.rule != "override/legacy-syntax"
+                && legacy_lines
+                    .get(&file_key(&f.loc))
+                    .is_some_and(|l| l.contains(&f.loc.lines.start)) =>
+            {
+                revealed.push(f.clone());
             }
             _ => new.push(f.clone()),
         }
@@ -1089,6 +1156,7 @@ fn compare(
         fixed,
         remaining,
         new,
+        revealed,
         problems,
     }
 }
@@ -1324,16 +1392,34 @@ pub fn render_text(r: &FixReport) -> String {
     if let Some(a) = &r.after {
         let _ = writeln!(
             out,
-            "after: {} written; {} fixed, {} remaining, {} new in them",
+            "after: {} written; {} fixed, {} remaining, {} new, {} revealed in them",
             plural(a.files.len(), "file", "files"),
             plural(a.fixed.len(), "finding", "findings"),
             a.remaining.len(),
-            a.new.len()
+            a.new.len(),
+            a.revealed.len()
         );
+        if !a.revealed.is_empty() {
+            let _ = writeln!(
+                out,
+                "revealed (on lines whose legacy name a fix converted; the rules skip legacy \
+                 names, so the old spelling hid these):"
+            );
+            for f in &a.revealed {
+                let _ = writeln!(
+                    out,
+                    "  {}\t{}\t{}\t{}",
+                    f.severity.as_str(),
+                    f.rule,
+                    f.loc,
+                    f.message
+                );
+            }
+        }
         if !a.new.is_empty() {
             let _ = writeln!(
                 out,
-                "new findings (a fix introduced them, or they were hidden by what it replaced):"
+                "new findings (a fix introduced them: a bug in that fix):"
             );
             for f in &a.new {
                 let _ = writeln!(
