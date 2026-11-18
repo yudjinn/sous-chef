@@ -418,3 +418,45 @@ fn real_log_task_order_format() {
             .ends_with("do_compile (1757933): log.do_compile.1757933")
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// The bitbake tool: `op=build target=curl` and two cancels.
+
+/// A cancelled build's job output. Killed with SIGTERM (before y1-build's fix) the client
+/// printed nothing more: its output stops at `do_configure: Started` while the server built
+/// on. Interrupted twice it printed knotty's two messages, the server stopped the running
+/// task, and the client ended with `Execution was interrupted`. Neither is a failure the
+/// digester should report.
+#[test]
+fn real_cancelled_build_outputs() {
+    let killed = sample("bitbake/job-build-curl-cancel-sigterm.out");
+    assert!(
+        killed
+            .trim_end()
+            .ends_with("NOTE: recipe curl-8.19.0-r0: task do_configure: Started")
+    );
+    let interrupted = sample("bitbake/job-build-curl-cancel-sigint.out");
+    let at = |s: &str| interrupted.find(s).unwrap_or_else(|| panic!("{s}"));
+    assert!(
+        at("Keyboard Interrupt, closing down...") < at("Second Keyboard Interrupt, stopping...")
+    );
+    assert!(at("Second Keyboard Interrupt") < at("NOTE: Sending SIGTERM to remaining 1 tasks"));
+    assert!(
+        interrupted
+            .trim_end()
+            .ends_with("Execution was interrupted, returning a non-zero exit code.")
+    );
+    for text in [&killed, &interrupted] {
+        assert!(logs::detect(text).is_empty());
+        assert!(logs::failed_tasks(text).is_empty());
+    }
+    let done = sample("bitbake/job-build-curl.out");
+    assert!(done.contains(
+        "NOTE: Tasks Summary: Attempted 919 tasks of which 900 didn't need to be rerun and all succeeded."
+    ));
+    let daemon = sample("bitbake/cookerdaemon-cancel-excerpt.log");
+    assert!(daemon.contains("23:16:35.315404 Disconnecting Client"));
+    assert!(daemon.contains("23:16:55.051976 No timeout, exiting."));
+    assert!(daemon.contains("23:24:04.076926 Running command ['stateShutdown']"));
+    assert!(daemon.contains("23:24:05.077478 Running command ['stateForceShutdown']"));
+}

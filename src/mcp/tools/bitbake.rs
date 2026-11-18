@@ -22,8 +22,8 @@ use std::time::Duration;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::bitbake::env::KILL_GRACE;
 use crate::bitbake::env::validate_target;
+use crate::bitbake::env::{GROUP_EXIT_WAIT, INTERRUPT_REPEAT, INTERRUPT_WAIT, KILL_GRACE};
 use crate::bitbake::jobs::{self, JobInfo, JobSpec, JobState, QUEUE_WAIT, Started};
 use crate::bitbake::logs::{self, Digest, DigestInput};
 use crate::bitbake::{BbEnv, HostEnv, validate_name};
@@ -152,10 +152,18 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
                 }
             };
             ctx.jobs.cancel(&id)?;
-            // SIGTERM, up to KILL_GRACE, then SIGKILL: wait a little longer than that.
+            // SIGINT twice (BitBake stops its build), up to INTERRUPT_WAIT for the client to
+            // exit, then SIGTERM, KILL_GRACE, SIGKILL: wait a little longer than all that.
             let job = ctx
                 .jobs
-                .wait(&id, KILL_GRACE + Duration::from_secs(3))
+                .wait(
+                    &id,
+                    INTERRUPT_REPEAT
+                        + INTERRUPT_WAIT
+                        + GROUP_EXIT_WAIT
+                        + KILL_GRACE
+                        + Duration::from_secs(3),
+                )
                 .await
                 .ok_or_else(|| Error::NotFound { what: id.clone() })?;
             ctx.jobs.settle(&ctx.handles);

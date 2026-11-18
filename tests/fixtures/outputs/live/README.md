@@ -82,4 +82,8 @@ Under `y1-build/`; the same scrubbing as above.
 | `y1-build/log/console-compile-fail.out` | the same command with a bbappend whose `do_compile:prepend` echoes a compiler-style error line and runs `false` (exit 1; kas's INFO lines removed) |
 | `y1-build/log/log.do_compile.1757933`, `run.do_compile.1757933` | that task's log and run file |
 | `y1-build/log/log.task_order` | curl's `${T}/log.task_order` after these runs (the fetch of 2026-11-17 first) |
+| `y1-build/bitbake/job-build-curl.out` | the output of job 2 of the `bitbake` tool, `op=build target=curl` after `op=clean args=["cleanall"]` (init-script mode; the job's handle content) |
+| `y1-build/bitbake/job-build-curl-cancel-sigterm.out` | the same after `op=cancel` 22 s in, before the fix (SIGTERM to the job's group: the client's output stops, the server built on) |
+| `y1-build/bitbake/job-build-curl-cancel-sigint.out` | the same with the fix (two SIGINTs): knotty's interrupt messages and `Execution was interrupted` |
+| `y1-build/bitbake/cookerdaemon-cancel-excerpt.log` | lines of `build/bitbake-cookerdaemon.log` around both cancels (the server's `Disconnecting Client` and its end 20 s later; `stateShutdown`, `stateForceShutdown`) |
 

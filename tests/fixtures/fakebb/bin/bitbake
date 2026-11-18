@@ -6,6 +6,7 @@
 #   FAKEBB_SLEEP        seconds to sleep in a child process before exiting
 #   FAKEBB_PIDFILE      file that receives "<own pid> <sleep pid>" once sleeping
 #   FAKEBB_IGNORE_TERM  1: ignore SIGTERM (it, and the sleep child, then need SIGKILL)
+#   FAKEBB_ON_INT       1: run until the second SIGINT, as knotty does, ignoring SIGTERM
 #   FAKEBB_EXIT         exit status (default 0)
 echo "fakebb: $(basename "$0")"
 echo "cwd: $PWD"
@@ -19,6 +20,23 @@ if [ -n "${FAKEBB_OUTPUT-}" ]; then
 fi
 if [ -n "${FAKEBB_STDERR-}" ]; then
     printf '%s\n' "$FAKEBB_STDERR" >&2
+fi
+if [ "${FAKEBB_ON_INT-}" = 1 ]; then
+    # As knotty: the first SIGINT asks the server to shut down, the second forces it; the
+    # client exits once the server says the build ended. SIGTERM is ignored, so only the
+    # interrupts stop it in time.
+    trap '' TERM
+    n=0
+    stop=
+    trap 'n=$((n + 1)); if [ "$n" = 1 ]; then echo "Keyboard Interrupt, closing down..."; else echo "Second Keyboard Interrupt, stopping..."; stop=1; fi' INT
+    if [ -n "${FAKEBB_PIDFILE-}" ]; then
+        echo "$$" > "$FAKEBB_PIDFILE.tmp" && mv "$FAKEBB_PIDFILE.tmp" "$FAKEBB_PIDFILE"
+    fi
+    while [ -z "$stop" ]; do
+        sleep 0.1
+    done
+    echo "fakebb: build stopped"
+    exit 1
 fi
 if [ -n "${FAKEBB_SLEEP-}" ]; then
     if [ "${FAKEBB_IGNORE_TERM-}" = 1 ]; then

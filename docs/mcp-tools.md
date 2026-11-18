@@ -1267,11 +1267,18 @@ NOTE: Running task 812 of 3301 ...`). Without `wait`, poll with `op: status`.
 `failed`, `cancelled`), `elapsed`, `exit` and `handle`. While running it shows the last 5
 output lines; a finished job that did not fail shows the last 3 and a `slice` hint; a
 failed job is followed by a digest of the console output and, for operations that run
-tasks, a `log job=` hint. JSON: `{job, tail, digest, notes}`. `cancel` terminates the job's
-process group (SIGTERM, then SIGKILL after 2 s, then up to 5 s until no process is left in
-the group; a process that left the group, such as a daemon that called `setsid`, is not
-reached) and reports the job, which is `cancelled` once that is done; a `bitbake -e` that
-times out is ended the same way. A finished job's output becomes a handle the next time the
+tasks, a `log job=` hint. JSON: `{job, tail, digest, notes}`. `cancel` stops the job as
+Ctrl-C twice does: SIGINT to its process group (BitBake's client asks the server to stop
+scheduling), a second SIGINT 1 s later (the server kills the running tasks), up to 60 s for
+the client to exit and 1 s more for the rest of the group; only then, if something is
+left, SIGTERM, SIGKILL after 2 s and up to 5 s until no process is left in the group. It
+reports the job, which is `cancelled` once that is done (the call waits for it). The
+interrupts matter: the BitBake server runs outside the job's group and **keeps building
+when its client is only killed** (live, y1-build: SIGTERM ended `bitbake curl` and the
+build ran 20 s more to its end; with the SIGINTs it stopped in 3.6 s, `NOTE: Sending
+SIGTERM to remaining 1 tasks`, `Execution was interrupted`). A process that left the group
+otherwise (a daemon that called `setsid`) is not reached. A `bitbake -e` that times out is
+terminated directly (SIGTERM, SIGKILL). A finished job's output becomes a handle the next time the
 `bitbake` tool, or `log` with `job`, is called.
 
 Jobs live in the server process. `status` of a job, finished or not, is reachable only

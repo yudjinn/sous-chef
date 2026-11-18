@@ -2152,6 +2152,19 @@ Checked 2026-11-17 against bitbake `master` (`lib/bb/main.py`, `lib/bb/cooker.py
   after the cancel and exited by itself about 3 s later ("No timeout, exiting.",
   "Exiting as we could obtain the lock"), because with `BB_SERVER_TIMEOUT` unset the server
   leaves once its client is gone. With `BB_SERVER_TIMEOUT` set it would stay (not tried).
+  **During a build** (y1-build, `bitbake curl` from the `bitbake` tool, cancelled 22 s in,
+  in `do_configure`) the server does **not** stop when its client is killed: the
+  cookerdaemon log has `Disconnecting Client` at the cancel, and the server went on
+  scheduling (`do_compile` with `make -j 16`, then `do_install` to
+  `do_create_package_spdx`) until the build was complete 20 s later, then "No timeout,
+  exiting.". What stops it is the client's own interrupt handling (`ui/knotty.py`): on the
+  first SIGINT (`KeyboardInterrupt`) it prints "Keyboard Interrupt, closing down..." and
+  sends `stateShutdown` (no new tasks), on the second "Second Keyboard Interrupt,
+  stopping..." and `stateForceShutdown` (running tasks killed: `NOTE: Sending SIGTERM to
+  remaining 1 tasks`), and it exits once the server reports the end (`Execution was
+  interrupted, returning a non-zero exit code.`). Live: two SIGINTs 1 s apart, the client
+  gone 3.6 s after the first, the server 1 s after it. A SIGTERM to the client has no such
+  handler.
 - **A second client** (settled on the live environment): while `bitbake -e curl` ran, `bitbake-layers
   show-layers` started in a second shell printed `NOTE: Reconnecting to bitbake server...`,
   **waited**, and completed normally (exit 0) half a second after the first client

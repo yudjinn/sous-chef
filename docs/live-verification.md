@@ -823,7 +823,7 @@ handle	h:391e170707
 Recipe, task, exit status (from the newest cooker console log), the first error with its
 context, the failing function mapped through the run file (`autotools.bbclass:96` is the
 `bbfatal_log "configure failed"` line: checked by hand from the `# line: 87` comment), the
-task definition (`autotools_do_configure`, lines 149-225) and the handle; 645 bytes:
+task definition (`autotools_do_configure`, lines 149-225) and the handle; 574 bytes:
 **confirmed**.
 
 **A failing `do_compile:prepend`** (it echoes `lib/sous_chef_probe.c:12:5: error: 'probe'
@@ -862,6 +862,50 @@ Seen in the consoles (bitbake-semantics.md, "Build output", corrected): the `con
 failed` `ERROR:` (from `bbfatal_log`) did not stop knotty from printing `Log data follows:`
 (it is logged with `forcelog`); in both consoles `Execution of '<run file>' failed with exit
 code 1` came before `Logfile of failure stored in:`.
+
+### The bitbake tool with a real build: confirmed, cancel fixed
+
+Through the MCP server (init-script mode, `runs/y1-build/tools/calls-bitbake-*.json`), the
+scratch bbappend removed first:
+
+- `op=clean target=curl args=["cleanall"] confirm=true wait=300` with a progress token:
+  job 1, `bitbake -c cleanall curl`, succeeded in 6 s; 14 progress notifications, about two
+  a second, each `job:1 clean curl running <n>s: <last line>`.
+- `op=build target=curl`: job 2 started at once (`started; poll with bitbake op=status
+  job=job:2, stop with op=cancel`). `op=status` 5 s later: `running`, the last five lines.
+- **Behind the build**, `op=env target=curl` and `op=layers` were refused at once with the
+  running job and "already running (one job at a time): it holds BitBake's lock ...", and
+  `var name=S recipe=curl authoritative=true` with "cannot run bitbake -e now: job:2 (build
+  curl) is running ... use static mode"; `log job=job:2`: "still running". As documented.
+- `op=status wait=300` with a progress token: 67 notifications (`job:2 build curl running
+  15s: NOTE: recipe curl-8.19.0-r0: task do_configure: Started`, ...), then the finished
+  job: `succeeded`, `elapsed 41s`, `exit 0`, the handle and the last three lines (`Attempted
+  919 tasks of which 900 didn't need to be rerun and all succeeded.`).
+
+**Bug: `op=cancel` did not stop the build.** A second run (cleanall, build, cancel 22 s in,
+during `do_configure`, with `ps` sampled every second, `y1-build/bitbake/`): the job was
+`cancelled` after 29 ms and its client was gone, but the BitBake server (`bitbake-server`,
+in its own session, re-parented, as for `bitbake -e` before) and its workers were not in
+the job's group: `do_configure` went on, `do_compile` started (`make -j 16`) 5 s after the
+cancel, and the build ran to `do_create_package_spdx`; the cookerdaemon log has
+`Disconnecting Client` at 23:16:35 and the build's end, then `No timeout, exiting.`, at
+23:16:55. So a cancel only made the build invisible. Fixed (`Supervised::interrupt`,
+`src/bitbake/env.rs`): a cancel sends SIGINT to the group, again 1 s later, and waits up to
+60 s for the client to exit before terminating anything: what Ctrl-C twice does in knotty
+(`stateShutdown`, `stateForceShutdown`). Re-run live with the fix: cancel answered after
+3.6 s; the job output ends `Keyboard Interrupt, closing down...`, `Second Keyboard
+Interrupt, stopping...`, `WARNING: Exiting due to interrupt.`, `NOTE: Sending SIGTERM to
+remaining 1 tasks`, `Execution was interrupted, returning a non-zero exit code.`; the
+daemon log has `stateShutdown` and `stateForceShutdown` 1 s apart and the server exited 2 s
+later; no configure or make process after 23:24:06; `log.task_order` has nothing after that
+`do_configure`; and an `op=layers` 3 s later ran at once (`succeeded`, the lock free). Test
+with a fake client that behaves as knotty and ignores SIGTERM:
+`tests/bitbake_jobs.rs`, `cancel_interrupts_the_client_twice_and_lets_it_stop`; the
+recorded outputs in `tests/live_build.rs`, `real_cancelled_build_outputs`.
+
+Not settled: `log job=` on a cancelled job says "no error lines recognised; slice the log"
+(true; it could say the job was cancelled). Cancel with `BB_SERVER_TIMEOUT` set and a
+kas-mode job (where SIGINT also reaches kas and the shell) were not tried.
 
 ## Left in the environment
 

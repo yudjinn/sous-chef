@@ -22,13 +22,21 @@
 //! or devtool it is refused at once, whatever its own kind, because those hold the lock for
 //! minutes to hours.
 //!
-//! Cancellation ([`JobTable::cancel`]) terminates the job's process group
-//! ([`Supervised::terminate`]): SIGTERM, then SIGKILL after
+//! Cancellation ([`JobTable::cancel`]) first interrupts the job's process group as Ctrl-C
+//! twice would ([`Supervised::interrupt`]: SIGINT, then SIGINT again after
+//! [`crate::bitbake::env::INTERRUPT_REPEAT`], up to
+//! [`crate::bitbake::env::INTERRUPT_WAIT`] for the client to exit), because the BitBake
+//! server a job starts runs outside the group (its own session) and keeps building when
+//! its client is merely killed: seen live (docs/live-verification.md, y1-build), SIGTERM
+//! ended `bitbake curl` and the server ran the build to its end 20 s later; with the
+//! SIGINTs the client sends `stateShutdown` and `stateForceShutdown`, the server kills the
+//! running task and the client exits (3.6 s there). Only if that fails, the group is
+//! terminated ([`Supervised::terminate`]): SIGTERM, then SIGKILL after
 //! [`crate::bitbake::env::KILL_GRACE`], then a wait of up to
-//! [`crate::bitbake::env::GROUP_EXIT_WAIT`] until the group is empty; the job is recorded
+//! [`crate::bitbake::env::GROUP_EXIT_WAIT`] until the group is empty. The job is recorded
 //! as cancelled only after that, so a job that is no longer running has no process left in
-//! its group (unless one outlived that wait). Unverified: whether a BitBake server started
-//! by the job detaches from the group and survives that.
+//! its group (unless one outlived that wait). The server itself, outside the group, exits
+//! by itself about a second after its client (`BB_SERVER_TIMEOUT` unset).
 //!
 //! When the server exits (the client closes stdin, `serve` returns and `main` drops the
 //! tokio runtime), the task waiting for a running job is dropped with the runtime, and
