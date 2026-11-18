@@ -117,7 +117,14 @@ fn as_release_adds_a_release_to_a_layer_claiming_only_scarthgap() {
         "{r:?}"
     );
     assert!(r[0].contains("wrynose"), "{r:?}");
-    assert!(!r[0].contains("scarthgap"), "{r:?}");
+    // (x7: the scarthgap claim now appears in the no-fix clause, not as a rejecting release.)
+    assert!(!r[0].contains("error in scarthgap"), "{r:?}");
+    assert!(
+        r[0].ends_with(
+            "no automatic fix while the layer also claims scarthgap, which has no UNPACKDIR"
+        ),
+        "{r:?}"
+    );
 
     // --only-release with a release that accepts it: nothing.
     let only_kirkstone = Options {
@@ -729,4 +736,32 @@ fn lint_tool_migrate_to_and_as_release() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("only_release needs as_release"), "{err}");
+}
+
+#[test]
+fn release_removed_srcpv_only_when_no_release_needs_it() {
+    // Nanbield and later: `SRCPV = ""`, an info finding per `${SRCPV}` in PV.
+    let got = removed(
+        "fixable.bb",
+        "x_git.bb",
+        &[Release::Scarthgap, Release::Wrynose],
+    )
+    .into_iter()
+    .filter(|r| r.contains("SRCPV"))
+    .collect::<Vec<_>>();
+    assert_eq!(
+        got,
+        [
+            "3 info: `${SRCPV}` in PV: it is empty from nanbield on (the source revision goes to PKGV), and this layer is checked against scarthgap and wrynose only; write `PV = \"1.0+git\"`",
+            "4 info: `${SRCPV}` in PV:append:x: it is empty from nanbield on (the source revision goes to PKGV), and this layer is checked against scarthgap and wrynose only; write `PV:append:x = \"\"`",
+        ]
+    );
+    // A layer that also claims kirkstone needs it there: nothing.
+    assert_eq!(
+        removed("fixable.bb", "x_git.bb", &MINE)
+            .iter()
+            .filter(|r| r.contains("SRCPV"))
+            .count(),
+        0
+    );
 }

@@ -6,11 +6,15 @@
 //! table over stdio with `rmcp` by implementing `ServerHandler::list_tools` / `call_tool`
 //! directly (no `#[tool]` macros), so tool files never depend on `rmcp`.
 //!
-//! Deferred tools: MCP has no notion of deferred loading. A deferred tool is still listed
-//! in `tools/list` (every client can call it), but with a one-line description, and its
-//! `_meta` carries `"sous-chef/loading": "deferred"` (`"always"` for the six full tools).
-//! The server instructions name the deferred tools and point at `sous-chef://help` for
-//! their arguments.
+//! Deferred tools: MCP itself has no notion of deferred loading; every tool is listed in
+//! `tools/list` and every client can call it. Claude Code's tool search (on by default)
+//! defers every MCP tool, keeping only its name and the server instructions in context
+//! until the agent searches for it, unless the tool's `_meta` has
+//! `"anthropic/alwaysLoad": true`: the six always-loaded tools carry it. A client without
+//! tool search (or a session whose `--tools` leaves `ToolSearch` out) loads every
+//! definition upfront, so all of them are kept short: a deferred tool has a one-line
+//! description, and every schema is compacted ([`compact_schema`]). The server
+//! instructions name the deferred tools and point at `sous-chef://help` for the long form.
 //!
 //! Startup never kills the transport: if the configuration or workspace cannot be loaded,
 //! the server still serves (degraded). Every tool then returns the startup error as a tool
@@ -310,7 +314,7 @@ pub enum Loading {
 }
 
 impl Loading {
-    /// The value of the `sous-chef/loading` key in a tool's `_meta`.
+    /// How `sous-chef://help` names the class.
     pub fn as_str(self) -> &'static str {
         match self {
             Loading::Always => "always",
@@ -318,9 +322,6 @@ impl Loading {
         }
     }
 }
-
-/// `_meta` key that tells the client whether a tool is always loaded or deferred.
-pub const LOADING_META_KEY: &str = "sous-chef/loading";
 
 /// The future a tool call returns. `Send`, because rmcp runs handlers on a multi-threaded
 /// runtime.
@@ -341,13 +342,178 @@ pub struct ToolEntry {
 }
 
 impl ToolEntry {
-    /// The rmcp tool definition advertised in `tools/list`.
+    /// The rmcp tool definition advertised in `tools/list`: the description and the
+    /// [`compact_schema`] of the arguments. An always-loaded tool carries
+    /// `_meta["anthropic/alwaysLoad"] = true`, the key Claude Code reads to load a tool
+    /// upfront while tool search defers the others; a deferred tool has no `_meta`.
     pub fn to_rmcp(&self) -> Tool {
-        let mut meta = MetaObject::new();
-        meta.0
-            .insert(LOADING_META_KEY.into(), self.loading.as_str().into());
-        Tool::new(self.name, self.description, (self.schema)()).with_meta(meta)
+        let tool = Tool::new(
+            self.name,
+            self.description,
+            Arc::new(compact_schema(&(self.schema)())),
+        );
+        if self.loading == Loading::Always {
+            let mut meta = MetaObject::new();
+            meta.0.insert(ALWAYS_LOAD_META_KEY.into(), true.into());
+            tool.with_meta(meta)
+        } else {
+            tool
+        }
     }
+}
+
+/// `_meta` key with which Claude Code loads a tool upfront when tool search is on
+/// (code.claude.com/docs/en/mcp, "Mark a tool to load upfront or stay deferred").
+pub const ALWAYS_LOAD_META_KEY: &str = "anthropic/alwaysLoad";
+
+/// Descriptions of the two arguments every tool takes; the server instructions explain
+/// them once, so `tools/list` leaves them out. A tool whose own text differs (another
+/// default) keeps it.
+const COMMON_ARG_DOCS: &[&str] = &[
+    "Output budget in tokens (default 600).",
+    "`text` (default) or `json`.",
+];
+
+/// The argument schema as `tools/list` sends it: the schemars output without what costs
+/// context and tells a client nothing it needs to call the tool. `$schema` and `title`
+/// go; an enum (a `$defs` entry of `const` strings, or a plain `enum`) is written in
+/// place as `{"type": "string", "enum": [...]}` without the per-value descriptions (the
+/// property's own description names the values; the long form is `sous-chef://help`);
+/// `Option<T>` is written as `T` (an argument left out is the same as null);
+/// integer `format` / `minimum` annotations go (serde rejects a bad value with a clear
+/// error); newlines in descriptions become spaces. Property names, `required`,
+/// defaults and the accepted values do not change. `sous-chef://help` is generated from
+/// the full schema.
+pub fn compact_schema(schema: &JsonObject) -> JsonObject {
+    let defs = schema
+        .get("$defs")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let mut out = JsonObject::new();
+    let mut kept_defs = JsonObject::new();
+    for (k, v) in schema {
+        match k.as_str() {
+            "$schema" | "title" | "$defs" => {}
+            "properties" => {
+                let mut props = JsonObject::new();
+                if let Some(obj) = v.as_object() {
+                    for (name, p) in obj {
+                        let mut p = compact_node(p, &defs, &mut kept_defs);
+                        if let Some(o) = p.as_object_mut() {
+                            let common = o
+                                .get("description")
+                                .and_then(|d| d.as_str())
+                                .is_some_and(|d| COMMON_ARG_DOCS.contains(&d));
+                            if common {
+                                o.remove("description");
+                            }
+                        }
+                        props.insert(name.clone(), p);
+                    }
+                }
+                out.insert(k.clone(), serde_json::Value::Object(props));
+            }
+            _ => {
+                out.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    if !kept_defs.is_empty() {
+        out.insert("$defs".into(), serde_json::Value::Object(kept_defs));
+    }
+    out
+}
+
+/// The string values of an enum definition, if it is one (`oneOf` of `const` strings, or
+/// `enum` of strings).
+fn enum_values(def: &serde_json::Value) -> Option<Vec<serde_json::Value>> {
+    let o = def.as_object()?;
+    if let Some(list) = o.get("enum").and_then(|v| v.as_array()) {
+        return list.iter().all(|v| v.is_string()).then(|| list.clone());
+    }
+    let one_of = o.get("oneOf")?.as_array()?;
+    one_of
+        .iter()
+        .map(|v| v.get("const").filter(|c| c.is_string()).cloned())
+        .collect()
+}
+
+/// One property schema compacted ([`compact_schema`]).
+fn compact_node(
+    node: &serde_json::Value,
+    defs: &JsonObject,
+    kept_defs: &mut JsonObject,
+) -> serde_json::Value {
+    use serde_json::Value;
+    let Some(o) = node.as_object() else {
+        return node.clone();
+    };
+    // `anyOf: [X, {type: null}]` (an `Option` of a referenced type) is X.
+    if let Some(any) = o.get("anyOf").and_then(|v| v.as_array()) {
+        let non_null: Vec<&Value> = any
+            .iter()
+            .filter(|v| v.get("type").and_then(|t| t.as_str()) != Some("null"))
+            .collect();
+        if non_null.len() == 1 && any.len() == 2 {
+            let mut inner = compact_node(non_null[0], defs, kept_defs);
+            if let (Some(io), Some(d)) = (inner.as_object_mut(), o.get("description")) {
+                io.insert("description".into(), d.clone());
+            }
+            return inner;
+        }
+    }
+    let mut out = serde_json::Map::new();
+    if let Some(r) = o.get("$ref").and_then(|v| v.as_str()) {
+        let name = r.strip_prefix("#/$defs/").unwrap_or(r);
+        match defs.get(name) {
+            Some(def) if enum_values(def).is_some() => {
+                out.insert("type".into(), "string".into());
+                out.insert(
+                    "enum".into(),
+                    Value::Array(enum_values(def).unwrap_or_default()),
+                );
+            }
+            Some(def) => {
+                kept_defs.insert(name.to_string(), def.clone());
+                out.insert("$ref".into(), r.into());
+            }
+            None => {
+                out.insert("$ref".into(), r.into());
+            }
+        }
+    }
+    for (k, v) in o {
+        match k.as_str() {
+            "$ref" | "format" | "minimum" => {}
+            "type" => {
+                let t = match v.as_array() {
+                    Some(list) => {
+                        let non_null: Vec<&Value> =
+                            list.iter().filter(|t| t.as_str() != Some("null")).collect();
+                        if non_null.len() == 1 {
+                            non_null[0].clone()
+                        } else {
+                            v.clone()
+                        }
+                    }
+                    None => v.clone(),
+                };
+                out.insert(k.clone(), t);
+            }
+            "description" => {
+                let d = v.as_str().map(|s| s.replace('\n', " ")).unwrap_or_default();
+                out.insert(k.clone(), d.into());
+            }
+            "items" => {
+                out.insert(k.clone(), compact_node(v, defs, kept_defs));
+            }
+            _ => {
+                out.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    Value::Object(out)
 }
 
 /// Deserialises tool arguments; a mismatch is an `Invalid` error naming the problem.
@@ -379,58 +545,47 @@ pub static TOOLS: &[ToolEntry] = &[
     tool!(
         recipe,
         Always,
-        "Resolve a Yocto recipe (pn, pn_pv or pointer) and show its shape. show=summary \
-         (default): recipe file and layer, all versions and the preferred one, each bbappend \
-         with its layer and priority in application order, inherited classes, key values \
-         (SUMMARY, LICENSE, SRC_URI and DEPENDS counts). show=tree: the include/inherit tree \
-         in parse order, one row per file with the pointer of the statement that pulled it \
-         in. show=outline: every task and function across the tree. An ambiguous name is an \
-         error listing the candidates. Prefer this over reading .bb/.bbappend/.inc files."
+        "A Yocto recipe's shape; use instead of reading .bb/.bbappend/.inc files. show: \
+         summary (file, versions, bbappends in order, classes, key values), tree \
+         (include/inherit tree), outline (tasks, functions), sources (SRC_URI entries), \
+         tasks (task graph), packages (PACKAGES, FILES, RDEPENDS), cve (CVE check inputs)."
     ),
     tool!(
         var,
         Always,
-        "History and final value of a BitBake variable (e.g. SRC_URI, FILES:${PN}) for a \
-         recipe, or for the global configuration when recipe is omitted, with optional \
-         machine/distro. One row per operation in parse order: status (applied, inactive, \
-         shadowed, removed), operator, override, pointer layer:path:A-B and snippet; then the \
-         final value. flags=true also shows VAR[flag] operations. Prefer this over grepping \
-         for assignments: it follows includes, inherits, bbappends and the override chain."
+        "Final value and history of a BitBake variable for a recipe (or the global \
+         configuration): every operation in parse order with its status (applied, inactive, \
+         shadowed, removed), override and pointer, through includes, inherits, bbappends and \
+         overrides. Use instead of grepping for assignments."
     ),
     tool!(
         overrides,
         Always,
-        "The OVERRIDES machinery for a recipe/machine/distro. show=chain (default): OVERRIDES \
-         entries lowest to highest priority with where each comes from. show=conditional: \
-         every override-conditional statement in the recipe tree, marked active or inactive. \
-         show=dead: statements whose override matches no known machine, distro, class or \
-         package (likely typos)."
+        "OVERRIDES for a recipe/machine/distro. show: chain (entries by priority and where \
+         each comes from), conditional (override-conditional statements, active or not), \
+         dead (overrides matching no machine, distro, class or package: likely typos)."
     ),
     tool!(
         item,
         Always,
-        "Return exact source lines. Give loc (a pointer layer:path:A-B), or recipe + name \
-         (e.g. do_install:append, searched across the recipe's tree), or file + name; \
-         context adds lines around. Output is a header `layer:path:A-B sha256=<12 hex>` then \
-         the lines byte-exact, usable as Edit old_string. Capped at 8 KB with a marker. This \
-         is how Yocto file text should enter context instead of Read."
+        "Exact source lines of a Yocto file, instead of Read: give loc (layer:path:A-B), or \
+         recipe + name (e.g. do_install:append), or file + name. Lines are byte-exact, usable \
+         as Edit old_string; capped at 8 KB."
     ),
     tool!(
         search,
         Always,
-        "Search the Yocto layers. mode=name (default): statement names by substring; \
-         mode=regex: file content line by line; mode=fts: full text of names and snippets. \
-         Filter by kind (assign, function, task, inherit, include, ...), layer, file_kind or \
-         recipe (that recipe's tree). Each hit: pointer, kind, enclosing item with its range, \
-         snippet; limit defaults to 30. Prefer this over Grep for Yocto metadata."
+        "Search the Yocto layers, instead of Grep (which misses gitignored layers). mode: \
+         name (statement names, also NAME[flag]), text (literal line text), regex, fts. \
+         Filter by kind, layer (comma-separated), file_kind or recipe. Each hit: pointer, \
+         kind, enclosing item, line."
     ),
     tool!(
         class,
         Always,
-        "A bbclass. show=summary (default): its file(s) across layers and which one wins, \
-         classes it inherits, tasks added, EXPORT_FUNCTIONS, and the variables it sets with \
-         ?= (its interface). show=users: recipes and classes that inherit it, direct and \
-         transitive, with pointers. show=outline: functions and tasks with pointers."
+        "A bbclass. show: summary (which file wins, classes inherited, tasks, \
+         EXPORT_FUNCTIONS, variables set with ?=), users (who inherits it), outline \
+         (functions and tasks)."
     ),
     tool!(
         layers,
@@ -566,10 +721,43 @@ pub fn help_text() -> String {
                     ""
                 };
                 out.push_str(&format!("- {name}{req}: {desc}\n"));
+                // The values of an enum argument, each with its doc (left out of the
+                // compact schema `tools/list` sends).
+                for (value, doc) in enum_docs(&schema, prop) {
+                    out.push_str(&format!("  - `{value}`: {doc}\n"));
+                }
             }
         }
     }
     out
+}
+
+/// The documented values of an enum property of the full schema (`oneOf` of `const`
+/// strings with a description each, reached through `$ref` / `anyOf`); empty otherwise.
+fn enum_docs(schema: &JsonObject, prop: &serde_json::Value) -> Vec<(String, String)> {
+    let mut node = prop;
+    if let Some(first) = node
+        .get("anyOf")
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first())
+    {
+        node = first;
+    }
+    let def = node
+        .get("$ref")
+        .and_then(|v| v.as_str())
+        .and_then(|r| r.strip_prefix("#/$defs/"))
+        .and_then(|name| schema.get("$defs")?.get(name));
+    let Some(list) = def.and_then(|d| d.get("oneOf")).and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter_map(|v| {
+            let value = v.get("const")?.as_str()?;
+            let doc = v.get("description")?.as_str()?.replace('\n', " ");
+            Some((value.to_string(), doc))
+        })
+        .collect()
 }
 
 /// `sous-chef://rules`: the lint rule catalogue, generated by
@@ -886,9 +1074,73 @@ mod tests {
             );
             let tool = t.to_rmcp();
             assert_eq!(tool.name, t.name);
-            let meta = tool.meta.unwrap();
-            assert_eq!(meta.0[LOADING_META_KEY], t.loading.as_str());
+            let always = tool
+                .meta
+                .as_ref()
+                .and_then(|m| m.0.get(ALWAYS_LOAD_META_KEY))
+                .cloned();
+            match t.loading {
+                Loading::Always => assert_eq!(always, Some(true.into()), "{}", t.name),
+                Loading::Deferred => assert!(tool.meta.is_none(), "{}", t.name),
+            }
         }
+    }
+
+    /// The enum values a property accepts, `$ref`s resolved, in the full or compact schema.
+    fn accepted(schema: &JsonObject, prop: &serde_json::Value) -> Vec<serde_json::Value> {
+        let defs = schema.get("$defs").and_then(|v| v.as_object());
+        let mut node = prop.clone();
+        if let Some(any) = node.get("anyOf").and_then(|v| v.as_array()) {
+            node = any[0].clone();
+        }
+        if let Some(r) = node.get("$ref").and_then(|v| v.as_str()) {
+            let name = r.trim_start_matches("#/$defs/");
+            node = defs.and_then(|d| d.get(name)).cloned().unwrap_or_default();
+        }
+        enum_values(&node).unwrap_or_default()
+    }
+
+    #[test]
+    fn compaction_keeps_names_required_and_values() {
+        for t in TOOLS {
+            let full = (t.schema)();
+            let compact = compact_schema(&full);
+            assert!(!compact.contains_key("$schema") && !compact.contains_key("title"));
+            assert_eq!(full.get("required"), compact.get("required"), "{}", t.name);
+            let fp = full["properties"].as_object().unwrap();
+            let cp = compact["properties"].as_object().unwrap();
+            assert_eq!(
+                fp.keys().collect::<Vec<_>>(),
+                cp.keys().collect::<Vec<_>>(),
+                "{}",
+                t.name
+            );
+            for (name, p) in fp {
+                assert_eq!(
+                    accepted(&full, p),
+                    accepted(&compact, &cp[name]),
+                    "{} {name}",
+                    t.name
+                );
+                assert_eq!(
+                    p.get("default"),
+                    cp[name].get("default"),
+                    "{} {name}",
+                    t.name
+                );
+            }
+            let text = serde_json::to_string(&compact).unwrap();
+            assert!(!text.contains("\"null\""), "{}: {text}", t.name);
+            assert!(!text.contains("#/$defs/"), "{}: {text}", t.name);
+        }
+        // The values of `recipe show` are all there, in order.
+        let recipe = compact_schema(&(TOOLS[0].schema)());
+        assert_eq!(
+            recipe["properties"]["show"]["enum"],
+            serde_json::json!([
+                "summary", "tree", "outline", "sources", "tasks", "packages", "cve"
+            ])
+        );
     }
 
     #[test]
@@ -912,7 +1164,7 @@ mod tests {
             assert!(t.description.len() <= 120, "{}", t.name);
         }
         for t in TOOLS.iter().filter(|t| t.loading == Loading::Always) {
-            assert!(t.description.len() > 200, "{}", t.name);
+            assert!(t.description.len() > 150, "{}", t.name);
         }
     }
 
@@ -950,6 +1202,9 @@ mod tests {
         assert!(help.contains("- name (required):"));
         assert!(!help.contains("- budget_tokens:"));
         assert!(help.contains("budget_tokens (default 600"));
+        // The per-value docs that the compact schema leaves out are here.
+        assert!(help.contains("  - `cve`: "), "{help}");
+        assert!(help.contains("  - `dead`: "), "{help}");
     }
 
     #[test]

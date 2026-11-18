@@ -26,7 +26,7 @@ workspace, release wrynose: 3 layers enabled (1 own), 1 present but not enabled;
 
 Chosen by rule: errors in own layers, by rule, most findings first; then layer structure errors (org/layer-conf errors outside own layers, bbappends outside own layers that match no recipe: BitBake stops on these); then warnings in own layers, by rule; while that gives fewer than 3: errors in upstream layers by rule, then layer structure warnings, then infos in own layers by rule; at most 10.
 
-1. **warning** `hygiene/release-syntax` (1 finding, in meta-mine): `meta-mine:recipes-app/app/app_0.1.bb:22` `${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
+1. **warning** `hygiene/release-syntax` (1 finding, in meta-mine): `meta-mine:recipes-app/app/app_0.1.bb:22` `${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}"); no automatic fix while the layer also claims kirkstone and scarthgap, which have no UNPACKDIR
 2. **warning** `org/append-no-match` (1 finding, in meta-mine): `meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1` orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer
 3. **warning** `override/plus-equals-on-default` (1 finding, in build): `build:conf/local.conf:13` `DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = " wayland"`
 
@@ -104,7 +104,7 @@ Every enabled rule over every layer, as `sous-chef lint --all`: upstream layers 
 #### meta-mine (2 findings: 0 error, 2 warning, 0 info)
 
 - `hygiene/release-syntax` (warning, 1)
-  - `meta-mine:recipes-app/app/app_0.1.bb:22`: `${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
+  - `meta-mine:recipes-app/app/app_0.1.bb:22`: `${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}"); no automatic fix while the layer also claims kirkstone and scarthgap, which have no UNPACKDIR
 
 - `org/append-no-match` (warning, 1)
   - `meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1`: orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer

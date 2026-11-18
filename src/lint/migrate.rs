@@ -145,6 +145,12 @@ pub fn instruction(feature: Feature, target: bool) -> String {
         (Feature::DeferredInheritsClassOverride, _) => "from whinlatter on CLASSOVERRIDE is class-native (and the like) while deferred classes are parsed: check recipes that combine BBCLASSEXTEND with inherit_defer".into(),
         (Feature::AssignmentWhitespaceWarning, true) => format!("from {first} on BitBake warns about an assignment without whitespace around its operator (5.3 guide, \"Space around equal assignment\")"),
         (Feature::AssignmentWhitespaceWarning, false) => "no whitespace warning there".into(),
+        (Feature::CveStatus, true) => format!("from {first} on the CVE check reads CVE_STATUS[<id>] (CVE_CHECK_IGNORE becomes CVE_STATUS with a reason)"),
+        (Feature::CveStatus, false) => "the CVE check reads CVE_CHECK_IGNORE there, not CVE_STATUS".into(),
+        (Feature::CveStatusCpe, true) => format!("from {first} on a CVE_STATUS value may name `cpe:vendor:product`"),
+        (Feature::CveStatusCpe, false) => "a `cpe:` CVE_STATUS value is not understood there".into(),
+        (Feature::CvePatchContentLines, true) => format!("from {first} on a patch declares CVEs on lines starting with `CVE:`"),
+        (Feature::CvePatchContentLines, false) => "a patch's `CVE: CVE-...` tag is matched anywhere in its text there".into(),
         (_, true) => "still present there".into(),
         (kept, false) => format!(
             "removed or renamed in {gone} (the {} migration guide): change each use as shown",

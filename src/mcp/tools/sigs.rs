@@ -35,11 +35,11 @@ pub struct Args {
     pub recipe: Option<String>,
     /// Task, e.g. `compile` or `do_compile`.
     pub task: Option<String>,
-    /// First (older) signature file, a path; with `sigfile2` instead of recipe and task.
+    /// Older signature file (with `sigfile2`, instead of recipe and task).
     pub sigfile1: Option<String>,
     /// Second (newer) signature file.
     pub sigfile2: Option<String>,
-    /// Output budget in tokens (default 250, about 1 KB).
+    /// Output budget in tokens (default 250).
     pub budget_tokens: Option<usize>,
     /// `text` (default) or `json`.
     pub format: Option<Format>,

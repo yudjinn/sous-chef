@@ -111,7 +111,7 @@ summary line and notes go to stderr.
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `override/legacy-syntax` | E | file | Underscore override syntax: a name the parser marks legacy (`VAR_append`, `VAR_remove`, `RDEPENDS_${PN}`, a package variable followed by `_<lowercase package>`), or `VAR_<o>` whose trailing `_` elements are all machine or distro names of the workspace, known `class-*` overrides or `pn-<name>`. Never flags `do_install`, the per-collection `layer.conf` names, `PREFERRED_*`, `SRCREV_<name>` or a suffix that is a collection name. Misses `VAR_<machine>` when that machine has no `.conf` in the workspace. |
+| `override/legacy-syntax` | E | file | Underscore override syntax: a name the parser marks legacy (`VAR_append`, `VAR_remove`, `RDEPENDS_${PN}`, a package variable followed by `_<lowercase package>`), or `VAR_<o>` whose trailing `_` elements are all machine or distro names of the workspace, known `class-*` overrides or `pn-<name>`. (Since x7) also the package variables of OE-core's `scripts/contrib/convert-overrides.py` that the parser's list lacks (`SYSTEMD_SERVICE_${PN}`, `INITSCRIPT_PARAMS_${PN}`, `INITSCRIPT_NAME`, `ALTERNATIVE`, `USERADD_PARAM`, `GROUPADD_PARAM`, `PKGV`, `IMAGE_CMD_<type>`, ...), but not `ALTERNATIVE_TARGET_<pkg>` / `ALTERNATIVE_PRIORITY_<pkg>`, which `update-alternatives.bbclass` still reads with `_`. Never flags `do_install`, the per-collection `layer.conf` names, a `PREFERRED_*` name itself (`PREFERRED_PROVIDER_virtual/kernel`, `PREFERRED_VERSION_<pn>`, `PREFERRED_PROVIDER_<machine>`), `SRCREV_<name>` or a suffix that is a collection name; a machine or distro suffix after the name a `PREFERRED_*` variable is keyed by is reported (`PREFERRED_PROVIDER_virtual/kernel_qemux86`, which the old syntax read as an override: write `PREFERRED_PROVIDER_virtual/kernel:qemux86`). The message names what the fix writes (`VAR_qemux86_append`: `VAR:qemux86:append`). Misses `VAR_<machine>` when that machine has no `.conf` in the workspace. |
 | `override/append-no-space` | W | file | `:append` value without a leading space, or `:prepend` without a trailing space, on a variable known to be a space-separated list. Not flagged: colon lists (`FILESEXTRAPATHS`), scalars, flags and unknown variables; values starting with `${@`, and a `:prepend` value ending in python; a value starting (`:append`) or ending (`:prepend`) with `${NAME}`, unless the file itself gives `NAME` a non-empty literal value without the space; `+=` / `=+` on an `:append` / `:prepend` name (they add the space); function bodies. |
 | `override/plus-equals-with-override` | W | file | `VAR:foo += "x"` (and `=+`, `.=`, `=.`): this builds the variable `VAR:foo`, which replaces `VAR` when `foo` is active, rather than appending to `VAR`. Suggests `VAR:append:foo`. Not flagged: the package override of a package-scoped variable (`FILES:${PN} +=`, `RDEPENDS:libfoo +=`), overrides containing `${` or not starting with `[a-z0-9]`, names with `:append` / `:prepend` / `:remove`. A condition after the package is flagged (`RDEPENDS:${PN}:qemux86 +=`). |
 | `override/remove-in-recipe` | W/I | file | `:remove` (not on a flag). Warning in a `.bb`, `.inc` or `.bbclass`: it is applied last, so no bbappend or conf can add the item back. Info in a `.bbappend`, a `.conf`, or an `.inc` under a `conf/` directory (configuration), where it is the usual tool. |
@@ -125,12 +125,16 @@ summary line and notes go to stderr.
 
 Notes:
 
-- **`legacy-syntax`.** Two sources: the parser's `VarRef.legacy_syntax` (see "Legacy
-  syntax" in bitbake-semantics.md) and the suffix check, which needs the index's machine and
-  distro conf names. The names never flagged by the suffix check start with
-  `BBFILE_PATTERN`, `BBFILE_PRIORITY`, `LAYERDEPENDS`, `LAYERRECOMMENDS`,
+- **`legacy-syntax`.** Three sources: the parser's `VarRef.legacy_syntax` (see "Legacy
+  syntax" in bitbake-semantics.md); (since x7) `SCRIPT_PACKAGE_VARS` in the rule's file, the
+  package variables of OE-core's `scripts/contrib/convert-overrides.py` the parser's list
+  lacks, each checked to be read with `:<package>` by OE-core on wrynose; and the suffix
+  check, which needs the index's machine and distro conf names. The suffix check never
+  reads what follows one of these prefixes as an override suffix: `BBFILE_PATTERN`, `BBFILE_PRIORITY`, `LAYERDEPENDS`, `LAYERRECOMMENDS`,
   `LAYERSERIES_COMPAT`, `LAYERVERSION`, `PREFERRED_PROVIDER`, `PREFERRED_RPROVIDER`,
-  `PREFERRED_VERSION` or `SRCREV`. Both forms are errors: BitBake rejects a name containing
+  `PREFERRED_VERSION` or `SRCREV` (so `PREFERRED_PROVIDER_qemux86` is a name, but a machine
+  suffix after the provided name, `PREFERRED_PROVIDER_virtual/kernel_qemux86`, is reported).
+  Both forms are errors: BitBake rejects a name containing
   `_append`, `_prepend` or `_remove`, and treats the others as a different variable.
 - **`plus-equals-with-override`.** The package-scoped variables are OE-core's `PACKAGEVARS`
   plus `INSANE_SKIP` and `QA_EMPTY_DIRS`. The first override of such a variable is taken as
@@ -199,7 +203,7 @@ Notes:
 | `org/include-must-exist` | W | file | `include` of a file the recipe cannot work without (it sets `SRC_URI` or `LICENSE`, or defines a `do_*` task or `addtask`): use `require`. Also `require` of a file that does not resolve. A `require` whose argument still contains `${` is never reported, even when it expands statically (a known miss). |
 | `org/repeated-logic` | I | layer | The same function body (5 or more lines) or the same 5 consecutive assignments in three or more recipes of a layer: suggest a bbclass or `.inc`. Recipes are counted by `PN` (an `.inc` counts as itself); classes are not looked at. Reported on the first file in path order. |
 | `org/class-recipe-specific` | W | file | A bbclass sets `SRC_URI`, `PV` or `LICENSE` with `=` or `:=`, or sets another variable with `=` / `:=` that a recipe inheriting it directly sets before its `inherit` line (the class replaces the recipe's value). `?=`, `??=`, `+=` and `:append` are not flagged. |
-| `org/class-export-functions` | W | file | A bbclass defines `<class>_do_<task>` without `EXPORT_FUNCTIONS do_<task>`, or defines `do_<task>` directly for a task it does not add itself with `addtask` (this replaces the recipe's own definition). Classes with `-` in the name are skipped. |
+| `org/class-export-functions` | W | file | A bbclass defines `<class>_do_<task>` without `EXPORT_FUNCTIONS do_<task>`, or defines `do_<task>` directly for a task it does not add itself with `addtask` (this replaces the recipe's own definition). Classes with `-` in the name are skipped. (Since x7) Only a task: `do_<task>` must be added by `addtask` somewhere in the workspace (base.bbclass's standard tasks included) or by the class itself (also from python, `bb.build.addtask('do_x', ...)`); a function the class uses as a helper is never reported: named in a `[prefuncs]` / `[postfuncs]` flag or a `*FUNCS` / `*_COMMAND` list (`do_qa_sysroot`, `package_do_filedeps`), called as the first word of a line of another function or with `exec_func("<name>"` (`do_package_deb`). An index with no `addtask` at all says nothing about tasks, and every `do_*` counts as one. |
 | `org/class-location` | I | layer | Class in `classes/` in a layer all of whose releases search `classes-recipe/` and `classes-global/` (Langdale and later): suggest the directory that matches how the workspace uses it. Not flagged for a layer that claims Kirkstone, or for a class used both globally and by recipes. |
 | `org/inherit-defer` | I | file | In a `.bb`, `inherit ${VAR}` where `VAR` may be changed later (a later statement of the file, a bbappend of the recipe, or anonymous python there): suggest `inherit_defer`. Silent unless every release the layer is checked against has `inherit_defer` (Scarthgap and later). |
 | `org/append-no-match` | W | layer | A bbappend collected by `BBFILES` that matches no recipe in the workspace (BitBake stops on it). The message lists recipes of the same `PN` if there are any. |
@@ -291,16 +295,18 @@ Notes:
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `hygiene/missing-metadata` | W/I | recipe | No `SUMMARY` or `LICENSE`, or no `LIC_FILES_CHKSUM` when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (W, one finding); no `HOMEPAGE` (I) when the recipe has an upstream: a `SRC_URI` entry that is not `file://`, and not an image or a packagegroup. Configuration defaults do not count as set. Values that depend on python are not reported. |
+| `hygiene/missing-metadata` | W/I | recipe | No `SUMMARY` or `LICENSE`, or no `LIC_FILES_CHKSUM` when `LICENSE` is not `CLOSED` and `SRC_URI` is not empty (W, one finding); no `HOMEPAGE` (I) when the recipe has an upstream: a `SRC_URI` entry that is not `file://`, and not an image or a packagegroup. Configuration defaults do not count as set. Values that depend on python are not reported. (Since x1) `LIC_FILES_CHKSUM` is not asked of a recipe the evaluation says BitBake would skip under the configuration evaluated (no license QA runs there). |
+| `hygiene/git-pv` | I | recipe | (since x7) A `<pn>_git.bb` recipe fetching from `git://` or `gitsm://` whose `PV` comes only from `bitbake.conf`'s default, so it is the file name's version part `git` (BitBake's `vars_from_file`; yocto-kiss's `u-boot-kiss`: `PV="git"` in `bitbake -e`). Without a version number or a `+`, `package.bbclass` adds no source revision to `PKGV`, so a new `SRCREV` builds packages of the same version. Info: OE-core itself has three such recipes (`sato-icon-theme_git.bb`, ...). Not reported when python sets `PV`. No fix (the version is not known). |
+| `hygiene/insane-skip` | I | file | (since x7) `INSANE_SKIP` (any override, not `:remove`, not a flag) of `ldflags`, `textrel` or `buildpaths` in a `.bb`, `.bbappend` or `.inc`: QA checks of `ERROR_QA` whose failure usually means the recipe builds wrongly (no distro `LDFLAGS`, text relocations, host paths in the output). Other skips (`dev-so`, `arch`, `already-stripped`, ...) are routine and not reported; nor are classes (`go.bbclass` skips `ldflags` on purpose) or a file that inherits `bin_package`. |
 | `hygiene/autorev` | W | file | `SRCREV` or `SRCREV_<name>` (any operator or override, not a flag) whose value contains `${AUTOREV}`, outside `local.conf` and `auto.conf`. `SRCREV_FORMAT` is not checked. |
-| `hygiene/src-uri-checksum` | W | recipe | Remote download (`http`, `https`, `ftp`) in the evaluated `SRC_URI` without a checksum; `git://` / `gitsm://` URL without a revision, or without `branch=` (or `nobranch=1`) unless a `tag=` is given. E for a recipe checked against Walnascar or later (BitBake 2.12 stops on it): a git URL without `branch=` / `nobranch=1` / `usehead=1`, a `tag=` notwithstanding, or with several comma-separated branches; the message names those releases. Not reported when `SRC_URI` depends on python, or for an entry still containing `${` after expansion. |
+| `hygiene/src-uri-checksum` | W | recipe | Remote download (`http`, `https`, `ftp`) in the evaluated `SRC_URI` without a checksum; `git://` / `gitsm://` URL without a revision, or without `branch=` (or `nobranch=1`) unless a `tag=` is given. E for a recipe checked against Walnascar or later (BitBake 2.12 stops on it): a git URL without `branch=` / `nobranch=1` / `usehead=1`, a `tag=` notwithstanding, or with several comma-separated branches; the message names those releases. Not reported when `SRC_URI` depends on python, for an entry still containing `${` after expansion, or (since x1) when the evaluation says BitBake would skip the recipe under the configuration evaluated (a static "would skip" note: it fetches nothing there, and a value per machine says nothing about the others). |
 | `hygiene/host-path` | W | file | Absolute host paths (`/usr/lib`, `/etc`, `/home/...`) at the start of a word in `do_<task>` shell bodies, instead of `${D}`, `${S}`, `${bindir}` and friends; a `do_install` that never references `${D}` while running a command that writes files itself. Not scanned: other functions, comments, here-documents, the command word, values after `=`; `/dev`, `/proc`, `/sys`, `/tmp` are never reported. Data is not host access: the arguments of `echo`, `printf` and `bb*` messages, quoted arguments of `sed`, `grep`, `awk`, `perl` (expressions, patterns, shebangs), the target of `ln -s`; a redirection target always is. |
 | `hygiene/workdir-s` | E | file | `S = "${WORKDIR}"` (or `${WORKDIR}/`), reported only when the file's releases include one that rejects it (Styhead and later), naming them. A layer checked only against releases that accept it gets nothing. |
 | `hygiene/variable-order` | I | file | In a `.bb`, the first statement out of the OE style guide order (description block, license, dependencies, `SRC_URI`, `S`, inherit, `PACKAGECONFIG` and build options, tasks, packaging), once per file. Off by default: runs only when selected by its id, the alias `style/variable-order` or the alias group `style`. |
 | `hygiene/tabs` | I | file | Tabs in shell task bodies mixed with spaces; python bodies not indented with 4 spaces. At most one finding per function. |
 | `hygiene/continuation` | W | file | Whitespace after a trailing `\`; a blank line that ends a continued statement before its closing quote. A comment line inside a continued statement is reported by `hygiene/parse-error`, not here. |
 | `hygiene/release-syntax` | E/W | file | A construct that one of the releases the file is checked against lacks, from the `Feature` table: `inherit_defer` before Scarthgap (not in a `.conf`, where `hygiene/parse-error` reports it), `include_all` before Walnascar, a class in `classes-recipe/` or `classes-global/` on Kirkstone, `${UNPACKDIR}` before Styhead (unless a file of the same layer, or of a layer other than the core layer, assigns `UNPACKDIR`: the core layer's own assignment comes with the workspace's release), `addfragments` before Walnascar, and its three-argument form from Whinlatter (BitBake 2.16 needs a fourth argument). Warning: `${WORKDIR}/<file>` for a `file://` entry of the same file's `SRC_URI` on Styhead and later (unpacked into `UNPACKDIR`). The message names the releases. |
-| `hygiene/release-removed` | E/W | file | Something a release the file is checked against removed, renamed or deprecated, from one table (`REMOVALS` in the rule's file, one `KeptUntil*` `Feature` per migration guide; see "Release removals" below): a renamed variable (`BB_RENAMED_VARIABLES`, BitBake's own renames; E: BitBake stops), a variable OE-core dropped (W), an `inherit` (or `INHERIT`-style list word) of a removed class (E, unless a layer other than the core layer has the class), a removed word in `IMAGE_FEATURES` (`debug-tweaks`, E) or a QA list (`license-incompatible`, W), an old virtual toolchain provider name (W), a `SRC_URI` scheme whose fetcher is gone (E); `S` below `${WORKDIR}` or `S = "${UNPACKDIR}/git"` from Whinlatter (E); `LAYERSERIES_COMPAT_<c> = "${LAYERSERIES_CORENAMES}"` from Mickledore (E); an obsolete license name in `LICENSE` (W, E from Styhead); an assignment without whitespace around its operator from Whinlatter (W). The message names the releases. |
+| `hygiene/release-removed` | E/W | file | Something a release the file is checked against removed, renamed or deprecated, from one table (`REMOVALS` in the rule's file, one `KeptUntil*` `Feature` per migration guide; see "Release removals" below): a renamed variable (`BB_RENAMED_VARIABLES`, BitBake's own renames; E: BitBake stops), a variable OE-core dropped (W), an `inherit` (or `INHERIT`-style list word) of a removed class (E, unless a layer other than the core layer has the class), a removed word in `IMAGE_FEATURES` (`debug-tweaks`, E) or a QA list (`license-incompatible`, W), an old virtual toolchain provider name (W), a `SRC_URI` scheme whose fetcher is gone (E); `S` below `${WORKDIR}` or `S = "${UNPACKDIR}/git"` from Whinlatter (E); `LAYERSERIES_COMPAT_<c> = "${LAYERSERIES_CORENAMES}"` from Mickledore (E); an obsolete license name in `LICENSE` (W, E from Styhead); an assignment without whitespace around its operator from Whinlatter (W); (since x7) `${SRCPV}` in `PV` when every release the file is checked against is Nanbield or later (I: from Nanbield `SRCPV = ""` and the revision goes to `PKGV`; not when a layer other than the core layer assigns `SRCPV`). The message names the releases. |
 | `hygiene/parse-error` | E/W | file | Any `Unknown` statement no parser diagnostic covers, and parser diagnostics. Not reported: whitespace after a trailing `\` (left to `hygiene/continuation`). `addfragments` with three or more arguments and `addpylib` with two or more are statements of their own; with fewer each is an unparsed line. `addpylib` is an error outside the base configuration (`conf/layer.conf`, `conf/bitbake.conf`, `conf/bblayers.conf`; BitBake rejects it in a recipe, a class, an `.inc` and any `.conf` those include), and in the base configuration on a release before Mickledore (BitBake 2.4), which has no such directive. Data files are not linted. Warning: the `addtask` quirk that joins two `before`/`after` groups into one task name. Error: everything else. In a `.conf` file, a function, `def`, `inherit`, `inherit_defer`, `addtask`, `deltask`, `addhandler` or `EXPORT_FUNCTIONS` is an error (BitBake's configuration parser rejects them). |
 
 Notes:
@@ -424,7 +430,7 @@ of any file-scope rule, and fixing it again changes nothing):
 | org/include-must-exist | safe (`include` only) | `include` to `require` for a file the index resolved: BitBake reads a found file the same way (`IncludeNode.eval` passes `error_out`, which matters only when the file is missing), so a missing file now stops the parse, the rule's correction. A `require` that does not resolve: none (the right path is unknown) |
 | org/repeated-logic | none | Needs a new class or `.inc` and edits to several recipes |
 | org/class-recipe-specific | none | Needs a decision (`?=`, or moving the setting to the recipes) |
-| org/class-export-functions | suggested | `EXPORT_FUNCTIONS do_<task>` as a line after the function (after: `ExportFuncsNode.eval` copies the `python` flag when the line is parsed), and for a `do_<task>` defined directly the rename to `<class>_do_<task>`. On OE-core's classes the findings are mostly false (a class's own tasks used as `postfuncs`): review before `--fix-suggested` |
+| org/class-export-functions | suggested | `EXPORT_FUNCTIONS do_<task>` as a line after the function (after: `ExportFuncsNode.eval` copies the `python` flag when the line is parsed), and for a `do_<task>` defined directly the rename to `<class>_do_<task>`. On OE-core (wrynose) the rule found 23 functions before x7, nearly all helpers (`postfuncs`, `PACKAGEFUNCS`, `exec_func`); since x7 one, `kernel.bbclass`'s `do_kernel_version_sanity_check`, a task `kernel-yocto.bbclass` adds. Review before `--fix-suggested` |
 | org/class-location | none | Would move a file |
 | org/inherit-defer | suggested | `inherit` to `inherit_defer`: the class is chosen by the final value, and is parsed after the recipe (its plain assignments now win over the recipe's) |
 | org/append-no-match | none | Removing the append or adding a layer is a decision |
@@ -436,22 +442,25 @@ of any file-scope rule, and fixing it again changes nothing):
 | org/layer-conf | suggested for two checks | `BBPATH .= ":${LAYERDIR}"` before the first statement of `conf/layer.conf` when `BBPATH` is not extended; the line the message names, `LAYERDEPENDS_<c> += "<other>"`, after the last `LAYERDEPENDS_<c>` when a class comes from a layer it does not depend on. The other checks need a decision (a collection name, the releases to claim, a glob) |
 | org/upstream-edit | none | The layer is not writable by definition |
 | hygiene/missing-metadata | none | The values (summary, license, checksum) are not known |
+| hygiene/git-pv | none | The version is not known |
+| hygiene/insane-skip | none | Fixing the build (passing `LDFLAGS`, `-fPIC`) is not a text edit |
 | hygiene/autorev | none | Needs a real revision |
 | hygiene/src-uri-checksum | none | Needs the download's checksum |
 | hygiene/host-path | none | Which variable (`${D}`, `${sysconfdir}`, ...) is meant is a decision |
-| hygiene/workdir-s | none yet | (Another task's file.) Should get: `S = "${WORKDIR}"` / `"${WORKDIR}/"` to `S = "${UNPACKDIR}"`, safe only when every release the file is checked against has `UNPACKDIR` (Styhead and later); none when one does not |
+| hygiene/workdir-s | safe (since x7), when every release the file is checked against has `UNPACKDIR` | `S = "${WORKDIR}"` / `"${WORKDIR}/"` (any override) to `S = "${UNPACKDIR}"`, the form of the 5.1 guide ("The recipe should be changed to: S = "${UNPACKDIR}""). A layer that also claims a release before Styhead (no `UNPACKDIR` there): none, and the message says so ("no automatic fix while the layer also claims scarthgap, which has no UNPACKDIR"). Evaluation: only `S` (and what is set from it, `B`) changes, to the value of `UNPACKDIR` |
 | hygiene/variable-order | none | Moving statements changes parse order (`?=`, `+=`, `:=` depend on it) |
 | hygiene/tabs | none | Not exact: the tab width is unknown, python indentation is syntax, here-documents are content |
 | hygiene/continuation | safe (whitespace only) | The whitespace between a trailing `\` and the end of the line is removed (the terminator stays): BitBake right-strips every line before joining, so it reads the file exactly as before. Evaluation: every value equal. The blank line ending a statement: none (the blank line or the `\` may be the mistake) |
-| hygiene/release-syntax | none yet | (Another task's file.) The `${WORKDIR}/<file>` case should get `${UNPACKDIR}/<file>` for a `file://` entry of the same file, safe only when every release the file is checked against has `UNPACKDIR`; the other cases need a decision (an older release is claimed) |
+| hygiene/release-syntax | safe for one case (since x7) | `${WORKDIR}/<file>` to `${UNPACKDIR}/<file>`, every such reference of the statement, where `<file>` is a `file://` entry of the same file without `subdir=` (5.1 guide: "If they reference files from SRC_URI, they likely need changing to UNPACKDIR"), only when every release the file is checked against has `UNPACKDIR`; otherwise none, and the message says so. Other `${WORKDIR}` text (a `sed` expression, a file that is no `SRC_URI` entry) is left alone. The other cases (`inherit_defer`, `include_all`, `addfragments`, `${UNPACKDIR}` on an old release, class directories): none, they need a decision (an older release is claimed) |
+| hygiene/release-removed | safe (since x7) for two cases | A renamed variable with a one-to-one new name whose value keeps its meaning (`PURE_RENAMES` in the rule's file: the `BB_*_WHITELIST` names, `PNBLACKLIST`, `MULTI_PROVIDER_WHITELIST`, `SDK_*`, `SSTATE_DUPWHITELIST`, `SYSROOT_DIRS_BLACKLIST`, `UNKNOWN_CONFIGURE_WHITELIST`, `LICENSE_FLAGS_WHITELIST`, `*_FEATURES_BACKFILL_CONSIDERED`, each checked against OE-core's `BB_RENAMED_VARIABLES` or BitBake's `bitbake_renamed_vars`): renamed, overrides, flag, `export`, operator and value kept, only when no release the file is checked against still has the old name. `${SRCPV}` in `PV`: removed (it is empty on every release the finding is reported for). None for: a removed variable or class, a rename that is a removal ("remove it"), `WHITELIST_<license>` (`INCOMPATIBLE_LICENSE_EXCEPTIONS` takes `<pkg>:<license>`), `CVE_CHECK_*` and `ICECC_*` (their classes are gone), the other checks. Evaluation: the new name holds the old one's value, nothing else changes |
 | hygiene/parse-error | none | What an unparsed line meant is unknown |
 
 Compared with OE-core's `scripts/contrib/convert-overrides.py` (0.9.3), which rewrites any
 text that looks like an override with regular expressions (names, values, python strings,
 comments, function bodies) from a fixed list of overrides plus `--override`: on the
 fixtures and on a dozen old-style recipes the two agree on every name the rule reports. The
-script also converts the package variables its longer list has (`SYSTEMD_SERVICE_${PN}`,
-`INITSCRIPT_PARAMS_${PN}`; the parser's list lacks them, a miss of the rule) and rewrites
+script's package variables (`packagevars`, `imagevars`) are the rule's too since x7
+(`SYSTEMD_SERVICE_${PN}`, `INITSCRIPT_PARAMS_${PN}`: until x7 a miss of the rule); the script rewrites
 text inside function bodies and comments (`: # do_install_append` in a shell body); it does
 not convert `PREFERRED_PROVIDER_virtual/kernel_<machine>` (its regular expression stops at
 `/`), which the rule reports and the fix converts (suggested). The script warns that its
@@ -530,9 +539,10 @@ What the default rule set reports on `tests/fixtures/ws`, whose `sous-chef.toml`
 severity	rule	pointer	message
 info	org/recipe-change-in-local-conf	build:conf/local.conf:9	`EXTRA_OECONF:append:pn-hello` in local.conf changes only recipe hello, and only in this build directory; move it to a hello_%.bbappend in your layer as `EXTRA_OECONF:append`, or to your distro conf if it is policy
 warning	override/plus-equals-on-default	build:conf/local.conf:13	`DISTRO_FEATURES +=` gives DISTRO_FEATURES a value before the `?=` default at meta-core:conf/distro/testdistro.conf:5 is parsed, so that default is lost; write `DISTRO_FEATURES:append = " wayland"`
-warning	hygiene/release-syntax	meta-mine:recipes-app/app/app_0.1.bb:22	`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}")
+warning	hygiene/release-syntax	meta-mine:recipes-app/app/app_0.1.bb:22	`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = "${UNPACKDIR}"); no automatic fix while the layer also claims kirkstone and scarthgap, which have no UNPACKDIR
 warning	org/append-no-match	meta-mine:recipes-app/orphan/orphan_9.%.bbappend:1	orphan_9.%.bbappend matches no recipe in the workspace, which BitBake treats as an error ("No recipes available for"); there is no orphan recipe; remove the append or add its layer
 note: not checked: 2 layers that are not writable (meta-core, meta-vendor); name one as the target or pass --all
+note: checked 6 files with 41 rules: Yocto conventions and release compatibility, not whether the recipes build or work
 ```
 
 `sous-chef lint --all` adds four findings in the other layers (`8 findings in 21 files: 1
@@ -683,13 +693,41 @@ What the rules still get wrong there, as far as it was checked:
   `SECTION` findings replaced by `pypi.bbclass:42` are true.
 - `override/dead` (92, info): real overrides of architectures and target OSes no machine
   of the workspace uses; expected noise while `OVERRIDES` holds python.
-- `org/class-export-functions` (23) and `org/class-recipe-specific` (7): false in the
+- `org/class-export-functions` (23 until x7, 1 since: below) and `org/class-recipe-specific` (7): false in the
   sample checked (a class's own tasks; `native.bbclass` setting `EXCLUDE_FROM_WORLD`).
 - `org/inc-has-version-data` (8): false in the sample (`common-clang.inc` `PV`,
   `u-boot-common.inc` `SRCREV`, shared on purpose by recipes of one version).
 - `override/remove-in-recipe`, `org/class-location`, `override/plus-equals-with-override`:
   true by the rule's definition; OE-core does these on purpose.
-- No rule reports `PV = "1.0+git${SRCPV}"` (`SRCPV` is empty in Wrynose): a miss.
+- No rule reported `PV = "1.0+git${SRCPV}"` (`SRCPV` is empty in Wrynose): a miss until
+  x7 (now `hygiene/release-removed`, below).
+
+Re-measured for branch `x7-cleanup` (2026-11-18, the release binary with
+`runs/x7-cleanup/sous-chef.toml` (the two kas files, `[bitbake] enabled = false`), run from
+`yocto-kiss/`, cache under `runs/x7-cleanup/`, no BitBake run):
+
+| Run | x7-cleanup |
+|---|---|
+| Default (13 files) | 5 findings (0 E, 1 W, 4 I), then the coverage note `checked 13 files with 41 rules: ...` |
+| With --all | 649 findings in 1718 files (0 E, 156 W, 493 I) |
+
+The default run now gives the four problems of meta-kiss the benchmark's t09 expected:
+`linux-kiss` has no `SUMMARY` (W) and no `HOMEPAGE` (I); `u-boot-kiss_git.bb` sets no `PV`
+(`hygiene/git-pv`, I); `sl_git.bb:12` has `${SRCPV}` in `PV` (`hygiene/release-removed`,
+I) and `sl_git.bb:22` skips `ldflags` (`hygiene/insane-skip`, I). Per rule with `--all`,
+what changed since `x2-migrate` (every other rule as in the tables above):
+
+| Rule | x2-migrate | x7-cleanup | Cause |
+|---|---|---|---|
+| hygiene/missing-metadata | 16 | 25 | 9 more "no SUMMARY" warnings, from the x batch (the merged tree at `a76da18` already has them): `linux-kiss` and 8 meta-arm recipes (`cot-dt2c`, three `tf-a-tests`, four `trusted-firmware-a`). Three checked in the files: `cot-dt2c_0.1.0.bb`, `tf-a-tests_2.14.0.bb` and `trusted-firmware-a_2.14.1.bb` (with `trusted-firmware-a.inc`) set `DESCRIPTION` but no `SUMMARY`, and neither do the classes they inherit: true by the rule's definition (BitBake gives them the default `${PN} version ${PV}-${PR}`) |
+| hygiene/insane-skip | - | 25 | new rule (info); 6 in OE-core (`opensbi`, `linux-firmware`, `go-target.inc`, ...), 18 in meta-arm firmware recipes, 1 in meta-kiss: the skip is often legitimate for firmware, as the message says |
+| hygiene/git-pv | - | 7 | new rule (info): OE-core's `sato-icon-theme_git.bb`, `vulkan-samples_git.bb`, `rpm-sequoia-crypto-policy_git.bb`, meta-arm's `scp-firmware`, `trusted-firmware-a`, `trusted-firmware-m` `_git.bb`, meta-kiss's `u-boot-kiss_git.bb`; `PV="git"` checked in `bitbake -e` for `u-boot-kiss` |
+| hygiene/release-removed | 3 | 5 | `${SRCPV}` in `PV` (info) in meta-kiss's `sl_git.bb` and meta-arm's `execstack-native.bb` |
+| org/class-export-functions | 23 | 1 | helpers (`postfuncs`, `PACKAGEFUNCS`, `exec_func`, shell calls) and functions no file adds as a task are no longer reported; the one left is `kernel.bbclass`'s `do_kernel_version_sanity_check`, a task `kernel-yocto.bbclass` adds |
+| override/shadowed, override/plus-equals-with-override, hygiene/tabs, ... | | | unchanged |
+
+(The W count fell from 169 to 156 although `missing-metadata` gained 9 warnings: the 22
+`class-export-functions` warnings went; the `release-removed` warnings stay 3.)
 
 ## Output
 

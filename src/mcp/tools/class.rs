@@ -40,7 +40,7 @@ pub enum Show {
 pub struct Args {
     /// Class name without `.bbclass`.
     pub name: String,
-    /// `summary` (default), `users` or `outline`.
+    /// Default `summary`.
     #[serde(default)]
     pub show: Show,
     /// Output budget in tokens (default 600).

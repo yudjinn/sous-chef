@@ -10,4 +10,4 @@ hello-doc	FILES	/usr/share/doc	meta-core:conf/bitbake.conf:29
 hello	FILES	/usr/bin/* /usr/sbin/* /usr/lib/lib*.so.* /etc/hello.conf	meta-core:conf/bitbake.conf:27, meta-core:recipes-core/hello/hello.inc:20
 note: values of the evaluated datastore (PACKAGES and FILES defaults come from bitbake.conf); RDEPENDS and RPROVIDES rows only where set
 note: not included: what OE-Core adds while packaging (do_package: shared-library and pkg-config dependencies, packages split by python such as do_split_packages) and the RDEPENDS:${PN} that base.bbclass adds for PACKAGECONFIG with anonymous python (see deps kind=runtime)
-note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)

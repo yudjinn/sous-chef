@@ -68,11 +68,10 @@ pub enum Kind {
 pub struct Args {
     /// Recipe, or for `kind: providers` a provided name such as `virtual/kernel`.
     pub recipe: String,
-    /// `build` (default), `runtime`, `packageconfig`, `reverse`, `providers` or `mcdepends`.
+    /// Default `build`.
     #[serde(default)]
     pub kind: Kind,
-    /// Multiconfig to evaluate in (default: the default configuration); a recipe written
-    /// `mc:<name>:<recipe>` also selects it.
+    /// Multiconfig name (or write the recipe `mc:<name>:<recipe>`).
     pub mc: Option<String>,
     /// Depth (default 1).
     pub depth: Option<u32>,

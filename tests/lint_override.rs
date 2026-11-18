@@ -198,6 +198,57 @@ fn legacy_syntax() {
 }
 
 #[test]
+fn legacy_syntax_knows_the_package_variables_of_convert_overrides() {
+    // x7: SYSTEMD_SERVICE_${PN} and the rest of convert-overrides.py's lists; not
+    // ALTERNATIVE_PRIORITY_<pkg> / ALTERNATIVE_TARGET_<pkg>, which update-alternatives.bbclass
+    // reads with `_` today.
+    let env = Env::new();
+    let r = &OverrideLegacySyntax;
+    let found: Vec<u32> = lines(&env, r, "package-vars.bb")
+        .into_iter()
+        .map(|(l, _)| l)
+        .collect();
+    assert_eq!(found, [2, 3, 4, 5, 8, 9, 10, 11]);
+    let m = messages(&env, r, "package-vars.bb");
+    let tails: Vec<&str> = m.iter().map(|s| s.rsplit("; ").next().unwrap()).collect();
+    assert_eq!(
+        tails,
+        [
+            "write `SYSTEMD_SERVICE:${PN}`",
+            "write `INITSCRIPT_PARAMS:${PN}`",
+            "write `INITSCRIPT_NAME:${PN}-server`",
+            "write `ALTERNATIVE:${PN}`",
+            "write `SYSTEMD_SERVICE_ESCAPED:${PN}`",
+            "write `USERADD_PARAM:${PN}`",
+            "write `IMAGE_CMD:ext4`",
+            // The message says what the fix writes (it said `KERNEL_DEVICETREE_qemux86:append`).
+            "write `KERNEL_DEVICETREE:qemux86:append`",
+        ]
+    );
+    assert!(m[0].contains("in `SYSTEMD_SERVICE_${PN}`"), "{}", m[0]);
+    // A machine suffix after the name a PREFERRED_* variable is keyed by was an override
+    // (doc and code agree since x7); `PREFERRED_PROVIDER_<machine>` alone is a name.
+    let found: Vec<u32> = lines(&env, r, "preferred.conf")
+        .into_iter()
+        .map(|(l, _)| l)
+        .collect();
+    assert_eq!(found, [1, 4]);
+    let p = messages(&env, r, "preferred.conf");
+    assert!(
+        p[0].ends_with("write `PREFERRED_PROVIDER_virtual/kernel:qemux86`"),
+        "{}",
+        p[0]
+    );
+    // bad-more.bb's first line, the same form.
+    let more = messages(&env, r, "bad-more.bb");
+    assert!(
+        more[0].ends_with("write `EXTRA_OECONF:qemux86:append`"),
+        "{}",
+        more[0]
+    );
+}
+
+#[test]
 fn legacy_syntax_on_meta_legacy() {
     // meta-legacy is not in BBLAYERS; its files are checked one by one (fixture README,
     // "meta-legacy": true positives, and SRCREV_machine, do_install(), the layer.conf

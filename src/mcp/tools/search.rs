@@ -36,10 +36,12 @@ use crate::workspace::Workspace;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
-    /// Statement names, substring (index).
+    /// Statement names, substring (index); `NAME[flag]` matches flag statements.
     #[default]
     Name,
-    /// File content, line by line.
+    /// File content line by line: a literal substring, no escaping needed.
+    Text,
+    /// File content line by line: a regular expression.
     Regex,
     /// Full-text search over names and snippets (index).
     Fts,
@@ -47,14 +49,14 @@ pub enum Mode {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct Args {
-    /// Search text or regular expression.
+    /// A name (`SRCREV`, `PACKAGECONFIG[gnutls]`), literal text or a regex, as `mode` says.
     pub query: String,
-    /// `name` (default), `regex` or `fts`.
+    /// `name` (default): statement names; `text`: literal line text; `regex`; `fts`.
     #[serde(default)]
     pub mode: Mode,
     /// Statement kinds: `assign`, `function`, `task`, `inherit`, `include`, ...
     pub kind: Option<Vec<String>>,
-    /// Only this layer.
+    /// Only these layers (comma-separated names).
     pub layer: Option<String>,
     /// Only this file kind: `bb`, `bbappend`, `inc`, `bbclass`, `conf`.
     pub file_kind: Option<String>,
@@ -112,10 +114,12 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     let mut t = Table::new(&["loc", "kind", "item", "snippet"]);
     match args.mode {
         Mode::Name | Mode::Fts => {
-            let mut rows = if args.mode == Mode::Name {
-                query::search_names(&index, query, &filter, COUNT_CAP)?
-            } else {
-                query::search_fts(&index, query, &filter, COUNT_CAP)?
+            let mut rows = match (args.mode, name_flag(query)) {
+                (Mode::Name, Some((name, flag))) => {
+                    query::search_name_flags(&index, name, flag, &filter, COUNT_CAP)?
+                }
+                (Mode::Name, None) => query::search_names(&index, query, &filter, COUNT_CAP)?,
+                _ => query::search_fts(&index, query, &filter, COUNT_CAP)?,
             };
             let more = rows.len().saturating_sub(limit);
             rows.truncate(limit);
@@ -130,6 +134,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
             collection_notes(&index, &files, &mut t)?;
         }
         Mode::Regex => regex_search(&index, ctx, query, &filter, limit, &mut t)?,
+        Mode::Text => regex_search(&index, ctx, &regex::escape(query), &filter, limit, &mut t)?,
     }
     if t.is_empty() {
         t.note("no hits");
@@ -137,10 +142,28 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     if let Some(line) = render::freshness_line(&report) {
         t.note(&line);
     }
-    let budget = args
-        .budget_tokens
-        .unwrap_or(ctx.config.output.budget_tokens);
+    let budget = args.budget_tokens.unwrap_or_else(|| {
+        // The default budget is raised so that the default `limit` of hits fits (a hit row
+        // is about 150 bytes); a budget set in sous-chef.toml is kept as it is.
+        let configured = ctx.config.output.budget_tokens;
+        if configured == render::DEFAULT_BUDGET_TOKENS {
+            DEFAULT_BUDGET
+        } else {
+            configured
+        }
+    });
     Ok(t.render_as(args.format.unwrap_or_default(), budget))
+}
+
+/// `search`'s own default `budget_tokens`: room for [`DEFAULT_LIMIT`] hits.
+pub const DEFAULT_BUDGET: usize = 1200;
+
+/// `NAME[flag]` split into its name and flag (both non-empty, no further brackets).
+fn name_flag(query: &str) -> Option<(&str, &str)> {
+    let (name, rest) = query.split_once('[')?;
+    let flag = rest.strip_suffix(']')?;
+    let plain = |s: &str| !s.is_empty() && !s.contains(['[', ']']);
+    (plain(name) && plain(flag)).then_some((name, flag))
 }
 
 /// A note for each file of the hits that BitBake does not parse as indexed (a `.bb` no
@@ -183,15 +206,25 @@ fn build_filter(index: &Index, ws: &Workspace, args: &Args) -> Result<StatementF
         }
         f.kinds.push(k.to_string());
     }
-    if let Some(l) = &args.layer {
-        let known = query::layer_stats(index)?;
-        if !known.iter().any(|s| s.name == *l) {
-            let names: Vec<String> = known.into_iter().map(|s| s.name).collect();
-            return Err(Error::NotFound {
-                what: format!("layer {l}; layers: {}", names.join(", ")),
-            });
+    let mut layers: Vec<&str> = Vec::new();
+    for l in args.layer.iter().flat_map(|l| l.split(',')).map(str::trim) {
+        if !l.is_empty() && !layers.contains(&l) {
+            layers.push(l);
         }
-        f.layer = Some(l.clone());
+    }
+    if !layers.is_empty() {
+        let known = query::layer_stats(index)?;
+        for l in &layers {
+            if !known.iter().any(|s| s.name == *l) {
+                let names: Vec<&str> = known.iter().map(|s| s.name.as_str()).collect();
+                return Err(Error::NotFound {
+                    what: format!("layer {l}; layers: {}", names.join(", ")),
+                });
+            }
+        }
+    }
+    if let [one] = layers.as_slice() {
+        f.layer = Some(one.to_string());
     }
     if let Some(k) = &args.file_kind {
         f.file_kind = Some(k.trim().parse::<FileKind>()?);
@@ -200,6 +233,22 @@ fn build_filter(index: &Index, ws: &Workspace, args: &Args) -> Result<StatementF
         // The file BitBake uses for a bare `pn`, as in `recipe` (provider selection).
         let (rec, _) = recipe::resolve_selected(index, ws, r, None)?;
         f.files = Some(recipe::walk_recipe(index, &rec)?.files);
+    }
+    if layers.len() > 1 {
+        // Several layers: only their files, in layer then path order (or, with `recipe`,
+        // that recipe's files in those layers, in tree order).
+        let in_layers: Vec<i64> = query::all_files(index)?
+            .into_iter()
+            .filter(|file| layers.contains(&file.layer.as_str()))
+            .map(|file| file.id)
+            .collect();
+        f.files = Some(match f.files.take() {
+            Some(tree) => tree
+                .into_iter()
+                .filter(|id| in_layers.contains(id))
+                .collect(),
+            None => in_layers,
+        });
     }
     Ok(f)
 }

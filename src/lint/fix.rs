@@ -1369,6 +1369,16 @@ pub fn render_text(r: &FixReport) -> String {
             let _ = writeln!(out, "refused: {line}");
         }
     }
+    // A dry run is the first round only. A write re-lints the changed files with the index
+    // refreshed (recipe-scope rules evaluate the written files), which a dry run cannot do
+    // exactly from memory, so it says so instead of guessing.
+    if !r.write && r.rounds.iter().any(|round| !round.changes.is_empty()) {
+        let _ = writeln!(
+            out,
+            "note: this is the first round only; --write re-lints the changed files and may \
+             apply further fixes they make possible (up to {MAX_ROUNDS} rounds)"
+        );
+    }
     if !r.suggested_skipped.is_empty() {
         let _ = writeln!(
             out,

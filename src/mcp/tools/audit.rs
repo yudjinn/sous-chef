@@ -27,15 +27,13 @@ use crate::workspace::Workspace;
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct Args {
-    /// The repository root to audit: the working directory (default) or a directory inside
-    /// the workspace's span (relative to the working directory).
+    /// Repository root (default: the working directory).
     pub root: Option<String>,
-    /// Digest budget in tokens (default 600). The stored report is not cut.
+    /// Digest budget in tokens (default 600).
     pub budget_tokens: Option<usize>,
     /// `text` (default) or `json`.
     pub format: Option<Format>,
-    /// Add section 7: the migration report of the writable layers to this release (a
-    /// codename).
+    /// Add the migration report to this release codename (section 7).
     pub migrate_to: Option<String>,
 }
 

@@ -211,7 +211,10 @@ pub enum Feature {
     /// other `layer.conf` files are read, so copying them works.
     KeptUntilLangdale,
     /// What the 4.3 (Nanbield) guide removes is still there: `PERLARCH`, `PERLVERSION`,
-    /// `QEMU_USE_SLIRP`, `SERIAL_CONSOLES_CHECK`, the class `glide`.
+    /// `QEMU_USE_SLIRP`, `SERIAL_CONSOLES_CHECK`, the class `glide`; and `SRCPV` carries the
+    /// source revision, so a `_git` recipe needs `${SRCPV}` in `PV` (from Nanbield on
+    /// `bitbake.conf` sets `SRCPV = ""` and `package.bbclass` appends the revision to
+    /// `PKGV`: OE-core `a8e7b0f932`, on the nanbield branch and not on mickledore).
     KeptUntilMickledore,
     /// What the 5.0 (Scarthgap) guide removes is still there: `DEPLOY_DIR_TAR`,
     /// `oldincludedir`.
@@ -239,10 +242,25 @@ pub enum Feature {
     /// BitBake warns about an assignment without whitespace around the operator
     /// (`FOO="bar"`: "has a lack of whitespace around the assignment").
     AssignmentWhitespaceWarning,
+    /// OE-core's CVE check reads `CVE_STATUS[<id>]` (with `CVE_CHECK_STATUSMAP` and
+    /// `CVE_STATUS_GROUPS`): `lib/oe/cve_check.py` has `decode_cve_status` (OE-core
+    /// `34f682a24b`, on the nanbield branch, not on mickledore). Before, only
+    /// `CVE_CHECK_IGNORE`.
+    CveStatus,
+    /// A `CVE_STATUS` value may be `detail: cpe:vendor:product:description`, and a patched
+    /// CVE counts only for a matching `CVE_PRODUCT` (`decode_cve_status` compares a part with
+    /// `"cpe"`; OE-core `abca80a716`, on the styhead branch, not on scarthgap).
+    CveStatusCpe,
+    /// Patch contents are read line by line: every id on a line starting with `CVE:`, and a
+    /// file-name id needs four or more digits after the year
+    /// (`parse_cves_from_patch_contents`; OE-core `87c6da6816` "cve-check: Rework patch
+    /// parsing", on the walnascar branch, not on styhead). Before, `CVE:( CVE-\d{4}-\d+)+`
+    /// anywhere in the text.
+    CvePatchContentLines,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 21] = [
+    pub const ALL: [Feature; 24] = [
         Feature::SplitClassDirs,
         Feature::InheritDefer,
         Feature::IncludeAll,
@@ -264,6 +282,9 @@ impl Feature {
         Feature::KeptUntilWalnascar,
         Feature::KeptUntilWhinlatter,
         Feature::AssignmentWhitespaceWarning,
+        Feature::CveStatus,
+        Feature::CveStatusCpe,
+        Feature::CvePatchContentLines,
     ];
 
     /// The first supported release that has the feature.
@@ -279,6 +300,9 @@ impl Feature {
             | Feature::ClassExtendDeferred
             | Feature::DeferredInheritsClassOverride
             | Feature::AssignmentWhitespaceWarning => Release::Whinlatter,
+            Feature::CveStatus => Release::Nanbield,
+            Feature::CveStatusCpe => Release::Styhead,
+            Feature::CvePatchContentLines => Release::Walnascar,
             Feature::UnpackDir => Release::Styhead,
             Feature::WorkdirAsSourceDir
             | Feature::PrInWorkdir
@@ -336,7 +360,10 @@ impl Feature {
             | Feature::KeptUntilStyhead
             | Feature::KeptUntilWalnascar
             | Feature::KeptUntilWhinlatter
-            | Feature::AssignmentWhitespaceWarning => true,
+            | Feature::AssignmentWhitespaceWarning
+            | Feature::CveStatus
+            | Feature::CveStatusCpe
+            | Feature::CvePatchContentLines => true,
         }
     }
 
@@ -746,6 +773,9 @@ mod tests {
             (KeptUntilWalnascar, true, true, false),
             (KeptUntilWhinlatter, true, true, false),
             (AssignmentWhitespaceWarning, false, false, true),
+            (CveStatus, false, true, true),
+            (CveStatusCpe, false, false, true),
+            (CvePatchContentLines, false, false, true),
         ];
         assert_eq!(table.len(), Feature::ALL.len());
         for (f, k, s, w) in table {
@@ -778,6 +808,12 @@ mod tests {
         assert!(Release::Walnascar.has(KeptUntilWalnascar));
         assert!(!Release::Whinlatter.has(KeptUntilWalnascar));
         assert!(!Release::Walnascar.has(AssignmentWhitespaceWarning));
+        assert!(!Release::Mickledore.has(CveStatus));
+        assert!(Release::Nanbield.has(CveStatus));
+        assert!(!Release::Scarthgap.has(CveStatusCpe));
+        assert!(Release::Styhead.has(CveStatusCpe));
+        assert!(!Release::Styhead.has(CvePatchContentLines));
+        assert!(Release::Walnascar.has(CvePatchContentLines));
         assert_eq!(KeptUntilStyhead.removed_in(), Some(Release::Walnascar));
         assert_eq!(KeptUntilWhinlatter.removed_in(), Some(Release::Wrynose));
         assert_eq!(InheritDefer.removed_in(), None);

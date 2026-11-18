@@ -12,7 +12,14 @@
 //! Matched: an assignment to `S` (no flag; any operator except `+=`-style and
 //! `:append` / `:prepend` / `:remove`, with or without other overrides) whose value is
 //! `${WORKDIR}` or `${WORKDIR}/`.
+//!
+//! **Fix** (since x7), safe: the value becomes `${UNPACKDIR}`, the form the 5.1 guide gives
+//! ("The recipe should be changed to: `S = "${UNPACKDIR}"`"), the rule's own correction.
+//! Offered only when every release the file is checked against has `UNPACKDIR`
+//! (`Feature::UnpackDir`); a layer that also claims an older release, which has no
+//! `UNPACKDIR`, gets no fix and the message says so.
 
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
@@ -35,11 +42,26 @@ impl Rule for HygieneWorkdirS {
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
-        let Some(file) = cx.file else { return };
+        out.extend(self.scan(cx, false).into_iter().map(|(f, _)| f));
+    }
+
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        self.scan(cx, true)
+            .into_iter()
+            .filter_map(|(finding, fix)| fix.map(|fix| FixedFinding { finding, fix }))
+            .collect()
+    }
+}
+
+impl HygieneWorkdirS {
+    fn scan(&self, cx: &LintContext<'_>, want_fix: bool) -> Vec<(Finding, Option<Fix>)> {
+        let mut out = Vec::new();
+        let Some(file) = cx.file else { return out };
         let rejecting = helpers::releases_lacking(cx, Feature::WorkdirAsSourceDir);
         if rejecting.is_empty() {
-            return;
+            return out;
         }
+        let no_unpackdir = helpers::releases_lacking(cx, Feature::UnpackDir);
         for s in &file.statements {
             let StatementKind::Assign { var, op, value, .. } = &s.kind else {
                 continue;
@@ -61,18 +83,44 @@ impl Rule for HygieneWorkdirS {
             {
                 continue;
             }
-            out.push(helpers::finding(
+            let by_hand = if no_unpackdir.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "; no automatic fix while the layer also claims {}, which {} no UNPACKDIR",
+                    helpers::release_list(&no_unpackdir),
+                    if no_unpackdir.len() == 1 {
+                        "has"
+                    } else {
+                        "have"
+                    }
+                )
+            };
+            let finding = helpers::finding(
                 self,
                 cx,
                 LineSpan::line(s.span.start),
                 format!(
                     "`S = \"${{WORKDIR}}\"` is rejected with an error in {}, which this layer \
                      is checked against; point S at the unpacked sources instead, e.g. \
-                     `S = \"${{UNPACKDIR}}\"` (the variable exists from {} on)",
+                     `S = \"${{UNPACKDIR}}\"` (the variable exists from {} on){by_hand}",
                     helpers::release_list(&rejecting),
                     Feature::UnpackDir.first().codename()
                 ),
-            ));
+            );
+            let fix = (want_fix && no_unpackdir.is_empty())
+                .then(|| {
+                    let p = fix::assign_parts(cx.source?, s)?;
+                    Fix::in_file(
+                        cx,
+                        vec![Edit::replace(p.value(), "${UNPACKDIR}")],
+                        "set S to `${UNPACKDIR}`",
+                        Safety::Safe,
+                    )
+                })
+                .flatten();
+            out.push((finding, fix));
         }
+        out
     }
 }

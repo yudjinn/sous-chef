@@ -21,26 +21,23 @@ pub struct Args {
     pub target: Option<String>,
     /// Rule ids or groups to run; default: all enabled rules.
     pub rules: Option<Vec<String>>,
-    /// Minimum severity: `info`, `warning` or `error`.
+    /// Minimum severity.
     pub severity: Option<Severity>,
     /// Output budget in tokens (default 600).
     pub budget_tokens: Option<usize>,
     /// `text` (default) or `json`.
     pub format: Option<Format>,
-    /// Fix what can be fixed safely; a dry run (a diff per file) unless `write`.
+    /// Safe fixes, as a diff per file (dry run unless `write`).
     pub fix: Option<bool>,
-    /// Also apply suggested fixes (they change meaning as the rule recommends); implies `fix`.
+    /// Also the suggested fixes (they change meaning); implies `fix`.
     pub fix_suggested: Option<bool>,
-    /// With `fix`: write the fixes into the writable layers, then lint the changed files.
+    /// With `fix`: write the fixes.
     pub write: Option<bool>,
-    /// Also check against this release (a codename), as if each layer claimed it in
-    /// `LAYERSERIES_COMPAT`.
+    /// Also check against this release codename.
     pub as_release: Option<String>,
-    /// With `as_release`: check against that release only.
+    /// With `as_release`: that release only.
     pub only_release: Option<bool>,
-    /// Migration report to this release (a codename): what holds for it and not for the
-    /// releases the target layers claim now, the features they use that it changed, and
-    /// their `LAYERSERIES_COMPAT`.
+    /// Migration report to this release codename.
     pub migrate_to: Option<String>,
 }
 

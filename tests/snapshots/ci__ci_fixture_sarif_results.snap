@@ -72,14 +72,14 @@ expression: results
       }
     ],
     "message": {
-      "text": "`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = \"${UNPACKDIR}\")"
+      "text": "`${WORKDIR}/app.c`: from styhead on, `file://` sources are unpacked into ${UNPACKDIR}, not ${WORKDIR}, and this layer is checked against wrynose; write `${UNPACKDIR}/app.c` (or `${S}/app.c` with S = \"${UNPACKDIR}\"); no automatic fix while the layer also claims kirkstone and scarthgap, which have no UNPACKDIR"
     },
     "partialFingerprints": {
       "primaryLocationLineHash": "fe92ab3f99cc6a8e249e8b1bde88ed95:1",
       "sousChefFinding/v1": "fe92ab3f99cc6a8e249e8b1bde88ed95:1"
     },
     "ruleId": "hygiene/release-syntax",
-    "ruleIndex": 38
+    "ruleIndex": 40
   },
   {
     "level": "warning",

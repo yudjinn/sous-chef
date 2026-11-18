@@ -10,5 +10,5 @@ SUMMARY	Example application using python and fakeroot	meta-mine:recipes-app/app/
 LICENSE	CLOSED	meta-mine:recipes-app/app/app_0.1.bb:2
 SRC_URI	1 entry from 1 applied operation	-
 DEPENDS	1 entry from 1 applied operation	-
-note: key values are evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run); use var for the full history
+note: key values are evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated); use var for the full history
 note: 1 anonymous python function was not run; values it changes may differ

@@ -28,7 +28,7 @@ pub const CONTENT_CAP_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct Args {
-    /// `recipe`, `bbappend`, `layer`, `class`, `inc_split` or `where`.
+    /// What to create (`where`: advise where a change belongs).
     pub kind: Kind,
     /// Target layer (must be writable).
     pub layer: Option<String>,

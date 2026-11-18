@@ -6,7 +6,9 @@ use super::Rule;
 
 pub mod hygiene_autorev;
 pub mod hygiene_continuation;
+pub mod hygiene_git_pv;
 pub mod hygiene_host_path;
+pub mod hygiene_insane_skip;
 pub mod hygiene_missing_metadata;
 pub mod hygiene_parse_error;
 pub mod hygiene_release_removed;
@@ -77,6 +79,8 @@ pub static ALL: &[&dyn Rule] = &[
     &org_layer_conf::OrgLayerConf,
     &org_upstream_edit::OrgUpstreamEdit,
     &hygiene_missing_metadata::HygieneMissingMetadata,
+    &hygiene_git_pv::HygieneGitPv,
+    &hygiene_insane_skip::HygieneInsaneSkip,
     &hygiene_autorev::HygieneAutorev,
     &hygiene_src_uri_checksum::HygieneSrcUriChecksum,
     &hygiene_host_path::HygieneHostPath,

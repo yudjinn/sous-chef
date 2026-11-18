@@ -30,4 +30,4 @@ file://absent.cfg	searched	#18	meta-core:recipes-core/hello/hello-1.1/	missing	-
 file://absent.cfg	searched	#19	meta-core:recipes-core/hello/hello/	missing	-
 file://absent.cfg	searched	#20	meta-core:recipes-core/hello/files/	missing	-
 note: FILESPATH is built by OE-Core's base_set_filespath (python), which is not run; the search order is reconstructed: FILESEXTRAPATHS, then the recipe's ${BP}, ${BPN} and files directories, each tried with every FILESOVERRIDES entry (last first; 3 entries) and then without
-note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)

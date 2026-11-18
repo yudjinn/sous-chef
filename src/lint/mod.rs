@@ -486,6 +486,41 @@ pub struct Report {
     pub files: usize,
     /// Layers checked (the build pseudo-layer included), in workspace order.
     pub layers: Vec<String>,
+    /// Rules selected for the run (since x7: the coverage note of [`render_report`]).
+    #[serde(skip)]
+    pub rules_run: usize,
+    /// Recipes whose evaluation failed, so recipe-scope rules did not run on them.
+    #[serde(skip)]
+    pub recipes_unevaluated: usize,
+}
+
+impl Report {
+    /// One line saying what a lint run covers, so an answer with few findings is not read
+    /// as a clean bill of health: the files and rules, that the rules check conventions and
+    /// release compatibility and not the build, and the recipes recipe-scope rules missed
+    /// (layers left out are told by their own note).
+    pub fn coverage_note(&self) -> String {
+        let mut line = format!(
+            "checked {} {} with {} {}: Yocto conventions and release compatibility, not \
+             whether the recipes build or work",
+            self.files,
+            if self.files == 1 { "file" } else { "files" },
+            self.rules_run,
+            if self.rules_run == 1 { "rule" } else { "rules" },
+        );
+        if self.recipes_unevaluated > 0 {
+            line.push_str(&format!(
+                "; recipe-scope rules did not run on {} {} (evaluation failed)",
+                self.recipes_unevaluated,
+                if self.recipes_unevaluated == 1 {
+                    "recipe"
+                } else {
+                    "recipes"
+                }
+            ));
+        }
+        line
+    }
 }
 
 /// Lints `target` with every rule of the catalogue and the real evaluator.
@@ -556,6 +591,7 @@ pub fn run_with_progress(
     let overrides = severity_overrides(config, rules, &mut report.notes);
     let plan = plan(ws, index, target, options, &mut report.notes)?;
     report.files = plan.files.len();
+    report.rules_run = selected.len();
     report.layers = plan.layers_checked.clone();
 
     let reach = match target {
@@ -666,11 +702,14 @@ pub fn run_with_progress(
                 }
             }
             Ok(None) => eval_unavailable = true,
-            Err(e) => report.notes.push(format!(
-                "recipe {} ({}): evaluation failed, recipe-scope rules skipped: {e}",
-                pn.unwrap_or_default(),
-                loc
-            )),
+            Err(e) => {
+                report.recipes_unevaluated += 1;
+                report.notes.push(format!(
+                    "recipe {} ({}): evaluation failed, recipe-scope rules skipped: {e}",
+                    pn.unwrap_or_default(),
+                    loc
+                ))
+            }
         }
     }
     tell(total);
@@ -1266,6 +1305,9 @@ pub fn render_report(report: &Report, format: Format, budget_tokens: usize) -> S
     }
     for n in &report.notes {
         table.note(&format!("note: {n}"));
+    }
+    if report.rules_run > 0 {
+        table.note(&format!("note: {}", report.coverage_note()));
     }
     let budget = budget_tokens.saturating_sub(render::estimate_tokens(&summary) + 1);
     match format {

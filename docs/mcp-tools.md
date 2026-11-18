@@ -99,6 +99,24 @@ Common to every tool:
 
 The first six are always loaded. The rest are deferred (short descriptions, loaded on demand).
 
+**Context cost (since x7).** Every tool definition a client loads stays in the agent's
+context on every turn. Claude Code's tool search (on by default) defers every MCP tool,
+keeping only its name and the server instructions in context until the agent searches
+for it, unless the tool's `_meta` has `"anthropic/alwaysLoad": true`
+(code.claude.com/docs/en/mcp, "Mark a tool to load upfront or stay deferred"): the six
+always-loaded tools carry it, the deferred ones carry no `_meta`. Without tool search
+(tool search off, an older model, or a session whose `--tools` leaves `ToolSearch` out, as
+the benchmark's did) every definition loads upfront, so all are kept short: the
+descriptions here say what an agent needs to choose and call a tool, and the input schema
+is sent compacted (`mcp::compact_schema`: no `$schema` or `title`, enums written in place
+without per-value docs, `Option<T>` as `T`, no integer `format`/`minimum`, the shared
+`budget_tokens` / `format` docs left out because the server instructions give them). The
+long form is this document and `sous-chef://help`, which is generated from the full schema
+and lists every enum value with its doc. Measured with `cargo test --test tools_budget --
+--nocapture`: `tools/list` was 31,539 bytes (about 7,900 tokens at 4 bytes a token) for the
+18 tools before x7 and is 14,102 bytes (about 3,500 tokens) after; the test fails above
+15,000 bytes, above 800 bytes of server instructions, or above 3,000 bytes of the skill.
+
 ## Always loaded
 
 ### `recipe`
@@ -109,7 +127,7 @@ Resolve a recipe and show its shape.
 | `name` | string | required: a `pn`, a `pn_pv`, or a pointer to a `.bb` or a `.bbappend` (a bbappend pointer means the recipe it applies to) |
 | `version` | string? | default: the version BitBake would use (provider selection for the default machine and distro); `%` matches any rest |
 | `show` | `"summary"` \| `"tree"` \| `"outline"` \| `"sources"` \| `"tasks"` \| `"packages"` \| `"cve"` | default `summary` |
-| `mc` | string? | multiconfig (also `name` written `mc:<name>:<recipe>`): the version is chosen and the key values and evaluated views are evaluated there; `tree` and `outline` are static and the same everywhere (a note says so) |
+| `mc` | string? | multiconfig, a name in `BBMULTICONFIG` (common section, "Multiconfig"; also `name` written `mc:<name>:<recipe>`): the version is chosen and the key values and evaluated views are evaluated there; `tree` and `outline` are static and the same everywhere (a note says so) |
 
 An unknown version is an error listing the versions that exist. A `pn_pv` together with a
 different `version` is an error. A bbappend that applies to several recipes is an error
@@ -214,9 +232,10 @@ changes variables through computed names).
     missing patch is matched by file name only (a note lists them).
 
   Which rules apply (whether `CVE_STATUS` exists, the `cpe:` form, how patch headers are
-  read) is read from the `lib/oe/cve_check.py` of the first layer that has one, and named
-  in a note; without one, Wrynose's rules are used and the note says so. Ends with the
-  evaluated views' notes. On the fixture copy of `tests/recipe_cve.rs` (cut):
+  read) comes from the workspace's release (since x7, the `release::Feature`s `CveStatus`,
+  `CveStatusCpe`, `CvePatchContentLines`) and is named in a note; the `lib/oe/cve_check.py`
+  of the first layer that has one is read as a cross-check, and a second note says where it
+  differs. Ends with the evaluated views' notes. On the fixture copy of `tests/recipe_cve.rs` (cut):
 
   ```
   kind	cve	value	file	loc
@@ -267,7 +286,7 @@ do_install	-	do_compile	meta-core:classes-recipe/autotoolsish.bbclass:30 -> auto
 do_build	noexec	do_install	-	meta-core:classes/base.bbclass:51
 note: order from the addtask / deltask statements in parse order (the index: configuration classes, recipe, includes and classes, bbappends, deferred inherits; the replay does not run them); dependencies first
 note: not accounted for: tasks added or deleted by anonymous python (bb.build.addtask / deltask), do_x[deps] set directly, and dependencies on other recipes' tasks ([depends], [deptask], [rdeptask], [recrdeptask])
-note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)
 ```
 
 `packages` of `libfoo`:
@@ -282,7 +301,7 @@ libfoo-doc	FILES	/usr/share/doc	meta-core:conf/bitbake.conf:29
 libfoo	FILES	/usr/bin/* /usr/sbin/* /usr/lib/lib*.so.*	meta-core:conf/bitbake.conf:27
 note: values of the evaluated datastore (PACKAGES and FILES defaults come from bitbake.conf); RDEPENDS and RPROVIDES rows only where set
 note: not included: what OE-Core adds while packaging (do_package: shared-library and pkg-config dependencies, packages split by python such as do_split_packages) and the RDEPENDS:${PN} that base.bbclass adds for PACKAGECONFIG with anonymous python (see deps kind=runtime)
-note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)
 ```
 
 ```
@@ -298,7 +317,7 @@ SUMMARY	GNU Hello stand-in	meta-core:recipes-core/hello/hello.inc:1
 LICENSE	MIT	meta-core:recipes-core/hello/hello.inc:5
 SRC_URI	4 entries from 4 applied operations; 1 inactive operation (override not active)	-
 DEPENDS	3 entries from 2 applied operations	-
-note: key values are evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run); use var for the full history
+note: key values are evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated); use var for the full history
 ```
 
 ### `var`
@@ -309,7 +328,7 @@ History and final value of a variable. The main tool.
 | `name` | string | base name, e.g. `SRC_URI`; `FILES:${PN}` allowed (expanded for the recipe first); `VAR[flag]` shows that flag only |
 | `recipe` | string? | omit for global configuration; `mc:<name>:<recipe>` evaluates in that multiconfig |
 | `machine`, `distro` | string? | |
-| `mc` | string? | multiconfig to evaluate in (common section, "Multiconfig"); not with `authoritative` |
+| `mc` | string? | multiconfig, a name in `BBMULTICONFIG` (common section, "Multiconfig"; also `recipe` written `mc:<name>:<recipe>`); not with `authoritative` |
 | `authoritative` | bool | default false; true runs `bitbake -e` (M5) |
 | `flags` | bool | also show `VAR[flag]` operations, per flag, after the value's |
 
@@ -463,7 +482,7 @@ final: function do_install, 3 pieces in order: meta-core:classes-recipe/autotool
 |---|---|---|
 | `recipe` | string? | `mc:<name>:<recipe>` allowed |
 | `machine`, `distro` | string? | |
-| `mc` | string? | multiconfig to evaluate in; the multiconfig note is printed |
+| `mc` | string? | multiconfig, a name in `BBMULTICONFIG` (common section, "Multiconfig"; also `recipe` written `mc:<name>:<recipe>`) |
 | `show` | `"chain"` \| `"conditional"` \| `"dead"` | default `chain` |
 
 - `chain`: rows `priority entry from loc`: the entries of the evaluated `OVERRIDES`,
@@ -577,13 +596,13 @@ fakeroot do_install() {
 | Arg | Type | Notes |
 |---|---|---|
 | `query` | string | required |
-| `mode` | `"name"` \| `"regex"` \| `"fts"` | default `name`: statement names containing `query`, case-insensitive, exact names first. `fts`: SQLite FTS5 over names and snippets |
+| `mode` | `"name"` \| `"text"` \| `"regex"` \| `"fts"` | default `name`: statement names containing `query`, case-insensitive, exact names first; `NAME[flag]` (since x7) matches flag statements, the name and the flag each as a fragment, so `PACKAGECONFIG[gnutls]` finds every `PACKAGECONFIG[gnutls] = ...`. `text` (since x7): file content line by line containing `query` literally (case-sensitive, nothing to escape: `PACKAGECONFIG[gnutls] =`). `regex`: the same with a regular expression. `fts`: SQLite FTS5 over names and snippets |
 | `kind` | list? | `assign`, `function`, `pydef`, `inherit`, `include`, `addtask`, `deltask`, `addhandler`, `export_functions`, `export`, `unset`, `addfragments`, `addpylib`, `unknown` (every kind the index stores); aliases `task` (`addtask`) and `def` (`pydef`) |
-| `layer`, `file_kind`, `recipe` | filters | `recipe` restricts to that recipe's tree (the `.bb`, its includes and classes, its bbappends) |
-| `limit` | int | default 30, at most 1000 |
+| `layer`, `file_kind`, `recipe` | filters | `layer` takes one name or several separated by commas (since x7: `meta-kiss,meta-kiss-ti`); `recipe` restricts to that recipe's tree (the `.bb`, its includes and classes, its bbappends) |
+| `limit` | int | default 30, at most 1000. `budget_tokens` defaults to 1200 here (since x7; 600 elsewhere), room for 30 hits, unless `sous-chef.toml` sets another `[output] budget_tokens` |
 
 Each hit is a row `loc kind item snippet`; `item` is `[name A-B]`, the enclosing item and
-its range. `regex` mode reads file content line by line, through the confinement check;
+its range. `text` and `regex` modes read file content line by line, through the confinement check;
 `kind` is the enclosing statement's kind (`-` outside any statement), and the `kind` filter
 applies to the enclosing statement, so lines outside any statement are dropped. Files that
 cannot be read are skipped and counted in a note. The other modes use the index. `limit`
@@ -699,7 +718,7 @@ note: 1 bbappend matches no recipe; BitBake stops with a fatal error on these (c
 |---|---|
 | `recipe` | required; for `providers`, a provided name such as `virtual/kernel`; `mc:<name>:<recipe>` allowed |
 | `kind` | `"build"` (default), `"runtime"`, `"packageconfig"`, `"reverse"`, `"providers"`, `"mcdepends"` |
-| `mc` | multiconfig to evaluate in, provider selection included (per configuration, as in BitBake) |
+| `mc` | multiconfig, a name in `BBMULTICONFIG` (common section, "Multiconfig"; also `recipe` written `mc:<name>:<recipe>`); provider selection is per configuration, as in BitBake |
 | `depth` | default 1, at most 5; used by `build` and `reverse` only (a note says so otherwise) |
 
 There is no `machine` or `distro` argument: the recipe is evaluated for the configuration's
@@ -813,7 +832,11 @@ those of the default configuration's `BBMASK` (bitbake-semantics.md, "Multiconfi
 pointer with a line range keeps only
 the findings in that range. Output: a summary line first (counts by severity and by rule,
 so a table cut by the budget still gives the totals), then the table
-`severity rule pointer message`, then the notes. JSON:
+`severity rule pointer message`, then the notes, the last of which (since x7) says what was
+checked: `checked N files with R rules: Yocto conventions and release compatibility, not
+whether the recipes build or work`, plus the recipes recipe-scope rules missed because their
+evaluation failed (layers left out have their own `not checked:` note), so that few or no
+findings are not read as a clean bill of health. JSON:
 `{summary, errors, warnings, infos, by_rule, findings}`, where `findings` is the table.
 See [lint-rules.md](lint-rules.md) for the engine.
 
@@ -824,6 +847,7 @@ error	hygiene/parse-error	meta-mine:conf/distro/mine.conf:1	`inherit` in a .conf
 error	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:3	unparsed line; fix the line so BitBake can parse it, or remove it
 warning	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:4	addtask: `before`/`after` groups split by the other keyword are concatenated by BitBake without a space, joining two task names; write all `after` tasks in one group and all `before` tasks in another
 error	hygiene/parse-error	meta-mine:recipes-app/bad/bad_1.0.bb:5-6	function do_broken is never closed: no `}` in column 0 before end of file; close the function with `}` in column 0
+note: checked 6 files with 1 rule: Yocto conventions and release compatibility, not whether the recipes build or work
 ```
 
 Fix mode (lint-rules.md, "Fixes"; the CLI's `--fix`, `--fix-suggested`, `--write`):
@@ -838,7 +862,9 @@ Fix mode (lint-rules.md, "Fixes"; the CLI's `--fix`, `--fix-suggested`, `--write
 (saying whether it is a dry run), the lint summary line, `fixes available: N for M findings
 (S safe, G suggested); by rule: ...`, then per round `applied N fixes in F files` (dry run:
 `would apply`) followed by a unified diff per file (`--- layer:path` / `+++ layer:path`),
-the fixes deferred because they overlap another (dry run: "re-run after applying"), the
+the fixes deferred because they overlap another (dry run: "re-run after applying"; since x7
+a dry run also says that it shows the first round only and a write may apply further fixes
+in up to 5 rounds), the
 files refused (changed since indexed or read, refused by the scaffold checks), the
 suggested fixes not applied (each `pointer rule safety description` with its own diff), the
 fixes in layers that are not writable (never applied), and after a write `after: F files

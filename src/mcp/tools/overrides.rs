@@ -59,10 +59,9 @@ pub struct Args {
     pub machine: Option<String>,
     /// Default: `DISTRO` from local.conf.
     pub distro: Option<String>,
-    /// Multiconfig to evaluate in (default: the default configuration); a recipe written
-    /// `mc:<name>:<recipe>` also selects it.
+    /// Multiconfig name (or write the recipe `mc:<name>:<recipe>`).
     pub mc: Option<String>,
-    /// `chain` (default), `conditional` or `dead`.
+    /// Default `chain`.
     #[serde(default)]
     pub show: Show,
     /// Output budget in tokens (default 600).

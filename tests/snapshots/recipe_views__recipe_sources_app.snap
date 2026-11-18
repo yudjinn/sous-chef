@@ -6,5 +6,5 @@ entry	type	state	file	status	loc
 file://app.c	file	active	meta-mine:recipes-app/app/files/app.c	-	meta-mine:recipes-app/app/app_0.1.bb:6
 note: FILESPATH is built by OE-Core's base_set_filespath (python), which is not run; the search order is reconstructed: FILESEXTRAPATHS, then the recipe's ${BP}, ${BPN} and files directories, each tried with every FILESOVERRIDES entry (last first; 0 entries) and then without
 note: FILESOVERRIDES is empty or not set, so no override subdirectory is searched; ":" + "" splits into two empty overrides, so each directory is searched twice, as in OE-Core
-note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)
 note: 1 anonymous python function was not run (none changes SRC_URI, FILESEXTRAPATHS, FILESOVERRIDES by name)

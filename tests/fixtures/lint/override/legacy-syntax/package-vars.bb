@@ -1,0 +1,12 @@
+# Package variables only convert-overrides.py lists, and a machine suffix before _append.
+SYSTEMD_SERVICE_${PN} = "x.service"
+INITSCRIPT_PARAMS_${PN} = "defaults 10"
+INITSCRIPT_NAME_${PN}-server = "x"
+ALTERNATIVE_${PN} = "sh"
+ALTERNATIVE_PRIORITY_${PN} = "100"
+ALTERNATIVE_TARGET_${PN}[sh] = "/bin/x"
+SYSTEMD_SERVICE_ESCAPED_${PN} = "y"
+USERADD_PARAM_${PN} = "-u 1000 x"
+IMAGE_CMD_ext4 = "true"
+KERNEL_DEVICETREE_qemux86_append = " y.dtb"
+SYSTEMD_AUTO_ENABLE = "enable"

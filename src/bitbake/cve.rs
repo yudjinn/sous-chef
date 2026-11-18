@@ -2,17 +2,24 @@
 //! writes. Used by `recipe show=cve` (docs/mcp-tools.md). Nothing here runs anything.
 //!
 //! The rules are OE-core's `lib/oe/cve_check.py` (see "CVE metadata" in
-//! docs/bitbake-semantics.md). They changed between releases, and which ones apply is read
-//! from the `lib/oe/cve_check.py` of the workspace ([`CveRules::from_lib`]), so a release
-//! between the three supported ones gets the rules its OE-core has:
+//! docs/bitbake-semantics.md). They changed between releases; which ones apply comes from
+//! the release table ([`CveRules::for_release`], since x7), checked on OE-core's release
+//! branches:
 //!
 //! - `CVE_STATUS` (and `CVE_CHECK_STATUSMAP`, `CVE_STATUS_GROUPS`) exists where
-//!   `decode_cve_status` does (Nanbield and later; Kirkstone has `CVE_CHECK_IGNORE` only);
+//!   `decode_cve_status` does (`Feature::CveStatus`, Nanbield and later; Kirkstone to
+//!   Mickledore have `CVE_CHECK_IGNORE` only);
 //! - the `detail: cpe:vendor:product:description` form of a status and the product match
-//!   (`has_cve_product_match`) exist where `decode_cve_status` compares a part with `"cpe"`;
+//!   (`has_cve_product_match`) exist where `decode_cve_status` compares a part with `"cpe"`
+//!   (`Feature::CveStatusCpe`, Styhead and later);
 //! - patch contents are read line by line (`parse_cves_from_patch_contents`: every id on a
-//!   line starting with `CVE:`) where that function exists; before, the regular expression
-//!   `CVE:( CVE-\d{4}-\d+)+` was matched anywhere in the text.
+//!   line starting with `CVE:`; `Feature::CvePatchContentLines`, Walnascar and later);
+//!   before, the regular expression `CVE:( CVE-\d{4}-\d+)+` was matched anywhere in the
+//!   text.
+//!
+//! The workspace's own `lib/oe/cve_check.py` is read only as a cross-check
+//! ([`CveRules::from_lib`]): when it implements other rules than its release has (a stable
+//! update backported a change, a patched OE-core), the answer says so in a note.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -20,6 +27,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::error::{Error, Result};
+use crate::release::{Feature, Release};
 
 /// Which of OE-core's CVE rules the workspace's `lib/oe/cve_check.py` has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,12 +43,32 @@ pub struct CveRules {
 }
 
 impl CveRules {
-    /// The rules of the newest OE-core (Wrynose), used when no `lib/oe/cve_check.py` is found.
-    pub const NEWEST: CveRules = CveRules {
-        status: true,
-        cpe: true,
-        line_rule: true,
-    };
+    /// The rules of `release`'s OE-core, from the release table (`Feature::CveStatus`,
+    /// `Feature::CveStatusCpe`, `Feature::CvePatchContentLines`; sources in
+    /// bitbake-semantics.md, "Releases").
+    pub fn for_release(release: Release) -> CveRules {
+        CveRules {
+            status: release.has(Feature::CveStatus),
+            cpe: release.has(Feature::CveStatusCpe),
+            line_rule: release.has(Feature::CvePatchContentLines),
+        }
+    }
+
+    /// The rules that differ between `self` and `other`, by name (for the note when a
+    /// workspace's `lib/oe/cve_check.py` disagrees with its release).
+    pub fn differences(self, other: CveRules) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.status != other.status {
+            out.push("CVE_STATUS");
+        }
+        if self.cpe != other.cpe {
+            out.push("the cpe: form of CVE_STATUS");
+        }
+        if self.line_rule != other.line_rule {
+            out.push("the patch header rule");
+        }
+        out
+    }
 
     /// The rules the text of an OE-core `lib/oe/cve_check.py` implements: the presence of
     /// `def decode_cve_status`, of the `== "cpe"` comparison in it, and of
@@ -294,7 +322,7 @@ mod tests {
 
     #[test]
     fn file_names() {
-        let r = CveRules::NEWEST;
+        let r = CveRules::for_release(Release::NEWEST);
         assert_eq!(
             cve_from_filename("/a/CVE-2023-1234-and-cve-2024-56789.patch", r).as_deref(),
             Some("CVE-2024-56789")
@@ -310,7 +338,7 @@ mod tests {
     fn patch_text() {
         let text = "Subject: x\nCVE: CVE-2023-0001, CVE-2023-0002 and CVE-2023-0003\n x CVE: CVE-2023-0009\n";
         assert_eq!(
-            cves_from_patch_text(text, CveRules::NEWEST),
+            cves_from_patch_text(text, CveRules::for_release(Release::NEWEST)),
             vec!["CVE-2023-0001", "CVE-2023-0002", "CVE-2023-0003"]
         );
         // The old rule: the tag anywhere, ids separated by single spaces.
@@ -324,7 +352,7 @@ mod tests {
     fn decode() {
         let d = decode_status(
             "fixed-version: cpe:acme:tool:fixed in 2.0",
-            CveRules::NEWEST,
+            CveRules::for_release(Release::NEWEST),
         );
         assert_eq!(
             (d.detail.as_str(), d.vendor.as_str(), d.product.as_str()),
@@ -335,8 +363,10 @@ mod tests {
         assert!(!product_matches(&d, "tool"));
         let d = decode_status("fixed-version: cpe:acme:tool:fixed in 2.0", OLD);
         assert_eq!(d.description, "cpe:acme:tool:fixed in 2.0");
-        assert!(decode_status("ignored: cpe:x", CveRules::NEWEST).malformed_cpe);
-        let d = decode_status("disputed", CveRules::NEWEST);
+        assert!(
+            decode_status("ignored: cpe:x", CveRules::for_release(Release::NEWEST)).malformed_cpe
+        );
+        let d = decode_status("disputed", CveRules::for_release(Release::NEWEST));
         assert_eq!(
             (d.detail.as_str(), d.description.as_str()),
             ("disputed", "")
