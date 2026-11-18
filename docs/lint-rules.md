@@ -33,7 +33,8 @@ rebuilds the index for the new release. A user changes behaviour with `release`,
 
 ## Running lint
 
-`sous-chef lint [target] [--rule ID]... [--severity S] [--fail-on S] [--format F] [--all]`
+`sous-chef lint [target] [--rule ID]... [--severity S] [--fail-on S] [--format F] [--all]
+[--as-release R [--only-release]] [--migrate-to R] [--baseline FILE | --write-baseline FILE]`
 and the `lint` tool take the same target: a layer name (`build` for the build directory),
 a pointer `layer:path` or `layer:path:A-B` (the range keeps only findings in it), a path to
 a file or directory relative to the working directory, or a recipe `pn` or `pn_pv` (its
@@ -81,7 +82,30 @@ Several such comment lines may be stacked.
 
 Exit status of `sous-chef lint`: 0 clean, 1 a reported finding at or above `--fail-on`
 (default `error`), 2 lint could not run (bad target, unknown rule id, unreadable
-workspace). Findings hidden by `--severity` never fail the run.
+workspace, missing or malformed baseline). Findings hidden by `--severity` never fail the
+run.
+
+Other releases:
+
+- `--as-release <codename>` (tool: `as_release`) checks every unit against that release
+  as well, as if its layer claimed it in `LAYERSERIES_COMPAT`; with `--only-release`
+  (`only_release`) against that release alone. Only `LintContext::releases` changes (carried
+  in `lint::Options`); findings name their releases as usual. An unknown codename is an
+  error listing the supported ones, and a release older than Kirkstone is refused.
+- `--migrate-to <codename>` (tool: `migrate_to`; audit: section 7) prints the migration
+  report of the target (default: the writable layers and the build configuration): the
+  findings new with that release (lint against it alone, minus the rule and pointer pairs
+  lint finds now), those that already hold, the features the target release changed that
+  the layers use (each `Feature` whose value differs between the newest release a layer is
+  checked against now and the target, with the guide's instruction and every pointer), each
+  layer's `LAYERSERIES_COMPAT` and what to write, and what the report cannot tell. Text or
+  JSON (`sous-chef-migration/1`). Exit status 1 when a new finding is at or above
+  `--fail-on`.
+
+CI (docs/ci.md): `--format sarif` (SARIF 2.1.0 for GitHub code scanning), `--format
+github` (workflow command annotations), `--write-baseline FILE` and `--baseline FILE`
+(report and fail only on findings not in the baseline). With `sarif` and `github` the
+summary line and notes go to stderr.
 
 ## Group `override` (task T4.2)
 
@@ -275,7 +299,7 @@ Notes:
 | `hygiene/variable-order` | I | file | In a `.bb`, the first statement out of the OE style guide order (description block, license, dependencies, `SRC_URI`, `S`, inherit, `PACKAGECONFIG` and build options, tasks, packaging), once per file. Off by default: runs only when selected by its id, the alias `style/variable-order` or the alias group `style`. |
 | `hygiene/tabs` | I | file | Tabs in shell task bodies mixed with spaces; python bodies not indented with 4 spaces. At most one finding per function. |
 | `hygiene/continuation` | W | file | Whitespace after a trailing `\`; a blank line that ends a continued statement before its closing quote. A comment line inside a continued statement is reported by `hygiene/parse-error`, not here. |
-| `hygiene/release-syntax` | E/W | file | A construct that one of the releases the file is checked against lacks, from the `Feature` table: `inherit_defer` before Scarthgap (not in a `.conf`, where `hygiene/parse-error` reports it), `include_all` before Walnascar, a class in `classes-recipe/` or `classes-global/` on Kirkstone, `${UNPACKDIR}` before Styhead (unless some file assigns `UNPACKDIR`). Warning: `${WORKDIR}/<file>` for a `file://` entry of the same file's `SRC_URI` on Styhead and later (unpacked into `UNPACKDIR`). The message names the releases. |
+| `hygiene/release-syntax` | E/W | file | A construct that one of the releases the file is checked against lacks, from the `Feature` table: `inherit_defer` before Scarthgap (not in a `.conf`, where `hygiene/parse-error` reports it), `include_all` before Walnascar, a class in `classes-recipe/` or `classes-global/` on Kirkstone, `${UNPACKDIR}` before Styhead (unless a file of the same layer, or of a layer other than the core layer, assigns `UNPACKDIR`: the core layer's own assignment comes with the workspace's release), `addfragments` before Walnascar, and its three-argument form from Whinlatter (BitBake 2.16 needs a fourth argument). Warning: `${WORKDIR}/<file>` for a `file://` entry of the same file's `SRC_URI` on Styhead and later (unpacked into `UNPACKDIR`). The message names the releases. |
 | `hygiene/release-removed` | E/W | file | Something a release the file is checked against removed, renamed or deprecated, from one table (`REMOVALS` in the rule's file, one `KeptUntil*` `Feature` per migration guide; see "Release removals" below): a renamed variable (`BB_RENAMED_VARIABLES`, BitBake's own renames; E: BitBake stops), a variable OE-core dropped (W), an `inherit` (or `INHERIT`-style list word) of a removed class (E, unless a layer other than the core layer has the class), a removed word in `IMAGE_FEATURES` (`debug-tweaks`, E) or a QA list (`license-incompatible`, W), an old virtual toolchain provider name (W), a `SRC_URI` scheme whose fetcher is gone (E); `S` below `${WORKDIR}` or `S = "${UNPACKDIR}/git"` from Whinlatter (E); `LAYERSERIES_COMPAT_<c> = "${LAYERSERIES_CORENAMES}"` from Mickledore (E); an obsolete license name in `LICENSE` (W, E from Styhead); an assignment without whitespace around its operator from Whinlatter (W). The message names the releases. |
 | `hygiene/parse-error` | E/W | file | Any `Unknown` statement no parser diagnostic covers, and parser diagnostics. Not reported: whitespace after a trailing `\` (left to `hygiene/continuation`). `addfragments` with three or more arguments and `addpylib` with two or more are statements of their own; with fewer each is an unparsed line. `addpylib` is an error outside the base configuration (`conf/layer.conf`, `conf/bitbake.conf`, `conf/bblayers.conf`; BitBake rejects it in a recipe, a class, an `.inc` and any `.conf` those include), and in the base configuration on a release before Mickledore (BitBake 2.4), which has no such directive. Data files are not linted. Warning: the `addtask` quirk that joins two `before`/`after` groups into one task name. Error: everything else. In a `.conf` file, a function, `def`, `inherit`, `inherit_defer`, `addtask`, `deltask`, `addhandler` or `EXPORT_FUNCTIONS` is an error (BitBake's configuration parser rejects them). |
 
@@ -343,6 +367,68 @@ Notes:
   character); the first later line starting with the other one is reported; here-document
   bodies are skipped. Python and `def`: a tab anywhere in the indentation, or a first
   indented code line not indented by exactly 4 spaces.
+
+## Release removals
+
+Every change in the Yocto migration guides for 4.1 to 6.0 (https://docs.yoctoproject.org/migration-guides/)
+that a layer maintainer must act on, and how lint covers it. "Feature" is the
+`src/release.rs` entry, whose source is in the "Releases" table of bitbake-semantics.md;
+"added" means added on branch `x2-migrate`. The `release-removed` rows live in the table
+`REMOVALS` of `src/lint/rules/hygiene_release_removed.rs`. Not detected: a change that needs
+a build, the target release's own metadata (its recipes and class layout), or that only
+changes a default; and a few the guide names but the source contradicts.
+
+| Release | Change | Covered by |
+|---|---|---|
+| (before 4.0) | Variable renames of 4.0 (`BB_ENV_WHITELIST`, `PNBLACKLIST`, `LICENSE_FLAGS_WHITELIST`, `WHITELIST_GPL-3.0`, ... : BitBake's `bitbake_renamed_vars` and OE-core's 27 `BB_RENAMED_VARIABLES`) | `release-removed`, no Feature (every supported release stops on them); added |
+| (before 4.0) | Obsolete license names (`GPLv2`, `LGPLv2.1+`, ...): OE-core `obsolete_license_list` | `release-removed`: W, E from 5.1 (`KeptUntilScarthgap`); added |
+| 4.1 | Classes split into `classes-recipe/` / `classes-global/` | `SplitClassDirs`: `release-syntax` (a split class on Kirkstone), `org/class-location`; a class used in the wrong context (`INHERIT += "testimage"`) is not detected: it needs the target release's class layout |
+| 4.1 | A missing local file in `SRC_URI` is an error | not detected (`FILESPATH` lookup per override) |
+| 4.1 | `PEP517_BUILD_API` removed | `release-removed`, `KeptUntilKirkstone`; added |
+| 4.1 | buildpaths QA in `WARN_QA`, shebang size, `help2man-native` dependency, recommends of complementary and `-dev` packages, `IMAGE_BUILDINFO_FILE` / `ARCHIVER_OUTDIR` defaults, `icu-config`, rng-tools service name, `largefile` feature, connman `PACKAGECONFIG`, wpa-supplicant defconfig, `mount.blacklist` | not detected (build-time, runtime or a recipe's own defaults) |
+| 4.1 | Removed recipes (`lzop`, `alsa-utils-scripts`, ...) | not detected (needs the target release's recipes) |
+| 4.2 | `addpylib` | `AddPyLib`: `hygiene/parse-error` |
+| 4.2 | `SERIAL_CONSOLE`, `PACKAGEBUILDPKGD` removed | `release-removed`, `KeptUntilLangdale`; added |
+| 4.2 | Classes `rust-bin`, `package_tar` removed | `release-removed`, `KeptUntilLangdale`; added |
+| 4.2 | `LAYERSERIES_COMPAT` copying `LAYERSERIES_CORENAMES` or another layer's value | `release-removed` (`${LAYERSERIES_CORENAMES}`, added); `org/layer-conf` (`${LAYERSERIES_COMPAT_...}`, made release-aware: `KeptUntilLangdale`) |
+| 4.2 | `OEBasic` signature handler removed | `release-removed` (`BB_SIGNATURE_HANDLER`), `KeptUntilLangdale`; added |
+| 4.2 | crate checksums, patch-fuzz / patch-status in `ERROR_QA`, `QB_SLIRP_OPT`, `IMAGE_LINK_NAME`, kmod / cups / openssh / scons defaults, `PKG` conflicts | not detected |
+| 4.3 | `PERLARCH`, `PERLVERSION`, `QEMU_USE_SLIRP`, `SERIAL_CONSOLES_CHECK` removed | `release-removed`, `KeptUntilMickledore`; added |
+| 4.3 | Class `glide` removed | `release-removed`, `KeptUntilMickledore`; added |
+| 4.3 | `PE` / `PR` no longer in `WORKDIR` | `PrInWorkdir` (evaluator); no lint finding (paths only) |
+| 4.3 | `AUTHOR` removed | not added: OE-core only documented it (`documentation.conf`), so nothing changes |
+| 4.3 | `CVE_CHECK_IGNORE` deprecated, `SRCPV` no longer needed, `OLDEST_KERNEL`, `FILE_LAYERNAME` patch QA, 64-bit `time_t`, `usrmerge` with systemd, `IMAGE_NAME_SUFFIX`, `imgsuffix`, `virtual/` provider prefixes, removed recipes | not detected (deprecations that still work, build-time checks) |
+| 5.0 | `inherit_defer` | `InheritDefer`: `release-syntax`, `org/inherit-defer` |
+| 5.0 | `DEPLOY_DIR_TAR`, `oldincludedir` removed | `release-removed`, `KeptUntilNanbield`; added |
+| 5.0 | `PYTHON_PN`, `USE_L10N`, `CVE_SOCKET_TIMEOUT` removed | not added: OE-core's `python3-dir.bbclass` still sets `PYTHON_PN` on wrynose; `USE_L10N` is in no OE-core branch checked; `CVE_SOCKET_TIMEOUT` is back in `cve-update-db-native.bb` on whinlatter |
+| 5.0 | Go `linkmode`, systemd `nss-resolve`, ipk zstd, `virtual/` in runtime contexts, removed recipes | not detected |
+| 5.1 | `S = "${WORKDIR}"` rejected | `WorkdirAsSourceDir`: `hygiene/workdir-s` |
+| 5.1 | `UNPACKDIR`; `${WORKDIR}/<file>` for local sources | `UnpackDir`: `release-syntax` (made to ignore the core layer's own `UNPACKDIR`) |
+| 5.1 | `TCLIBCAPPEND`, `VOLATILE_LOG_DIR`, `VOLATILE_TMP_DIR` (renamed variables) | `release-removed`, `KeptUntilScarthgap`; added |
+| 5.1 | Class `siteconfig` removed | `release-removed`, `KeptUntilScarthgap`; added |
+| 5.1 | `license-incompatible` QA check renamed `license-exception` | `release-removed`, `KeptUntilScarthgap`; added |
+| 5.1 | insane checks promoted to errors | `obsolete-license` only (license rows above); the others run at build time |
+| 5.1 | Go `GO_SRCURI_DESTSUFFIX`, `${WORKDIR}/${BP}`, removed recipes, perf / openssl / gobject-introspection packaging | not detected |
+| 5.2 | `include_all`, `addfragments`, `BB_RECIPE_VIRTUAL_PROVIDERS` | `IncludeAll`, `AddFragments`, `RecipeVirtualProviders`: `release-syntax` (`addfragments` added on this branch) |
+| 5.2 | Git URL without `branch=` is an error; one branch per URL | `hygiene/src-uri-checksum`, made release-aware (`KeptUntilStyhead`) |
+| 5.2 | `debug-tweaks` removed from `IMAGE_FEATURES` | `release-removed`, `KeptUntilStyhead`; added |
+| 5.2 | Virtual toolchain providers renamed (`virtual/${TARGET_PREFIX}gcc` to `virtual/cross-cc`, ...) | `release-removed`, `KeptUntilStyhead`; added |
+| 5.2 | `BB_DANGLINGAPPENDS_WARNONLY` (renamed variable), `PACKAGE_SNAP_LIB_SYMLINKS`, `ACLOCALDIR`, `ACLOCALEXTRAPATH` | `release-removed`, `KeptUntilStyhead`; added |
+| 5.2 | Class `migrate_localcount` removed | `release-removed`, `KeptUntilStyhead`; added |
+| 5.2 | `SETUPTOOLS_INSTALL_ARGS` removed | not added: `setuptools3_legacy.bbclass` still uses it on wrynose |
+| 5.2 | `CARGO_INSTALL_LIBRARIES`, systemd `Also=` / split-usr / `pni-names`, `BB_CURRENT_MC`, `configure` required, `UBOOT_ENTRYPOINT` `0x`, `ld-is-gold`, `ZSTD_COMPRESSION_LEVEL`, `FIT_UBOOT_ENV`, removed / renamed recipes | not detected |
+| 5.3 | `S` below `${WORKDIR}`; `S = "${WORKDIR}/git"` / `"${UNPACKDIR}/git"` | `release-removed`, `KeptUntilWalnascar`; added |
+| 5.3 | Whitespace around `=` | `release-removed`, `AssignmentWhitespaceWarning`; added |
+| 5.3 | `addfragments` four-argument form | `BuiltinFragments`: `release-syntax`; added on this branch |
+| 5.3 | `BBCLASSEXTEND` variants and deferred inherits | `ClassExtendDeferred`, `DeferredInheritsClassOverride` (evaluator; listed in the migration report) |
+| 5.3 | `GPE_MIRROR`, `BUILDHISTORY_RESET` removed | `release-removed`, `KeptUntilWalnascar`; added |
+| 5.3 | Classes `kernel-fitimage`, `icecc` removed | `release-removed`, `KeptUntilWalnascar`; added |
+| 5.3 | `KERNEL_IMAGETYPE = "fitImage"` no longer supported | not added: the check was not found in OE-core's `kernel.bbclass` |
+| 5.3 | Git `tag` checked against `SRCREV`, hard-coded `git` paths, `*FLAGS` for native, `GDK_PIXBUF_LOADERS`, `REMOVE_UNLICENSED`, removed `PACKAGECONFIG` entries, `distro_alias.inc`, wic plugin names, removed recipes | not detected |
+| 6.0 | `DISTRO_FEATURES_BACKFILL*`, `MACHINE_FEATURES_BACKFILL*`, `*_FEATURES_DEFAULT` (renamed variables) | `release-removed`, `KeptUntilWhinlatter`; added |
+| 6.0 | Classes `create-spdx-2.2`, `cve-check`, `oelint` removed; `CVE_CHECK_SHOW_WARNINGS` | `release-removed`, `KeptUntilWhinlatter`; added |
+| 6.0 | `bzr`, `osc`, `cvs` fetchers removed; `npm`, `npmsw` disabled | `release-removed`, `KeptUntilWhinlatter`; added |
+| 6.0 | `INIT_MANAGER` default, default `DISTRO_FEATURES`, templates, `DEBUG_BUILD`, `UBOOT_CONFIG` flags, pkgconfig exports, `.vex.json`, `CVE_PRODUCT` escaping, `WIC_SECTOR_SIZE` (deprecated), `.wks` under `files/wic`, systemd with sysvinit, `meson_do_qa_configure`, removed recipes / `PACKAGECONFIG` | not detected |
 
 ## Findings on the fixture workspace
 
@@ -456,6 +542,37 @@ carrying kas's `CACHEDIR.TAG`, else the directory of sous-chef.toml (a guess, un
 org/generated-conf-edit build` 3 warnings before, 0 after; the default run 1 finding in 13
 files, and `--all` 625 findings in 1718 files, identical line for line to the w11 run
 from the project directory. Since w11 the `lint` tool and the audit's lint stage report MCP progress per file.
+
+Re-measured for branch `x2-migrate` (2026-11-18, the release binary with
+`scratch/sous-chef.toml`, run from `yocto-kiss/`, cache under `runs/x2-migrate/`, no
+BitBake run): default 1 finding in 13 files, unchanged; `--all` 628 findings in 1718 files
+(0 E, 169 W, 459 I), 15 s: the w12 counts plus 3 `hygiene/release-removed` warnings, all
+true for Wrynose: `meta:conf/machine/include/mips/tune-octeon.inc:1` (`DEFAULTTUNE
+?="octeon2"`, which BitBake 2.18 warns about) and two `DEPENDS:remove =
+"virtual/${TARGET_PREFIX}compilerlibs ..."` in meta-arm (`trusted-firmware-a.inc:95`,
+`edk2-firmware.inc:55`), which remove a provider name OE-core no longer uses, so they
+remove nothing. `--format sarif` takes the same 15 s (628 results, 628 distinct
+fingerprints).
+
+Backwards migration reports, as a check of the release table's coverage (yocto-kiss is
+Wrynose; its own layers claim only wrynose), `sous-chef lint --all --migrate-to <R>
+<layer>`:
+
+| Layer, target | New findings | Already hold | Feature uses |
+|---|---|---|---|
+| meta-kiss, kirkstone | 1 (`release-syntax`: `${UNPACKDIR}` in `linux-kiss.inc:17`) | 1 | `UnpackDir` 1 |
+| meta-kiss, scarthgap | 1 (the same) | 1 | `UnpackDir` 1 |
+| meta (OE-core), kirkstone | 214 (`release-syntax`: 164 classes in `classes-recipe/`, 23 in `classes-global/`, 24 `inherit_defer`, 1 `include_all`, 1 `addfragments`; `parse-error`: 1 `addpylib`) | 510 | `SplitClassDirs` 187, `InheritDefer` 24, `IncludeAll` 1, `UnpackDir` 315, `AddFragments` 1, `BuiltinFragments` 1, `RecipeVirtualProviders` 1, `AddPyLib` 1, `ClassExtendDeferred` 2, `DeferredInheritsClassOverride` 2 |
+| meta (OE-core), scarthgap | 2 (`include_all` in `defaultsetup.conf:3`, `addfragments` in `bitbake.conf:822`) | 550 | `IncludeAll` 1, `UnpackDir` 315, `AddFragments` 1, `BuiltinFragments` 1, `RecipeVirtualProviders` 1, `ClassExtendDeferred` 2, `DeferredInheritsClassOverride` 2 |
+
+Every new finding in a random sample of 8 of the kirkstone run (and both scarthgap ones) is a construct the
+older release does not have. Two gaps the first run showed were fixed on the branch:
+`${UNPACKDIR}` in meta-kiss was not reported because OE-core's own `bitbake.conf` assigns
+`UNPACKDIR` (now only a layer other than the core layer, or the file's own layer, counts),
+and `addfragments` had no release check. OE-core's 315 `${UNPACKDIR}` references are
+feature uses and not findings, because its own `bitbake.conf` defines `UNPACKDIR` for its
+files. Times: about 30 to 40 s for `meta` (two lint runs of the layer), under 1 s for
+`meta-kiss`.
 
 What the rules still get wrong there, as far as it was checked:
 

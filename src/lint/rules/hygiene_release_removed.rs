@@ -113,6 +113,7 @@ const K53: Option<Feature> = Some(Feature::KeptUntilWhinlatter);
 
 const IMAGE_FEATURES: &[&str] = &["IMAGE_FEATURES", "EXTRA_IMAGE_FEATURES"];
 const QA_LISTS: &[&str] = &["ERROR_QA", "WARN_QA", "INSANE_SKIP"];
+const SIGNATURE_HANDLER: &[&str] = &["BB_SIGNATURE_HANDLER"];
 
 /// The table. Sources per row group in docs/bitbake-semantics.md ("Releases").
 #[rustfmt::skip]
@@ -160,6 +161,7 @@ pub const REMOVALS: &[Removal] = &[
     row(RemovedVariable, "PACKAGEBUILDPKGD", K41, W, "use `PACKAGE_PREPROCESS_FUNCS` or `PACKAGESPLITFUNCS`"),
     row(RemovedClass, "rust-bin", K41, E, "build the Rust code with the `cargo` class"),
     row(RemovedClass, "package_tar", K41, E, "use `package_rpm`, `package_deb` or `package_ipk`"),
+    row(RemovedWord(SIGNATURE_HANDLER), "OEBasic", K41, W, "remove the setting (the default `OEBasicHash` or `OEEquivHash` is used)"),
     // 4.3 (Nanbield), "Removed variables" and "Removed classes".
     row(RemovedVariable, "PERLARCH", K42, W, "remove it"),
     row(RemovedVariable, "PERLVERSION", K42, W, "remove it"),
@@ -178,6 +180,8 @@ pub const REMOVALS: &[Removal] = &[
     // 5.2 (Walnascar), "Removed variables", "Removed classes", debug-tweaks, virtual providers.
     row(RenamedVariable, "BB_DANGLINGAPPENDS_WARNONLY", K51, E, "remove it (support was removed)"),
     row(RemovedVariable, "PACKAGE_SNAP_LIB_SYMLINKS", K51, W, "remove it"),
+    row(RemovedVariable, "ACLOCALDIR", K51, W, "for m4 files autoreconf does not find, add `EXTRA_AUTORECONF += \"-I path/to/m4\"`"),
+    row(RemovedVariable, "ACLOCALEXTRAPATH", K51, W, "for m4 files autoreconf does not find, add `EXTRA_AUTORECONF += \"-I path/to/m4\"`"),
     row(RemovedClass, "migrate_localcount", K51, E, "remove the inherit"),
     row(RemovedWord(IMAGE_FEATURES), "debug-tweaks", K51, E, "write the features it stood for: `allow-empty-password allow-root-login empty-root-password post-install-logging`"),
     row(RenamedText, "virtual/${TARGET_PREFIX}gcc", K51, W, "write `virtual/cross-cc`"),

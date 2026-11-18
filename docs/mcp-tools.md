@@ -703,6 +703,9 @@ The samples are `build` of `app` with `depth: 2`, `packageconfig` and `reverse` 
 | `target` | a recipe (`pn` or `pn_pv`), a file pointer `layer:path[:A-B]`, a layer name (`build` for the build directory), or a path relative to the working directory; default: the writable layers (every layer if none is writable) and the build directory's configuration files |
 | `rules` | optional list of ids or groups to run; an unknown one is an error |
 | `severity` | minimum: `info` \| `warning` \| `error` |
+| `as_release` | a codename: also check against that release, as if each layer claimed it in `LAYERSERIES_COMPAT` (`--as-release`); an unknown name is an error listing the supported ones, one older than Kirkstone is refused |
+| `only_release` | with `as_release`: check against that release alone |
+| `migrate_to` | a codename: the migration report instead of the findings (`--migrate-to`; lint-rules.md, "Running lint"): findings new with that release, findings that already hold, the features it changed that the layers use with their pointers, each layer's `LAYERSERIES_COMPAT` and what to write, what the report cannot tell. Text is cut to the budget by whole lines (a last line says so); `format=json` returns the whole `sous-chef-migration/1` object. Not with `as_release` |
 
 The tool has no `all` argument (the CLI's `--all`). A pointer with a line range keeps only
 the findings in that range. Output: a summary line first (counts by severity and by rule,
@@ -1210,6 +1213,7 @@ about 15 s; the rest depends on the machine's load).
 |---|---|
 | `root` | the repository root, relative to the working directory: the working directory (default, when it holds the build directory or an enabled layer; else the workspace span below), or a directory inside the workspace span, the deepest directory holding the build directory, every enabled layer and the kas project root. The filesystem root and anything outside are refused, so a client cannot point the audit at other directories. |
 | `budget_tokens`, `format` | for the digest only; the stored report is never cut |
+| `migrate_to` | a codename: add section 7, the migration report of the writable layers to that release (as `sous-chef lint --migrate-to`), and a `7 migration` digest row; the JSON report gets a `migration` field. Without it the report is unchanged |
 
 The tool stores the whole Markdown report under a `text` handle and returns a digest:
 rows `field value`: `summary`, `workspace`, one row per section (`1 inventory` to `6 not

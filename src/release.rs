@@ -205,7 +205,8 @@ pub enum Feature {
     /// (`src/lint/rules/hygiene_release_removed.rs` lists what each one covers).
     KeptUntilKirkstone,
     /// What the 4.2 (Mickledore) guide removes is still there: `SERIAL_CONSOLE`,
-    /// `PACKAGEBUILDPKGD`, the classes `rust-bin` and `package_tar`; and BitBake (before 2.4)
+    /// `PACKAGEBUILDPKGD`, the classes `rust-bin` and `package_tar`, the `OEBasic` signature
+    /// handler; and BitBake (before 2.4)
     /// keeps each layer's `LAYERSERIES_COMPAT_<c>` and `LAYERSERIES_CORENAMES` while the
     /// other `layer.conf` files are read, so copying them works.
     KeptUntilLangdale,
@@ -221,7 +222,8 @@ pub enum Feature {
     /// warning (`WARN_QA`), not an error.
     KeptUntilScarthgap,
     /// What the 5.2 (Walnascar) guide removes is still there: `BB_DANGLINGAPPENDS_WARNONLY`,
-    /// `PACKAGE_SNAP_LIB_SYMLINKS`, the class `migrate_localcount`, the image feature
+    /// `PACKAGE_SNAP_LIB_SYMLINKS`, `ACLOCALDIR`, `ACLOCALEXTRAPATH`, the class
+    /// `migrate_localcount`, the image feature
     /// `debug-tweaks`, the `virtual/${TARGET_PREFIX}gcc`-style toolchain providers; and a git
     /// URL without `branch=` (BitBake before 2.12) is a warning, not an error.
     KeptUntilStyhead,

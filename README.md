@@ -253,8 +253,32 @@ workspace").
 |---|---|
 | `sous-chef serve` | Serves MCP over stdio |
 | `sous-chef index` | Refreshes the index and prints what changed |
-| `sous-chef lint [TARGET] [--rule ID]... [--severity S] [--fail-on S] [--format text\|json] [--all]` | Lints a recipe, pointer, layer or path; default the writable layers and the build configuration (`--all`: every layer). Exit status 0 clean, 1 a finding at or above `--fail-on` (default `error`), 2 lint could not run |
-| `sous-chef audit [ROOT] [--format md\|json] [--output FILE]` | Writes one findings report for a whole build repository: every layer under ROOT (default: the working directory), enabled or not, with git facts, releases, layer structure, lint findings of every layer and parse problems. Read-only; takes about as long as `lint --all` (15 s on the live workspace), progress on stderr. Exit status 0 when the report was written, 2 when it could not be |
+| `sous-chef lint [TARGET] [--rule ID]... [--severity S] [--fail-on S] [--format text\|json\|sarif\|github] [--all] [--as-release R [--only-release]] [--migrate-to R] [--baseline FILE \| --write-baseline FILE]` | Lints a recipe, pointer, layer or path; default the writable layers and the build configuration (`--all`: every layer). `--as-release` also checks against a release the layers do not claim; `--migrate-to` prints the migration report; SARIF, annotations and the baseline are for CI ([docs/ci.md](docs/ci.md)). Exit status 0 clean, 1 a finding at or above `--fail-on` (default `error`; with `--baseline`, a new one), 2 lint could not run |
+| `sous-chef audit [ROOT] [--format md\|json] [--output FILE] [--migrate-to R]` | Writes one findings report for a whole build repository: every layer under ROOT (default: the working directory), enabled or not, with git facts, releases, layer structure, lint findings of every layer and parse problems (`--migrate-to`: plus section 7, the migration report of the writable layers). Read-only; takes about as long as `lint --all` (15 s on the live workspace), progress on stderr. Exit status 0 when the report was written, 2 when it could not be |
+
+### Migrating a layer
+
+"What breaks if this layer moves to release X?" for a release it does not claim yet:
+
+```sh
+sous-chef lint --migrate-to wrynose meta-mine      # or --format json; audit --migrate-to for every writable layer
+```
+
+The report lists the findings that hold for Wrynose and not for the releases the layer
+claims now ("new with wrynose") apart from those that already hold, the features Wrynose
+changed that the layer uses (each with the migration guide's instruction and every
+pointer: `S = "${WORKDIR}"`, `${WORKDIR}/<file>`, class directories, `inherit_defer`,
+removed classes and variables...), the layer's `LAYERSERIES_COMPAT` line and what to
+write, and what it cannot tell (anything that needs a build). `--as-release wrynose` lints
+as if the layer also claimed Wrynose. What each release removed, and what lint detects of
+it, is the "Release removals" table in [docs/lint-rules.md](docs/lint-rules.md).
+
+### In CI
+
+`sous-chef lint --format sarif` writes SARIF 2.1.0 for GitHub code scanning, `--format
+github` writes workflow annotations, and `--write-baseline FILE` / `--baseline FILE` keep
+existing findings from failing new changes. Workflow examples (GitHub Actions, GitLab) and
+the exit codes: [docs/ci.md](docs/ci.md).
 | `sous-chef diff LAYER FROM [TO] [--recipe PN] [--all] [--format text\|json] [--output FILE]` | The `diff` tool's whole table (or the whole diff as JSON) between two revisions of the layer's repository; `TO` defaults to the working tree. Read-only (no checkout, no fetch); under a second for every recipe of OE-core. Exit status 0 when the diff was produced, 2 when it could not be |
 | `sous-chef hook` | Claude Code hook: reads one event on stdin, writes nothing or one response object; always exits 0 |
 
@@ -472,6 +496,7 @@ files `recipe show=tree` lists, or a task log under `${T}`).
 | [docs/overview.md](docs/overview.md) | The problem, the decisions, non-goals, glossary |
 | [docs/mcp-tools.md](docs/mcp-tools.md) | Every tool: arguments, output, examples |
 | [docs/lint-rules.md](docs/lint-rules.md) | Every lint rule, and what lint reports on the fixture and live workspaces |
+| [docs/ci.md](docs/ci.md) | `sous-chef lint` in CI: SARIF, annotations, the baseline, exit codes |
 | [docs/architecture.md](docs/architecture.md) | Module layout, contracts, configuration, conventions (for contributors) |
 | [docs/bitbake-semantics.md](docs/bitbake-semantics.md) | The BitBake behaviour reproduced, with sources |
 | [docs/differential.md](docs/differential.md) | Static answers compared with `bitbake -e`, every difference |
