@@ -7,6 +7,7 @@
 pub mod datastore;
 pub mod expand;
 mod license;
+pub mod multiconfig;
 pub mod overlay;
 pub mod overrides;
 pub mod providers;
@@ -38,6 +39,11 @@ pub struct Target {
     /// `None` = as set in `local.conf`.
     pub machine: Option<String>,
     pub distro: Option<String>,
+    /// The multiconfig (`BBMULTICONFIG` name) to evaluate in; `None` or empty = the default
+    /// configuration. A recipe written `mc:<name>:<recipe>` sets it too (see
+    /// [`multiconfig`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mc: Option<String>,
 }
 
 /// A finalised value.
@@ -65,7 +71,10 @@ pub struct FileVisit {
 /// `target.recipe` is a recipe name (`hello`; `target.version` picks a version, `%`
 /// allowed, else the one provider selection prefers, see `providers`), an absolute path to a
 /// `.bb`, or `layer:path` (`meta-core:recipes-core/hello/hello_1.1.bb`). `None` evaluates
-/// the configuration only. `machine` / `distro` override the configured values.
+/// the configuration only. `machine` / `distro` override the configured values. `mc` (or a
+/// recipe written `mc:<name>:<recipe>`) evaluates in that multiconfig: the configuration is
+/// parsed again with `BB_CURRENT_MC` set, as BitBake does ([`multiconfig`]); an unknown name
+/// is an error listing the known ones.
 ///
 /// The index must be refreshed by the caller. The configuration pass is cached in a
 /// process-wide [`ConfigCache`] (see [`evaluate_with`] for an explicit one). An unknown

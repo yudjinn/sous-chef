@@ -9,7 +9,9 @@
 //!
 //! Every user-supplied recipe, task, image and layer name goes through
 //! [`validate_name`] before any argv is built: [`crate::bitbake::BbEnv::command`] cannot
-//! tell a target from an option.
+//! tell a target from an option. A target of `build`, `task`, `env` and `clean` may also be
+//! `mc:<multiconfig>:<target>` ([`validate_target`]: exactly that form, each part a valid
+//! name); `devtool` and `bitbake-layers` take plain names only.
 //!
 //! One job at a time ([`crate::bitbake::jobs`], module docs): a new operation while a
 //! read-only job (`env`, `layers`) runs waits for it, up to [`QUEUE_WAIT`], then starts;
@@ -21,6 +23,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::bitbake::env::KILL_GRACE;
+use crate::bitbake::env::validate_target;
 use crate::bitbake::jobs::{self, JobInfo, JobSpec, JobState, QUEUE_WAIT, Started};
 use crate::bitbake::logs::{self, Digest, DigestInput};
 use crate::bitbake::{BbEnv, HostEnv, validate_name};
@@ -81,7 +84,7 @@ impl Op {
 pub struct Args {
     /// `build`, `task`, `env`, `clean`, `devtool`, `layers`, `status` or `cancel`.
     pub op: Op,
-    /// Recipe or image.
+    /// Recipe or image; for build, task, env and clean also `mc:<multiconfig>:<target>`.
     pub target: Option<String>,
     /// For `op: task`, e.g. `compile`.
     pub task: Option<String>,
@@ -322,6 +325,27 @@ fn optional_target(args: &Args) -> Result<Option<&str>> {
     }
 }
 
+/// [`need_target`] for a `bitbake` command: also `mc:<multiconfig>:<target>`.
+fn need_bitbake_target<'a>(args: &'a Args, op: &str) -> Result<&'a str> {
+    let t = args
+        .target
+        .as_deref()
+        .ok_or_else(|| invalid(format!("op={op} needs target (a recipe or image)")))?;
+    validate_target(t)?;
+    Ok(t)
+}
+
+/// [`optional_target`] for a `bitbake` command: also `mc:<multiconfig>:<target>`.
+fn optional_bitbake_target(args: &Args) -> Result<Option<&str>> {
+    match args.target.as_deref() {
+        Some(t) => {
+            validate_target(t)?;
+            Ok(Some(t))
+        }
+        None => Ok(None),
+    }
+}
+
 /// Refuses any `args` entry outside `allowed`.
 fn check_args(op: &str, args: &[String], allowed: &[&str]) -> Result<()> {
     if let Some(bad) = args.iter().find(|a| !allowed.contains(&a.as_str())) {
@@ -353,7 +377,7 @@ pub fn plan(_config: &Config, ws: &Workspace, args: &Args) -> Result<Plan> {
     {
         Op::Build => {
             check_args(op, a, &["continue"])?;
-            let t = need_target(args, op)?;
+            let t = need_bitbake_target(args, op)?;
             let mut v = Vec::new();
             if a.iter().any(|x| x == "continue") {
                 v.push("-k".to_string());
@@ -363,7 +387,7 @@ pub fn plan(_config: &Config, ws: &Workspace, args: &Args) -> Result<Plan> {
         }
         Op::Task => {
             check_args(op, a, &["force"])?;
-            let t = need_target(args, op)?;
+            let t = need_bitbake_target(args, op)?;
             let task = args
                 .task
                 .as_deref()
@@ -381,7 +405,7 @@ pub fn plan(_config: &Config, ws: &Workspace, args: &Args) -> Result<Plan> {
         }
         Op::Env => {
             check_args(op, a, &[])?;
-            let t = optional_target(args)?;
+            let t = optional_bitbake_target(args)?;
             let mut v = vec!["-e".to_string()];
             v.extend(t.map(str::to_string));
             ("bitbake", v, HandleKind::Env, t.map(str::to_string))
@@ -395,7 +419,7 @@ pub fn plan(_config: &Config, ws: &Workspace, args: &Args) -> Result<Plan> {
                     CLEANS.join(", ")
                 )));
             }
-            let t = need_target(args, op)?;
+            let t = need_bitbake_target(args, op)?;
             let which = a.first().map(String::as_str).unwrap_or("clean");
             destructive = which != "clean";
             let v = vec!["-c".to_string(), which.to_string(), t.to_string()];

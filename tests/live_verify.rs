@@ -110,6 +110,7 @@ fn curl() -> Target {
         version: None,
         machine: None,
         distro: None,
+        mc: None,
     }
 }
 

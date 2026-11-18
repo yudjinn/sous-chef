@@ -49,6 +49,10 @@ pub struct Report {
     /// The kas project, when the workspace is one (left out of the JSON otherwise).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kas: Option<KasStatus>,
+    /// The multiconfigs (`BBMULTICONFIG`), when the workspace has any, a multiconfig file or
+    /// a problem with them (left out of the JSON otherwise).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multiconfig: Option<MulticonfigStatus>,
     /// Files on disk by kind (`bb`, `bbappend`, `inc`, `bbclass`, `conf`), across the layers
     /// and `build/conf`.
     pub files: BTreeMap<String, u32>,
@@ -114,6 +118,23 @@ pub struct KasStatus {
     pub problems: Vec<String>,
 }
 
+/// What `status` shows about the multiconfigs (`eval::multiconfig::list`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct MulticonfigStatus {
+    /// Where the names came from: `BBMULTICONFIG = "..." (<pointer>)`, or the kas targets.
+    pub source: String,
+    /// Why the list may be wrong (python, an unevaluated kas header).
+    pub uncertain: Option<String>,
+    /// `<name> <pointer of conf/multiconfig/<name>.conf>`, or `<name> (no file)`.
+    pub enabled: Vec<String>,
+    /// Files along `BBPATH` the list does not name: `<name> <pointer> (...)`.
+    pub present: Vec<String>,
+    /// What BitBake would stop on.
+    pub problems: Vec<String>,
+    /// The configuration could not be evaluated.
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct IndexStatus {
     pub path: Option<String>,
@@ -168,6 +189,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
                 if let Ok(stats) = crate::index::query::layer_stats(&index) {
                     report.files = indexed_counts(&stats);
                 }
+                report.multiconfig = multiconfig_status(&index, &ctx.workspace);
             }
             Err(e) => report.index.error = Some(e.to_string()),
         }
@@ -187,6 +209,85 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     report.handles = handles_status(&ctx.handles);
 
     output(&report, freshness, &args, ctx.config.output.budget_tokens)
+}
+
+/// The multiconfigs, when there is anything to say. The default configuration is evaluated
+/// (cached per process) only when the index has a `BBMULTICONFIG` statement or a
+/// `conf/multiconfig/*.conf` file, or a kas project's targets name a multiconfig.
+fn multiconfig_status(index: &crate::index::Index, ws: &Workspace) -> Option<MulticonfigStatus> {
+    use crate::eval::multiconfig::{self, Source};
+    use crate::index::query;
+    let statements =
+        query::statements_by_base(index, "BBMULTICONFIG", &query::StatementFilter::default())
+            .map(|v| !v.is_empty())
+            .unwrap_or(true);
+    let files = query::files_by_kind_in(index, &[FileKind::Conf], query::FileSet::ALL)
+        .map(|v| {
+            v.iter()
+                .any(|f| f.path.parent() == Some(Path::new("conf/multiconfig")))
+        })
+        .unwrap_or(true);
+    let kas = ws
+        .kas
+        .as_ref()
+        .is_some_and(|k| !k.multiconfigs().is_empty());
+    if !statements && !files && !kas {
+        return None;
+    }
+    let all = match multiconfig::list(index, ws) {
+        Ok(a) => a,
+        Err(e) => {
+            return Some(MulticonfigStatus {
+                error: Some(e.to_string()),
+                ..MulticonfigStatus::default()
+            });
+        }
+    };
+    if all.is_empty() && all.uncertain.is_none() {
+        return None;
+    }
+    let ptr = |l: &Option<crate::types::Loc>| l.as_ref().map(|l| l.to_string());
+    let source = match all.source {
+        Source::Configuration => format!(
+            "BBMULTICONFIG = \"{}\"{}",
+            all.value.as_deref().unwrap_or("").trim(),
+            ptr(&all.setting).map_or(String::new(), |l| format!(" ({l})"))
+        ),
+        Source::Kas => format!(
+            "the kas targets (kas writes BBMULTICONFIG ?= \"{}\" into local.conf)",
+            all.value.as_deref().unwrap_or("")
+        ),
+    };
+    let present_why = if all.uncertain.is_some() {
+        "present, not confirmed enabled"
+    } else {
+        "not in BBMULTICONFIG"
+    };
+    Some(MulticonfigStatus {
+        source,
+        uncertain: all.uncertain.clone(),
+        enabled: all
+            .enabled
+            .iter()
+            .map(|m| match ptr(&m.file) {
+                Some(l) => format!("{} {l}", m.name),
+                None => format!("{} (no file)", m.name),
+            })
+            .collect(),
+        present: all
+            .present
+            .iter()
+            .map(|m| {
+                format!(
+                    "{} {} ({present_why})",
+                    m.name,
+                    ptr(&m.file).unwrap_or_else(|| "-".into())
+                )
+            })
+            .collect(),
+        problems: all.problems.clone(),
+        error: None,
+    })
 }
 
 /// The handle store's size and the limits it applied.
@@ -421,6 +522,27 @@ fn table(r: &Report) -> Table {
         }
         for p in &k.problems {
             rows.push(("kas_problem", p.clone()));
+        }
+    }
+    if let Some(m) = &r.multiconfig {
+        match &m.error {
+            Some(e) => rows.push(("multiconfigs", format!("not known: {e}"))),
+            None => {
+                let mut s = m.source.clone();
+                if let Some(u) = &m.uncertain {
+                    s.push_str(&format!("; may be wrong: {u}"));
+                }
+                rows.push(("multiconfigs", s));
+            }
+        }
+        for e in &m.enabled {
+            rows.push(("multiconfig", e.clone()));
+        }
+        for p in &m.present {
+            rows.push(("multiconfig_present", p.clone()));
+        }
+        for p in &m.problems {
+            rows.push(("multiconfig_problem", p.clone()));
         }
     }
     let files = if r.files.is_empty() {

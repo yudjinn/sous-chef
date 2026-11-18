@@ -64,6 +64,25 @@ Common to every tool:
   kas file kas/board.yaml:5 (kas project without a build directory; ...)`, from
   `tests/eval_w8.rs`). When nothing sets `MACHINE`, every evaluated view ends with
   `note: no MACHINE is set (...)`: machine-specific values are not applied.
+- **Multiconfig** (since x5; bitbake-semantics.md "Multiconfig"). `var`, `overrides`, `deps`
+  and `recipe` take `mc` (a name in `BBMULTICONFIG`), and also a recipe written
+  `mc:<name>:<recipe>` (or the old `multiconfig:<name>:<recipe>`; both forms naming
+  different configurations is an error). The configuration is replayed again with
+  `BB_CURRENT_MC` set and `conf/multiconfig/<name>.conf` read where OE-core's `bitbake.conf`
+  requires it (after `local.conf`, before the machine conf), so the multiconfig's
+  `MACHINE`, `DISTRO`, `TMPDIR`, `PREFERRED_PROVIDER_*` and machine overrides apply;
+  `machine` / `distro` arguments still override on top. Every answer in a multiconfig
+  carries one note, `note: multiconfig <name>: the configuration parsed again with
+  BB_CURRENT_MC = "<name>", conf/multiconfig/<name>.conf (<pointer>) read where
+  conf/bitbake.conf requires it`; an answer for the default configuration (no `mc`, or an
+  empty one) has none and is exactly as before. An unknown name is an error listing the
+  known ones (`multiconfig nope; known: tiny, musl`), and a listed name whose file is not
+  found is an error as in BitBake. `status` lists the configurations. Only the default
+  configuration is used by: lint (recipe-scope rules evaluate in it), the index's `BBMASK`
+  marks (which files are collected, so the candidates of provider selection in every
+  configuration), the audit report, `item`, `search`, `class`, `layers`, `slice` and
+  `scaffold`, and the authoritative `var` (an error with `mc`; use `bitbake op=env
+  target=mc:<name>:<recipe>`).
 
 - **Progress.** A call whose request carries `_meta.progressToken` gets MCP
   `notifications/progress` while a long operation runs, before its result and never after
@@ -90,6 +109,7 @@ Resolve a recipe and show its shape.
 | `name` | string | required: a `pn`, a `pn_pv`, or a pointer to a `.bb` or a `.bbappend` (a bbappend pointer means the recipe it applies to) |
 | `version` | string? | default: the version BitBake would use (provider selection for the default machine and distro); `%` matches any rest |
 | `show` | `"summary"` \| `"tree"` \| `"outline"` \| `"sources"` \| `"tasks"` \| `"packages"` | default `summary` |
+| `mc` | string? | multiconfig (also `name` written `mc:<name>:<recipe>`): the version is chosen and the key values and evaluated views are evaluated there; `tree` and `outline` are static and the same everywhere (a note says so) |
 
 An unknown version is an error listing the versions that exist. A `pn_pv` together with a
 different `version` is an error. A bbappend that applies to several recipes is an error
@@ -233,8 +253,9 @@ History and final value of a variable. The main tool.
 | Arg | Type | Notes |
 |---|---|---|
 | `name` | string | base name, e.g. `SRC_URI`; `FILES:${PN}` allowed (expanded for the recipe first); `VAR[flag]` shows that flag only |
-| `recipe` | string? | omit for global configuration |
+| `recipe` | string? | omit for global configuration; `mc:<name>:<recipe>` evaluates in that multiconfig |
 | `machine`, `distro` | string? | |
+| `mc` | string? | multiconfig to evaluate in (common section, "Multiconfig"); not with `authoritative` |
 | `authoritative` | bool | default false; true runs `bitbake -e` (M5) |
 | `flags` | bool | also show `VAR[flag]` operations, per flag, after the value's |
 
@@ -374,8 +395,9 @@ final: function do_install, 3 pieces in order: meta-core:classes-recipe/autotool
 ### `overrides`
 | Arg | Type | Notes |
 |---|---|---|
-| `recipe` | string? | |
+| `recipe` | string? | `mc:<name>:<recipe>` allowed |
 | `machine`, `distro` | string? | |
+| `mc` | string? | multiconfig to evaluate in; the multiconfig note is printed |
 | `show` | `"chain"` \| `"conditional"` \| `"dead"` | default `chain` |
 
 - `chain`: rows `priority entry from loc`: the entries of the evaluated `OVERRIDES`,
@@ -608,12 +630,13 @@ note: 1 bbappend matches no recipe; BitBake stops with a fatal error on these (c
 ### `deps`
 | Arg | Notes |
 |---|---|
-| `recipe` | required; for `providers`, a provided name such as `virtual/kernel` |
-| `kind` | `"build"` (default), `"runtime"`, `"packageconfig"`, `"reverse"`, `"providers"` |
+| `recipe` | required; for `providers`, a provided name such as `virtual/kernel`; `mc:<name>:<recipe>` allowed |
+| `kind` | `"build"` (default), `"runtime"`, `"packageconfig"`, `"reverse"`, `"providers"`, `"mcdepends"` |
+| `mc` | multiconfig to evaluate in, provider selection included (per configuration, as in BitBake) |
 | `depth` | default 1, at most 5; used by `build` and `reverse` only (a note says so otherwise) |
 
 There is no `machine` or `distro` argument: the recipe is evaluated for the configuration's
-machine and distro (see the common section). `PACKAGECONFIG` additions to `DEPENDS` and `RDEPENDS:${PN}` are made by
+machine and distro (see the common section), in the multiconfig `mc` names when given. `PACKAGECONFIG` additions to `DEPENDS` and `RDEPENDS:${PN}` are made by
 OE-core's `base.bbclass` with anonymous python, which is never run, so they are listed from
 the flags of the selected options, with a note.
 
@@ -643,6 +666,16 @@ the flags of the selected options, with a note.
   something it provides (`via <name>`, with the selected provider of that name). Static:
   read from the index, unconditional statements as written; names with `${...}` and
   conditional statements are not seen.
+- `mcdepends` (since x5): rows `task from to recipe dep_task status loc`, one per entry of
+  the `mcdepends` flag of each task of the recipe (`do_install[mcdepends] =
+  "mc:<from>:<to>:<recipe>:<task>"`; bitbake-semantics.md "Multiconfig"): `(default)` for
+  an empty configuration name, status `applies here` when `<from>` is the configuration
+  evaluated (BitBake adds the dependency only then), `not in this configuration (...)`
+  otherwise, `invalid: ...` for an entry without exactly five `:` fields (BitBake stops),
+  and a mark when the value holds python; `loc` is the applied assignments to the flag.
+  The edges are listed, not followed: the other configuration is not evaluated (call
+  `deps` again with `mc=<to>` for that side). `build` says in a note how many there are.
+  Tasks added by anonymous python are not seen.
 - `providers`: rows `name version status loc`: every recipe that provides the name, the
   selected one first, with the reason for its version and for the choice; then the
   `PREFERRED_PROVIDER` / `PREFERRED_VERSION` assignments that decided it. Candidates are
@@ -704,7 +737,10 @@ The samples are `build` of `app` with `depth: 2`, `packageconfig` and `reverse` 
 | `rules` | optional list of ids or groups to run; an unknown one is an error |
 | `severity` | minimum: `info` \| `warning` \| `error` |
 
-The tool has no `all` argument (the CLI's `--all`). A pointer with a line range keeps only
+The tool has no `all` argument (the CLI's `--all`) and no `mc`: recipe-scope rules evaluate
+each recipe in the default configuration only, and the files it skips as not collected are
+those of the default configuration's `BBMASK` (bitbake-semantics.md, "Multiconfig"). A
+pointer with a line range keeps only
 the findings in that range. Output: a summary line first (counts by severity and by rule,
 so a table cut by the budget still gives the totals), then the table
 `severity rule pointer message`, then the notes. JSON:
@@ -1037,7 +1073,7 @@ now: EXTRA_OECONF is set last at meta-mine:recipes-core/hello/hello_1.1.bbappend
 | Arg | Notes |
 |---|---|
 | `op` | `build` \| `task` \| `env` \| `clean` \| `devtool` \| `layers` \| `status` \| `cancel` |
-| `target` | recipe or image |
+| `target` | recipe or image; for `build`, `task`, `env` and `clean` also `mc:<multiconfig>:<target>` |
 | `task` | for `op: task`, e.g. `compile` (a `do_` prefix is dropped) |
 | `args` | op-specific, validated against an allowlist (below) |
 | `confirm` | required true for destructive operations |
@@ -1052,6 +1088,14 @@ now: EXTRA_OECONF is set last at meta-mine:recipes-core/hello/hello_1.1.bbappend
 | `clean` | `bitbake -c <which> <target>` | one of `clean` (default), `cleansstate`, `cleanall` | `build` |
 | `devtool` | `devtool <subcommand> ...` | the subcommand first: `modify`, `status`, `finish`, `reset`, `build` | `build` |
 | `layers` | `bitbake-layers <subcommand> [<target>]` | one of `show-layers` (default), `show-appends`, `show-recipes`, `show-overlayed`; `target` only with `show-recipes` and `show-appends` | `text` |
+
+A target is validated before any argv is built (`validate_name`: letters, digits and `_ . +
+- /`, not starting with `-`). Since x5 `build`, `task`, `env` and `clean` also take exactly
+`mc:<multiconfig>:<target>` (`bitbake::env::validate_target`: the name and the target each
+pass `validate_name`); every other form with a `:` is still rejected (`mc::<target>`,
+`multiconfig:...`, `mc:*:...`, `<target>:do_x`, more colons), and `devtool` and `layers`
+take plain names only. The multiconfig name is not checked against `BBMULTICONFIG` there:
+BitBake reports an unknown one.
 
 `devtool status` takes no target; `modify`, `reset` and `build` take a target and nothing
 else; `finish` takes a target and, as the second `args` entry, a writable layer of the
@@ -1180,6 +1224,21 @@ their total size, and the retention limits it applied at start, `[handles] max_t
 `meta-arm-toolchain`) in every tool and pointer; BitBake 2.18's `bitbake-layers
 show-layers` prints the collection name instead (`core`, `arm-toolchain`).
 
+When the workspace has multiconfigs, a multiconfig file or a problem with them (since x5;
+the default configuration is evaluated for this only when the index has a `BBMULTICONFIG`
+statement or a `conf/multiconfig/*.conf` file, or the kas targets name a multiconfig), it
+adds `multiconfigs` (where the names come from: `BBMULTICONFIG = "tiny musl"
+(build:conf/local.conf:21)`, or the kas targets in a kas project without a build
+directory; `; may be wrong: ...` when the value depends on python or an unevaluated kas
+header), one `multiconfig` row per name with its file (`musl
+build:conf/multiconfig/musl.conf:1`, or `ghost (no file)`), one `multiconfig_present` row
+per `conf/multiconfig/*.conf` along `BBPATH` that no name uses (`(not in BBMULTICONFIG)`,
+or `(present, not confirmed enabled)` when the value is uncertain) and one
+`multiconfig_problem` row per thing BitBake would stop on (a listed name without a file, a
+name starting with a digit); JSON `multiconfig {source, uncertain, enabled, present,
+problems, error}`. A workspace with `BBMULTICONFIG ?= ""` only (what kas writes) shows none
+of it.
+
 In a kas project (and only then) it adds `kas` (the files as kas takes them and how they
 were found, e.g. `kas/kiss.yaml:kas/dogbonedark.yaml (from kas in sous-chef.toml)`),
 `kas_defaults` (`machine dogbonedark, distro kiss, target kiss-image`: what kas uses, so a
@@ -1202,7 +1261,9 @@ show=compat` (`layers::order_problems`), `layers show=appends`,
 `query::shadowed`, `query::orphan_appends`, every enabled lint rule as `sous-chef lint
 --all`, and the index's parse and resolution results, and assembles them. It is
 read-only: it writes nothing into the repository, runs no BitBake and no kas, fetches
-nothing; it refreshes the index in the cache directory as every tool does. The lint run
+nothing; it refreshes the index in the cache directory as every tool does. Like lint, it is
+for the default configuration only (its lint findings, the files not collected); the
+multiconfigs are not listed in it (`status` lists them). The lint run
 dominates its time: on the 1755-file live workspace a run takes 15 to 30 s (lint alone
 about 15 s; the rest depends on the machine's load).
 

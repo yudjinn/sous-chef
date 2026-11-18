@@ -278,6 +278,21 @@ With `writable_layers` empty, the project's own layers are writable.
   includes a file from another repository (`{repo, file}`): kas fetches and checks out such
   repositories on every `kas shell`, even with that option, so sous-chef then uses another
   way into the build environment, or none (`status` says which).
+- kas has no multiconfig setting of its own: a target `mc:<name>:<image>` makes kas write
+  the name into `BBMULTICONFIG`. Before the first checkout sous-chef takes the
+  multiconfigs from those targets (see [Multiconfig](#multiconfig)).
+
+### Multiconfig
+
+A build directory can hold several configurations (`BBMULTICONFIG = "tiny musl"` in
+`local.conf`, one `conf/multiconfig/<name>.conf` each). `status` lists them with their files,
+and reports a listed name without a file (BitBake stops on it). `var`, `overrides`, `deps`
+and `recipe` take `mc=<name>`, or a recipe written `mc:<name>:<recipe>`: the configuration
+is parsed again with the multiconfig file where OE-core's `bitbake.conf` reads it, so its
+`MACHINE`, `TMPDIR` and `PREFERRED_PROVIDER_*` apply, and the answer says which configuration
+it is for. `deps kind=mcdepends` lists the cross-configuration task dependencies. The
+`bitbake` tool accepts `mc:<name>:<target>` targets. This was built from the BitBake,
+OE-core and kas source and fixture tests, not checked against a running BitBake.
 
 ## Reference
 
@@ -336,13 +351,13 @@ starts, and every tool and `status` report the error. Details: "Configuration" i
 | `search` | Statements by name, regex or full text, each with its enclosing item |
 | `class` | Which class file wins, its interface and tasks; who inherits it |
 | `layers` | Layers, priorities and compatibility; shadowed recipes and classes; bbappend matches; compatibility, dependency and order problems |
-| `deps` | Build, runtime and `PACKAGECONFIG` dependencies; reverse dependencies; providers |
+| `deps` | Build, runtime and `PACKAGECONFIG` dependencies; reverse dependencies; providers; cross-configuration (`mcdepends`) dependencies |
 | `lint` | Convention and syntax findings for a recipe, file, layer or the workspace, with MCP progress per file if the client asks for it |
 | `scaffold` | A new recipe, bbappend, layer or class, or an `.inc` split, as a dry run or written; or where a change belongs |
 | `bitbake` | Runs bitbake, devtool or bitbake-layers as a background job, in the build environment (init script, bitbake-setup or kas); poll with `op=status`, or pass `wait` to answer when it ends, with MCP progress notifications meanwhile if the client asks for them |
 | `log` | A digest of a failed task's log |
 | `slice` | Part of a stored output, by lines, regex, variable or failures |
-| `status` | Workspace roots, release, index, build environment, kas project, running job, handle store |
+| `status` | Workspace roots, release, index, build environment, kas project, multiconfigs, running job, handle store |
 | `audit` | One findings report over every layer of the repository (inventory with git facts and kas pins, releases, layer structure, lint, parse problems, what was not checked), stored under a handle; returns a digest |
 | `diff` | Statement-level diff of a layer's recipes between two git revisions (variables, tasks, inherits, `SRC_URI` entries, version renames, changed classes) and which of your bbappends no longer apply, apply to another version or carry patches on changed source; read-only, no checkout |
 
@@ -401,7 +416,9 @@ edit = false       # the reindex and lint after an edit
   `PREFERRED_PROVIDER_virtual/...` naming another recipe give a "BitBake would skip this
   recipe" note when the values involved are static, or "may skip" naming the unknown ones;
   nothing is hidden. `PACKAGECONFIG` dependencies are listed from the flags. Tasks added by
-  anonymous python are not seen. The details are in [docs/mcp-tools.md](docs/mcp-tools.md)
+  anonymous python are not seen. Lint, the index's `BBMASK` marks and the audit are for the
+  default configuration only (not per [multiconfig](#multiconfig)), and the authoritative
+  `var` does not take one. The details are in [docs/mcp-tools.md](docs/mcp-tools.md)
   (the common section) and [docs/bitbake-semantics.md](docs/bitbake-semantics.md) ("What
   the static evaluator cannot do").
 - **Writes** go only to layers listed in `writable_layers` (and, in a kas project, the kas

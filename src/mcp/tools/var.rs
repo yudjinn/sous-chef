@@ -50,6 +50,9 @@ pub struct Args {
     pub machine: Option<String>,
     /// Default: `DISTRO` from local.conf.
     pub distro: Option<String>,
+    /// Multiconfig (a `BBMULTICONFIG` name) to evaluate in; default: the default
+    /// configuration. A recipe written `mc:<name>:<recipe>` also selects it.
+    pub mc: Option<String>,
     /// Run `bitbake -e` instead of the static evaluator (default false).
     #[serde(default)]
     pub authoritative: bool,
@@ -64,16 +67,27 @@ pub struct Args {
 
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     if args.authoritative {
+        if args.mc.as_deref().is_some_and(|m| !m.trim().is_empty())
+            || args
+                .recipe
+                .as_deref()
+                .is_some_and(|r| eval::multiconfig::split_mc(r.trim()).is_some())
+        {
+            return Err(Error::Invalid {
+                msg: "authoritative mode does not take a multiconfig yet; drop authoritative for the static answer, or run bitbake op=env target=mc:<name>:<recipe>".into(),
+            });
+        }
         return super::var_authoritative::run(ctx, &args).await;
     }
     let (name, flag) = split_flag(&args.name)?;
     let mut index = ctx.index.lock().await;
     let report = index.refresh(&ctx.workspace)?;
-    let target = recipe_target(
+    let target = recipe_target_in(
         &index,
         args.recipe.as_deref(),
         args.machine.as_deref(),
         args.distro.as_deref(),
+        args.mc.as_deref(),
     )?;
     let ds = eval::evaluate(&index, &ctx.workspace, &target)?;
     drop(index);
@@ -157,8 +171,28 @@ pub fn recipe_target(
     machine: Option<&str>,
     distro: Option<&str>,
 ) -> Result<Target> {
+    recipe_target_in(index, recipe_arg, machine, distro, None)
+}
+
+/// [`recipe_target`] in a multiconfig: `mc`, or the name a recipe written
+/// `mc:<name>:<recipe>` gives (both, when they differ, are an error). The evaluator checks
+/// the name (`eval::multiconfig::check`: an unknown one is an error listing the known ones).
+pub fn recipe_target_in(
+    index: &Index,
+    recipe_arg: Option<&str>,
+    machine: Option<&str>,
+    distro: Option<&str>,
+    mc: Option<&str>,
+) -> Result<Target> {
     let machine = machine.map(str::trim).filter(|m| !m.is_empty());
     let distro = distro.map(str::trim).filter(|d| !d.is_empty());
+    let split = eval::multiconfig::normalize_target(&Target {
+        recipe: recipe_arg.map(str::to_string),
+        mc: mc.map(str::to_string),
+        ..Target::default()
+    })?;
+    let mc = split.mc;
+    let recipe_arg = split.recipe.as_deref();
     let recipe = match recipe_arg.map(str::trim) {
         None => None,
         Some(r) if !r.contains(':') && !query::find_recipes(index, r)?.is_empty() => {
@@ -192,6 +226,7 @@ pub fn recipe_target(
         version: None,
         machine: machine.map(str::to_string),
         distro: distro.map(str::to_string),
+        mc,
     })
 }
 
@@ -262,6 +297,17 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
         ));
     }
     out
+}
+
+/// The target notes of a multiconfig evaluation (`eval::multiconfig`: which configuration,
+/// which file), for the tools that do not print every target note.
+pub fn mc_notes(ds: &DataStore) -> Vec<String> {
+    ds.replay()
+        .target_notes
+        .iter()
+        .filter(|n| n.starts_with("note: multiconfig "))
+        .cloned()
+        .collect()
 }
 
 /// `status` column text.
@@ -554,6 +600,7 @@ fn shown(ctx: &Ctx, text: &str, name: &str, flag: Option<&str>, args: &Args) -> 
         ("recipe", &args.recipe),
         ("machine", &args.machine),
         ("distro", &args.distro),
+        ("mc", &args.mc),
     ] {
         if let Some(v) = v {
             command.push_str(&format!(" {k}={v}"));

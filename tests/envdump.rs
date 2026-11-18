@@ -558,6 +558,7 @@ fn compare_classifies_differences() {
     let mut index = Index::open_in(cache.path(), &ws).unwrap();
     index.refresh(&ws).unwrap();
     let target = Target {
+        mc: None,
         recipe: Some("app".into()),
         version: None,
         machine: None,

@@ -43,6 +43,7 @@ fn fixture() -> Fixture {
 
 fn rargs(name: &str, show: Show) -> recipe::Args {
     recipe::Args {
+        mc: None,
         name: name.into(),
         version: None,
         show,

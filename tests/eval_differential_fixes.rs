@@ -432,6 +432,7 @@ async fn deps_without_a_machine_uses_the_fragment_machine() {
     let out = deps::run(
         &ctx,
         deps::Args {
+            mc: None,
             recipe: "app".into(),
             kind: deps::Kind::Build,
             depth: None,
@@ -453,6 +454,7 @@ async fn var_and_overrides_without_a_machine_use_the_fragment_machine() {
     let out = var::run(
         &ctx,
         var::Args {
+            mc: None,
             name: "MACHINE".into(),
             recipe: Some("app".into()),
             machine: None,
@@ -470,6 +472,7 @@ async fn var_and_overrides_without_a_machine_use_the_fragment_machine() {
     let out = overrides::run(
         &ctx,
         overrides::Args {
+            mc: None,
             recipe: Some("app".into()),
             machine: None,
             distro: None,
@@ -617,6 +620,7 @@ async fn no_machine_at_all_is_said() {
     let out = var::run(
         &ctx,
         var::Args {
+            mc: None,
             name: "WORKDIR".into(),
             recipe: Some("hello".into()),
             machine: None,

@@ -58,6 +58,7 @@ fn fixture() -> Fixture {
 
 fn args(name: &str, recipe: Option<&str>) -> var::Args {
     var::Args {
+        mc: None,
         name: name.into(),
         recipe: recipe.map(str::to_string),
         machine: None,

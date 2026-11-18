@@ -489,6 +489,26 @@ pub fn validate_name(s: &str) -> Result<()> {
     }
 }
 
+/// Validates a BitBake target: a name ([`validate_name`]), or exactly `mc:<name>:<target>`
+/// (a target in a multiconfig, BitBake 2.18.0 `cooker.py` `buildTaskData`; also on 2.0 and
+/// 2.8) with the multiconfig name and the target each a valid name. Nothing else with a `:`
+/// is accepted: not `mc::<target>` (the default configuration: give the target alone), not
+/// the old `multiconfig:` spelling, not a task suffix (`<target>:do_x`), not `virtual:`.
+pub fn validate_target(s: &str) -> Result<()> {
+    let Some(rest) = s.strip_prefix("mc:") else {
+        return validate_name(s);
+    };
+    let bad = || Error::Invalid {
+        msg: format!(
+            "invalid target {s:?}: write mc:<multiconfig>:<target>, each part only letters, digits and _ . + - /, not starting with -"
+        ),
+    };
+    let (mc, target) = rest.split_once(':').ok_or_else(bad)?;
+    validate_name(mc).map_err(|_| bad())?;
+    validate_name(target).map_err(|_| bad())?;
+    Ok(())
+}
+
 /// Validates one argument of [`BbEnv::command`]: a name ([`validate_name`]) or a plain
 /// option (`-c`, `--force`: one or two dashes, a letter, then letters, digits and `-`;
 /// no `=` value).
@@ -501,6 +521,10 @@ pub fn validate_arg(s: &str) -> Result<()> {
                 && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
         });
     if opt {
+        return Ok(());
+    }
+    // `mc:<name>:<target>` ([`validate_target`]): the colons cannot make an option.
+    if s.starts_with("mc:") && validate_target(s).is_ok() {
         return Ok(());
     }
     validate_name(s).map_err(|_| Error::Invalid {
@@ -837,6 +861,52 @@ mod tests {
         ] {
             assert!(validate_name(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn targets() {
+        for ok in [
+            "core-image-minimal",
+            "mc:musl:core-image-minimal",
+            "mc:tiny:virtual/kernel",
+            "mc:a.b-c_d:gtk+3",
+        ] {
+            assert!(validate_target(ok).is_ok(), "{ok}");
+            assert!(validate_arg(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "mc:",
+            "mc::x",
+            "mc:a:",
+            "mc:a",
+            "mc:a:b:c",
+            "mc:a:do_x:y",
+            "mc:-c:x",
+            "mc:a:-c",
+            "mc:a;id:x",
+            "mc:a:$(id)",
+            "mc:a:`id`",
+            "mc:a:b c",
+            "mc:a:b'c",
+            "mc:a b:c",
+            "mc:a:b\nc",
+            "mc:a:b\n",
+            "multiconfig:a:b",
+            "mc:*:b",
+            "virtual:native:x",
+            "a:b",
+            "x:mc:a:b",
+            "a;b",
+            "$(id)",
+            "a'b",
+            "a=b",
+        ] {
+            assert!(validate_target(bad).is_err(), "{bad:?}");
+            assert!(validate_arg(bad).is_err(), "{bad:?}");
+        }
+        // validate_name itself still rejects every colon.
+        assert!(validate_name("mc:a:b").is_err());
     }
 
     #[test]

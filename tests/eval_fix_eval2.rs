@@ -245,6 +245,7 @@ async fn overrides_out(f: &ToolFx, recipe: Option<&str>, show: overrides::Show) 
     overrides::run(
         &f.ctx,
         overrides::Args {
+            mc: None,
             recipe: recipe.map(str::to_string),
             machine: None,
             distro: None,
@@ -261,6 +262,7 @@ async fn deps_out(f: &ToolFx, recipe: &str, kind: deps::Kind) -> String {
     deps::run(
         &f.ctx,
         deps::Args {
+            mc: None,
             recipe: recipe.into(),
             kind,
             depth: None,
@@ -436,6 +438,7 @@ async fn var_final(f: &ToolFx, name: &str) -> String {
     let out = var::run(
         &f.ctx,
         var::Args {
+            mc: None,
             name: name.into(),
             recipe: Some("hello".into()),
             machine: None,

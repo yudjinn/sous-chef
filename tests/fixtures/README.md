@@ -22,6 +22,7 @@ fixtures/
   syntax/    one small file per statement form, plus malformed files (parser tests)
   lint/      per-rule bad/good fixtures (see lint/README.md)
   kas/       a kas project and what kas checkout adds to it
+  kas-mc/    a kas project whose targets name multiconfigs (tests/multiconfig.rs)
   fakebb/    fake bitbake, devtool, bitbake-layers, kas and init scripts (runner and job tests)
   outputs/   recorded build output: hand-written logs, live/ (real output), envdump/
   hooks/     Claude Code hook events, hand-written, and captured/ (real events)
@@ -309,6 +310,15 @@ create `.git` in the copy, so `project/` is the repository root kas uses.
 `fakebb/kasbin/kas` is the fake kas (see its header); `lint/org/generated-conf-edit/` holds
 the rule's `good` (the generated files) and `bad` fixtures; `hooks/bash_kas_build.json` is a
 hand-written `kas build` event.
+
+## `kas-mc/`: a kas project with multiconfigs (x5)
+
+`project/kas/mc.yaml`: `machine: board1`, targets `proj-image`, `mc:musl:proj-image` and
+`multiconfig:tiny:proj-image` (kas 5.5 writes `BBMULTICONFIG ?=` with `musl` and `tiny`
+from them), repo `proj` with layer `meta-mc`, which ships `conf/multiconfig/musl.conf`
+(no `tiny.conf`: a listed name without a file). No build directory, no OE-core.
+`tests/multiconfig.rs` copies it and creates `.git`. The multiconfig workspace of that test
+is built from a copy of `ws/` (`mc_workspace`), not a fixture of its own.
 
 ---
 

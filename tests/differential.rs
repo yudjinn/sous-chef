@@ -637,6 +637,7 @@ const DISTRO: &str = "kiss";
 
 fn target(recipe: &str, explicit: bool) -> Target {
     Target {
+        mc: None,
         recipe: Some(recipe.to_string()),
         version: None,
         machine: explicit.then(|| MACHINE.into()),
@@ -1245,6 +1246,7 @@ fn differential_against_bitbake() {
         &idx,
         &ws,
         &Target {
+            mc: None,
             recipe: None,
             version: None,
             machine: None,

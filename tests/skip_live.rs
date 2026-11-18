@@ -285,6 +285,7 @@ fn skip_checks_agree_with_bitbake() {
     for f in &recipes {
         let label = format!("{}:{}", f.layer, f.path.display());
         let t = Target {
+            mc: None,
             recipe: Some(label.clone()),
             version: None,
             machine: Some("dogbonedark".into()),

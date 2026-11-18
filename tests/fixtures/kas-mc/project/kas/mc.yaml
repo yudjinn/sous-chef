@@ -1,0 +1,16 @@
+# A kas project whose targets name multiconfigs: kas 5.5 writes `BBMULTICONFIG ?= "..."`
+# into local.conf from them (config.py get_multiconfig). `tiny` has no file in the layers.
+header:
+  version: 11
+
+machine: board1
+distro: projdistro
+target:
+  - proj-image
+  - mc:musl:proj-image
+  - multiconfig:tiny:proj-image
+
+repos:
+  proj:
+    layers:
+      meta-mc:
