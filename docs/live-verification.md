@@ -931,6 +931,46 @@ patch files). The report has no NVD fields (no scores), as the class says. Side 
 recorded in bitbake-semantics.md: the class's `BuildCompleted` handlers did not run (no
 `cve-summary.json`; `tmp/log/cve/cve-summary-index.txt` was left in the build directory).
 
+### Authoritative var and deps against the built curl: confirmed (known gaps flagged)
+
+After the scratch bbappend was removed and curl rebuilt through yocto-kiss's own kas files,
+`var recipe=curl` with and without `authoritative=true` (`runs/y1-build/tools/calls-var*.json`;
+the first authoritative call ran `bitbake -e curl` in 3.9 s, the others reused its dump:
+"reused: the tree is unchanged since it ran"):
+
+| Variable | Static = authoritative? | Value |
+|---|---|---|
+| `SRC_URI` | **equal** (1174 bytes, the two handles compared byte for byte) | the tarball and 26 `file://` entries |
+| `PACKAGECONFIG` | **equal** | `basic-auth bearer-auth digest-auth ipfs negotiate-auth openssl proxy threaded-resolver verbose zlib ipv6 aws libidn` |
+| `S` | **equal** | `<WORKDIR>/sources/curl-8.19.0` |
+| `B` | **equal** | `<WORKDIR>/build` |
+| `D` | **equal** | `<WORKDIR>/image` |
+| `WORKDIR` | **equal** | `{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0` (the directory the build used) |
+| `T` | **equal** | `<WORKDIR>/temp` |
+| `PKGDATA_DIR` | **equal** | `<build>/tmp/pkgdata/dogbonedark` (the directory `pkgdata` read) |
+| `EXTRA_OECONF` | differs, flagged ("1 value depends on python ... use authoritative=true") | static ends at `--disable-static`; BitBake's adds `PACKAGECONFIG_CONFARGS` (`--disable-ares --enable-aws ...`), which `base.bbclass`'s anonymous python sets (static: `""`) |
+| `DEPENDS` | differs, flagged | static `pkgconf-native ${@get_autotools_dep(d)} ${@get_base_dep(d)}`; BitBake `pkgconf-native autoconf-native automake-native libtool-native libtool-cross gcc-cross-arm virtual/compilerlibs virtual/libc libidn2 openssl zlib virtual/update-alternatives` |
+
+The two differences are the known ones (differential.md: the `PACKAGECONFIG` expansion and
+two python helpers outside the evaluated set), and both are flagged.
+
+**`deps curl` against what was built.** `kind=build`: `pkgconf-native`, the two unknown
+python rows (`get_autotools_dep`, `get_base_dep`: in BitBake the autotools natives and
+`libtool-cross`, and `virtual/cross-cc virtual/compilerlibs virtual/libc`), and from the
+`PACKAGECONFIG` flags `libidn2`, `openssl` (`PREFERRED_PROVIDER_openssl`), `zlib`. The
+build made exactly those target recipes plus what they need (`libunistring` for libidn2;
+glibc, libgcc, gcc-runtime, linux-libc-headers for the toolchain), `opkg-utils` for
+`virtual/update-alternatives` (added by `update-alternatives.bbclass`'s anonymous python
+through `ua_extend_depends`: not in the static list, covered only by the generic warning
+that this anonymous python "hands d to other code"), and `ca-certificates`. `kind=runtime`
+lists `RDEPENDS` only (`curl-staticdev` -> `curl-dev`); the built packages' `RDEPENDS` in
+the package data are the shared-library ones `do_package` adds (`libcurl`: glibc,
+libcrypto, libidn2, libssl, zlib; `curl`: glibc, libcurl), which no static view can know,
+and `RRECOMMENDS:libcurl: ca-certificates` (curl_8.19.0.bb:200), which is why
+ca-certificates was built (no other built package names it). **Open**: `deps` has no
+`RRECOMMENDS` rows, so the one recipe the build pulled in through them is not explained by
+any `deps` view (`recipe show=packages` and `pkgdata package_info` show it).
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,
