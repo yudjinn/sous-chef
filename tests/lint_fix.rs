@@ -1067,7 +1067,16 @@ fn overlapping_fixes_wait_for_the_next_round() {
         dry.rounds[0].deferred[0].finding.rule,
         "override/append-no-space"
     );
-    assert!(fix::render_text(&dry).contains("re-run after applying"));
+    let dry_text = fix::render_text(&dry);
+    assert!(dry_text.contains("re-run after applying"));
+    // x7: the dry run says that a write may take more rounds than the one it shows.
+    assert!(
+        dry_text.contains(
+            "note: this is the first round only; --write re-lints the changed files and may \
+             apply further fixes they make possible (up to 5 rounds)"
+        ),
+        "{dry_text}"
+    );
     let r = env.fix(&t, false, true);
     assert_eq!(env.read(MINE), format!("{head}DEPENDS:append = \" a\"\n"));
     let after = r.after.unwrap();
