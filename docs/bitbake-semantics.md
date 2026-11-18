@@ -1840,7 +1840,24 @@ reproduces it from the indexed statements:
   `run.<function>.<pid>` without a symlink for every helper function run
   (`base_do_fetch`, `extend_recipe_sysroot`, `sstate_*`, ...), `depsig.do_<task>.<pid>`
   with a symlink, and `log.task_order` with one line per task:
-  `<YYYYMMDD-HHMMSS.ffffff> do_<task> (<pid>): log.do_<task>.<pid>`.
+  `<YYYYMMDD-HHMMSS.ffffff> do_<task> (<pid>): log.do_<task>.<pid>`. **After full builds**
+  (y1-build, `tests/fixtures/outputs/live/y1-build/log/log.task_order`, checked by
+  `tests/live_build.rs`): the same layout for every task (`log.do_<task>` and
+  `run.do_<task>` symlinks for each task that ran, 21 at the end, `do_cleansstate`,
+  `do_cleanall` and `do_generate_vex` among them; `depsig.do_<task>` for the 11 sstate
+  tasks; and `run.<helper>.<pid>` for each helper per run: `sstate_*`,
+  `extend_recipe_sysroot`, `autotools_preconfigure`, `package_do_shlibs`, ...);
+  `log.task_order` gains a line per run, appended across builds (the fetch of the day before
+  stayed first) until `WORKDIR` is removed: after `bitbake -c cleanall curl` `T` holds
+  `log.do_cleansstate` and `log.do_cleanall` of that run, which are the first two lines of
+  a new `log.task_order`.
+  `WORKDIR` itself held `build/`, `sources/`, `image/`, `package/`, `packages-split/`,
+  `pkgdata/`, `pkgdata-pdata-input/`, `pkgdata-sysroot/`, `sysroot-destdir/`,
+  `recipe-sysroot/`, `recipe-sysroot-native/`, `deploy-ipks/`, `deploy-source-date-epoch/`,
+  `license-destdir/`, `spdx/`, `pseudo/`, `source-date-epoch/`, `temp/`, and the files
+  `configure.sstate` and `debugsources.list`. In the sstate cache an archive is
+  `<h0h1>/<h2h3>/sstate:<PN>:<MULTIMACH_TARGET_SYS>:<PV>:<PR>:<SSTATE_PKGARCH>:14:<hash>_<task>.tar.zst`
+  (`14`: `SSTATE_VERSION`) with `.siginfo` beside it.
 - Cooker logs: `BB_CONSOLELOG ?= "${LOG_DIR}/cooker/${MACHINE}/${DATETIME}.log"`, i.e.
   `tmp/log/cooker/<machine>/<datetime>.log` (OE-core `bitbake.conf`).
 - Failure text, as printed by bitbake 5495a54 (2026-11-16) and OE-core 9518ce9:
@@ -1945,7 +1962,8 @@ branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
 - **Names.** In the stamps directory `<STAMP>.<task>.sigdata.<unihash>` (with a task hash)
   or `.sigbasedata.<basehash>`, `STAMP = "${STAMPS_DIR}/${MULTIMACH_TARGET_SYS}/${PN}/${PV}"`,
   `STAMPS_DIR ?= "${TMPDIR}/stamps"`; in the sstate cache `<SSTATE_PKG>.siginfo` (the hash
-  after the last `:`, before `_`). `find_siginfo` globs the stamps directory first
+  after the last `:`, before `_`; **seen live**: `sstate:curl:armv7at2hf-neon-oe-linux-gnueabi:8.19.0:r0:armv7at2hf-neon:14:<hash>_package.tar.zst.siginfo`,
+  and in the stamps directory `8.19.0.do_configure.sigdata.<hash>`). `find_siginfo` globs the stamps directory first
   (`MULTIMACH_TARGET_SYS`, `PV`, `PR` as `*`), then the sstate cache.
 - **`bitbake-diffsigs -t <pn> <task>`** (`do_` added when missing) takes the two newest
   signatures by mtime; with one it prints `ERROR: Only one matching sigdata file found for

@@ -510,3 +510,41 @@ fn real_vex_report_of_curl() {
     assert_eq!(files, 25);
     assert_eq!(v["package"][0]["cpes"].as_array().unwrap().len(), 6);
 }
+
+// ---------------------------------------------------------------------------------------
+// Live (ignored): the whole package data of the build directory, when `SOUS_CHEF_LIVE`
+// names the live environment. Reads files only; starts nothing.
+
+/// Every `(package, path)` of `find_path *` over the build's whole `PKGDATA_DIR` against
+/// the recorded `oe-pkgdata-util find-path '*'` of the same build
+/// (`$SOUS_CHEF_LIVE/runs/y1-build/logs/find-path-all.out`, 10505 lines).
+#[test]
+#[ignore = "needs SOUS_CHEF_LIVE"]
+fn live_whole_pkgdata_find_path_equals_oe_pkgdata_util() {
+    let Some(root) = std::env::var_os("SOUS_CHEF_LIVE").map(PathBuf::from) else {
+        return;
+    };
+    let dir = root.join("yocto-kiss/build/tmp/pkgdata/dogbonedark");
+    let recorded = root.join("runs/y1-build/logs/find-path-all.out");
+    if !dir.join("runtime").is_dir() || !recorded.is_file() {
+        eprintln!("no package data or no recorded find-path output: skipping");
+        return;
+    }
+    let pd = PkgData::new(dir, &open_dir);
+    let ours: BTreeSet<String> = pd
+        .find_path(&pkgdata::glob_regex("*").unwrap())
+        .into_iter()
+        .map(|(p, path)| format!("{}: {}", p.name, as_oe_prints(&path)))
+        .collect();
+    let theirs: BTreeSet<String> = fs::read_to_string(recorded)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let only_ours: Vec<&String> = ours.difference(&theirs).take(5).collect();
+    let only_theirs: Vec<&String> = theirs.difference(&ours).take(5).collect();
+    assert!(
+        only_ours.is_empty() && only_theirs.is_empty(),
+        "ours only {only_ours:?}, theirs only {only_theirs:?}"
+    );
+}
