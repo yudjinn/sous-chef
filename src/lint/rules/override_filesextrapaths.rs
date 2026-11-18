@@ -28,6 +28,7 @@
 //! Legacy names (`FILESEXTRAPATHS_prepend`) are left to `override/legacy-syntax`.
 
 use crate::index::query;
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers::{self, ValueEdge};
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::{ParsedFile, StatementKind};
@@ -49,7 +50,123 @@ impl Rule for OverrideFilesextrapaths {
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
-        let Some(file) = cx.file else { return };
+        out.extend(self.scan(cx, false).into_iter().map(|(f, _)| f));
+    }
+
+    /// One fix per finding, covering every problem it names, or none when one of them has no
+    /// mechanical fix ([`Problems::fix`]).
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        self.scan(cx, true)
+            .into_iter()
+            .filter_map(|(finding, fix)| fix.map(|fix| FixedFinding { finding, fix }))
+            .collect()
+    }
+}
+
+/// The problems of one `FILESEXTRAPATHS` statement, for its fix.
+struct Problems {
+    /// Replaced instead of extended.
+    replaced: bool,
+    /// `${THISDIR}` (or `${FILE_DIRNAME}`, `${FILE}`) without `:=`.
+    needs_immediate: bool,
+    /// The separating colon is missing (at the start for an append, else at the end).
+    colon: bool,
+    appends: bool,
+}
+
+impl Problems {
+    /// The fix, or `None` when a problem has no mechanical one:
+    ///
+    /// - missing colon: `:` inserted right after the opening quote (append) or right before
+    ///   the closing one (prepend). Safe: it is the separator the rule asks for, and an empty
+    ///   entry (`::`) is skipped by `base_set_filespath`.
+    /// - no `:=`: the operator `=` of a `:prepend` / `:append` becomes `:=`. Safe when the
+    ///   value refers to nothing but `${THISDIR}`, `${FILE_DIRNAME}`, `${FILE}` (what the rule
+    ///   says must be expanded now); suggested when it refers to anything else, which `:=`
+    ///   expands now too (`${PN}`: in a bbappend from the append's file name, in an `.inc`
+    ///   BitBake's `defaultpkgname`, and never a `BBCLASSEXTEND` variant's name). Other
+    ///   operators (`+=` on a `:prepend` adds a space): no fix.
+    /// - replaced: a plain unconditional `FILESEXTRAPATHS =` / `:=` becomes
+    ///   `FILESEXTRAPATHS:prepend :=` (with the colon as above). Suggested: the line now
+    ///   extends the list instead of replacing it, which is the rule's point but changes
+    ///   meaning. Other operators, conditional names and `.conf` forms: no fix (the intent
+    ///   is not clear).
+    fn fix(
+        &self,
+        cx: &LintContext<'_>,
+        s: &crate::parse::Statement,
+        var: &crate::types::VarRef,
+        op: AssignOp,
+        value: &str,
+    ) -> Option<Fix> {
+        let source = cx.source?;
+        let p = fix::assign_parts(source, s)?;
+        let mut edits = Vec::new();
+        let mut safety = Safety::Safe;
+        let mut what = Vec::new();
+        if self.replaced {
+            if !(matches!(op, AssignOp::Set | AssignOp::Immediate)
+                && var.overrides.is_empty()
+                && cx.kind != Some(FileKind::Conf))
+            {
+                return None;
+            }
+            edits.push(Edit::replace(p.name.clone(), "FILESEXTRAPATHS:prepend"));
+            if op != AssignOp::Immediate {
+                edits.push(Edit::replace(p.op.clone(), ":="));
+            }
+            safety = Safety::Suggested;
+            what.push("extend the list with `FILESEXTRAPATHS:prepend :=` instead of replacing it");
+        } else if self.needs_immediate {
+            if op != AssignOp::Set {
+                return None;
+            }
+            edits.push(Edit::replace(p.op.clone(), ":="));
+            let refs_only_file = !value.contains("${@")
+                && value.match_indices("${").all(|(at, _)| {
+                    ["${THISDIR}", "${FILE_DIRNAME}", "${FILE}"]
+                        .iter()
+                        .any(|r| value[at..].starts_with(r))
+                });
+            if refs_only_file {
+                what.push("expand it at once with `:=`");
+            } else {
+                safety = Safety::Suggested;
+                what.push(
+                    "expand it at once with `:=`, which also expands its other references \
+                     (`${PN}` and the like) now",
+                );
+            }
+        }
+        if self.colon {
+            let appends = self.appends && !self.replaced;
+            // A blank between the quote and the path would stay part of the entry.
+            let blank_edge = if appends {
+                value.starts_with(char::is_whitespace)
+            } else {
+                value.ends_with(char::is_whitespace)
+            };
+            if blank_edge {
+                return None;
+            }
+            edits.push(Edit::insert(
+                if appends { p.open + 1 } else { p.close },
+                ":",
+            ));
+            what.push(if appends {
+                "add the leading `:`"
+            } else {
+                "add the trailing `:`"
+            });
+        }
+        Fix::in_file(cx, edits, helpers::and_list(&what), safety)
+    }
+}
+
+impl OverrideFilesextrapaths {
+    fn scan(&self, cx: &LintContext<'_>, want_fix: bool) -> Vec<(Finding, Option<Fix>)> {
+        let mut out = Vec::new();
+        let Some(file) = cx.file else { return out };
         // Computed once, only when needed.
         let mut beside: Option<bool> = None;
         for s in &file.statements {
@@ -108,6 +225,14 @@ impl Rule for OverrideFilesextrapaths {
             if problems.is_empty() {
                 continue;
             }
+            let found = Problems {
+                replaced: problems.iter().any(|p| p.contains(":prepend")),
+                needs_immediate: problems.iter().any(|p| p.contains(":=")),
+                colon: problems
+                    .iter()
+                    .any(|p| p.contains("the leading") || p.contains("the trailing")),
+                appends,
+            };
             let name = helpers::colon_name(var);
             let fix = if appends {
                 "FILESEXTRAPATHS:append := \":${THISDIR}/${PN}\"".to_string()
@@ -120,7 +245,7 @@ impl Rule for OverrideFilesextrapaths {
                 };
                 format!("FILESEXTRAPATHS:prepend := \"{path}:\"")
             };
-            out.push(helpers::finding(
+            let finding = helpers::finding(
                 self,
                 cx,
                 LineSpan::line(s.span.start),
@@ -129,8 +254,13 @@ impl Rule for OverrideFilesextrapaths {
                     op.as_str(),
                     problems.join(", ")
                 ),
-            ));
+            );
+            let fix = want_fix
+                .then(|| found.fix(cx, s, var, *op, value))
+                .flatten();
+            out.push((finding, fix));
         }
+        out
     }
 }
 

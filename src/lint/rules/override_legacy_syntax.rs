@@ -18,6 +18,7 @@
 //! `_remove` is fatal; the other forms are silently a different variable. Both are errors
 //! here: the line does not do what it says.
 
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers::{self, KnownOverrides};
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
@@ -53,7 +54,22 @@ impl Rule for OverrideLegacySyntax {
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
-        let Some(file) = cx.file else { return };
+        out.extend(self.scan(cx, false).into_iter().map(|(f, _)| f));
+    }
+
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        self.scan(cx, true)
+            .into_iter()
+            .filter_map(|(finding, fix)| fix.map(|fix| FixedFinding { finding, fix }))
+            .collect()
+    }
+}
+
+impl OverrideLegacySyntax {
+    /// The findings `check` reports, each with its fix when `want_fix` (see [`rename`]).
+    fn scan(&self, cx: &LintContext<'_>, want_fix: bool) -> Vec<(Finding, Option<Fix>)> {
+        let mut out = Vec::new();
+        let Some(file) = cx.file else { return out };
         // Loaded lazily: most files have no candidate name at all.
         let mut known: Option<(KnownOverrides, Vec<String>)> = None;
         for s in &file.statements {
@@ -67,12 +83,14 @@ impl Rule for OverrideLegacySyntax {
             let line = LineSpan::line(s.span.start);
             if var.legacy_syntax {
                 let written = written_name(helpers::statement_text(cx, s));
-                out.push(helpers::finding(
-                    self,
-                    cx,
-                    line,
-                    message(var, None, is_fn, written),
-                ));
+                let finding = helpers::finding(self, cx, line, message(var, None, is_fn, written));
+                let fix = want_fix
+                    .then(|| {
+                        let (k, collections) = known.get_or_insert_with(|| load_known(cx));
+                        rename(cx, s, var, override_suffix(&var.base, k, collections), true)
+                    })
+                    .flatten();
+                out.push((finding, fix));
                 continue;
             }
             if !var.base.contains('_') {
@@ -80,15 +98,76 @@ impl Rule for OverrideLegacySyntax {
             }
             let (k, collections) = known.get_or_insert_with(|| load_known(cx));
             if let Some(cut) = override_suffix(&var.base, k, collections) {
-                out.push(helpers::finding(
-                    self,
-                    cx,
-                    line,
-                    message(var, Some(cut), is_fn, None),
-                ));
+                let finding =
+                    helpers::finding(self, cx, line, message(var, Some(cut), is_fn, None));
+                let fix = want_fix
+                    .then(|| rename(cx, s, var, Some(cut), false))
+                    .flatten();
+                out.push((finding, fix));
             }
         }
+        out
     }
+}
+
+/// The fix of a reported name: the name as written replaced by the current syntax, every
+/// `_` that separates an override becoming `:` and nothing else changing (the flag, the
+/// operator, the value and a function body stay as they are).
+///
+/// - A name the parser split (`legacy`): its base and overrides joined with `:`. When the
+///   base itself ends in `_<machine>`, `_<distro>`, `_class-*` or `_pn-*` elements (the
+///   suffix check, `VAR_qemux86_append`: an append to `VAR_qemux86`, the `qemux86` variant
+///   of `VAR`), they become overrides too (`VAR:qemux86:append`), which is what the name
+///   meant to the BitBake that accepted it. Safe: the old spelling is fatal (`_append`,
+///   `_prepend`, `_remove`) or a variable nothing reads (`RDEPENDS_${PN}`).
+/// - A name only the suffix check reports (`KERNEL_DEVICETREE_qemux86`): safe when every
+///   suffix element is a `class-*` or `pn-*` override; suggested when one is a machine or
+///   distro name, since a current layer may read such a name as a variable of its own
+///   (`${FOO_${MACHINE}}`).
+fn rename(
+    cx: &LintContext<'_>,
+    s: &crate::parse::Statement,
+    var: &VarRef,
+    suffix_at: Option<usize>,
+    legacy: bool,
+) -> Option<Fix> {
+    let source = cx.source?;
+    let range = fix::statement_name(source, s)?;
+    let old = source.get(range.clone())?.to_string();
+    let (base, mut overrides): (String, Vec<String>) = match suffix_at {
+        Some(cut) => (
+            var.base[..cut].to_string(),
+            var.base[cut + 1..].split('_').map(str::to_string).collect(),
+        ),
+        None => (var.base.clone(), Vec::new()),
+    };
+    let suffix = overrides.clone();
+    overrides.extend(var.overrides.iter().cloned());
+    let modern = helpers::joined(&base, &overrides, ':');
+    if modern == old {
+        return None;
+    }
+    let machine_like = suffix
+        .iter()
+        .any(|e| !e.starts_with("class-") && !e.starts_with("pn-"));
+    let (safety, note) = if legacy || !machine_like {
+        (Safety::Safe, String::new())
+    } else {
+        (
+            Safety::Suggested,
+            format!(
+                " (`{}` is a machine or distro name; check that nothing reads `{old}` as a \
+                 variable of its own)",
+                suffix.join("_")
+            ),
+        )
+    };
+    Fix::in_file(
+        cx,
+        vec![Edit::replace(range, modern.clone())],
+        format!("rename `{old}` to `{modern}`{note}"),
+        safety,
+    )
 }
 
 fn load_known(cx: &LintContext<'_>) -> (KnownOverrides, Vec<String>) {

@@ -53,6 +53,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::index::{Index, query};
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::release::{Release, ReleaseSource};
 use crate::types::{FileKind, LineSpan, Loc};
@@ -597,5 +598,89 @@ impl Rule for OrgLayerConf {
                 message: p.message,
             });
         }
+    }
+
+    /// Suggested, for the two mechanical checks only, each one line added to
+    /// `conf/layer.conf` with the file's line terminator:
+    ///
+    /// - `BBPATH` not extended: `BBPATH .= ":${LAYERDIR}"` before the first statement (where
+    ///   OE-core's layer template has it), so the layer's classes and conf files are found.
+    /// - a class from another layer without `LAYERDEPENDS`: the line the message names,
+    ///   `LAYERDEPENDS_<c> += "<other>"`, after the last `LAYERDEPENDS_<c>` statement (else
+    ///   at the end). BitBake then requires that layer.
+    ///
+    /// The other checks need a decision (a collection name, the releases to claim, which
+    /// glob) and have no fix.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        let Some(name) = cx.layer else {
+            return Vec::new();
+        };
+        let Some(layer) = cx.ws.layer(name) else {
+            return Vec::new();
+        };
+        let conf = PathBuf::from("conf/layer.conf");
+        let Some(text) = cx
+            .ws
+            .confine(&layer.root.join(&conf))
+            .ok()
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|b| String::from_utf8(b).ok())
+        else {
+            return Vec::new();
+        };
+        let parsed = crate::parse::parse(&text);
+        let eol = fix::line_ending(&text);
+        let mut out = Vec::new();
+        for p in layer_problems(cx.ws, cx.index, name) {
+            let edit = match p.check {
+                LayerCheck::BbpathMissing => {
+                    let line = "BBPATH .= \":${LAYERDIR}\"";
+                    parsed.statements.first().map(|s| {
+                        (
+                            Edit::insert(s.bytes.start, format!("{line}{eol}")),
+                            format!("add `{line}` to conf/layer.conf"),
+                        )
+                    })
+                }
+                LayerCheck::DependsMissing => {
+                    let c = layer.collections.first().cloned().unwrap_or_default();
+                    let var = format!("LAYERDEPENDS_{c}");
+                    p.message
+                        .rsplit_once("; add it: ")
+                        .map(|(_, l)| l.to_string())
+                        .filter(|l| l.starts_with(&format!("{var} += \"")) && l.ends_with('"'))
+                        .and_then(|line| {
+                            let last = parsed.statements.iter().rev().find(|s| {
+                                matches!(&s.kind, crate::parse::StatementKind::Assign { var: v, .. }
+                                    if v.base == var)
+                            });
+                            let edit = match last {
+                                Some(s) => fix::insert_line_after(&text, s, &line)?,
+                                None if text.is_empty() || text.ends_with(['\n', '\r']) => {
+                                    Edit::insert(text.len(), format!("{line}{eol}"))
+                                }
+                                None => Edit::insert(text.len(), format!("{eol}{line}{eol}")),
+                            };
+                            Some((edit, format!("add `{line}` to conf/layer.conf")))
+                        })
+                }
+                _ => None,
+            };
+            let Some((edit, what)) = edit else { continue };
+            let Some(fix) = Fix::on_text(name, &conf, &text, vec![edit], what, Safety::Suggested)
+            else {
+                continue;
+            };
+            out.push(FixedFinding {
+                finding: Finding {
+                    rule: self.id(),
+                    severity: p.severity,
+                    loc: p.loc,
+                    message: p.message,
+                },
+                fix,
+            });
+        }
+        out
     }
 }

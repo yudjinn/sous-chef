@@ -13,6 +13,7 @@
 //! never reported (it cannot be classified statically). Names with `:append` / `:prepend` /
 //! `:remove` are another matter (BitBake warns) and are not reported here.
 
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers::{self, KnownOverrides};
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
@@ -34,7 +35,26 @@ impl Rule for OverridePlusEqualsWithOverride {
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
-        let Some(file) = cx.file else { return };
+        out.extend(self.scan(cx, false).into_iter().map(|(f, _)| f));
+    }
+
+    /// Suggested: `VAR:foo += "x"` becomes `VAR:append:foo = " x"` (`=+` a `:prepend` with
+    /// the trailing space, `.=` / `=.` the same without a space): the name and the operator
+    /// change, the value keeps its text, plus the one space `+=` / `=+` inserted. This is
+    /// what the rule recommends and it changes meaning (the line now adds to `VAR` instead of
+    /// building `VAR:foo`), so it needs a look: `VAR:foo` set elsewhere loses this part.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        self.scan(cx, true)
+            .into_iter()
+            .filter_map(|(finding, fix)| fix.map(|fix| FixedFinding { finding, fix }))
+            .collect()
+    }
+}
+
+impl OverridePlusEqualsWithOverride {
+    fn scan(&self, cx: &LintContext<'_>, want_fix: bool) -> Vec<(Finding, Option<Fix>)> {
+        let mut out = Vec::new();
+        let Some(file) = cx.file else { return out };
         let mut known: Option<KnownOverrides> = None;
         for s in &file.statements {
             let StatementKind::Assign { var, op, value, .. } = &s.kind else {
@@ -62,14 +82,54 @@ impl Rule for OverridePlusEqualsWithOverride {
             let Some(conditional) = conditional_overrides(var, k) else {
                 continue;
             };
-            out.push(helpers::finding(
+            let finding = helpers::finding(
                 self,
                 cx,
                 LineSpan::line(s.span.start),
                 message(var, *op, keyword, &conditional, value),
-            ));
+            );
+            let fix = want_fix
+                .then(|| rewrite(cx, s, var, *op, keyword, &conditional))
+                .flatten();
+            out.push((finding, fix));
         }
+        out
     }
+}
+
+fn rewrite(
+    cx: &LintContext<'_>,
+    s: &crate::parse::Statement,
+    var: &VarRef,
+    op: AssignOp,
+    keyword: &str,
+    split: &Split,
+) -> Option<Fix> {
+    let source = cx.source?;
+    let p = fix::assign_parts(source, s)?;
+    let target = helpers::joined(&var.base, &split.name, ':');
+    let new_name = format!("{target}:{keyword}:{}", split.conditions.join(":"));
+    let old_name = helpers::colon_name(var);
+    let mut edits = vec![
+        Edit::replace(p.name.clone(), new_name.clone()),
+        Edit::replace(p.op.clone(), "="),
+    ];
+    match op {
+        AssignOp::Append => edits.push(Edit::insert(p.open + 1, " ")),
+        AssignOp::Prepend => edits.push(Edit::insert(p.close, " ")),
+        _ => {}
+    }
+    Fix::in_file(
+        cx,
+        edits,
+        format!(
+            "`{old_name} {}` becomes `{new_name} =`: it adds to {target} when the condition \
+             holds instead of building `{old_name}` (changes meaning; check nothing else sets \
+             `{old_name}`)",
+            op.as_str()
+        ),
+        Safety::Suggested,
+    )
 }
 
 /// The split of `var`'s overrides into the part that names the variable (a package: it

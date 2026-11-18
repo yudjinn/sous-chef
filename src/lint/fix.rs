@@ -296,7 +296,7 @@ pub fn line_ending(text: &str) -> &'static str {
 }
 
 /// Whitespace as BitBake's regular expressions (`\s`) and `str.rstrip()` see it.
-fn py_space(c: char) -> bool {
+pub fn py_space(c: char) -> bool {
     c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
 }
 
@@ -485,6 +485,20 @@ pub fn statement_lines(source: &str, stmt: &Statement) -> Option<Range<usize>> {
     let first = lines.get((stmt.span.start as usize).checked_sub(1)?)?;
     let last = lines.get((stmt.span.end as usize).checked_sub(1)?)?;
     (first.start == stmt.bytes.start).then_some(first.start..last.next)
+}
+
+/// An insertion of `line` (no terminator) as a line of its own right after statement
+/// `stmt`, with the file's line terminator ([`line_ending`]); after a last line without a
+/// terminator, the terminator goes before the new line instead.
+pub fn insert_line_after(source: &str, stmt: &Statement, line: &str) -> Option<Edit> {
+    let range = statement_lines(source, stmt)?;
+    let eol = line_ending(source);
+    let last = physical_line(source, stmt.span.end)?;
+    Some(if last.next > last.content_end {
+        Edit::insert(range.end, format!("{line}{eol}"))
+    } else {
+        Edit::insert(range.end, format!("{eol}{line}"))
+    })
 }
 
 /// The name of `var` in the current syntax with its flag: `RDEPENDS:${PN}[doc]`.
@@ -1077,6 +1091,101 @@ fn compare(
         new,
         problems,
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// In memory (rule fixture tests)
+
+/// The fixes one file-scope rule offers for `text`, as the engine would get them for a file
+/// at `loc` checked against `releases` (empty: the workspace release); the counterpart of
+/// [`lint::check_text`]. Nothing is read or written.
+#[allow(clippy::too_many_arguments)]
+pub fn fixes_in_text(
+    rule: &dyn Rule,
+    ws: &Workspace,
+    index: &Index,
+    loc: Loc,
+    text: &str,
+    kind: Option<FileKind>,
+    releases: &[Release],
+) -> Vec<FixedFinding> {
+    let default = [ws.release.release];
+    let releases = if releases.is_empty() {
+        &default[..]
+    } else {
+        releases
+    };
+    if !lint::applies(rule, releases) {
+        return Vec::new();
+    }
+    let parsed = crate::parse::parse(text);
+    let lines = u32::try_from(text.lines().count().max(1)).unwrap_or(u32::MAX);
+    let cx = LintContext {
+        file: Some(&parsed),
+        source: Some(text),
+        kind,
+        data: None,
+        layer: None,
+        index,
+        ws,
+        loc: Loc {
+            lines: LineSpan::new(1, lines),
+            ..loc
+        },
+        releases,
+    };
+    // Only fixes of findings `check` reports.
+    let reported = {
+        let mut v = Vec::new();
+        rule.check(&cx, &mut v);
+        v
+    };
+    rule.fixes(&cx)
+        .into_iter()
+        .filter(|f| reported.contains(&f.finding))
+        .collect()
+}
+
+/// `text` after applying, in rounds as `--fix --write` does (at most [`MAX_ROUNDS`]), the
+/// fixes of `rules` (file scope) for a file at `loc`: safe ones, and suggested ones too
+/// when `suggested`. Overlapping fixes wait for the next round.
+#[allow(clippy::too_many_arguments)]
+pub fn fix_text(
+    rules: &[&dyn Rule],
+    ws: &Workspace,
+    index: &Index,
+    loc: &Loc,
+    text: &str,
+    kind: Option<FileKind>,
+    releases: &[Release],
+    suggested: bool,
+) -> String {
+    let mut text = text.to_string();
+    for _ in 0..MAX_ROUNDS {
+        let mut all: Vec<FixedFinding> = rules
+            .iter()
+            .filter(|r| r.scope() == Scope::File)
+            .flat_map(|r| fixes_in_text(*r, ws, index, loc.clone(), &text, kind, releases))
+            .filter(|f| suggested || f.fix.safety == Safety::Safe)
+            .collect();
+        all.sort_by_key(|f| first_offset(&f.fix));
+        let mut taken: Vec<&Edit> = Vec::new();
+        for f in &all {
+            if !f
+                .fix
+                .edits
+                .iter()
+                .any(|e| taken.iter().any(|t| overlaps(&t.bytes, &e.bytes)))
+            {
+                taken.extend(f.fix.edits.iter());
+            }
+        }
+        match apply_edits(&text, &taken) {
+            Some(new) if new != text => text = new,
+            _ => break,
+        }
+    }
+    text
 }
 
 // ---------------------------------------------------------------------------------------

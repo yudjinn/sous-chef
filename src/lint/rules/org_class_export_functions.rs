@@ -17,6 +17,7 @@
 
 use std::collections::HashSet;
 
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
@@ -45,6 +46,78 @@ impl Rule for OrgClassExportFunctions {
 
     fn default_severity(&self) -> Severity {
         Severity::Warning
+    }
+
+    /// Suggested, both cases: `EXPORT_FUNCTIONS do_<task>` as a line of its own right after
+    /// the function (after, because `ExportFuncsNode.eval` copies the `python` flag from
+    /// `<class>_do_<task>` when the line is parsed, so the function must already be
+    /// defined), and for a `do_<task>` defined directly, the function renamed to
+    /// `<class>_do_<task>`. Recipes then get the class's task only when they do not define
+    /// their own, which is what the rule recommends and changes what an inheriting recipe
+    /// runs.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        let (Some(file), Some(source)) = (cx.file, cx.source) else {
+            return Vec::new();
+        };
+        let Some(class) = cx.loc.path.file_stem().and_then(|s| s.to_str()) else {
+            return Vec::new();
+        };
+        let exported: HashSet<&str> = file
+            .statements
+            .iter()
+            .filter_map(|s| match &s.kind {
+                StatementKind::ExportFunctions { names } => Some(names),
+                _ => None,
+            })
+            .flatten()
+            .map(String::as_str)
+            .collect();
+        let mut found = Vec::new();
+        self.check(cx, &mut found);
+        let prefix = format!("{class}_");
+        found
+            .into_iter()
+            .filter_map(|finding| {
+                let s = file.statements.iter().find(|s| {
+                    s.span == finding.loc.lines
+                        && matches!(&s.kind, StatementKind::Function { name: Some(_), .. })
+                })?;
+                let StatementKind::Function {
+                    name: Some(var), ..
+                } = &s.kind
+                else {
+                    return None;
+                };
+                let fname = var.base.as_str();
+                let (task, rename) = match fname.strip_prefix(&prefix) {
+                    Some(task) => (task.to_string(), None),
+                    None => (fname.to_string(), Some(format!("{class}_{fname}"))),
+                };
+                let mut edits = Vec::new();
+                if let Some(new) = &rename {
+                    edits.push(Edit::replace(fix::function_name(source, s)?, new.clone()));
+                }
+                if !exported.contains(task.as_str()) {
+                    edits.push(fix::insert_line_after(
+                        source,
+                        s,
+                        &format!("EXPORT_FUNCTIONS {task}"),
+                    )?);
+                }
+                let what = match &rename {
+                    Some(new) => format!(
+                        "rename {fname} to {new} and add `EXPORT_FUNCTIONS {task}` after it \
+                         (a recipe's own {task} is then kept)"
+                    ),
+                    None => format!(
+                        "add `EXPORT_FUNCTIONS {task}` after {fname} (recipes inheriting \
+                         {class} then run it as {task})"
+                    ),
+                };
+                let fix = Fix::in_file(cx, edits, what, Safety::Suggested)?;
+                Some(FixedFinding { finding, fix })
+            })
+            .collect()
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {

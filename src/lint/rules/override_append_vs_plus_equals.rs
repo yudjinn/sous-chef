@@ -10,6 +10,7 @@
 //! that is why this is only info. The suggestion is `+=` when the
 //! appended text starts with a space (it adds one) and `.=` otherwise.
 
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::{Statement, StatementKind};
@@ -28,6 +29,54 @@ impl Rule for OverrideAppendVsPlusEquals {
 
     fn default_severity(&self) -> Severity {
         Severity::Info
+    }
+
+    /// Suggested: `VAR:append = " x"` becomes `VAR += "x"` (one leading space taken out, the
+    /// one `+=` puts back), and a value without a leading space `VAR .= "x"`. The value
+    /// reached at the end of this file is the same; it is not the same when something
+    /// parsed later sets `VAR` (a bbappend's `VAR =` drops a `+=` but keeps an `:append`) or
+    /// an override variant of it (`VAR:qemux86 =` wins over the `+=` text and gets the
+    /// `:append`), which is why this is a style suggestion and needs a look.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        let (Some(file), Some(source)) = (cx.file, cx.source) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        self.check(cx, &mut found);
+        found
+            .into_iter()
+            .filter_map(|finding| {
+                let s = file.statements.iter().find(|s| {
+                    s.span.start == finding.loc.lines.start
+                        && matches!(&s.kind, StatementKind::Assign { var, op: AssignOp::Set, .. }
+                            if var.overrides == ["append"])
+                })?;
+                let StatementKind::Assign { var, .. } = &s.kind else {
+                    return None;
+                };
+                let p = fix::assign_parts(source, s)?;
+                let base = var.base.as_str();
+                let spaced = source.as_bytes().get(p.open + 1) == Some(&b' ');
+                let mut edits = vec![
+                    Edit::replace(p.name.clone(), base),
+                    Edit::replace(p.op.clone(), if spaced { "+=" } else { ".=" }),
+                ];
+                if spaced {
+                    edits.push(Edit::delete(p.open + 1..p.open + 2));
+                }
+                let fix = Fix::in_file(
+                    cx,
+                    edits,
+                    format!(
+                        "`{base}:append =` becomes `{base} {}` (the same value here; not when a \
+                         bbappend or a conf sets {base} or an override of it later)",
+                        if spaced { "+=" } else { ".=" }
+                    ),
+                    Safety::Suggested,
+                )?;
+                Some(FixedFinding { finding, fix })
+            })
+            .collect()
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
