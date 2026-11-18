@@ -907,6 +907,30 @@ Not settled: `log job=` on a cancelled job says "no error lines recognised; slic
 (true; it could say the job was cancelled). Cancel with `BB_SERVER_TIMEOUT` set and a
 kas-mode job (where SIGINT also reaches kas and the shell) were not tried.
 
+### recipe show=cve against a real report: confirmed
+
+Which class can make a report for curl alone, read in OE-core Wrynose: `sbom-cve-check` /
+`sbom-cve-check-recipe` need `python3-sbom-cve-check-native` and the CVE database recipes
+(`sbom-cve-check-update-cvelist-native:do_patch`, `...-nvd-native:do_patch`, fetched lists),
+so other recipes and the network: not used. `vex.bbclass` (in `classes/`, so inheritable
+by a recipe) adds `do_generate_vex` (before `do_build`, no dependencies) that writes the
+per-recipe JSON from the metadata and the patches alone. So the scratch bbappend became
+`inherit vex`; `bitbake -n -c generate_vex curl` listed one task; `bitbake -c generate_vex
+curl` ran it (succeeded) and wrote `tmp/deploy/cve/curl_cve.json` (11 266 bytes).
+
+`recipe curl show=cve` (238 ms) then showed `build  Unpatched 0, Patched 21, Ignored 7
+(version 8.19.0)  build:tmp/deploy/cve/curl_cve.json`, the identity (`CVE_PRODUCT` from
+curl_8.19.0.bb:51, `CVE_VERSION` 8.19.0 from vex.bbclass:27), 7 `status` rows and 25
+`patch` rows. Compared with the report (`runs/y1-build/tools/cvecompare.py`): the same 28
+ids with the same status and detail (each `CVE_STATUS` entry `Ignored`, with its detail and
+the report's description; each CVE of a patch file `Patched` / `fix-file-included`, four of
+them from two patches: `CVE-2026-6429.patch` and `CVE-2026-6429-dependent.patch`, the
+`-01` / `-02` pairs). **Confirmed**; test `tests/live_build.rs`, `real_vex_report_of_curl`
+(the recorded report, the counts the view shows and the Wrynose file-name rule for all 25
+patch files). The report has no NVD fields (no scores), as the class says. Side effect,
+recorded in bitbake-semantics.md: the class's `BuildCompleted` handlers did not run (no
+`cve-summary.json`; `tmp/log/cve/cve-summary-index.txt` was left in the build directory).
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,

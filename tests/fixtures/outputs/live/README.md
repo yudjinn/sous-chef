@@ -86,4 +86,6 @@ Under `y1-build/`; the same scrubbing as above.
 | `y1-build/bitbake/job-build-curl-cancel-sigterm.out` | the same after `op=cancel` 22 s in, before the fix (SIGTERM to the job's group: the client's output stops, the server built on) |
 | `y1-build/bitbake/job-build-curl-cancel-sigint.out` | the same with the fix (two SIGINTs): knotty's interrupt messages and `Execution was interrupted` |
 | `y1-build/bitbake/cookerdaemon-cancel-excerpt.log` | lines of `build/bitbake-cookerdaemon.log` around both cancels (the server's `Disconnecting Client` and its end 20 s later; `stateShutdown`, `stateForceShutdown`) |
+| `y1-build/cve/curl_%.bbappend.vex` | the scratch bbappend for the CVE report (`inherit vex`, removed afterwards) |
+| `y1-build/cve/curl_cve.json` | `build/tmp/deploy/cve/curl_cve.json` after `$KAS shell ../scratch/kas-scratch.yaml -c 'bitbake -c generate_vex curl'` |
 

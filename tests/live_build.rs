@@ -460,3 +460,53 @@ fn real_cancelled_build_outputs() {
     assert!(daemon.contains("23:24:04.076926 Running command ['stateShutdown']"));
     assert!(daemon.contains("23:24:05.077478 Running command ['stateForceShutdown']"));
 }
+
+// ---------------------------------------------------------------------------------------
+// recipe show=cve: the real per-recipe report of `bitbake -c generate_vex curl`, with
+// `inherit vex` in a scratch bbappend (curl only).
+
+use sous_chef::bitbake::cve::{self, CveRules};
+use sous_chef::release::Release;
+
+/// The report reads as the view reads it (21 Patched, 7 Ignored), and every Patched issue
+/// is the CVE the Wrynose file-name rule takes from its patch files (`CVE-2026-6429.patch`
+/// and `CVE-2026-6429-dependent.patch`, `CVE-2026-9545-01.patch`, ...).
+#[test]
+fn real_vex_report_of_curl() {
+    let text = sample("cve/curl_cve.json");
+    let p = cve::read_check_json(&text, "curl").unwrap().unwrap();
+    assert_eq!((p.name.as_str(), p.version.as_str()), ("curl", "8.19.0"));
+    let counts = p.counts();
+    assert_eq!(counts.get("Patched"), Some(&21));
+    assert_eq!(counts.get("Ignored"), Some(&7));
+    assert_eq!(counts.len(), 2);
+    for i in &p.issues {
+        let want = if i.status == "Patched" {
+            "fix-file-included"
+        } else {
+            "not-applicable-config"
+        };
+        if i.id != "CVE-2024-32928" {
+            assert_eq!(i.detail.as_deref(), Some(want), "{}", i.id);
+        } else {
+            assert_eq!(i.detail.as_deref(), Some("ignored"));
+        }
+        assert!(i.scores.is_empty(), "vex writes no NVD fields: {i:?}");
+    }
+    let rules = CveRules::for_release(Release::Wrynose);
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let mut files = 0;
+    for i in v["package"][0]["issue"].as_array().unwrap() {
+        for f in i["patch-file"].as_array().into_iter().flatten() {
+            let f = f.as_str().unwrap();
+            assert_eq!(
+                cve::cve_from_filename(f, rules).as_deref(),
+                i["id"].as_str(),
+                "{f}"
+            );
+            files += 1;
+        }
+    }
+    assert_eq!(files, 25);
+    assert_eq!(v["package"][0]["cpes"].as_array().unwrap().len(), 6);
+}

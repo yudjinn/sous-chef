@@ -1715,8 +1715,25 @@ What `recipe show=cve` reproduces (x4). Read in OE-core Wrynose `33a6bd6c`
 (`meta/lib/oe/cve_check.py`, `meta/classes/vex.bbclass`, `meta/conf/cve-check-map.conf`,
 `meta/lib/oe/patch.py`), and with `git show` on the `scarthgap` and `kirkstone` branch
 tips (`meta/classes/cve-check.bbclass`, `meta/lib/oe/cve_check.py`), and the `nanbield` /
-`mickledore` tips for when `CVE_STATUS` appeared. Never checked against a build: the live
-build directory has no CVE output.
+`mickledore` tips for when `CVE_STATUS` appeared. **Checked against a real report**
+(y1-build, 2026-11-18; `tests/fixtures/outputs/live/y1-build/cve/`): `inherit vex` in a
+`curl_%.bbappend` (the class is in `classes/`, so a recipe may inherit it; it touches
+curl only, not the other recipes' signatures) and `bitbake -c generate_vex curl` (one
+task, no dependencies, no network: `do_generate_vex` reads only the metadata and the
+patches) wrote `tmp/deploy/cve/curl_cve.json` and the same file in `tmp/log/cve/` with
+`cve-summary-index.txt` naming it. Its package has `name`, `layer` (`meta`), `version`,
+`products` (`[{"product": "curl", "cvesInRecord": "No"}, {"product": "libcurl", ...}]`, the
+product part of each `CVE_PRODUCT` word, de-duplicated), `cpes` (six
+`cpe:2.3:*:<vendor>:<product>:8.19.0:*:*:*:*:*:*:*`) and 28 issues: 21 `Patched` with
+`detail` `fix-file-included` and `patch-file` (a list of absolute paths, two for a CVE
+fixed by two patches), 7 `Ignored` from `CVE_STATUS` (`detail` and `description`); no
+NVD fields. The ids, statuses and details are what the rules below give for the recipe
+(`recipe show=cve` matched all 28). The `BuildCompleted` handlers of the class
+(`vex_save_summary_handler`, `vex_cleanup`) did not run when only a recipe inherits it: no
+`cve-summary.json` was written and the index file was left behind. `sbom-cve-check` was not
+tried: it needs `python3-sbom-cve-check-native` built and its database recipes'
+`do_patch` (`SBOM_CVE_CHECK_UPDATE_DB_DEPENDENCIES`, fetched CVE lists), so other
+recipes and the network.
 
 - **Classes.** Kirkstone and Scarthgap have `cve-check.bbclass` (`do_cve_check`, needs the
   NVD database from `cve-update-nvd2-native`, network); Scarthgap and Wrynose have
