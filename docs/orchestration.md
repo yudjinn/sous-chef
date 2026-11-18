@@ -682,3 +682,57 @@ Still open:
 - Carried forward unchanged: hook events not captured live for Bash and Edit; the `.inc`
   split's static safety check; kas defaults applied before `bitbake.conf`; T8.4 (release
   diff) not built; no license file, no remote, CI never run.
+
+## Rounds 7 to 12 (closed)
+
+Merged on `worktree-w2-integration` after the "After wave 5" notes, one or two agents per
+round, gate after every merge, live tests (no BitBake) after every round:
+
+- **w7**: `w7-diff` (T8.4 release diff: the `diff` tool and CLI) and `w7-fix` (`addpylib`
+  statement kind, inherit context for `classes/`, shared git helper, typed `BBLAYERS`
+  order checks, `BBFILES_DYNAMIC` through includes, two flaky tests made reliable). One
+  integration fix: the diff's exhaustive match needed the `AddPyLib` arm.
+- **w8**: `w8-tools` (diff on the shared git helper, old-revision `BBFILES`, typed appends
+  rows, `search` kinds, process-group termination waits, stale job outputs, `KAS_*`
+  overrides, every kas *verify* item settled from the kas source) and `w8-eval` (the
+  `.inc` split evaluates its result through an in-memory overlay, task `depends`
+  rewrite, kas defaults at `local.conf`, three-way skip and license notes, per-machine
+  `BBMASK`). One integration fix: `kas_origin` uses `setting_source`.
+- **w9**: `w9-final` (`.inc` inherit context in the index, shared statement rows, stale
+  job outputs swept at server start, documentation pass).
+- **w10**: `w10-server` (MCP progress notifications, `[handles]` retention, the job queue
+  behind a read-only job) and `w10-eval` (class-extended variants evaluated,
+  `PREFERRED_PROVIDERS`, `BBMASK` recomputed from its inputs).
+- **w11**: `w11-final` (per-file lint progress, `features_check` and the preferred-provider
+  skip, native variants through `PROVIDES`, the class-extension order on Scarthgap 5.0 to
+  5.0.10, Styhead and Walnascar corrected).
+- **w12**: `w12-final` (kas work directory independent of the current directory, which
+  removed 3 false `org/generated-conf-edit` warnings; `nativesdk` and multilib `PROVIDES`;
+  `features_check` decides only on certain words).
+
+State at close: 1,050 tests pass (25 ignored, all live or timing tests); the 17 live tests
+pass against yocto-kiss. Differential: 1,090 values compared over 25 targets, 702 equal,
+357 flagged, 31 documented gap, 0 unflagged differences. Lint on yocto-kiss: 1 finding
+(true) by default, 625 with `--all`, 0 errors. Skip checks agree with BitBake on 21 of 24
+`show-appends` verdicts; no "would skip" names a recipe BitBake parsed.
+
+Why the rounds stopped: what remains is either a refinement of answers that are already
+flagged as uncertain, or needs something only the user can provide.
+
+Left open, refinements (no wrong answer today; each is flagged as uncertain):
+- multilib variants listed only by a recipe's own `BBCLASSEXTEND` are found by name only;
+  OE-core's python-computed `MULTILIB_VARIANTS` leaves some multilib `PROVIDES` words
+  flagged; `features_check` cannot give a certain pass on a flagged value even when only a
+  `:remove` is uncertain;
+- the three BitBake skips the notes cannot decide have a non-static `COMPATIBLE_MACHINE`
+  (python is never run, by design).
+
+Left open, needs the user:
+- a license for the repository, and a git remote (which is also what lets CI run: the
+  workflow has never run);
+- Bash and Edit hook events captured from a live Claude Code session (Grep and Read were;
+  the one attempt for the others was refused by the permission system);
+- a Scarthgap workspace and a multilib configuration to check those code paths against a
+  real BitBake;
+- anything that needs BitBake to compile or to report its parse log (the user's rule: no
+  large builds).
