@@ -235,6 +235,48 @@ bash = false       # the BitBake output digest
 edit = false       # the reindex and lint after an edit
 ```
 
+## Token savings
+
+sous-chef answers with pointers and short tables instead of file contents. The sizes
+below were measured on a real workspace (bootlin/yocto-kiss on Wrynose, OE-core and
+meta-arm; see `docs/live-environment.md`), each sous-chef answer against what an agent would
+otherwise read to answer the same question. Tokens are estimated at 4 bytes each.
+
+| Question | Without sous-chef | With sous-chef | Reduction |
+|---|---|---|---|
+| Where does `curl`'s `SRC_URI` come from? | The recipe and the classes and includes it pulls in: 127 KB, ~32k tokens; or `bitbake -e curl`: 1.9 MB, ~470k tokens | `var SRC_URI recipe=curl`: 3.7 KB, ~900 tokens | ~35× against the files, ~500× against `bitbake -e` |
+| What is `curl` (versions, appends, key values)? | `curl_8.19.0.bb`: 9.4 KB, ~2.4k tokens | `recipe curl`: 1.5 KB, ~370 tokens | ~6× |
+| What does `curl` pull in? | The same 127 KB of files | `recipe curl show=tree`: 1.4 KB | ~90× |
+| Why did a task fail? | A real `log.do_fetch`: 48 KB, ~12k tokens | the `log` digest: 523 bytes, ~130 tokens | ~90× |
+| Large BitBake output run through Bash | Console output of a small failed fetch: 5.6 KB | the Bash hook's digest: 716 bytes, full text kept under a handle | ~8× (more for real builds) |
+| Where is `PACKAGECONFIG[gnutls]` set? | `grep -rn`: about the same size | `search`: 1.2 KB for 8 hits | none |
+
+What to take from it:
+
+- The savings are largest where BitBake combines files: final values and where they come
+  from, recipe trees, task composition, build failures. Without sous-chef an agent reads
+  many files or runs `bitbake -e`, whose output is too large to read.
+- A search answer is about the size of grep's; the gain there is that each hit names the
+  item it is in, which saves follow-up reads.
+- The hooks add a few hundred bytes of context to each annotated Grep or Read.
+- Every answer is capped (8 KB, about 600 tokens by default); larger output goes under a
+  handle that is read with `slice`, so one answer cannot flood the context.
+- These are per-question measurements. The effect on a whole task depends on how an agent
+  uses the tools and has not been measured; doing so needs the same tasks run in Claude Code
+  with and without the plugin.
+
+To measure your own workspace, `scripts/measure-tokens.py` calls the tools over stdio and
+prints each answer's size (it runs no BitBake and writes only an index cache):
+
+```sh
+scripts/measure-tokens.py --config sous-chef.toml --sizes-only \
+    var '{"name":"SRC_URI","recipe":"curl"}' \
+    recipe '{"name":"curl","show":"tree"}'
+```
+
+Compare each size with `wc -c` of the files the same question needs (the recipe and the
+files `recipe show=tree` lists, or a task log under `${T}`).
+
 ## Limits
 
 - **Static.** The index, `recipe`, `var`, `overrides`, `deps`, `lint` and `scaffold` read the
