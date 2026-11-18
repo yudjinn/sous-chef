@@ -353,3 +353,100 @@ async fn a_configured_init_build_env_uses_the_setup_wrapper() {
         "{out:?}"
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// y3-leftovers, item 7: cancel through `kas shell`, and the server's TMPDIR.
+
+/// A cancel of a kas-mode job interrupts BitBake through `kas shell` as Ctrl-C twice does.
+/// The fake kas stays the parent and defers SIGINT and SIGTERM as kas 5.5 does (its asyncio
+/// handlers do not run while `subprocess.call` waits), so the interrupts reach BitBake
+/// only through the job's process group; the fake BitBake behaves as knotty (stops after
+/// the second SIGINT, ignores SIGTERM). Live (y3-leftovers) a kas-mode `bitbake curl`
+/// stopped this way in 3.4 s.
+#[tokio::test]
+async fn a_cancel_reaches_bitbake_through_kas_shell() {
+    use sous_chef::bitbake::{JobSpec, JobState, JobTable, Started};
+    use sous_chef::handles::HandleKind;
+    let p = Project::after();
+    let env = kas_env(&p);
+    let pidfile = p.path("pids");
+    fs::write(
+        p.path("fakekas.env"),
+        format!(
+            "export FAKEKAS_AS_KAS=1\nexport FAKEBB_ON_INT=1\nexport FAKEBB_PIDFILE={}\n",
+            pidfile.display()
+        ),
+    )
+    .unwrap();
+    let jobs = JobTable::new();
+    let out_dir = p.path("jobs");
+    let spec = JobSpec {
+        op: "build".into(),
+        target: Some("app".into()),
+        program: "bitbake".into(),
+        args: vec!["app".into()],
+        kind: HandleKind::Build,
+    };
+    let job = match jobs.start(&env, spec, &out_dir).unwrap() {
+        Started::Started(j) => j,
+        other => panic!("{other:?}"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !pidfile.exists() {
+        assert!(Instant::now() < deadline, "the fake BitBake never started");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let bitbake_pid = fs::read_to_string(&pidfile).unwrap();
+    let started = Instant::now();
+    jobs.cancel(&job.id).unwrap();
+    let done = jobs.wait(&job.id, Duration::from_secs(30)).await.unwrap();
+    assert_eq!(done.state, JobState::Cancelled, "{done:?}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(dead(bitbake_pid.trim()), "the fake BitBake survived");
+    let output = fs::read_to_string(&done.output).unwrap();
+    for want in [
+        "Keyboard Interrupt, closing down...",
+        "Second Keyboard Interrupt, stopping...",
+        "fakebb: build stopped",
+        // kas waited for its shell, and its own handling came only after.
+        "fakekas: shell returned 1",
+    ] {
+        assert!(output.contains(want), "{want:?} not in:\n{output}");
+    }
+    assert!(
+        output.find("fakebb: build stopped").unwrap()
+            < output.find("fakekas: shell returned").unwrap(),
+        "{output}"
+    );
+}
+
+/// kas copies `TMPDIR` from its environment into BitBake's and adds it to
+/// `BB_ENV_PASSTHROUGH_ADDITIONS` (kas 5.5 `libkas.py` `get_build_environ`), so the
+/// server's own temporary directory would become BitBake's `TMPDIR` (seen live in
+/// y3-leftovers). kas mode removes it from kas's environment; the other modes leave the
+/// environment alone (OE-core's passthrough list does not have `TMPDIR`).
+#[test]
+fn kas_mode_does_not_hand_the_servers_tmpdir_to_kas() {
+    use sous_chef::bitbake::env::KAS_DROPPED_ENV;
+    assert_eq!(KAS_DROPPED_ENV, ["TMPDIR"]);
+    let p = Project::after();
+    let cmd = kas_env(&p).command("bitbake", &["curl"]).unwrap();
+    let envs: Vec<(String, Option<String>)> = cmd
+        .as_std()
+        .get_envs()
+        .map(|(k, v)| {
+            (
+                k.to_string_lossy().into_owned(),
+                v.map(|v| v.to_string_lossy().into_owned()),
+            )
+        })
+        .collect();
+    assert!(envs.contains(&("TMPDIR".to_string(), None)), "{envs:?}");
+    let plain = BbEnv {
+        build_dir: p.path("build"),
+        init_script: None,
+        kas: None,
+    };
+    let cmd = plain.command("bitbake", &["curl"]).unwrap();
+    assert!(cmd.as_std().get_envs().next().is_none());
+}
