@@ -30,4 +30,4 @@ patch	CVE-2025-44444	by name and header; Upstream-Status: Backport [https://exam
 note: what the metadata declares (CVE_PRODUCT, CVE_STATUS, CVE_CHECK_IGNORE, patches in SRC_URI), read as OE-core's CVE check reads it; this is not a scan against the NVD, and nothing was run
 note: CVE rules of wrynose: CVE_STATUS with CVE_CHECK_STATUSMAP and CVE_STATUS_GROUPS; patch headers: every id on lines starting with CVE:
 note: 5 patches in SRC_URI scanned (file name and header); patches without a CVE id are not listed (see show=sources)
-note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)

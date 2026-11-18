@@ -987,6 +987,34 @@ Then for each recipe, on top of a copy of the configuration:
 6. each matching `.bbappend`, in layer priority order
 7. deferred inherits, anonymous python (not evaluated by us), then finalisation
 
+### Three parse details (checked in x7)
+
+Verified in BitBake on the yocto-kiss checkout (Wrynose, `bitbake/lib/bb/parse/`):
+
+- **`EXPORT_FUNCTIONS` copies the `python` flag when its line is evaluated.**
+  `ast.ExportFuncsNode.eval` runs, like every statement, in parse order; for each name `f`
+  it copies the `func` and `python` flags of `<class>_f` to `f` (`for flag in ["func",
+  "python"]: if data.getVarFlag(calledfunc, flag, False): data.setVarFlag(func, ...)`) and
+  writes the stub `bb.build.exec_func('<class>_f', d)` if `<class>_f` is python, else a
+  shell call. So `<class>_f` must be defined before the `EXPORT_FUNCTIONS` line, or the
+  stub of a python function is written as a shell call (`org/class-export-functions`'s fix
+  puts the line after the function). A recipe's own `f` is kept: the node skips a name whose
+  value is set and is not its own stub (`if basevar and sentinel not in basevar: continue`).
+- **`include` and `require` differ only when the file is missing.** `ast.IncludeNode.eval`
+  calls `ConfHandler.include` with `error_out` `"include required"` for `require` and `False`
+  for `include`; `include_single_file` resolves and parses the file the same way for both
+  and looks at `error_out` only when parsing raises `ENOENT` ("Could not include required
+  file ..."; `include` logs at debug level and goes on). A found file is read identically.
+- **Under `:=`, `PN` comes from `FILE`, which is the file being parsed.** OE-core's
+  `bitbake.conf:243` sets `PN = "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[0]
+  or 'defaultpkgname'}"`. `BBHandler.handle` sets `FILE` to the file it evaluates (also an
+  included `.inc`, not a `.bbclass`) and restores the old value afterwards; bbappends are
+  parsed by `ast.py` with `BBHandler.handle(append, d, True)` after the recipe. An immediate
+  expansion (`:=`) therefore sees `PN` from the bbappend's name inside a bbappend
+  (`foo_%.bbappend` gives `foo`) and `defaultpkgname` inside an `.inc` (`vars_from_file`
+  returns nothing for a name not ending in `.bb` / `.bbappend`); a lazy `=` sees the
+  recipe's.
+
 ### Replay
 
 Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigurationFiles`,

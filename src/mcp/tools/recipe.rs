@@ -804,7 +804,7 @@ fn summary(
     let machine = ds.value("MACHINE").map(|v| v.text).unwrap_or_default();
     let distro = ds.value("DISTRO").map(|v| v.text).unwrap_or_default();
     t.note(&format!(
-        "note: key values are evaluated for MACHINE={machine} DISTRO={distro} (static replay of the configuration, classes, recipe and bbappends; python not run); use var for the full history"
+        "note: key values are evaluated for MACHINE={machine} DISTRO={distro} (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated); use var for the full history"
     ));
     // (`run` adds the not-collected note for every static view itself.)
     for n in ds
@@ -951,7 +951,7 @@ mod views {
         let machine = ds.value("MACHINE").map(|v| v.text).unwrap_or_default();
         let distro = ds.value("DISTRO").map(|v| v.text).unwrap_or_default();
         t.note(&format!(
-            "note: evaluated for MACHINE={machine} DISTRO={distro} (static replay of the configuration, classes, recipe and bbappends; python not run)"
+            "note: evaluated for MACHINE={machine} DISTRO={distro} (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)"
         ));
         let notes = ds.replay();
         for n in &notes.target_notes {

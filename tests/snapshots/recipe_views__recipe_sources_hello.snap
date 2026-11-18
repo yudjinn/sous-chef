@@ -10,4 +10,4 @@ file://mine.patch	file (patch)	active	meta-mine:recipes-core/hello/hello/mine.pa
 file://boardx.cfg	file	inactive (override boardx not active)	meta-vendor:recipes-core/hello/hello/boardx.cfg	-	meta-vendor:recipes-core/hello/hello_%.bbappend:5
 note: FILESPATH is built by OE-Core's base_set_filespath (python), which is not run; the search order is reconstructed: FILESEXTRAPATHS, then the recipe's ${BP}, ${BPN} and files directories, each tried with every FILESOVERRIDES entry (last first; 0 entries) and then without
 note: FILESOVERRIDES is empty or not set, so no override subdirectory is searched; ":" + "" splits into two empty overrides, so each directory is searched twice, as in OE-Core
-note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)

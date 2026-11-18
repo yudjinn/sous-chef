@@ -286,7 +286,7 @@ do_install	-	do_compile	meta-core:classes-recipe/autotoolsish.bbclass:30 -> auto
 do_build	noexec	do_install	-	meta-core:classes/base.bbclass:51
 note: order from the addtask / deltask statements in parse order (the index: configuration classes, recipe, includes and classes, bbappends, deferred inherits; the replay does not run them); dependencies first
 note: not accounted for: tasks added or deleted by anonymous python (bb.build.addtask / deltask), do_x[deps] set directly, and dependencies on other recipes' tasks ([depends], [deptask], [rdeptask], [recrdeptask])
-note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)
 ```
 
 `packages` of `libfoo`:
@@ -301,7 +301,7 @@ libfoo-doc	FILES	/usr/share/doc	meta-core:conf/bitbake.conf:29
 libfoo	FILES	/usr/bin/* /usr/sbin/* /usr/lib/lib*.so.*	meta-core:conf/bitbake.conf:27
 note: values of the evaluated datastore (PACKAGES and FILES defaults come from bitbake.conf); RDEPENDS and RPROVIDES rows only where set
 note: not included: what OE-Core adds while packaging (do_package: shared-library and pkg-config dependencies, packages split by python such as do_split_packages) and the RDEPENDS:${PN} that base.bbclass adds for PACKAGECONFIG with anonymous python (see deps kind=runtime)
-note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run)
+note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)
 ```
 
 ```
@@ -317,7 +317,7 @@ SUMMARY	GNU Hello stand-in	meta-core:recipes-core/hello/hello.inc:1
 LICENSE	MIT	meta-core:recipes-core/hello/hello.inc:5
 SRC_URI	4 entries from 4 applied operations; 1 inactive operation (override not active)	-
 DEPENDS	3 entries from 2 applied operations	-
-note: key values are evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; python not run); use var for the full history
+note: key values are evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated); use var for the full history
 ```
 
 ### `var`
