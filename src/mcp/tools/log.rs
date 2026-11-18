@@ -5,7 +5,8 @@
 //! digest from [`crate::bitbake::logs`]. Every file is read through `Workspace::confine`.
 //!
 //! `job=<id>` digests a finished `bitbake` job: the failing task's log named in the job's
-//! output, else the output itself (stored under the job's handle).
+//! output, else the output itself (stored under the job's handle). A cancelled job whose
+//! output names no failed task is described instead ([`cancelled_report`]).
 //!
 //! The mapping of the failing function to the metadata ([`read_run_file`],
 //! [`place_stub_function`]) is shared with the Bash hook (`hook::bash`).
@@ -16,13 +17,14 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::bitbake::jobs::{self, JobInfo};
 use crate::bitbake::logs::{self, DigestInput};
 use crate::bitbake::{BbEnv, JobState};
 use crate::error::{Error, Result};
 use crate::handles::{Handle, HandleKind};
 use crate::index::Index;
 use crate::mcp::Ctx;
-use crate::render::{DEFAULT_BUDGET_TOKENS, Format};
+use crate::render::{self, DEFAULT_BUDGET_TOKENS, Format, Table};
 use crate::workspace::Workspace;
 
 /// How many candidate logs are read when looking for the most recent failure.
@@ -62,6 +64,9 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
                 JobLog::Task(p, out) => {
                     console = Some(out);
                     p
+                }
+                JobLog::Cancelled { job, text } => {
+                    return Ok(cancelled_report(ctx, &job, &text, &args, notes));
                 }
                 JobLog::Console { text, handle } => {
                     let digest = Digesting {
@@ -306,6 +311,9 @@ enum JobLog {
         text: String,
         handle: Option<Handle>,
     },
+    /// A job stopped by `bitbake op=cancel` whose output names no failed task: what
+    /// happened is the cancel, not an error ([`cancelled_report`]).
+    Cancelled { job: Box<JobInfo>, text: String },
 }
 
 /// The log of a finished job: the first failed task's log (`ERROR: Task (...) failed`
@@ -355,6 +363,12 @@ fn locate_job(
     {
         return Ok(JobLog::Task(p.clone(), out));
     }
+    if job.state == JobState::Cancelled && candidates.is_empty() {
+        return Ok(JobLog::Cancelled {
+            job: Box::new(job),
+            text: out,
+        });
+    }
     match candidates.first() {
         Some(p) => notes.push(format!(
             "note: the task log {} is not readable; digest of the {} output",
@@ -371,6 +385,103 @@ fn locate_job(
         text: out,
         handle: job.handle,
     })
+}
+
+/// What `log job=` says about a cancelled job: there is no error to digest, so it says
+/// that the job was cancelled, by the `bitbake` tool's `op=cancel` (the only way a job
+/// becomes `cancelled`, `JobTable::cancel`), when, what BitBake printed about the
+/// interrupt, the tasks that were running ([`logs::interruption`]), and the task log of
+/// the last of them when one was written while the job ran.
+fn cancelled_report(
+    ctx: &Ctx,
+    job: &JobInfo,
+    text: &str,
+    args: &Args,
+    notes: Vec<String>,
+) -> String {
+    let mut t = Table::new(&["field", "value"]);
+    let what = match &job.target {
+        Some(target) => format!("{} ({} {target})", job.id, job.op),
+        None => format!("{} ({})", job.id, job.op),
+    };
+    t.row(&["job", &what]);
+    t.row(&["command", &render::snippet(&job.command)]);
+    let when = match job.ended {
+        Some(end) => format!(
+            " at {} UTC, {}s after it started",
+            jobs::utc_time(end),
+            job.elapsed_secs
+        ),
+        None => String::new(),
+    };
+    t.row(&[
+        "state",
+        &format!("cancelled by the bitbake tool (op=cancel){when}: not a failure"),
+    ]);
+    let stop = logs::interruption(text);
+    if !stop.lines.is_empty() {
+        t.row(&["bitbake", &render::snippet(&stop.lines.join(" / "))]);
+    }
+    for r in &stop.running {
+        let n = r
+            .number
+            .as_deref()
+            .map(|n| format!(" (task {n})"))
+            .unwrap_or_default();
+        t.row(&["running", &format!("{} {}{n}", r.pf, r.task)]);
+    }
+    let started = job.started;
+    let last_log = stop.running.last().and_then(|r| {
+        let build_dir = ctx.workspace.build_dir.as_ref()?;
+        let found = logs::find_task_logs(build_dir, Some(&r.pn), Some(&r.task));
+        let log = found.into_iter().find(|p| {
+            fs::metadata(p)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .is_some_and(|m| m.as_secs() + 1 >= started)
+        })?;
+        Some((r, log))
+    });
+    match (&last_log, stop.running.last()) {
+        (Some((r, log)), _) => {
+            let shown = logs::display_path(Some(&ctx.workspace), log);
+            t.row(&["log", &render::snippet(&shown)]);
+            t.note(&format!(
+                "note: that log is the interrupted {} of {}, written up to the cancel; log recipe={} task={} digests it",
+                r.task,
+                r.pf,
+                r.pn,
+                r.task.trim_start_matches("do_")
+            ));
+        }
+        (None, Some(r)) => t.note(&format!(
+            "note: no log of {} {} written since the job started was found in the build directory",
+            r.pf, r.task
+        )),
+        (None, None) => t.note("note: no task was running when it was cancelled (none started and not ended in its output)"),
+    }
+    let (shown, total) = logs::console_warnings(text);
+    for w in logs::warning_rows(&shown, total, job.handle.as_ref()) {
+        t.row(&["warning", &render::snippet(&w)]);
+    }
+    if let Some(h) = &job.handle {
+        t.row(&["handle", &h.0]);
+    }
+    for n in &notes {
+        t.note(n);
+    }
+    if let Some(h) = &job.handle {
+        t.note(&format!("slice handle={h} grep=RE | lines=A-B"));
+    }
+    let budget = match args
+        .budget_tokens
+        .unwrap_or(ctx.config.output.budget_tokens)
+    {
+        0 => DEFAULT_BUDGET_TOKENS,
+        n => n,
+    };
+    t.render_as(args.format.unwrap_or_default(), budget)
 }
 
 /// Finds the log to digest. Order:

@@ -562,6 +562,50 @@ fn sample_y3(name: &str) -> String {
     .unwrap()
 }
 
+/// The three real cancelled builds: interrupted twice (y1-build, init-script mode; and
+/// y3-leftovers through `kas shell`), and killed with SIGTERM (y1-build, before the fix).
+/// Each was in `do_configure` of curl, task 909 of 919.
+#[test]
+fn real_cancelled_builds_name_the_running_task_and_the_interrupt() {
+    for (text, interrupted) in [
+        (sample("bitbake/job-build-curl-cancel-sigint.out"), true),
+        (sample_y3("job-kas-build-curl-cancel.out"), true),
+        (sample("bitbake/job-build-curl-cancel-sigterm.out"), false),
+    ] {
+        let stop = logs::interruption(&text);
+        assert_eq!(stop.running.len(), 1, "{:?}", stop.running);
+        let r = &stop.running[0];
+        assert_eq!(
+            (
+                r.pf.as_str(),
+                r.pn.as_str(),
+                r.task.as_str(),
+                r.number.as_deref()
+            ),
+            ("curl-8.19.0-r0", "curl", "do_configure", Some("909 of 919"))
+        );
+        if interrupted {
+            assert_eq!(
+                stop.lines,
+                [
+                    "Keyboard Interrupt, closing down...",
+                    "Second Keyboard Interrupt, stopping...",
+                    "NOTE: Sending SIGTERM to remaining 1 tasks",
+                    "Execution was interrupted, returning a non-zero exit code."
+                ]
+            );
+        } else {
+            assert!(stop.lines.is_empty());
+        }
+    }
+    // A finished build has no running task.
+    assert!(
+        logs::interruption(&sample("bitbake/job-build-curl.out"))
+            .running
+            .is_empty()
+    );
+}
+
 /// The warnings of the real finished builds: one (uninative) in a rebuild, three in the
 /// first build; the interrupted build adds knotty's `Exiting due to interrupt`.
 #[test]

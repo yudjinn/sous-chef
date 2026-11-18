@@ -7,6 +7,8 @@
 #   FAKEBB_PIDFILE      file that receives "<own pid> <sleep pid>" once sleeping
 #   FAKEBB_IGNORE_TERM  1: ignore SIGTERM (it, and the sleep child, then need SIGKILL)
 #   FAKEBB_ON_INT       1: run until the second SIGINT, as knotty does, ignoring SIGTERM
+#   FAKEBB_ON_INT_OUTPUT  with FAKEBB_ON_INT: file printed after the second SIGINT, in
+#                       place of the fake's own interrupt lines (recorded real output)
 #   FAKEBB_EXIT         exit status (default 0)
 echo "fakebb: $(basename "$0")"
 echo "cwd: $PWD"
@@ -28,14 +30,22 @@ if [ "${FAKEBB_ON_INT-}" = 1 ]; then
     trap '' TERM
     n=0
     stop=
-    trap 'n=$((n + 1)); if [ "$n" = 1 ]; then echo "Keyboard Interrupt, closing down..."; else echo "Second Keyboard Interrupt, stopping..."; stop=1; fi' INT
+    if [ -n "${FAKEBB_ON_INT_OUTPUT-}" ]; then
+        trap 'n=$((n + 1)); if [ "$n" -ge 2 ]; then stop=1; fi' INT
+    else
+        trap 'n=$((n + 1)); if [ "$n" = 1 ]; then echo "Keyboard Interrupt, closing down..."; else echo "Second Keyboard Interrupt, stopping..."; stop=1; fi' INT
+    fi
     if [ -n "${FAKEBB_PIDFILE-}" ]; then
         echo "$$" > "$FAKEBB_PIDFILE.tmp" && mv "$FAKEBB_PIDFILE.tmp" "$FAKEBB_PIDFILE"
     fi
     while [ -z "$stop" ]; do
         sleep 0.1
     done
-    echo "fakebb: build stopped"
+    if [ -n "${FAKEBB_ON_INT_OUTPUT-}" ]; then
+        cat "$FAKEBB_ON_INT_OUTPUT"
+    else
+        echo "fakebb: build stopped"
+    fi
     exit 1
 fi
 if [ -n "${FAKEBB_SLEEP-}" ]; then

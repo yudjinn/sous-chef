@@ -1066,7 +1066,7 @@ fn pointer_or_path(ws: Option<&Workspace>, file: &Path, line: u32) -> String {
 }
 
 /// A log path relative to the build directory when inside it.
-fn display_path(ws: Option<&Workspace>, p: &Path) -> String {
+pub fn display_path(ws: Option<&Workspace>, p: &Path) -> String {
     ws.and_then(|w| w.build_dir.as_ref())
         .and_then(|b| p.strip_prefix(b).ok())
         .map(|r| format!("{BUILD_LAYER}:{}", r.display()))
@@ -1430,6 +1430,90 @@ pub fn is_warning_summary(line: &str) -> bool {
     let l = line.trim();
     l.starts_with("Summary: There w") && l.ends_with("WARNING message.")
         || l.starts_with("Summary: There w") && l.ends_with("WARNING messages.")
+}
+
+/// A task that had started and not ended when the console stopped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RunningTask {
+    /// `PF`, from `NOTE: recipe <PF>: task do_<task>: Started`.
+    pub pf: String,
+    /// `PN`: from the recipe file of the matching `NOTE: Running task` line, else `PF`
+    /// without its last two `-` fields.
+    pub pn: String,
+    /// `do_<task>` (a setscene task keeps its `_setscene` suffix).
+    pub task: String,
+    /// `<n> of <m>` from the `NOTE: Running task <n> of <m> (<file>:<task>)` line.
+    pub number: Option<String>,
+}
+
+/// How a build that was interrupted ended, from its console output (`bb.ui.knotty`,
+/// docs/bitbake-semantics.md "Running BitBake").
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Interruption {
+    /// The tasks started and not reported as ended (`Succeeded` / `Failed`), last started
+    /// last.
+    pub running: Vec<RunningTask>,
+    /// knotty's lines about the interrupt, in order: `Keyboard Interrupt, closing
+    /// down...`, `Second Keyboard Interrupt, stopping...`, `NOTE: Sending SIGTERM to
+    /// remaining N tasks`, `Execution was interrupted, returning a non-zero exit code.`.
+    pub lines: Vec<String>,
+}
+
+/// The tasks running when the console output stops, and knotty's interrupt lines.
+pub fn interruption(output: &str) -> Interruption {
+    static RUNNING: LazyLock<Option<Regex>> = LazyLock::new(|| {
+        Regex::new(r"^NOTE: Running (?:setscene |noexec )?task (\d+ of \d+) \((.+):(do_[A-Za-z0-9_+.-]+)\)$")
+            .ok()
+    });
+    static STATE: LazyLock<Option<Regex>> = LazyLock::new(|| {
+        Regex::new(r"^NOTE: recipe (\S+): task (do_[A-Za-z0-9_+.-]+): (Started|Succeeded|Failed)$")
+            .ok()
+    });
+    let (Some(running_re), Some(state_re)) = (RUNNING.as_ref(), STATE.as_ref()) else {
+        return Interruption::default();
+    };
+    // (`<n> of <m>`, recipe file, task) of every `Running task` line, newest last.
+    let mut scheduled: Vec<(String, PathBuf, String)> = Vec::new();
+    let mut out = Interruption::default();
+    for raw in output.lines() {
+        let line = raw.trim_end_matches('\r').trim_end();
+        if let Some(c) = running_re.captures(line) {
+            scheduled.push((c[1].to_string(), PathBuf::from(&c[2]), c[3].to_string()));
+        } else if let Some(c) = state_re.captures(line) {
+            let (pf, task) = (c[1].to_string(), c[2].to_string());
+            if &c[3] == "Started" {
+                let found = scheduled.iter().rev().find(|(_, file, t)| {
+                    *t == task
+                        && pn_pv_from_file(file)
+                            .0
+                            .is_some_and(|pn| pf.starts_with(&format!("{pn}-")))
+                });
+                let pn = found
+                    .and_then(|(_, f, _)| pn_pv_from_file(f).0)
+                    .unwrap_or_else(|| pn_from_pf(&pf));
+                out.running.push(RunningTask {
+                    pf,
+                    pn,
+                    task,
+                    number: found.map(|(n, _, _)| n.clone()),
+                });
+            } else {
+                out.running.retain(|r| !(r.pf == pf && r.task == task));
+            }
+        } else if line == "Keyboard Interrupt, closing down..."
+            || line == "Second Keyboard Interrupt, stopping..."
+            || (line.starts_with("NOTE: Sending SIGTERM to remaining ") && line.ends_with("tasks"))
+            || line.starts_with("Execution was interrupted")
+        {
+            out.lines.push(line.to_string());
+        }
+    }
+    out
+}
+
+/// `PN` from `PF` (`${PN}-${EXTENDPE}${PV}-${PR}`): without its last two `-` fields.
+fn pn_from_pf(pf: &str) -> String {
+    pf.rsplitn(3, '-').nth(2).unwrap_or(pf).to_string()
 }
 
 /// `compile` or `do_compile` -> `do_compile`. Task and recipe names may hold only

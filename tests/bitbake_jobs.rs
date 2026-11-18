@@ -635,6 +635,95 @@ fn warning_rows_dedupe_and_cap() {
     ));
 }
 
+// --- log job= on a cancelled job (y3-leftovers, item 3) ---------------------------------
+
+/// A real kas-mode `bitbake curl` cancelled through the bitbake tool in `do_configure`
+/// (y3-leftovers): the fake replays its output up to `do_configure: Started`, waits for the
+/// two interrupts, then prints the rest as BitBake did. `log job=` says the job was
+/// cancelled, by whom and when, what BitBake printed, the task that was running and its
+/// log, which the interrupted task wrote.
+#[tokio::test]
+async fn log_job_on_a_cancelled_job_says_what_happened() {
+    let f = fixture();
+    let full = fs::read_to_string(live_y3(&f, "job-kas-build-curl-cancel.out")).unwrap();
+    let at = full
+        .find("NOTE: recipe curl-8.19.0-r0: task do_configure: Started\n")
+        .unwrap()
+        + "NOTE: recipe curl-8.19.0-r0: task do_configure: Started\n".len();
+    let (before, after) = (f.root.join("before.out"), f.root.join("after.out"));
+    fs::write(&before, &full[..at]).unwrap();
+    fs::write(&after, &full[at..]).unwrap();
+    let pidfile = f.root.join("fake.pids");
+    f.fake(&[
+        ("FAKEBB_OUTPUT", &before.display().to_string()),
+        ("FAKEBB_ON_INT", "1"),
+        ("FAKEBB_ON_INT_OUTPUT", &after.display().to_string()),
+        ("FAKEBB_PIDFILE", &pidfile.display().to_string()),
+    ]);
+    f.call(target(Op::Build, "curl")).await.unwrap();
+    wait_for_file(&pidfile).await;
+    // The interrupted task's log, written while the job runs.
+    let t = f
+        .build()
+        .join("tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp");
+    fs::create_dir_all(&t).unwrap();
+    let log = live_y3(&f, "log.do_configure.1910658.trimmed");
+    fs::rename(&log, t.join("log.do_configure.1910658")).unwrap();
+    let out = f.call(args(Op::Cancel)).await.unwrap();
+    assert!(out.contains("state\tcancelled\n"), "{out}");
+
+    let la = log::Args {
+        recipe: None,
+        task: None,
+        job: Some("job:1".into()),
+        budget_tokens: None,
+        format: None,
+    };
+    let out = log::run(&f.ctx, la.clone()).await.unwrap();
+    assert!(!out.contains("no error lines recognised"), "{out}");
+    let state = out
+        .lines()
+        .find_map(|l| l.strip_prefix("state\t"))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(
+        state.starts_with("cancelled by the bitbake tool (op=cancel) at 20"),
+        "{out}"
+    );
+    assert!(state.ends_with("after it started: not a failure"), "{out}");
+    assert!(out.contains("job\tjob:1 (build curl)\n"), "{out}");
+    assert!(
+        out.contains(
+            "bitbake\tKeyboard Interrupt, closing down... / Second Keyboard Interrupt, stopping..."
+        ),
+        "{out}"
+    );
+    assert!(
+        out.contains("running\tcurl-8.19.0-r0 do_configure (task 909 of 919)\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("log\tbuild:tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/log.do_configure.1910658\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("log recipe=curl task=configure digests it"),
+        "{out}"
+    );
+    assert!(
+        out.contains("warning\tWARNING: Exiting due to interrupt.\n"),
+        "{out}"
+    );
+    assert!(out.len() < 2048, "{}", out.len());
+
+    // Without the task's log (a job cancelled before any task wrote one).
+    fs::remove_file(t.join("log.do_configure.1910658")).unwrap();
+    let out = log::run(&f.ctx, la).await.unwrap();
+    assert!(
+        out.contains("note: no log of curl-8.19.0-r0 do_configure written since the job started"),
+        "{out}"
+    );
+}
+
 // --- running, status, cancel -----------------------------------------------------------
 
 #[tokio::test]
