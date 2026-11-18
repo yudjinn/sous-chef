@@ -642,8 +642,9 @@ release build, no BitBake or kas process started (outputs in
   compared, 701 equal (+1 after whitespace), 357 flagged, 31 known gap, 0 bug
   (differential.md, "After w11-final").
 - Lint on the kas build (`sous-chef lint --severity info`, run from the kas project
-  directory, because a kas project named in `sous-chef.toml` takes its work directory, where
-  remote repositories are checked out, from the working directory): default 1 finding in 13
+  directory, because in w11 a kas project named in `sous-chef.toml` took its work
+  directory, where remote repositories are checked out, from the working directory; since
+  w12 it does not, see lint-rules.md "On a real workspace"): default 1 finding in 13
   files; `--all` 625 findings in 1718 files (0 E, 166 W, 459 I), in 14.5 s: unchanged
   (lint-rules.md).
 - `SOUS_CHEF_LIVE=... cargo test --release --test live_verify --test audit --test

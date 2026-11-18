@@ -230,6 +230,10 @@ Notes:
   read (no unreadable include), the build directory is the kas build directory, and the
   directory has kas's `CACHEDIR.TAG` or the file has kas's own lines. A line left from a
   header entry that was since removed from the kas files is reported: it will be lost too.
+  A `BBLAYERS` entry is judged against the kas layers, whose remote repositories are in
+  the kas work directory; that directory comes from `KAS_WORK_DIR` or the kas build
+  directory's parent, not from where sous-chef runs, and when it can only be guessed (no
+  kas build directory) and the project has a remote repository, no entry is reported.
   The kas file named is the first project file with a header of that kind, else the last
   file on the command line.
 - **`layer-conf`.** The checks and their severities:
@@ -421,12 +425,18 @@ from a `.conf` or a global class).
 Re-measured for branch `w11-final` (2026-11-18, same command and configuration,
 `runs/w11-final/sous-chef-kas.toml`, run from the kas project directory `yocto-kiss/`, no
 BitBake run): default 1 finding in 13 files; `--all` 625 findings in 1718 files (0 E,
-166 W, 459 I) in 14.5 s, every rule's count as above. The working directory matters: with
-`kas` set in `sous-chef.toml` the kas work directory, where kas checks out the remote
-repositories, is the working directory (or `KAS_WORK_DIR`), so run from elsewhere
-`org/generated-conf-edit` reports the `BBLAYERS` entries of the remote repositories
-(`meta-arm`, `openembedded-core`) as "in no kas file" (3 warnings in the default run).
-Since w11 the `lint` tool and the audit's lint stage report MCP progress per file.
+166 W, 459 I) in 14.5 s, every rule's count as above. In w11 the working directory
+mattered: with `kas` set in `sous-chef.toml` the kas work directory, where kas checks out
+the remote repositories, was taken to be the working directory (or `KAS_WORK_DIR`), so run
+from elsewhere `org/generated-conf-edit` reported the `BBLAYERS` entries of the remote
+repositories (`meta-arm`, `openembedded-core`) as "in no kas file" (3 warnings). Fixed in
+w12: the kas work directory is `KAS_WORK_DIR`, else the parent of the build directory
+carrying kas's `CACHEDIR.TAG`, else the directory of sous-chef.toml (a guess, under which
+`BBLAYERS` entries are not judged), never the working directory alone
+(bitbake-semantics.md, "kas"). Re-measured for `w12-final` run from
+`runs/w12-final/` with `runs/w12-final/sous-chef-kas.toml`: `--rule
+org/generated-conf-edit build` 3 warnings before, 0 after; the default run 1 finding in 13
+files, as from the project directory. Since w11 the `lint` tool and the audit's lint stage report MCP progress per file.
 
 What the rules still get wrong there, as far as it was checked:
 

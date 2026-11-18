@@ -19,11 +19,18 @@
 //!    candidates nothing is guessed: the project has no files, [`KasSource::Ambiguous`] lists
 //!    them, and `status` says to set `kas` in `sous-chef.toml`.
 //!
-//! The kas work directory is `KAS_WORK_DIR`, else the build directory's parent (case 3),
-//! else the sous-chef working directory; the build directory is `build_dir` from the
-//! configuration, else `KAS_BUILD_DIR`, else `<work dir>/build`. The two variables count only
-//! when the sous-chef working directory is inside them or they are inside it, so a kas
-//! setting for another project does not turn an unrelated workspace into a kas project.
+//! kas's own work directory is `KAS_WORK_DIR`, else the directory kas is run from (kas 5.5
+//! `context.py`), which sous-chef cannot know; [`KasProject::work_dir_source`] records how
+//! it was decided. It is `KAS_WORK_DIR`; else the parent of a build directory kas set up
+//! (case 1: the configured build directory, `KAS_BUILD_DIR`, or `build/` next to
+//! sous-chef.toml or in the working directory; case 3: the build directory found); else
+//! (case 1) the directory of sous-chef.toml; else the sous-chef working directory. So with
+//! `kas` and a kas build directory configured, the answer does not depend on where
+//! sous-chef runs. The build directory is `build_dir` from the configuration, else
+//! `KAS_BUILD_DIR`, else `<work dir>/build`. The two variables count only when they are
+//! inside, or contain, the sous-chef working directory, the configured build directory or
+//! a configured kas file, so a kas setting for another project does not turn an unrelated
+//! workspace into a kas project.
 //!
 //! **Reading** follows kas's include handler: for each file, its lock file
 //! (`<stem>.lock.<ext>` next to it) first, then its `header.includes` depth first, then the
@@ -188,6 +195,8 @@ pub struct KasProject {
     pub root: PathBuf,
     /// kas's work directory (where it clones repositories and starts).
     pub work_dir: PathBuf,
+    /// How [`KasProject::work_dir`] was decided.
+    pub work_dir_source: WorkDirSource,
     /// kas's build directory.
     pub build_dir: PathBuf,
     /// Every file merged, in merge order (lock files and includes included).
@@ -220,6 +229,34 @@ pub struct KasProject {
     /// (its `repo_setup_loop` is not among the steps `-k` skips; docs/bitbake-semantics.md,
     /// "kas"), so sous-chef's kas mode is not used for such a project.
     pub repo_includes: Vec<String>,
+}
+
+/// How the kas work directory was decided ([`detect`]). kas's own rule (kas 5.5
+/// `context.py`): `KAS_WORK_DIR`, else the directory kas is run from. sous-chef cannot know
+/// the latter, so it takes it from what kas left on disk or from the configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum WorkDirSource {
+    /// `KAS_WORK_DIR`.
+    Env,
+    /// The parent of a build directory kas set up (kas's default build directory is
+    /// `<work dir>/build`).
+    BuildDirParent,
+    /// The directory holding `.config.yaml`, which kas reads from its work directory.
+    MenuConfig,
+    /// The directory of sous-chef.toml: a guess (no kas build directory was found).
+    ConfigFile,
+    /// sous-chef's working directory: a guess.
+    WorkingDir,
+    /// Passed to [`load`] by its caller.
+    Given,
+}
+
+impl WorkDirSource {
+    /// Whether the work directory is a guess, so the paths of the repositories kas clones
+    /// into it may be wrong.
+    pub fn is_guess(self) -> bool {
+        matches!(self, WorkDirSource::ConfigFile | WorkDirSource::WorkingDir)
+    }
 }
 
 /// The environment variables kas lets override the kas files' `machine`, `distro`,
@@ -549,9 +586,17 @@ pub fn has_kas_cachedir_tag(dir: &Path) -> bool {
 /// project. An error only for kas files named in `sous-chef.toml` that cannot be read.
 pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
     let sc_dir = lexical_abs(&cfg.work_dir);
+    // The variables count when they are related to what the configuration names, not only
+    // to the directory sous-chef happens to run in.
+    let anchors: Vec<PathBuf> = std::iter::once(sc_dir.clone())
+        .chain(cfg.build_dir.iter().map(|b| lexical_abs(b)))
+        .chain(cfg.kas.iter().map(|k| lexical_abs(k)))
+        .collect();
     let related = |p: &Path| {
         let p = lexical_abs(p);
-        sc_dir.starts_with(&p) || p.starts_with(&sc_dir)
+        anchors
+            .iter()
+            .any(|a| a.starts_with(&p) || p.starts_with(a))
     };
     let env_work = env.work_dir.as_deref().filter(|p| related(p));
     let env_build = env.build_dir.as_deref().filter(|p| related(p));
@@ -576,10 +621,36 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
                 });
             }
         }
-        let work = work_dir(&sc_dir);
+        // kas's work directory is where kas runs unless `KAS_WORK_DIR` says otherwise, and
+        // its build directory `<work dir>/build` unless `KAS_BUILD_DIR` says otherwise
+        // (kas 5.5 `context.py`). Where the user will run kas is unknown, so it is taken
+        // from the configuration, never from sous-chef's working directory alone:
+        // `KAS_WORK_DIR`, else the parent of a build directory kas set up (the configured
+        // one, `KAS_BUILD_DIR`, or `build/` next to sous-chef.toml or in the working
+        // directory), else the directory of sous-chef.toml, else the working directory.
+        let config_dir = cfg.config_dir.as_deref().map(lexical_abs);
+        let (work, from) = match env_work {
+            Some(w) => (lexical_abs(w), WorkDirSource::Env),
+            None => {
+                let kas_build = [
+                    cfg.build_dir.as_deref().map(lexical_abs),
+                    env_build.map(lexical_abs),
+                    config_dir.as_ref().map(|c| c.join("build")),
+                    Some(sc_dir.join("build")),
+                ]
+                .into_iter()
+                .flatten()
+                .find(|b| is_kas_build_dir(b));
+                match (kas_build.as_deref().and_then(Path::parent), config_dir) {
+                    (Some(p), _) => (p.to_path_buf(), WorkDirSource::BuildDirParent),
+                    (None, Some(c)) => (c, WorkDirSource::ConfigFile),
+                    (None, None) => (sc_dir.clone(), WorkDirSource::WorkingDir),
+                }
+            }
+        };
         let build = build_dir(&work);
         return Ok(Some(with_env(
-            load(&cfg.kas, KasSource::Config, &work, &build),
+            with_work_dir_source(load(&cfg.kas, KasSource::Config, &work, &build), from),
             env,
         )));
     }
@@ -588,8 +659,13 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
     let menu = work.join(MENU_CONFIG);
     if menu.is_file() {
         let build = build_dir(&work);
+        let from = if env_work.is_some() {
+            WorkDirSource::Env
+        } else {
+            WorkDirSource::MenuConfig
+        };
         return Ok(Some(with_env(
-            load(&[menu], KasSource::MenuConfig, &work, &build),
+            with_work_dir_source(load(&[menu], KasSource::MenuConfig, &work, &build), from),
             env,
         )));
     }
@@ -609,16 +685,19 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
     else {
         return Ok(None);
     };
-    let work = match (env_work, build.parent()) {
-        (Some(w), _) => lexical_abs(w),
-        (None, Some(p)) => p.to_path_buf(),
-        (None, None) => work,
+    let (work, from) = match (env_work, build.parent()) {
+        (Some(w), _) => (lexical_abs(w), WorkDirSource::Env),
+        (None, Some(p)) => (p.to_path_buf(), WorkDirSource::BuildDirParent),
+        (None, None) => (work, WorkDirSource::WorkingDir),
     };
     let found = candidate_files(&work);
     match found.as_slice() {
         [] => Ok(None),
         [one] => Ok(Some(with_env(
-            load(std::slice::from_ref(one), KasSource::Found, &work, &build),
+            with_work_dir_source(
+                load(std::slice::from_ref(one), KasSource::Found, &work, &build),
+                from,
+            ),
             env,
         ))),
         many => Ok(Some(KasProject {
@@ -628,6 +707,7 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
             },
             root: work.clone(),
             work_dir: work,
+            work_dir_source: from,
             build_dir: build,
             read: Vec::new(),
             lock_files: Vec::new(),
@@ -646,6 +726,12 @@ pub fn detect(cfg: &Config, env: &KasEnv) -> Result<Option<KasProject>> {
             repo_includes: Vec::new(),
         })),
     }
+}
+
+/// `project` with its work directory decided by `from`.
+fn with_work_dir_source(mut project: KasProject, from: WorkDirSource) -> KasProject {
+    project.work_dir_source = from;
+    project
 }
 
 /// `project` with the `KAS_*` overrides of `env`. They are not tied to a directory (kas
@@ -875,6 +961,7 @@ pub fn load(files: &[PathBuf], source: KasSource, work_dir: &Path, build_dir: &P
         source,
         root,
         work_dir,
+        work_dir_source: WorkDirSource::Given,
         build_dir: canonical_or(build_dir),
         lock_files: loader.locks,
         read: merge_order,

@@ -1765,7 +1765,19 @@ file name, the layer order. `src/workspace/kas.rs` implements what follows.
   `BUILDDIR` and `BBPATH` (the build directory), a minimal `PATH`, `PYTHONPATH`,
   `OE_ADDED_PATHS`, `BB_ENV_PASSTHROUGH_ADDITIONS`, and `HOME` to a temporary directory
   (observed). So sous-chef can only use `KAS_*` from the environment it was started in, and
-  only when that names a directory containing, or inside, its working directory.
+  only when that names a directory containing, or inside, its working directory, the
+  configured build directory or a configured kas file.
+- Read in kas 5.5 `context.py` (`Context.__init__`): `work_dir =
+  os.environ.get('KAS_WORK_DIR', os.getcwd())`, `build_dir =
+  os.environ.get('KAS_BUILD_DIR', os.path.join(work_dir, 'build'))`, both made absolute.
+  So the work directory is wherever the user runs kas, which sous-chef cannot know. What it
+  can see is what kas left: a build directory with kas's `CACHEDIR.TAG` (`# kas build
+  directory`) is `<work dir>/build` unless `KAS_BUILD_DIR` was used, so sous-chef takes
+  `KAS_WORK_DIR`, else the parent of such a build directory (the configured one,
+  `KAS_BUILD_DIR`, `build/` next to sous-chef.toml or in its working directory), else
+  the directory of sous-chef.toml (marked as a guess), else its working directory (a
+  guess). With a guessed work directory, where the remote repositories are cloned is a
+  guess too, and `org/generated-conf-edit` does not judge `BBLAYERS` entries (w12).
 - kas refuses to start when `NETRC_FILE` names a file that does not exist (observed).
 
 **Running a command** (`plugins/shell.py`). `kas shell <files> -c <cmd>` runs

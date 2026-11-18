@@ -970,8 +970,11 @@ next to a build directory kas generated; `KasSource { Config, MenuConfig, Found,
 }`), `load(files, source, work_dir, build_dir) -> KasProject` (lock files and includes
 merged as kas merges them; `repos`, `layers` in kas's `BBLAYERS` order, `machine`,
 `distro`, `target`, `task`, the two conf headers, `problems`, and `not_in_bblayers` /
-`not_in_kas` filled by discovery), `KasEnv { work_dir, build_dir }` (`KAS_WORK_DIR`,
-`KAS_BUILD_DIR`; `from_process`), `plan_add_layer(project, layer_root) -> LayerEdit {
+`not_in_kas` filled by discovery; `work_dir_source: WorkDirSource { Env, BuildDirParent,
+MenuConfig, ConfigFile, WorkingDir, Given }` with `is_guess()`, w12: the work directory
+comes from `KAS_WORK_DIR`, a kas build directory's parent or the directory of
+sous-chef.toml, `Config::config_dir`, before the working directory), `KasEnv { work_dir,
+build_dir }` (`KAS_WORK_DIR`, `KAS_BUILD_DIR`; `from_process`), `plan_add_layer(project, layer_root) -> LayerEdit {
 Modify { file, content }, Manual { lines, why } }` (one inserted line under the project's
 own repository, accepted only when the result still parses to the old content plus the new
 key), and the generated-file helpers `is_kas_build_dir`, `looks_generated_local_conf`,
@@ -1382,8 +1385,9 @@ max_age_days = 14                         # handles last stored longer ago are d
 In code (`src/config.rs`): `Config { build_dir, layers, writable_layers, init_script,
 release, kas, bitbake: BitbakeConfig { enabled, allow_destructive }, lint: LintConfig {
 disable, severity }, output: OutputConfig { budget_tokens }, hooks: HooksConfig { grep_read,
-bash, edit }, handles: HandlesConfig { max_total_mb, max_age_days }, work_dir }` (`work_dir`
-is not read from the file),
+bash, edit }, handles: HandlesConfig { max_total_mb, max_age_days }, work_dir, config_dir }`
+(`work_dir` and `config_dir`, the directory of the file read, w12, are not read from the
+file),
 `Config::load(&CliOverrides) -> Result<Config>`, `Config::from_toml(text, origin)`,
 `Config::validate(&Workspace)` (also checks that each `kas` file exists),
 `HooksConfig::enabled(key)`, `HandlesConfig::{retention, check}` (a `[handles]` value out

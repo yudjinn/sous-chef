@@ -20,7 +20,9 @@
 //! entries or one of kas's own lines (`MACHINE ??=` and the others with any value, since
 //! `KAS_MACHINE` and the like can change it). In `bblayers.conf` the `BBLAYERS ?=` list is
 //! kas's; an entry in it that expands (with `${TOPDIR}`) to no kas layer is reported on its
-//! line, and an entry still holding `${` after that is not. The message names the kas file
+//! line, and an entry still holding `${` after that is not; nor is any entry when the kas
+//! work directory (where kas clones the remote repositories) is a guess and the project
+//! has a remote repository ([`kas::WorkDirSource::is_guess`]). The message names the kas file
 //! to put the setting in: the first own file with such a header, else the last file on the
 //! command line.
 
@@ -100,7 +102,11 @@ impl Rule for OrgGeneratedConfEdit {
                 && var.flag.is_none()
                 && *op == AssignOp::Default
             {
-                self.check_bblayers(cx, k, build, st.span, text, &target, out);
+                // The repositories kas clones live in its work directory; when that is a
+                // guess, where their layers are is too, so their entries are not judged.
+                if !(k.work_dir_source.is_guess() && k.repos.iter().any(|r| !r.own)) {
+                    self.check_bblayers(cx, k, build, st.span, text, &target, out);
+                }
                 continue;
             }
             let from_kas = text.lines().all(|l| {
