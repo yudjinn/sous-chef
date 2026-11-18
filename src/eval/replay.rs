@@ -1950,6 +1950,9 @@ struct Replay<'a> {
     /// `(variable, value, origin)` kas would write into `local.conf` as `VAR ??= "value"`,
     /// still to be applied (a kas project without a build directory; see `config_pass`).
     kas_local: Vec<(String, String, String)>,
+    /// `native_virtclass_handler` set its `native_filter` on `PROVIDES`: `(pn, bpn, where)`
+    /// as the handler captured them (`bpn` `None` when not known statically).
+    native_provides: Option<(String, Option<String>, Loc)>,
 }
 
 impl<'a> Replay<'a> {
@@ -1975,6 +1978,7 @@ impl<'a> Replay<'a> {
             taint: Vec::new(),
             overlay: None,
             kas_local: Vec::new(),
+            native_provides: None,
         }
     }
 
@@ -3242,6 +3246,7 @@ impl Replay<'_> {
         if self.ws.release.release.has(Feature::RecipeVirtualProviders) {
             virtual_recipe_providers(&mut self.ds, recipe);
         }
+        self.apply_native_provides_filter();
         let mut skip = skip_reasons(&self.ds);
         skip.extend(self.features_check_notes());
         skip.extend(self.virtual_provider_notes());
@@ -3350,6 +3355,48 @@ impl Replay<'_> {
             .inherit_cache
             .iter()
             .any(|p| p.file_name().is_some_and(|f| f.to_string_lossy() == needle))
+    }
+
+    /// `native_virtclass_handler`'s `d.setVarFilter("PROVIDES", "native_filter(val, pn,
+    /// bpn)")`: BitBake applies the filter to the expanded value on every `getVar` (BitBake
+    /// 2.18.0 `data_smart.getVarFlag`, `bb.filter.apply_filters`, only for a non-empty
+    /// value), so the final `PROVIDES`, the one `bb.cache.CoreRecipeInfo` registers for the
+    /// variant, is `native_filter(<final expanded value>)`. Computed here when that value is
+    /// static and no anonymous python sets `PROVIDES` by name; then recorded as a handler
+    /// operation with a note. Otherwise `PROVIDES` is flagged, as before w11.
+    fn apply_native_provides_filter(&mut self) {
+        const NATIVE: &str = "native_virtclass_handler";
+        let Some((pn, bpn, loc)) = self.native_provides.take() else {
+            return;
+        };
+        let v = self.ds.value("PROVIDES").unwrap_or_default();
+        let by_python = self.ds.notes.python_vars.contains("PROVIDES");
+        let computed = if by_python || v.unevaluated_python || !v.unresolved.is_empty() {
+            None
+        } else {
+            match super::variant::native_filter(&v.text, &pn, bpn.as_deref()) {
+                None => return,
+                Some(Ok(t)) => Some(t),
+                Some(Err(())) => None,
+            }
+        };
+        match computed {
+            Some(t) => {
+                let note = format!(
+                    "note: {NATIVE} (an OE-core event handler at {loc}) filters PROVIDES with native_filter (OE-core lib/oe/classextend.py), which BitBake applies when the value is read: \"{}\" becomes \"{t}\" (computed from the static value)",
+                    v.text
+                );
+                self.ds
+                    .rewrite("PROVIDES", t, loc.clone(), OpKind::EventHandler);
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                notes
+                    .var_notes
+                    .entry("PROVIDES".into())
+                    .or_default()
+                    .push(note);
+            }
+            None => self.handler_flags(NATIVE, &loc, &strings(&["PROVIDES"]), "filters"),
+        }
     }
 
     /// The text of the anonymous python function defined in class `<class>.bbclass`.
@@ -3588,7 +3635,23 @@ impl Replay<'_> {
                     let ce = self.ds.value("BBCLASSEXTEND").unwrap_or_default();
                     let unsure = ce.unevaluated_python || !ce.unresolved.is_empty();
                     if ce.text.contains("native") || unsure || pn.is_none() {
-                        vars.extend(strings(NATIVE_FILTERED));
+                        // The PROVIDES filter is computed at the end of finalisation
+                        // ([`Replay::apply_native_provides_filter`]) when PN is known and
+                        // the filter certainly applies; otherwise flagged with the rest.
+                        let certain = !unsure && ce.text.contains("native");
+                        match (&pn, certain) {
+                            (Some(Some(p)), true) => {
+                                let bpn = static_value(&self.ds, "BPN").flatten();
+                                vars.extend(
+                                    NATIVE_FILTERED
+                                        .iter()
+                                        .filter(|v| **v != "PROVIDES")
+                                        .map(|v| v.to_string()),
+                                );
+                                self.native_provides = Some((p.clone(), bpn, loc.clone()));
+                            }
+                            _ => vars.extend(strings(NATIVE_FILTERED)),
+                        }
                     }
                     self.handler_flags(NATIVE, &loc, &vars, "filters");
                 }

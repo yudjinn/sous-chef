@@ -1085,7 +1085,8 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
     BBCLASSEXTEND` (a substring test, so `nativesdk` alone also passes) it `setVarFilter`s
     `DEPENDS`, `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RREPLACES`, `PACKAGES`,
     `PACKAGES_DYNAMIC`, `PROVIDES` (`native_filter`) and renames `<VAR>:${PN}-x` package
-    variables. Flagged, never computed.
+    variables. Flagged, never computed; except (w11) the `PROVIDES` filter, computed on a
+    static value (see "Providers and versions").
   - `nativesdk.bbclass`: plain assignments, replayed; `nativesdk_virtclass_handler` (the
     rename above, reproduced; `DISTRO_FEATURES` flagged); anonymous python (when `PN` starts
     with `nativesdk-`): `oe.classextend.ClassExtender` filters on `DEPENDS`,
@@ -1191,11 +1192,32 @@ found. The file order inside a bucket is layer then path, not BitBake's collecti
 `DEFAULT_PREFERENCE`, `PE` and `PR` come from evaluating each candidate only when some
 non-`.conf` file (or a `.conf` statement with an override) sets one of them; values set by
 anonymous python are not seen. `BBMASK`, `SKIP_RECIPE` and `COMPATIBLE_*` are not applied.
-(w10) A `BBCLASSEXTEND` variant (`-native`, `nativesdk-`, `<variant>-`) is a provider of its
-own name when no indexed recipe provides that name: the base recipe's file (chosen as for
-its `PN`), confirmed by evaluating the base (see "Class-extended variants"); it is not
-found through the `PROVIDES` its class rewrites (`native_filter`, `suffix_filter`), and a
-real recipe of the same name hides it.
+(w10, w11) `BBCLASSEXTEND` variants. **What BitBake does** (2.18.0 `lib/bb/cache.py`
+`CoreRecipeInfo.__init__` and `add_cacheData`, read for w11): every variant's finalised
+datastore gets its own cache entry, `provides = explode_deps(getVar("PROVIDES"))` read
+**after** finalisation (so through any filter its class set), `pn = getVar("PN")`;
+`fn_provides[virtualfn] = [pn] + provides`, and `pkg_pn[pn]` gets the virtual file name. A
+skipped variant is not added. So a variant is a provider of its `PN` and of its rewritten
+`PROVIDES`, beside any real recipe of the same name, and `findBestProvider(<variant PN>)`
+chooses among all files of that `PN` with the version variables of **the variant's**
+`PN` (`PREFERRED_VERSION_<pn>-native`). **sous-chef** (w11): `Providers::best_version`
+counts the `native` / `nativesdk` variants of the base recipes whose finalised
+`BBCLASSEXTEND` lists the word as files of the variant's `PN` beside real recipes of that
+name (multilib variants only when no recipe has the name); `Providers::providers` finds
+variant candidates through `variant::provides_forms` (the base words the class can turn
+into the name: `x` and `x-native` for `x-native`, `a-cross-b` for `a-native-b`,
+`virtual/x` and the passed-through words for `virtual/nativesdk-x` / `nativesdk-x`),
+evaluates each variant and confirms it as for a real recipe; multilib variants are found
+by their `PN` only, and only when nothing else provides the name. The variant's `PROVIDES`:
+for `native`, `native_virtclass_handler` sets `native_filter` (OE-core Wrynose
+`lib/oe/classextend.py`) on it, which BitBake applies to the expanded value on every read
+(`data_smart.getVarFlag` -> `bb.filter.apply_filters`, only for a non-empty value); the
+replay computes it when the value is static and no anonymous python sets `PROVIDES` by name
+(and `BPN` is static when a word holds the variant's `PN`), recorded as a `handler` row with
+a note, else flags it. For `nativesdk` the filter is set by the class's anonymous python
+(`ClassExtender.set_filter("PROVIDES")`, `suffix_filter` / `add_suffix`) and for multilib
+by `multilib_virtclass_handler_postkeyexp`: not computed, so such a variant is listed as an
+uncertain provider (`python`) with a note saying its `PROVIDES` goes through python.
 (w10) `PREFERRED_PROVIDERS` is read as above (`Providers::preference`,
 `ProviderReason::PreferredProviders`): from the configuration's value, its static words
 only (a value with python adds a note that an entry may be missing); a malformed word

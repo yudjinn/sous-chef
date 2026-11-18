@@ -364,3 +364,153 @@ fn the_pure_checks_are_public() {
         Some("PREFERRED_PROVIDER_virtual/libc set to glibc, not musl")
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// Item 3: variants found through the PROVIDES their class rewrites
+// ---------------------------------------------------------------------------------------
+
+/// Stand-ins for OE-core's `native` and `nativesdk` classes (handlers by name and event
+/// mask; their bodies are never run), and `BBCLASSEXTEND` on libfoo (which provides
+/// `virtual/foo`).
+fn class_extension(root: &Path) {
+    write(
+        root,
+        "meta-core/classes-recipe/native.bbclass",
+        "CLASSOVERRIDE = \"class-native\"\nMACHINEOVERRIDES = \"\"\n\
+         python native_virtclass_handler () {\n    pn = d.getVar(\"PN\")\n}\n\
+         addhandler native_virtclass_handler\n\
+         native_virtclass_handler[eventmask] = \"bb.event.RecipePreFinalise\"\n",
+    );
+    write(
+        root,
+        "meta-core/classes-recipe/nativesdk.bbclass",
+        "CLASSOVERRIDE = \"class-nativesdk\"\nMACHINEOVERRIDES = \"\"\n\
+         python nativesdk_virtclass_handler () {\n    pn = e.data.getVar(\"PN\")\n}\n\
+         addhandler nativesdk_virtclass_handler\n\
+         nativesdk_virtclass_handler[eventmask] = \"bb.event.RecipePreFinalise\"\n\
+         python () {\n    clsextend = oe.classextend.ClassExtender(\"nativesdk\", [], d)\n    clsextend.set_filter(\"PROVIDES\", deps=False)\n}\n",
+    );
+    append_to(
+        root,
+        "meta-core/recipes-core/libfoo/libfoo_2.0.bb",
+        "BBCLASSEXTEND = \"native nativesdk\"\nPROVIDES += \"libfoo-cross-tools\"\n",
+    );
+}
+
+fn providers_of(fx: &Fx, name: &str) -> sous_chef::eval::providers::ProviderSet {
+    sous_chef::eval::providers::Providers::new(&fx.idx, &fx.ws, None, None)
+        .unwrap()
+        .providers(name)
+        .unwrap()
+}
+
+#[test]
+fn the_native_variant_provides_what_native_filter_makes_of_provides() {
+    let fx = modified(class_extension);
+    // native_filter on "virtual/foo libfoo-cross-tools": virtual/foo-native, and -cross-
+    // becomes -native.
+    let ds = eval(&fx, "libfoo-native");
+    let p = ds.value("PROVIDES").unwrap();
+    assert_eq!(p.text, "virtual/foo-native libfoo-native-tools");
+    assert!(!p.unevaluated_python, "{p:?}");
+    assert!(
+        ds.replay().var_notes["PROVIDES"]
+            .iter()
+            .any(|n| n.contains("native_filter")),
+        "{:?}",
+        ds.replay().var_notes
+    );
+    // The base recipe keeps its own PROVIDES.
+    assert_eq!(
+        eval(&fx, "libfoo").value("PROVIDES").unwrap().text,
+        "virtual/foo libfoo-cross-tools"
+    );
+
+    let set = providers_of(&fx, "virtual/foo-native");
+    let sel = set.selected().expect("a provider");
+    assert_eq!(sel.pn, "libfoo-native");
+    assert_eq!(sel.selection.recipe.pn, "libfoo");
+    assert_eq!(
+        sel.selection.variant.as_ref().map(|v| v.word.as_str()),
+        Some("native")
+    );
+    assert!(!sel.python);
+    assert!(
+        set.notes
+            .iter()
+            .any(|n| n
+                .contains("provides virtual/foo-native through the PROVIDES its class rewrites")),
+        "{:?}",
+        set.notes
+    );
+    let set = providers_of(&fx, "libfoo-native-tools");
+    assert_eq!(set.selected().map(|p| p.pn.as_str()), Some("libfoo-native"));
+    // The target recipes still provide virtual/foo; the variant does not.
+    let set = providers_of(&fx, "virtual/foo");
+    assert!(set.providers.iter().all(|p| p.selection.variant.is_none()));
+}
+
+#[test]
+fn the_nativesdk_variant_is_an_uncertain_provider_its_python_decides() {
+    let fx = modified(class_extension);
+    let set = providers_of(&fx, "virtual/nativesdk-foo");
+    let sel = set.selected().expect("a candidate");
+    assert_eq!(sel.pn, "nativesdk-libfoo");
+    assert!(sel.python, "{sel:?}");
+    assert!(
+        set.notes
+            .iter()
+            .any(|n| n.contains("goes through python that was not run")),
+        "{:?}",
+        set.notes
+    );
+}
+
+#[test]
+fn a_real_recipe_of_the_same_name_does_not_hide_the_variant() {
+    let fx = modified(|r| {
+        class_extension(r);
+        // A real libfoo-native 1.0 in meta-vendor (priority 6) beside the variant made
+        // from meta-core's libfoo 2.0 (priority 5).
+        write(
+            r,
+            "meta-vendor/recipes-vendor/libfoo-native/libfoo-native_1.0.bb",
+            "LICENSE = \"CLOSED\"\n",
+        );
+    });
+    let p = sous_chef::eval::providers::Providers::new(&fx.idx, &fx.ws, None, None).unwrap();
+    // Both are files of the PN libfoo-native; the higher layer priority wins.
+    let bv = p.best_version("libfoo-native", None).unwrap().unwrap();
+    assert_eq!(bv.recipe.pn, "libfoo-native", "{bv:?}");
+    assert!(bv.variant.is_none());
+    // The variant is one of the files: asking for its version finds it.
+    let v2 = p
+        .best_version("libfoo-native", Some("2.0"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(v2.recipe.pn, "libfoo", "{v2:?}");
+    assert!(v2.variant.is_some());
+    // PREFERRED_VERSION of the variant's PN picks it, as findBestProvider does.
+    let fx = modified(|r| {
+        class_extension(r);
+        write(
+            r,
+            "meta-vendor/recipes-vendor/libfoo-native/libfoo-native_1.0.bb",
+            "LICENSE = \"CLOSED\"\n",
+        );
+        append_to(
+            r,
+            "meta-core/conf/distro/testdistro.conf",
+            "PREFERRED_VERSION_libfoo-native = \"2.%\"\n",
+        );
+    });
+    let p = sous_chef::eval::providers::Providers::new(&fx.idx, &fx.ws, None, None).unwrap();
+    let bv = p.best_version("libfoo-native", None).unwrap().unwrap();
+    assert!(bv.variant.is_some(), "{bv:?}");
+    let set = p.providers("libfoo-native").unwrap();
+    assert_eq!(set.providers.len(), 1, "{set:?}");
+    assert!(
+        set.selected().unwrap().selection.variant.is_some(),
+        "{set:?}"
+    );
+}

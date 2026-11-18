@@ -1270,6 +1270,19 @@ Result<Option<(Selection, DataStore)>>`; `Providers::best_version` and `Provider
 fall back to it when no indexed recipe has the name; `Providers::evaluate_selection(&Selection)`.
 `Feature::ClassExtendDeferred`, `Feature::DeferredInheritsClassOverride` (`Feature::ALL` has
 twelve). bitbake-semantics.md, "Class-extended variants", has the rules.
+(w11) Variants as providers: `Providers::best_version` counts `native` / `nativesdk`
+variants as files of their `PN` beside real recipes of that name (no longer only when no
+recipe has it), with the version variables of the variant's `PN`;
+`Providers::variant_files(name, native_only) -> Result<Vec<(RecipeRow, ClassExtend)>>`
+(new); `Providers::variant` chooses among those; `Providers::providers` finds variants
+through `variant::provides_forms(name)` (new, with `variant::native_filter`,
+`variant::add_suffix`, `variant::explode_deps`, OE-core's and BitBake's functions) and
+evaluates them. The replay computes `native_virtclass_handler`'s `PROVIDES` filter
+(`Replay::apply_native_provides_filter`) instead of flagging it, when the value is static.
+Skip notes (w11, `eval::skips`, public): `Words`, `Check`, `KindLists`, `FEATURE_KINDS`,
+`features_kind`, `features_skip(kind, kind_value, any_of, required, conflict, features) ->
+Option<String>`, `virtual_provider_skip(p, preferred, pn) -> Option<String>`; the replay
+adds the `features_check.bbclass` and `base_eventhandler` `RecipeParsed` notes.
 
 kas (w8, `workspace::kas`):
 
