@@ -61,7 +61,7 @@ pub enum Show {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct Args {
-    /// `list` (default), `shadowed`, `appends` or `compat`.
+    /// Default `list`.
     #[serde(default)]
     pub show: Show,
     /// Output budget in tokens (default 600).

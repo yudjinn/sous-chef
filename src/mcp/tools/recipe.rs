@@ -89,11 +89,10 @@ pub struct Args {
     pub name: String,
     /// Default: the preferred version.
     pub version: Option<String>,
-    /// `summary` (default), `tree`, `outline`, `sources`, `tasks`, `packages` or `cve`.
+    /// Default `summary`.
     #[serde(default)]
     pub show: Show,
-    /// Multiconfig for the version choice and the evaluated values (default: the default
-    /// configuration); `name` written `mc:<name>:<recipe>` also selects it.
+    /// Multiconfig name (or write `name` as `mc:<name>:<recipe>`).
     pub mc: Option<String>,
     /// Output budget in tokens (default 600).
     pub budget_tokens: Option<usize>,

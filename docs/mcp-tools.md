@@ -99,6 +99,24 @@ Common to every tool:
 
 The first six are always loaded. The rest are deferred (short descriptions, loaded on demand).
 
+**Context cost (since x7).** Every tool definition a client loads stays in the agent's
+context on every turn. Claude Code's tool search (on by default) defers every MCP tool,
+keeping only its name and the server instructions in context until the agent searches
+for it, unless the tool's `_meta` has `"anthropic/alwaysLoad": true`
+(code.claude.com/docs/en/mcp, "Mark a tool to load upfront or stay deferred"): the six
+always-loaded tools carry it, the deferred ones carry no `_meta`. Without tool search
+(tool search off, an older model, or a session whose `--tools` leaves `ToolSearch` out, as
+the benchmark's did) every definition loads upfront, so all are kept short: the
+descriptions here say what an agent needs to choose and call a tool, and the input schema
+is sent compacted (`mcp::compact_schema`: no `$schema` or `title`, enums written in place
+without per-value docs, `Option<T>` as `T`, no integer `format`/`minimum`, the shared
+`budget_tokens` / `format` docs left out because the server instructions give them). The
+long form is this document and `sous-chef://help`, which is generated from the full schema
+and lists every enum value with its doc. Measured with `cargo test --test tools_budget --
+--nocapture`: `tools/list` was 31,539 bytes (about 7,900 tokens at 4 bytes a token) for the
+18 tools before x7 and is 14,088 bytes (about 3,500 tokens) after; the test fails above
+15,000 bytes, above 800 bytes of server instructions, or above 3,000 bytes of the skill.
+
 ## Always loaded
 
 ### `recipe`

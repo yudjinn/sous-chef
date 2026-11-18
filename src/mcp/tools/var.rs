@@ -50,8 +50,7 @@ pub struct Args {
     pub machine: Option<String>,
     /// Default: `DISTRO` from local.conf.
     pub distro: Option<String>,
-    /// Multiconfig (a `BBMULTICONFIG` name) to evaluate in; default: the default
-    /// configuration. A recipe written `mc:<name>:<recipe>` also selects it.
+    /// Multiconfig name (or write the recipe `mc:<name>:<recipe>`).
     pub mc: Option<String>,
     /// Run `bitbake -e` instead of the static evaluator (default false).
     #[serde(default)]

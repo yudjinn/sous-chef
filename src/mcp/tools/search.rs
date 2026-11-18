@@ -49,7 +49,7 @@ pub enum Mode {
 pub struct Args {
     /// Search text or regular expression.
     pub query: String,
-    /// `name` (default), `regex` or `fts`.
+    /// Default `name`.
     #[serde(default)]
     pub mode: Mode,
     /// Statement kinds: `assign`, `function`, `task`, `inherit`, `include`, ...

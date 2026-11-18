@@ -568,9 +568,11 @@ through `progress::blocking`, the `block_in_place` wrapper) and the audit's lint
 
 As implemented in T2.5:
 
-- **Deferred tools** are still listed by `tools/list`, with a one-line description, and every
-  tool carries `_meta["sous-chef/loading"] = "always" | "deferred"`. MCP and rmcp have no
-  standard field for this; T7.5 may add a client-specific one.
+- **Deferred tools** are still listed by `tools/list`, with a one-line description. MCP and
+  rmcp have no standard field for deferral; since x7 the six always-loaded tools carry
+  Claude Code's `_meta["anthropic/alwaysLoad"] = true` (until x7 every tool carried
+  `_meta["sous-chef/loading"]`, which no client read) and the schemas are compacted
+  (mcp-tools.md, "Context cost").
 - **The server does not exit on a startup failure.** If the configuration or the workspace
   cannot be loaded it serves degraded (`serve_degraded`): `status` reports
   `state: "degraded"` with `startup_error`, and every other tool returns a one-line error

@@ -52,13 +52,12 @@ pub enum Mode {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct Args {
-    /// `find_path` (default), `list_pkg_files`, `lookup_recipe`, `list_pkgs`, `package_info`.
+    /// Default `find_path`.
     #[serde(default)]
     pub mode: Mode,
-    /// For `find_path`: a path or glob on the target, e.g. `/usr/bin/curl` or `*/libssl.so*`.
+    /// For `find_path`: a target path or glob, e.g. `*/libssl.so*`.
     pub path: Option<String>,
-    /// For `list_pkg_files`, `lookup_recipe`, `package_info`: a package name (runtime name,
-    /// recipe-space name or an RPROVIDES name).
+    /// For `list_pkg_files`, `lookup_recipe`, `package_info`: a package name.
     pub package: Option<String>,
     /// For `list_pkgs`: a recipe (`pn`).
     pub recipe: Option<String>,

@@ -82,30 +82,24 @@ impl Op {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct Args {
-    /// `build`, `task`, `env`, `clean`, `devtool`, `layers`, `status` or `cancel`.
+    /// The operation.
     pub op: Op,
-    /// Recipe or image; for build, task, env and clean also `mc:<multiconfig>:<target>`.
+    /// Recipe or image (also `mc:<multiconfig>:<target>`).
     pub target: Option<String>,
     /// For `op: task`, e.g. `compile`.
     pub task: Option<String>,
-    /// Op-specific arguments, validated against an allowlist: build `continue` (-k); task
-    /// `force` (-f); clean `clean` (default), `cleansstate` or `cleanall`; devtool the
-    /// subcommand `modify`, `status`, `finish` (then the destination layer), `reset` or
-    /// `build`; layers `show-layers` (default), `show-appends`, `show-recipes` or
-    /// `show-overlayed`.
+    /// Allowlisted: build `continue`; task `force`; clean `clean|cleansstate|cleanall`;
+    /// devtool `modify|status|finish <layer>|reset|build`; layers
+    /// `show-layers|show-appends|show-recipes|show-overlayed`.
     #[serde(default)]
     pub args: Vec<String>,
-    /// Must be true for destructive operations (cleansstate, cleanall, devtool reset,
-    /// devtool finish), which also need `[bitbake] allow_destructive = true`.
+    /// True for cleansstate, cleanall, devtool reset/finish (also needs
+    /// `allow_destructive`).
     #[serde(default)]
     pub confirm: bool,
-    /// For `op: status` and `op: cancel`: the job id (default: the running job, else the
-    /// last one).
+    /// Job id for `status` / `cancel` (default: running, else last).
     pub job: Option<String>,
-    /// Seconds to wait for the job to end before answering (default 0: answer at once; at
-    /// most 300). For a starting operation, after it starts; for `op: status`, for the job
-    /// shown. While waiting, a client that sent a progress token gets MCP progress
-    /// notifications (elapsed time and the last output line).
+    /// Seconds to wait for the job to end (default 0, at most 300).
     pub wait: Option<u64>,
     /// Output budget in tokens (default 600).
     pub budget_tokens: Option<usize>,

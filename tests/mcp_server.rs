@@ -266,8 +266,12 @@ fn serve_initialize_list_and_status() {
         assert_eq!(t["inputSchema"]["type"], "object", "{t}");
         let desc = t["description"].as_str().unwrap();
         assert!(!desc.is_empty());
-        let loading = if i < 6 { "always" } else { "deferred" };
-        assert_eq!(t["_meta"]["sous-chef/loading"], loading, "{t}");
+        // Claude Code loads these six upfront under tool search; the rest stay deferred.
+        if i < 6 {
+            assert_eq!(t["_meta"]["anthropic/alwaysLoad"], json!(true), "{t}");
+        } else {
+            assert!(t.get("_meta").is_none(), "{t}");
+        }
     }
 
     // status, text: a successful tool result with one text block.

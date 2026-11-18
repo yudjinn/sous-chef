@@ -18,18 +18,17 @@ use crate::render::{self, Format};
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct Args {
-    /// The layer to compare (a layer name of the workspace); its git repository is the one
-    /// holding the layer's directory.
+    /// Layer name; its git repository is compared.
     pub layer: String,
-    /// The old revision: a branch, tag or commit of that repository.
+    /// Old revision (branch, tag or commit).
     pub from: String,
-    /// The new revision (default: the working tree, HEAD plus uncommitted changes).
+    /// New revision (default: the working tree).
     pub to: Option<String>,
-    /// One recipe (PN). Default: the recipes your writable layers append or use.
+    /// One recipe (default: those your writable layers append or use).
     pub recipe: Option<String>,
-    /// Every recipe of the layer (unchanged ones counted, not listed).
+    /// Every recipe of the layer.
     pub all: Option<bool>,
-    /// Output budget in tokens (default 600); a longer diff is stored under a handle.
+    /// Output budget in tokens (default 600; more is stored under a handle).
     pub budget_tokens: Option<usize>,
     /// `text` (default) or `json`.
     pub format: Option<Format>,
