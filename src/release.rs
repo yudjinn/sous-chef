@@ -211,7 +211,10 @@ pub enum Feature {
     /// other `layer.conf` files are read, so copying them works.
     KeptUntilLangdale,
     /// What the 4.3 (Nanbield) guide removes is still there: `PERLARCH`, `PERLVERSION`,
-    /// `QEMU_USE_SLIRP`, `SERIAL_CONSOLES_CHECK`, the class `glide`.
+    /// `QEMU_USE_SLIRP`, `SERIAL_CONSOLES_CHECK`, the class `glide`; and `SRCPV` carries the
+    /// source revision, so a `_git` recipe needs `${SRCPV}` in `PV` (from Nanbield on
+    /// `bitbake.conf` sets `SRCPV = ""` and `package.bbclass` appends the revision to
+    /// `PKGV`: OE-core `a8e7b0f932`, on the nanbield branch and not on mickledore).
     KeptUntilMickledore,
     /// What the 5.0 (Scarthgap) guide removes is still there: `DEPLOY_DIR_TAR`,
     /// `oldincludedir`.

@@ -79,7 +79,7 @@ expression: results
       "sousChefFinding/v1": "fe92ab3f99cc6a8e249e8b1bde88ed95:1"
     },
     "ruleId": "hygiene/release-syntax",
-    "ruleIndex": 38
+    "ruleIndex": 40
   },
   {
     "level": "warning",

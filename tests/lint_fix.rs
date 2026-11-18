@@ -21,7 +21,8 @@ use sous_chef::eval::{self, Overlay};
 use sous_chef::index::Index;
 use sous_chef::lint::fix::{self, FixOptions, Safety};
 use sous_chef::lint::rules::{
-    hygiene_continuation::HygieneContinuation, org_class_export_functions::OrgClassExportFunctions,
+    hygiene_continuation::HygieneContinuation, hygiene_release_removed::HygieneReleaseRemoved,
+    org_class_export_functions::OrgClassExportFunctions,
     org_include_must_exist::OrgIncludeMustExist, org_inherit_defer::OrgInheritDefer,
     org_layer_conf::OrgLayerConf, override_append_no_space::OverrideAppendNoSpace,
     override_append_vs_plus_equals::OverrideAppendVsPlusEquals,
@@ -390,6 +391,14 @@ fn continuation_fixes() {
 }
 
 #[test]
+fn release_removed_fixes() {
+    let r = &HygieneReleaseRemoved;
+    let dir = "hygiene/release-removed";
+    check_fixture(r, dir, "fixable.bb", "fixed.bb", &[]);
+    assert!(safeties(r, dir, "fixable.bb").iter().all(|(_, s)| *s == S));
+}
+
+#[test]
 fn class_export_functions_fixes() {
     // The rule takes the class name from the file name: lint the fixture as mytool.bbclass.
     let env = Env::new();
@@ -436,6 +445,7 @@ fn rules_without_a_fix_offer_none() {
         "org/include-must-exist",
         "org/inherit-defer",
         "override/plus-equals-on-default",
+        "hygiene/release-removed",
     ];
     let env = Env::new();
     for r in lint::all_rules() {
@@ -490,7 +500,21 @@ fn evaluate_pair(
     BTreeMap<String, Option<String>>,
     BTreeMap<String, Option<String>>,
 ) {
-    let env = Env::with(&[(RECIPE, before)], &["meta-mine"]);
+    evaluate_pair_with(before, after, &[])
+}
+
+/// [`evaluate_pair`] in a copy with `extra` files (`(path under ws, content)`) written too.
+fn evaluate_pair_with(
+    before: &str,
+    after: &str,
+    extra: &[(&str, &str)],
+) -> (
+    BTreeMap<String, Option<String>>,
+    BTreeMap<String, Option<String>>,
+) {
+    let mut files = vec![(RECIPE, before)];
+    files.extend_from_slice(extra);
+    let env = Env::with(&files, &["meta-mine"]);
     let target = eval::Target {
         recipe: Some(format!(
             "meta-mine:{}",
@@ -519,6 +543,23 @@ fn weak_after_default_fix_keeps_every_value() {
     assert_eq!(a, b);
     assert_eq!(a.get("MY_A"), Some(&Some("x".to_string())));
     assert_eq!(a.get("MY_D:qemux86"), Some(&Some("x".to_string())));
+}
+
+#[test]
+fn release_removed_srcpv_fix_keeps_every_value_where_srcpv_is_empty() {
+    // From Nanbield OE-core's bitbake.conf sets `SRCPV = ""` (the fixture's sets nothing):
+    // a layer.conf of the copy sets it as OE-core does, and removing `${SRCPV}` changes no
+    // value.
+    let bad = fixture("hygiene/release-removed/fixable.bb");
+    let fixed = fixed_in_memory(&HygieneReleaseRemoved, &bad);
+    assert_eq!(fixed, fixture("hygiene/release-removed/fixed.bb"));
+    let layer_conf = format!(
+        "{}SRCPV = \"\"\n",
+        fs::read_to_string(fixture_path("ws/meta-mine/conf/layer.conf")).unwrap()
+    );
+    let (a, b) = evaluate_pair_with(&bad, &fixed, &[("meta-mine/conf/layer.conf", &layer_conf)]);
+    assert_eq!(a, b);
+    assert_eq!(a.get("PV"), Some(&Some("1.0+git".to_string())));
 }
 
 #[test]

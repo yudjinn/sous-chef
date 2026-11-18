@@ -16,9 +16,9 @@ use sous_chef::config::Config;
 use sous_chef::index::Index;
 use sous_chef::lint::rules::{
     hygiene_autorev::HygieneAutorev, hygiene_continuation::HygieneContinuation,
-    hygiene_host_path::HygieneHostPath, hygiene_release_syntax::HygieneReleaseSyntax,
-    hygiene_tabs::HygieneTabs, hygiene_variable_order::HygieneVariableOrder,
-    hygiene_workdir_s::HygieneWorkdirS,
+    hygiene_host_path::HygieneHostPath, hygiene_insane_skip::HygieneInsaneSkip,
+    hygiene_release_syntax::HygieneReleaseSyntax, hygiene_tabs::HygieneTabs,
+    hygiene_variable_order::HygieneVariableOrder, hygiene_workdir_s::HygieneWorkdirS,
 };
 use sous_chef::lint::{self, Options, Rule, Severity, Target};
 use sous_chef::release::Release;
@@ -879,4 +879,112 @@ fn src_uri_checksum_on_the_fixture_workspace_recipes() {
     ] {
         assert_eq!(w.lint("hygiene/src-uri-checksum", rel), [], "{rel}");
     }
+}
+
+// ---------------------------------------------------------------------------------------
+// hygiene/git-pv (x7)
+
+const GP: &str = "lint/hygiene/git-pv";
+
+/// OE-core's default `PV` (`meta/conf/bitbake.conf:244` on wrynose), added to the copy's
+/// `bitbake.conf` (the fixture's has none).
+fn with_oe_pv(root: &Path) {
+    let conf = root.join("meta-core/conf/bitbake.conf");
+    let mut text = fs::read_to_string(&conf).unwrap();
+    text.push_str("PV = \"${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[1] or '1.0'}\"\n");
+    fs::write(conf, text).unwrap();
+}
+
+#[test]
+fn git_pv_bad_and_good() {
+    let bad = "meta-mine/recipes-test/x/x_git.bb";
+    let good = "meta-mine/recipes-test/y/y_git.bb";
+    let w = ws_with(
+        &[
+            (&format!("{GP}/bad_git.bb"), bad),
+            (&format!("{GP}/good_git.bb"), good),
+        ],
+        with_oe_pv,
+    );
+    let got = w.lint("hygiene/git-pv", bad);
+    assert_eq!(
+        got,
+        [(
+            "info hygiene/git-pv meta-mine:recipes-test/x/x_git.bb:1".to_string(),
+            "`x_git.bb` sets no PV, so BitBake takes it from the file name: PV is `git`, with \
+             no version number and no `+`, so no source revision is added to PKGV and a new \
+             SRCREV gives packages of the same version; set `PV = \"<version>+git\"`"
+                .to_string()
+        )]
+    );
+    assert_eq!(w.lint("hygiene/git-pv", good), []);
+}
+
+#[test]
+fn git_pv_needs_a_git_file_name_and_counts_a_bbappend() {
+    let versioned = "meta-mine/recipes-test/z/z_1.0.bb";
+    let appended = "meta-mine/recipes-test/w/w_git.bb";
+    let w = ws_with(
+        &[
+            (&format!("{GP}/bad_git.bb"), versioned),
+            (&format!("{GP}/bad_git.bb"), appended),
+        ],
+        |root| {
+            with_oe_pv(root);
+            let app = root.join("meta-mine/recipes-test/w/w_git.bbappend");
+            fs::write(app, "PV = \"2.0+git\"\n").unwrap();
+            // Fetches nothing from git (OE-core's clang-cross_git.bb): no revision to lose.
+            let dir = root.join("meta-mine/recipes-test/v");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("v_git.bb"),
+                "SUMMARY = \"v\"\nLICENSE = \"MIT\"\nSRC_URI = \"file://v.c\"\n",
+            )
+            .unwrap();
+        },
+    );
+    assert_eq!(w.lint("hygiene/git-pv", versioned), []);
+    assert_eq!(w.lint("hygiene/git-pv", appended), []);
+    assert_eq!(
+        w.lint("hygiene/git-pv", "meta-mine/recipes-test/v/v_git.bb"),
+        []
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// hygiene/insane-skip (x7)
+
+#[test]
+fn insane_skip_bad_and_good() {
+    let r = &HygieneInsaneSkip;
+    let bad = check(r, "insane-skip", "bad.bb", "x_1.0.bb", &NEW);
+    let rows: Vec<(u32, &str)> = bad
+        .iter()
+        .map(|(l, s, m)| {
+            assert_eq!(*s, Severity::Info);
+            (*l, m.split(" QA check").next().unwrap())
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (3, "`INSANE_SKIP:${PN}` skips the `ldflags`"),
+            (4, "`INSANE_SKIP:${PN}-dev` skips the `textrel`"),
+            (5, "`INSANE_SKIP` skips the `buildpaths`"),
+        ],
+        "{bad:#?}"
+    );
+    assert!(bad[0].2.contains("pass LDFLAGS to the build"), "{bad:#?}");
+    for good in ["good.bb", "good-prebuilt.bb"] {
+        assert_eq!(
+            check(r, "insane-skip", good, "x_1.0.bb", &NEW),
+            [],
+            "{good}"
+        );
+    }
+    // A class sets it for its users on purpose.
+    assert_eq!(
+        check(r, "insane-skip", "bad.bb", "classes/x.bbclass", &NEW),
+        []
+    );
 }

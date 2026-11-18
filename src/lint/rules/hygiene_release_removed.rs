@@ -49,6 +49,7 @@
 //!   warns "has a lack of whitespace around the assignment" (`24772dd2a`, 5.3 guide).
 
 use crate::index::query;
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::{Statement, StatementKind, words};
@@ -828,11 +829,20 @@ pub struct Sink {
     findings: Vec<Finding>,
     uses: Vec<RemovalUse>,
     pending: Option<(Option<Feature>, String, String)>,
+    /// The fix of the finding at that index of `findings`.
+    fixes: Vec<(usize, Fix)>,
 }
 
 impl Sink {
     fn tag(&mut self, feature: Option<Feature>, what: &str, instead: &str) {
         self.pending = Some((feature, what.to_string(), instead.to_string()));
+    }
+
+    /// Attaches `fix` to the finding pushed last.
+    fn fix_last(&mut self, fix: Option<Fix>) {
+        if let (Some(fix), Some(i)) = (fix, self.findings.len().checked_sub(1)) {
+            self.fixes.push((i, fix));
+        }
     }
 }
 
@@ -843,6 +853,76 @@ impl HygieneReleaseRemoved {
         self.compat_corenames(cx, out);
         self.licenses(cx, out);
         self.whitespace(cx, out);
+        self.srcpv(cx, out);
+    }
+
+    /// `${SRCPV}` in `PV` when no release the file is checked against needs it: from
+    /// Nanbield on `bitbake.conf` sets `SRCPV = ""` and the source revision goes to `PKGV`
+    /// (`Feature::KeptUntilMickledore`; the 4.3 guide, "Versioning changes": "you can remove
+    /// it (leaving behind the "+")"). Info: it has no effect. Not reported when a release the
+    /// file is checked against still needs it, or when a layer other than the core layer
+    /// assigns `SRCPV` (then it may not be empty). The safe fix deletes each `${SRCPV}` from
+    /// the value: in every release the file is checked against it expands to nothing.
+    fn srcpv(&self, cx: &LintContext<'_>, out: &mut Sink) {
+        let Some(file) = cx.file else { return };
+        if cx.releases.is_empty()
+            || !helpers::releases_having(cx, Feature::KeptUntilMickledore).is_empty()
+        {
+            return;
+        }
+        const NEEDLE: &str = "${SRCPV}";
+        let mut checked_layers = None;
+        for s in &file.statements {
+            let StatementKind::Assign { var, value, .. } = &s.kind else {
+                continue;
+            };
+            if var.base != "PV" || var.flag.is_some() || !value.contains(NEEDLE) {
+                continue;
+            }
+            let own = file.statements.iter().any(
+                |o| matches!(&o.kind, StatementKind::Assign { var, .. } if var.base == "SRCPV"),
+            );
+            if own || *checked_layers.get_or_insert_with(|| assigned_outside_core(cx, "SRCPV")) {
+                continue;
+            }
+            let without = value.replace(NEEDLE, "");
+            out.tag(
+                Some(Feature::KeptUntilMickledore),
+                "${SRCPV} in PV",
+                "remove `${SRCPV}`, keeping the `+`",
+            );
+            self.push(
+                cx,
+                out,
+                s.span.start,
+                Severity::Info,
+                format!(
+                    "`${{SRCPV}}` in {}: it is empty from {} on (the source revision goes to \
+                     PKGV), and this layer is checked against {} only; write `{} = \"{}\"`",
+                    helpers::colon_name(var),
+                    Feature::KeptUntilMickledore
+                        .removed_in()
+                        .map_or("", |r| r.codename()),
+                    helpers::release_list(cx.releases),
+                    helpers::colon_name(var),
+                    without
+                ),
+            );
+            let fix = (|| {
+                let source = cx.source?;
+                let p = fix::assign_parts(source, s)?;
+                let raw = source.get(p.value())?;
+                let edits: Vec<Edit> = raw
+                    .match_indices(NEEDLE)
+                    .map(|(at, _)| {
+                        let start = p.open + 1 + at;
+                        Edit::delete(start..start + NEEDLE.len())
+                    })
+                    .collect();
+                Fix::in_file(cx, edits, "remove `${SRCPV}` from PV", Safety::Safe)
+            })();
+            out.fix_last(fix);
+        }
     }
 
     /// What the rule finds in the context's file, as uses (one per finding, same order).
@@ -878,6 +958,20 @@ impl Rule for HygieneReleaseRemoved {
         let mut sink = Sink::default();
         self.run(cx, &mut sink);
         out.append(&mut sink.findings);
+    }
+
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        let mut sink = Sink::default();
+        self.run(cx, &mut sink);
+        sink.fixes
+            .into_iter()
+            .filter_map(|(i, fix)| {
+                Some(FixedFinding {
+                    finding: sink.findings.get(i)?.clone(),
+                    fix,
+                })
+            })
+            .collect()
     }
 }
 

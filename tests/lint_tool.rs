@@ -198,7 +198,10 @@ async fn snapshot_on_a_fixture_layer() {
     .await
     .unwrap();
     assert_eq!(
-        core, "no findings in 3 files\nseverity\trule\tpointer\tmessage\n",
+        core,
+        "no findings in 3 files\nseverity\trule\tpointer\tmessage\nnote: checked 3 files \
+         with 1 rule: Yocto conventions and release compatibility, not whether the recipes \
+         build or work\n",
         "{core}"
     );
 }
@@ -335,5 +338,37 @@ async fn the_rules_resource_is_the_catalogue_with_effective_severities() {
     assert!(
         text.ends_with("disabled in sous-chef.toml: style\n"),
         "{text}"
+    );
+}
+
+#[tokio::test]
+async fn few_findings_do_not_read_as_a_clean_bill_of_health() {
+    // x7 (benchmark t09): the answer says what was checked and what was not.
+    let rel = "meta-mine/recipes-app/ok/ok_1.0.bb";
+    let ok = "SUMMARY = \"ok\"\nLICENSE = \"CLOSED\"\n";
+    let env = Env::new(&[(rel, ok)], |_| {}).await;
+    let out = tool::run(&env.ctx, args(Some("meta-mine:recipes-app/ok/ok_1.0.bb")))
+        .await
+        .unwrap();
+    let n = sous_chef::lint::all_rules()
+        .iter()
+        .filter(|r| r.default_enabled())
+        .count();
+    let want = format!(
+        "note: checked 1 file with {n} rules: Yocto conventions and release compatibility, \
+         not whether the recipes build or work\n"
+    );
+    assert!(out.starts_with("no findings in 1 file"), "{out}");
+    assert!(out.ends_with(&want), "{out}");
+    // The whole workspace: the layers left out are named as before, then the coverage.
+    let out = tool::run(&env.ctx, args(None)).await.unwrap();
+    let notes: Vec<&str> = out.lines().filter(|l| l.starts_with("note: ")).collect();
+    assert!(notes[0].starts_with("note: not checked: "), "{out}");
+    assert!(
+        notes
+            .last()
+            .unwrap()
+            .contains("not whether the recipes build"),
+        "{out}"
     );
 }

@@ -1,0 +1,7 @@
+SUMMARY = "QA skips"
+LICENSE = "MIT"
+INSANE_SKIP:${PN} += "ldflags"
+INSANE_SKIP:${PN}-dev = "dev-so textrel"
+INSANE_SKIP += "already-stripped buildpaths"
+INSANE_SKIP:remove = "ldflags"
+INSANE_SKIP[doc] = "ldflags"
