@@ -568,6 +568,7 @@ fn job_output(ctx: &Ctx, job: &JobInfo) -> Option<String> {
 #[derive(Debug, Serialize)]
 struct JsonReport<'a> {
     job: &'a JobInfo,
+    warnings: Vec<String>,
     tail: Vec<String>,
     digest: Option<Digest>,
     notes: Vec<String>,
@@ -583,6 +584,7 @@ fn report(
     budget: usize,
 ) -> Result<String> {
     let mut notes: Vec<String> = notes.to_vec();
+    let mut warnings: Vec<String> = Vec::new();
     let (tail, digest) = match job.state {
         JobState::Running => (jobs::tail(&job.output, RUNNING_TAIL_LINES), None),
         JobState::Failed => {
@@ -600,9 +602,19 @@ fn report(
             (Vec::new(), d)
         }
         JobState::Succeeded | JobState::Cancelled => {
-            let tail = job_output(ctx, job)
-                .map(|t| jobs::tail_of(&t, FINISHED_TAIL_LINES))
-                .unwrap_or_default();
+            let text = job_output(ctx, job).unwrap_or_default();
+            let (shown, total) = logs::console_warnings(&text);
+            // The warnings themselves, not knotty's count of them (y1-build: the tail of a
+            // real build ended "Summary: There was 1 WARNING message.").
+            let tail = jobs::tail_of(
+                &text
+                    .lines()
+                    .filter(|l| !logs::is_warning_summary(l))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                FINISHED_TAIL_LINES,
+            );
+            warnings = logs::warning_rows(&shown, total, job.handle.as_ref());
             if let Some(h) = &job.handle {
                 notes.push(match job.kind {
                     HandleKind::Env => format!("slice handle={h} var=NAME | grep=RE"),
@@ -616,6 +628,7 @@ fn report(
     if format == Format::Json {
         let r = JsonReport {
             job,
+            warnings,
             tail,
             digest,
             notes,
@@ -643,6 +656,9 @@ fn report(
     }
     if let Some(e) = &job.handle_error {
         t.row(&["output", &render::snippet(&format!("not stored: {e}"))]);
+    }
+    for w in &warnings {
+        t.row(&["warning", &render::snippet(w)]);
     }
     for l in &tail {
         t.row(&["tail", &render::snippet(l)]);

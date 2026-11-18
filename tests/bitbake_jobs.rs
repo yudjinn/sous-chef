@@ -552,6 +552,89 @@ async fn log_job_without_a_readable_task_log_digests_the_output() {
     assert!(out.contains("oe_runmake failed"), "{out}");
 }
 
+// --- warnings of a finished job (y3-leftovers, item 5) ----------------------------------
+
+/// A recorded real console (`tests/fixtures/outputs/live/y3-leftovers/<name>`), with
+/// `{{LIVE}}` replaced by the fixture's root, written into the fixture.
+fn live_y3(f: &Fixture, name: &str) -> PathBuf {
+    let text = fs::read_to_string(common::fixture_path(&format!(
+        "outputs/live/y3-leftovers/{name}"
+    )))
+    .unwrap()
+    .replace("{{LIVE}}", &f.root.display().to_string());
+    let p = f.root.join(name);
+    fs::write(&p, text).unwrap();
+    p
+}
+
+/// The first real build of curl had three warnings (uninative disabled, two fetches that
+/// fell back to MIRRORS) and ended with knotty's count of them: the finished job lists the
+/// warnings, not the count.
+#[tokio::test]
+async fn a_finished_job_lists_its_warnings_not_their_count() {
+    let f = fixture();
+    let console = live_y3(&f, "build1-first-build-trimmed.out");
+    f.fake(&[("FAKEBB_OUTPUT", &console.display().to_string())]);
+    f.call(target(Op::Build, "curl")).await.unwrap();
+    f.wait_done("job:1").await;
+    let out = f.call(status_of(Some("job:1"))).await.unwrap();
+    assert!(out.contains("state\tsucceeded\n"), "{out}");
+    let warnings: Vec<&str> = out
+        .lines()
+        .filter_map(|l| l.strip_prefix("warning\t"))
+        .collect();
+    assert_eq!(warnings.len(), 3, "{out}");
+    assert!(warnings[0].starts_with("WARNING: Your host glibc version (2.44) is newer"));
+    assert!(
+        warnings[1]
+            .starts_with("WARNING: ca-certificates-20260816-r0 do_fetch: Failed to fetch URL")
+    );
+    assert!(warnings[2].starts_with("WARNING: gnu-config-native-20250709+git-r0 do_fetch:"));
+    assert!(!out.contains("Summary: There were"), "{out}");
+    assert!(
+        out.contains("tail\tNOTE: Tasks Summary: Attempted 919 tasks of which 2 didn't need to be rerun and all succeeded.\n"),
+        "{out}"
+    );
+    let v = json(
+        &f.call(Args {
+            format: Some(Format::Json),
+            ..status_of(Some("job:1"))
+        })
+        .await
+        .unwrap(),
+    );
+    assert_eq!(v["warnings"].as_array().unwrap().len(), 3, "{v}");
+}
+
+/// Repeated warnings are listed once and counted; more than five distinct ones are counted
+/// with a slice hint.
+#[test]
+fn warning_rows_dedupe_and_cap() {
+    let mut text = String::new();
+    for i in 0..7 {
+        text.push_str(&format!(
+            "WARNING: w{i}\nWARNING: w{i}\n| WARNING: from a log\n"
+        ));
+    }
+    text.push_str("Summary: There were 14 WARNING messages.\n");
+    let (shown, total) = sous_chef::bitbake::logs::console_warnings(&text);
+    assert_eq!((shown.len(), total), (7, 14));
+    let h: sous_chef::handles::Handle = "h:0123456789".parse().unwrap();
+    let rows = sous_chef::bitbake::logs::warning_rows(&shown, total, Some(&h));
+    assert_eq!(rows.len(), 6, "{rows:?}");
+    assert_eq!(rows[0], "WARNING: w0");
+    assert_eq!(
+        rows[5],
+        "+2 more distinct warnings; 7 repeated lines left out (14 WARNING lines in all: slice handle=h:0123456789 grep=^WARNING:)"
+    );
+    assert!(sous_chef::bitbake::logs::is_warning_summary(
+        "Summary: There was 1 WARNING message."
+    ));
+    assert!(!sous_chef::bitbake::logs::is_warning_summary(
+        "Summary: There was 1 ERROR message, returning a non-zero exit code."
+    ));
+}
+
 // --- running, status, cancel -----------------------------------------------------------
 
 #[tokio::test]

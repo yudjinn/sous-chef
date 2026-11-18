@@ -229,3 +229,76 @@ fn timing() {
         start.elapsed().as_secs_f64() * 1000.0 / f64::from(n)
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// y3-leftovers: the hook on recorded real consoles of curl (docs/live-verification.md).
+
+/// A recorded real output (`tests/fixtures/outputs/live/<name>`) with `{{LIVE}}/yocto-kiss`
+/// replaced by `root` (so its build directory is the workspace's `build/`) and the given
+/// further replacements.
+fn live_output(name: &str, root: &Path, more: &[(&str, &str)]) -> String {
+    let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/outputs/live")
+        .join(name);
+    let mut text = std::fs::read_to_string(&p)
+        .unwrap()
+        .replace("{{LIVE}}/yocto-kiss", root.to_str().unwrap());
+    for (from, to) in more {
+        text = text.replace(from, to);
+    }
+    text
+}
+
+/// A Bash event in the workspace at `root`: `command` with `stdout`.
+fn bash_event(root: &Path, command: &str, stdout: &str) -> String {
+    let mut ev: Value = serde_json::from_str(&event_in("bash", root)).unwrap();
+    ev["tool_input"]["command"] = Value::String(command.into());
+    ev["tool_response"]["stdout"] = Value::String(stdout.into());
+    ev.to_string()
+}
+
+/// The real first build's console (trimmed): no failure, three warnings. The replacement
+/// lists the warnings, and its tail leaves out knotty's count of them.
+#[test]
+fn the_hook_lists_the_warnings_of_a_real_successful_build() {
+    let (_tmp, root) = common::temp_ws();
+    let root = std::fs::canonicalize(root).unwrap();
+    let console = live_output("y3-leftovers/build1-first-build-trimmed.out", &root, &[]);
+    assert!(console.len() > 3 * 1024);
+    let cache = indexed_cache(&root);
+    let r = replaced(&run_hook(
+        bash_event(
+            &root,
+            "env -u NETRC_FILE ../venv/bin/kas shell kas/kiss.yaml:kas/dogbonedark.yaml -c 'bitbake curl'",
+            &console,
+        )
+        .as_bytes(),
+        cache.path(),
+    ));
+    let stdout = r["stdout"].as_str().unwrap();
+    let at = stdout
+        .find("3 warnings:\n")
+        .unwrap_or_else(|| panic!("{stdout}"));
+    let listed: Vec<&str> = stdout[at..].lines().skip(1).take(3).collect();
+    assert!(
+        listed[0].starts_with("WARNING: Your host glibc version (2.44)"),
+        "{stdout}"
+    );
+    assert!(
+        listed[1].starts_with("WARNING: ca-certificates-20260816-r0 do_fetch"),
+        "{stdout}"
+    );
+    assert!(
+        listed[2].starts_with("WARNING: gnu-config-native-20250709+git-r0 do_fetch"),
+        "{stdout}"
+    );
+    assert!(
+        !stdout.contains("Summary: There were 3 WARNING messages."),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("no failure recognised; last 10 lines:\n"),
+        "{stdout}"
+    );
+    assert!(stdout.len() < 2048, "{}", stdout.len());
+}

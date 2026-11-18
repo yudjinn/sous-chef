@@ -1360,6 +1360,78 @@ pub fn exit_from_console(output: &str, log: &Path) -> Option<i32> {
         .and_then(|t| t.exit_code)
 }
 
+// ---------------------------------------------------------------------------------------
+// A finished job's console: warnings and interruption
+// ---------------------------------------------------------------------------------------
+
+/// Warnings shown for a finished job; the rest are counted.
+pub const MAX_WARNINGS: usize = 5;
+
+/// The `WARNING:` lines of console output (knotty prints each warning the server logs as
+/// `WARNING: <message>`, with the `<PF> <task>: ` prefix for a task's), distinct, in
+/// order, with how many there were in all. Lines of a task log printed under `Log data
+/// follows:` (`| WARNING: ...`) are not the console's own and are left out, as is
+/// knotty's closing count (`Summary: There was 1 WARNING message.`,
+/// [`is_warning_summary`]).
+pub fn console_warnings(output: &str) -> (Vec<String>, usize) {
+    let mut seen = HashSet::new();
+    let mut distinct = Vec::new();
+    let mut total = 0;
+    for raw in output.lines() {
+        let line = raw.trim_end_matches('\r').trim_end();
+        if !line.starts_with("WARNING: ") {
+            continue;
+        }
+        total += 1;
+        if seen.insert(line.to_string()) {
+            distinct.push(line.to_string());
+        }
+    }
+    (distinct, total)
+}
+
+/// The rows of a finished job's warnings: the first [`MAX_WARNINGS`] distinct
+/// `WARNING:` lines ([`console_warnings`]), then how many more there are and where.
+pub fn warning_rows(shown: &[String], total: usize, handle: Option<&Handle>) -> Vec<String> {
+    let mut out: Vec<String> = shown.iter().take(MAX_WARNINGS).cloned().collect();
+    let more = shown.len().saturating_sub(MAX_WARNINGS);
+    let repeats = total.saturating_sub(shown.len());
+    if more > 0 || repeats > 0 {
+        let mut s = String::new();
+        if more > 0 {
+            s.push_str(&format!(
+                "+{more} more distinct {}",
+                if more == 1 { "warning" } else { "warnings" }
+            ));
+        }
+        if repeats > 0 {
+            if !s.is_empty() {
+                s.push_str("; ");
+            }
+            s.push_str(&format!(
+                "{repeats} repeated {} left out",
+                if repeats == 1 { "line" } else { "lines" }
+            ));
+        }
+        s.push_str(&format!(" ({total} WARNING lines in all"));
+        if let Some(h) = handle {
+            s.push_str(&format!(": slice handle={h} grep=^WARNING:"));
+        }
+        s.push(')');
+        out.push(s);
+    }
+    out
+}
+
+/// knotty's count of warnings and errors at the end of a build (`bb.ui.knotty`: `Summary:
+/// There was 1 WARNING message.`, `Summary: There were 3 WARNING messages.`), which says
+/// nothing the warnings themselves do not.
+pub fn is_warning_summary(line: &str) -> bool {
+    let l = line.trim();
+    l.starts_with("Summary: There w") && l.ends_with("WARNING message.")
+        || l.starts_with("Summary: There w") && l.ends_with("WARNING messages.")
+}
+
 /// `compile` or `do_compile` -> `do_compile`. Task and recipe names may hold only
 /// `[A-Za-z0-9_.+-]`, so they can be used as path components.
 pub fn normalize_task(task: &str) -> Result<String> {

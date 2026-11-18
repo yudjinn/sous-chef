@@ -24,6 +24,8 @@
 //! (`bitbake::logs::digest`, about 600 bytes, with the task definition from the index when
 //! the console names a recipe and task) when `bitbake::logs::detect` finds a failure, or
 //! else the last [`TAIL_LINES`] lines; the `slice` hint is the last line either way.
+//! Without a failure the warnings come first (`logs::console_warnings`, as the `bitbake`
+//! tool shows a finished job's), and the tail leaves out knotty's count of them.
 //!
 //! **Handle store from a hook process.** The store is a directory plus rows in the index
 //! database (`src/handles.rs`): `<cache dir>/handles` and the `handles` table of
@@ -228,11 +230,29 @@ fn summary(text: &str, handle: &Handle, digest: Option<String>, with_stderr: boo
     match digest {
         Some(d) => out.push_str(&d),
         None => {
+            // The warnings themselves, not knotty's count of them (y1-build: a real build
+            // ended "Summary: There were 3 WARNING messages.").
+            let (shown, total) = logs::console_warnings(text);
+            let warnings = logs::warning_rows(&shown, total, Some(handle));
+            if !warnings.is_empty() {
+                out.push_str(&format!(
+                    "{total} {}:\n",
+                    if total == 1 { "warning" } else { "warnings" }
+                ));
+                for w in &warnings {
+                    out.push_str(&render::snippet(w));
+                    out.push('\n');
+                }
+            }
+            let kept: Vec<&str> = text
+                .lines()
+                .filter(|l| !logs::is_warning_summary(l))
+                .collect();
             out.push_str(&format!(
                 "no failure recognised; last {} lines:\n",
-                TAIL_LINES.min(lines)
+                TAIL_LINES.min(kept.len())
             ));
-            let tail: Vec<&str> = text.lines().rev().take(TAIL_LINES).collect();
+            let tail: Vec<&str> = kept.iter().rev().take(TAIL_LINES).copied().collect();
             for l in tail.into_iter().rev() {
                 out.push_str(&render::snippet(l));
                 out.push('\n');

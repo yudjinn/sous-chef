@@ -548,3 +548,37 @@ fn live_whole_pkgdata_find_path_equals_oe_pkgdata_util() {
         "ours only {only_ours:?}, theirs only {only_theirs:?}"
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// y3-leftovers: a cancelled build's console (the interrupt and the task that was running)
+// and the warnings of finished builds.
+
+fn sample_y3(name: &str) -> String {
+    fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/outputs/live/y3-leftovers")
+            .join(name),
+    )
+    .unwrap()
+}
+
+/// The warnings of the real finished builds: one (uninative) in a rebuild, three in the
+/// first build; the interrupted build adds knotty's `Exiting due to interrupt`.
+#[test]
+fn real_build_warnings() {
+    let (w, n) = logs::console_warnings(&sample_y3("job-kas-build-curl.out"));
+    assert_eq!(n, 1);
+    assert!(w[0].starts_with(
+        "WARNING: Your host glibc version (2.44) is newer than that in uninative (2.43)."
+    ));
+    let (w, n) = logs::console_warnings(&sample_y3("build1-first-build-trimmed.out"));
+    assert_eq!((w.len(), n), (3, 3));
+    assert!(w[1].contains("attempting MIRRORS if available"));
+    let (w, _) = logs::console_warnings(&sample_y3("job-kas-build-curl-cancel.out"));
+    assert_eq!(w[1], "WARNING: Exiting due to interrupt.");
+    for name in ["job-kas-build-curl.out", "build1-first-build-trimmed.out"] {
+        let text = sample_y3(name);
+        let last = text.lines().rev().find(|l| !l.trim().is_empty()).unwrap();
+        assert!(logs::is_warning_summary(last), "{name}: {last}");
+    }
+}
