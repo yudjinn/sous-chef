@@ -1084,6 +1084,14 @@ fn context_lines(f: &Failure, lines: &[&str], ws: Option<&Workspace>) -> Vec<Str
         if l.starts_with("DEBUG:") || l.starts_with("NOTE:") {
             return None;
         }
+        // The shell exit trap and its backtrace: the `function` row says what they say
+        // (live, y1-build: they were the only context of a compiler-style error).
+        if p.trap_bash.is_match(&l)
+            || l.starts_with("WARNING: Backtrace")
+            || p.trap_frame.is_match(&l)
+        {
+            return None;
+        }
         let s = render::snippet(&l);
         (!s.is_empty()).then_some(s)
     };

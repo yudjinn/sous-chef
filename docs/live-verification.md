@@ -697,6 +697,319 @@ false`):
 - The four live tests (`live_verify`, `audit`, `release_diff`, `skip_live` with
   `--ignored`): all pass (14, 1, 1, 1).
 
+## The first real build (y1-build, 2026-11-18)
+
+Until this round nothing in the environment had compiled. The user allowed building one
+recipe, `curl`, with whatever BitBake schedules for it, and cleaning and rebuilding curl
+(only curl). The features written from the source alone (`pkgdata`, `sigs`, `log` on a
+compile or configure failure, the `bitbake` tool's build jobs, `recipe show=cve`) were
+checked against what that build produced. Raw outputs are in `{{LIVE}}/runs/y1-build/`;
+trimmed copies in `tests/fixtures/outputs/live/y1-build/` (README there), checked in the
+normal gate by `tests/live_build.rs`.
+
+**Setup.** The kas build only (`{{LIVE}}/yocto-kiss/build`), entered with `env -u NETRC_FILE
+../venv/bin/kas shell kas/kiss.yaml:kas/dogbonedark.yaml -c '<command>'` from `yocto-kiss/`,
+or through `../scratch/kas-scratch.yaml` for the experiments (it adds
+`scratch/meta-scratch`, where a `curl_%.bbappend` was put and removed again). sous-chef: the
+release build of branch `y1-build`, `--config {{LIVE}}/runs/y1-build/sous-chef.toml`
+(`build_dir`, `init_script = openembedded-core/oe-init-build-env`, `[bitbake] enabled =
+true`, `allow_destructive = true`), `XDG_CACHE_HOME` and `TMPDIR` under `runs/y1-build/`, and
+`PATH=/usr/sbin:/usr/bin:/sbin:/bin` (the `PATH` kas shell gives BitBake, so that the
+init-script runner sees the same host tools); MCP calls by `runs/y1-build/tools/mcp.py`.
+
+**The build.** `bitbake curl` from an empty `sstate-cache` (only curl's earlier fetch was
+there): **succeeded** in **28 min 31 s** on the 16-core host, "Attempted 919 tasks of which 2
+didn't need to be rerun and all succeeded", 78 recipes (`NOTE: recipe <PF>: task` lines: 65
+native or cross, and 13 others: curl, its target dependencies openssl, zlib, libidn2,
+libunistring, the toolchain's glibc, libgcc, libgcc-initial, gcc-runtime,
+linux-libc-headers, gcc-source, opkg-utils, and ca-certificates in `all-oe-linux`). The build directory grew from
+250 MB to 13 GB. Three warnings, none a failure: uninative disabled (host glibc 2.44 newer
+than uninative's 2.43, as before), and two upstream fetch failures recovered from
+`MIRRORS` (`ca-certificates` from deb.debian.org, `gnu-config-native` from
+git.savannah.gnu.org). No host-tool problem on this Arch host.
+
+### pkgdata: confirmed
+
+After the build, every mode against `oe-pkgdata-util` in the same environment
+(`y1-build/oe-pkgdata-util.out`):
+
+| Call | sous-chef | oe-pkgdata-util |
+|---|---|---|
+| `find_path /usr/bin/curl` | `curl`, recipe curl, loc `FILES:curl meta:conf/bitbake.conf:338-347, meta:recipes-support/curl/curl_8.19.0.bb:202` | `curl: /usr/bin/curl` |
+| `find_path *libcurl.so*` | 4 rows: `curl-dbg` `/usr/lib/.debug/libcurl.so.4.8.0`, `curl-dev` `/usr/lib/libcurl.so`, `libcurl (runtime name libcurl4)` `/usr/lib/libcurl.so.4` and `.so.4.8.0` | the same 4 (in `os.walk` order) |
+| `list_pkg_files curl` / `libcurl` / `libcurl4` / `curl-dev` | 2 / 2 / 2 / 16 files with sizes; `libcurl4` noted as the runtime name of `libcurl` | the same files (`-r libcurl4` for the runtime name); sizes equal `list-pkg-files -l` |
+| `lookup_recipe libcurl4`, `libcurl`, `curl-dev` | curl `8.19.0-r0` `meta:recipes-support/curl/curl_8.19.0.bb` | `curl` each |
+| `list_pkgs curl` | the 8 `PACKAGES` with runtime name, packaged, size: `curl-staticdev` and `curl-locale` `no (empty)` | `list-pkgs -p curl`: the 6 packaged ones; `-r` gives `libcurl4` |
+| `package_info libcurl` / `libcurl4` / `curl` | version `8.19.0-r0`, runtime name `libcurl4`, size 432452, `RDEPENDS` `glibc (>= 2.43+git0+562cd7badd) libcrypto (>= 3.5.9) libidn2 (>= 2.3.8) libssl (>= 3.5.9) zlib (>= 1.3.2)`, `RRECOMMENDS ca-certificates`, `RPROVIDES libcurl (=8.19.0)` | `libcurl 8.19.0-r0 curl 8.19.0-r0 432452`, `libcurl4 ...`, `curl 8.19.0-r0 curl 8.19.0-r0 156605` |
+
+- **`PKGDATA_DIR`**: taken from the evaluated configuration (`note: PKGDATA_DIR = ... (from
+  the evaluated configuration)`), equal to `bitbake-getvar --value PKGDATA_DIR`
+  (`{{LIVE}}/yocto-kiss/build/tmp/pkgdata/dogbonedark`). The `bitbake-getvar` and search
+  fallbacks were not needed here.
+- **Renamed package**: `PKG:libcurl: libcurl4` (debian.bbclass), shown as `libcurl (runtime
+  name libcurl4)`; found by its runtime name through `runtime-reverse/`.
+- **Escapes**: one file name of the build has them, in ca-certificates
+  (`NetLock_Arany_=Class_Gold=_Főtanúsítvány.crt`). sous-chef shows the real name (as on
+  disk in `packages-split/`); `oe-pkgdata-util` prints `Főtanúsítvány`,
+  as bitbake-semantics.md said.
+- **Whole comparison** (`tests/live_build.rs`, `real_pkgdata_find_path_equals_oe_pkgdata_util`):
+  `find_path *` over the recorded curl and ca-certificates package data gives the same 1062
+  `(package, path)` pairs as `oe-pkgdata-util find-path '*'`; the sizes equal `list-pkg-files
+  -l -p curl` and each `PKGSIZE` is their sum. Over the whole package data of the build
+  (17 recipes) the ignored test `live_whole_pkgdata_find_path_equals_oe_pkgdata_util`
+  compares all 10 505 pairs with the recorded `find-path '*'`: equal (run after the later
+  rebuilds of curl too).
+
+### sigs: confirmed, two fixes
+
+Before any change, `sigs recipe=curl task=configure`: "only one signature: nothing to
+compare", as `bitbake-diffsigs` (`ERROR: Only one matching sigdata file found ...`). Then
+`scratch/meta-scratch/recipes-test/curl/curl_%.bbappend` with `EXTRA_OECONF:append = "
+--disable-dict"`, entered through `kas-scratch.yaml` (a dry run `bitbake -n curl` with the
+scratch layer and no bbappend first: "919 didn't need to be rerun", so adding the layer
+changes no signature), and `bitbake curl`: 39.7 s, 11 tasks ran (`do_configure` to
+`do_create_package_spdx`). The raw comparisons are in `y1-build/sigs/`.
+
+| Task | `bitbake-diffsigs -t curl <task>` | sous-chef `sigs` (after the fixes) |
+|---|---|---|
+| `do_configure` | `basehash changed from 470219a9... to ba225ab2...`, `Variable EXTRA_OECONF value changed:` and a unified diff: the whole old and new value, one line each, then three `PACKAGECONFIG{...} = Set/Unset` context lines | `re-ran: its own inputs changed (basehash)`; `cause EXTRA_OECONF value changed: 1 line added, 1 removed; words added: --disable-dict` at `meta-scratch:recipes-test/curl/curl_%.bbappend:2` |
+| `do_compile` | `Hash for task dependency curl:do_configure changed from 7ee05dbc... to 8a1a4041...`, then the configure comparison indented | `re-ran: ... by way of curl:do_configure`, `via curl:do_configure hash 7ee05dbc4c -> 8a1a4041e9`, the same cause `EXTRA_OECONF (curl)` with the same pointer |
+| `do_install` | two levels | `by way of curl:do_compile -> curl:do_configure`, two `via` rows, the same cause |
+
+Root cause, variable, pointer to the assignment in the scratch bbappend and the chain: all
+right. Two things were wrong and are fixed (tests in `tests/live_build.rs` on the recorded
+outputs):
+
+- **The word added was not named, and the pointer was right by luck.** A value that starts
+  with a newline (`EXTRA_OECONF = " \`...) is printed as a unified diff whose `-` and `+`
+  lines are the whole value; the digest said only "1 line added, 1 removed", and the
+  "words the change added" used to find the assignment were every word of the `+` line, so
+  any applied operation matched and the last one won. Now `bitbake::sigs::word_changes`
+  takes the multiset difference of the `+` and `-` words (`--disable-dict`), the detail
+  names it when lines were changed in place, and the pointer is the operation holding it.
+- **BitBake client lines counted as unrecognised output.** `NOTE: Starting bitbake
+  server...` (every run) and, when the previous `bitbake-diffsigs`'s server had not exited
+  yet, `NOTE: Reconnecting to bitbake server...` / `NOTE: Retrying server connection (#1)...`
+  (seven lines for the second call, 3 s after the first) gave "7 output lines were not
+  recognised". `NOTE:` and `WARNING:` lines are skipped now.
+
+Side observation: `--disable-dict` was already in `PACKAGECONFIG_CONFARGS` (curl's
+`PACKAGECONFIG` does not enable dict), so the configure line had it twice and the output
+did not change; the `do_packagedata` stamp kept its old hash (`db59de52...`), consistent
+with hash equivalence giving `do_package` its old unihash. No change reached curl through
+a dependency's hash in this round (nothing else changed); that case remains checked on
+hand-written output only.
+
+### log and the Bash hook on real failures: confirmed, three fixes
+
+Two failures of curl made on purpose through the scratch bbappend, each with `bitbake curl`
+through `kas-scratch.yaml` (exit 1 both times); raw consoles, task logs and run files in
+`y1-build/log/`.
+
+**A real `configure: error`** (`EXTRA_OECONF:append = " --with-libpsl"`; libpsl is not in
+curl's `DEPENDS`): `log recipe=curl task=configure`, and `log` with no argument (which found
+the same failure as the most recent one), 3.4 s and 0.2 s:
+
+```
+recipe	curl
+version	8.19.0
+task	do_configure
+exit	1
+error (configure, line 345)	configure: error: libpsl libs and/or directories were not found where specified!
+context	checking for psl_builtin in -lpsl... no
+function	oe_runconf at meta:classes-recipe/autotools.bbclass:96; called from autotools_do_configure < do_configure
+definition	meta:classes-recipe/autotools.bbclass:149-225
+log	build:tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/log.do_configure.1749535
+handle	h:391e170707
+```
+
+Recipe, task, exit status (from the newest cooker console log), the first error with its
+context, the failing function mapped through the run file (`autotools.bbclass:96` is the
+`bbfatal_log "configure failed"` line: checked by hand from the `# line: 87` comment), the
+task definition (`autotools_do_configure`, lines 149-225) and the handle; 574 bytes:
+**confirmed**.
+
+**A failing `do_compile:prepend`** (it echoes `lib/sous_chef_probe.c:12:5: error: 'probe'
+undeclared (first use in this function)` and runs `false`): the first error and exit were
+right, but
+
+- **the function row said `do_compile at autogenerated:3`.** BitBake writes a `:prepend` of
+  an `EXPORT_FUNCTIONS` stub inside the stub, under its `# line: 1, file: autogenerated`
+  comment, so the mapping is BitBake's own and useless. Fixed: the tool looks up the
+  applied operations of that function in the recipe's evaluation and points at the line
+  equal to the trap's command: `do_compile at
+  meta-scratch:recipes-test/curl/curl_%.bbappend:4 (run inside the EXPORT_FUNCTIONS stub)`.
+  Test: `tests/bitbake_logs.rs`, `log_tool_points_a_failing_prepend_at_its_operation` (the
+  real log and run file laid out in the fixture workspace).
+- **the only context rows were the shell trap's** (`WARNING: <run file>:148 exit 1 from
+  'false'`, `WARNING: Backtrace (BB generated script):`), which the function row already
+  says. They are left out of the context now (`tests/live_build.rs`,
+  `real_compile_failure_in_prepend_maps_to_autogenerated`).
+
+**The Bash hook** on both consoles (a `PostToolUse` Bash event carrying the captured
+output, `runs/y1-build/tools/hookrun.py`), with the command as it was really run, `env -u
+NETRC_FILE ../venv/bin/kas shell ../scratch/kas-scratch.yaml -c 'bitbake curl'`:
+
+- **it passed the output through** (2 ms, no response): `runs_bitbake` skipped `env` and
+  the option `-u` but took `NETRC_FILE`, the option's value, for the command. This is the
+  way docs/live-environment.md tells everyone to run kas here. Fixed: the options of `env`,
+  `sudo`, `nice` and `time` that take a value skip it (`-u`, `--unset`, `-C`, `--chdir`,
+  `-g`, `-n`, `-f`, `-o`, ...); unit tests in `src/hook/bash.rs`.
+- after the fix: the 37 359-byte configure console is replaced by 583 bytes (recipe,
+  version, task, exit 1, the `configure: error`, its context, `oe_runconf (run file line
+  255)`, the definition, the handle and the slice hint), the 4 564-byte compile console by
+  477 bytes; 18 to 21 ms per call. The hook does not read the run file, so its function row
+  gives the run-file line, not the metadata line (the `log` tool does).
+
+Seen in the consoles (bitbake-semantics.md, "Build output", corrected): the `configure
+failed` `ERROR:` (from `bbfatal_log`) did not stop knotty from printing `Log data follows:`
+(it is logged with `forcelog`); in both consoles `Execution of '<run file>' failed with exit
+code 1` came before `Logfile of failure stored in:`.
+
+### The bitbake tool with a real build: confirmed, cancel fixed
+
+Through the MCP server (init-script mode, `runs/y1-build/tools/calls-bitbake-*.json`), the
+scratch bbappend removed first:
+
+- `op=clean target=curl args=["cleanall"] confirm=true wait=300` with a progress token:
+  job 1, `bitbake -c cleanall curl`, succeeded in 6 s; 14 progress notifications, about two
+  a second, each `job:1 clean curl running <n>s: <last line>`.
+- `op=build target=curl`: job 2 started at once (`started; poll with bitbake op=status
+  job=job:2, stop with op=cancel`). `op=status` 5 s later: `running`, the last five lines.
+- **Behind the build**, `op=env target=curl` and `op=layers` were refused at once with the
+  running job and "already running (one job at a time): it holds BitBake's lock ...", and
+  `var name=S recipe=curl authoritative=true` with "cannot run bitbake -e now: job:2 (build
+  curl) is running ... use static mode"; `log job=job:2`: "still running". As documented.
+- `op=status wait=300` with a progress token: 67 notifications (`job:2 build curl running
+  15s: NOTE: recipe curl-8.19.0-r0: task do_configure: Started`, ...), then the finished
+  job: `succeeded`, `elapsed 41s`, `exit 0`, the handle and the last three lines (`Attempted
+  919 tasks of which 900 didn't need to be rerun and all succeeded.`).
+
+**Bug: `op=cancel` did not stop the build.** A second run (cleanall, build, cancel 22 s in,
+during `do_configure`, with `ps` sampled every second, `y1-build/bitbake/`): the job was
+`cancelled` after 29 ms and its client was gone, but the BitBake server (`bitbake-server`,
+in its own session, re-parented, as for `bitbake -e` before) and its workers were not in
+the job's group: `do_configure` went on, `do_compile` started (`make -j 16`) 5 s after the
+cancel, and the build ran to `do_create_package_spdx`; the cookerdaemon log has
+`Disconnecting Client` at 23:16:35 and the build's end, then `No timeout, exiting.`, at
+23:16:55. So a cancel only made the build invisible. Fixed (`Supervised::interrupt`,
+`src/bitbake/env.rs`): a cancel sends SIGINT to the group, again 1 s later, and waits up to
+60 s for the client to exit before terminating anything: what Ctrl-C twice does in knotty
+(`stateShutdown`, `stateForceShutdown`). Re-run live with the fix: cancel answered after
+3.6 s; the job output ends `Keyboard Interrupt, closing down...`, `Second Keyboard
+Interrupt, stopping...`, `WARNING: Exiting due to interrupt.`, `NOTE: Sending SIGTERM to
+remaining 1 tasks`, `Execution was interrupted, returning a non-zero exit code.`; the
+daemon log has `stateShutdown` and `stateForceShutdown` 1 s apart and the server exited 2 s
+later; no configure or make process after 23:24:06; `log.task_order` has nothing after that
+`do_configure`; and an `op=layers` 3 s later ran at once (`succeeded`, the lock free). Test
+with a fake client that behaves as knotty and ignores SIGTERM:
+`tests/bitbake_jobs.rs`, `cancel_interrupts_the_client_twice_and_lets_it_stop`; the
+recorded outputs in `tests/live_build.rs`, `real_cancelled_build_outputs`.
+
+Not settled: `log job=` on a cancelled job says "no error lines recognised; slice the log"
+(true; it could say the job was cancelled). Cancel with `BB_SERVER_TIMEOUT` set and a
+kas-mode job (where SIGINT also reaches kas and the shell) were not tried.
+
+### recipe show=cve against a real report: confirmed
+
+Which class can make a report for curl alone, read in OE-core Wrynose: `sbom-cve-check` /
+`sbom-cve-check-recipe` need `python3-sbom-cve-check-native` and the CVE database recipes
+(`sbom-cve-check-update-cvelist-native:do_patch`, `...-nvd-native:do_patch`, fetched lists),
+so other recipes and the network: not used. `vex.bbclass` (in `classes/`, so inheritable
+by a recipe) adds `do_generate_vex` (before `do_build`, no dependencies) that writes the
+per-recipe JSON from the metadata and the patches alone. So the scratch bbappend became
+`inherit vex`; `bitbake -n -c generate_vex curl` listed one task; `bitbake -c generate_vex
+curl` ran it (succeeded) and wrote `tmp/deploy/cve/curl_cve.json` (11 266 bytes).
+
+`recipe curl show=cve` (238 ms) then showed `build  Unpatched 0, Patched 21, Ignored 7
+(version 8.19.0)  build:tmp/deploy/cve/curl_cve.json`, the identity (`CVE_PRODUCT` from
+curl_8.19.0.bb:51, `CVE_VERSION` 8.19.0 from vex.bbclass:27), 7 `status` rows and 25
+`patch` rows. Compared with the report (`runs/y1-build/tools/cvecompare.py`): the same 28
+ids with the same status and detail (each `CVE_STATUS` entry `Ignored`, with its detail and
+the report's description; each CVE of a patch file `Patched` / `fix-file-included`, four of
+them from two patches: `CVE-2026-6429.patch` and `CVE-2026-6429-dependent.patch`, the
+`-01` / `-02` pairs). **Confirmed**; test `tests/live_build.rs`, `real_vex_report_of_curl`
+(the recorded report, the counts the view shows and the Wrynose file-name rule for all 25
+patch files). The report has no NVD fields (no scores), as the class says. Side effect,
+recorded in bitbake-semantics.md: the class's `BuildCompleted` handlers did not run (no
+`cve-summary.json`; `tmp/log/cve/cve-summary-index.txt` was left in the build directory).
+
+### Authoritative var and deps against the built curl: confirmed (known gaps flagged)
+
+After the scratch bbappend was removed and curl rebuilt through yocto-kiss's own kas files,
+`var recipe=curl` with and without `authoritative=true` (`runs/y1-build/tools/calls-var*.json`;
+the first authoritative call ran `bitbake -e curl` in 3.9 s, the others reused its dump:
+"reused: the tree is unchanged since it ran"):
+
+| Variable | Static = authoritative? | Value |
+|---|---|---|
+| `SRC_URI` | **equal** (1174 bytes, the two handles compared byte for byte) | the tarball and 26 `file://` entries |
+| `PACKAGECONFIG` | **equal** | `basic-auth bearer-auth digest-auth ipfs negotiate-auth openssl proxy threaded-resolver verbose zlib ipv6 aws libidn` |
+| `S` | **equal** | `<WORKDIR>/sources/curl-8.19.0` |
+| `B` | **equal** | `<WORKDIR>/build` |
+| `D` | **equal** | `<WORKDIR>/image` |
+| `WORKDIR` | **equal** | `{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0` (the directory the build used) |
+| `T` | **equal** | `<WORKDIR>/temp` |
+| `PKGDATA_DIR` | **equal** | `<build>/tmp/pkgdata/dogbonedark` (the directory `pkgdata` read) |
+| `EXTRA_OECONF` | differs, flagged ("1 value depends on python ... use authoritative=true") | static ends at `--disable-static`; BitBake's adds `PACKAGECONFIG_CONFARGS` (`--disable-ares --enable-aws ...`), which `base.bbclass`'s anonymous python sets (static: `""`) |
+| `DEPENDS` | differs, flagged | static `pkgconf-native ${@get_autotools_dep(d)} ${@get_base_dep(d)}`; BitBake `pkgconf-native autoconf-native automake-native libtool-native libtool-cross gcc-cross-arm virtual/compilerlibs virtual/libc libidn2 openssl zlib virtual/update-alternatives` |
+
+The two differences are the known ones (differential.md: the `PACKAGECONFIG` expansion and
+two python helpers outside the evaluated set), and both are flagged.
+
+**`deps curl` against what was built.** `kind=build`: `pkgconf-native`, the two unknown
+python rows (`get_autotools_dep`, `get_base_dep`: in BitBake the autotools natives and
+`libtool-cross`, and `virtual/cross-cc virtual/compilerlibs virtual/libc`), and from the
+`PACKAGECONFIG` flags `libidn2`, `openssl` (`PREFERRED_PROVIDER_openssl`), `zlib`. The
+build made exactly those target recipes plus what they need (`libunistring` for libidn2;
+glibc, libgcc, gcc-runtime, linux-libc-headers for the toolchain), `opkg-utils` for
+`virtual/update-alternatives` (added by `update-alternatives.bbclass`'s anonymous python
+through `ua_extend_depends`: not in the static list, covered only by the generic warning
+that this anonymous python "hands d to other code"), and `ca-certificates`. `kind=runtime`
+lists `RDEPENDS` only (`curl-staticdev` -> `curl-dev`); the built packages' `RDEPENDS` in
+the package data are the shared-library ones `do_package` adds (`libcurl`: glibc,
+libcrypto, libidn2, libssl, zlib; `curl`: glibc, libcurl), which no static view can know,
+and `RRECOMMENDS:libcurl: ca-certificates` (curl_8.19.0.bb:200), which is why
+ca-certificates was built (no other built package names it). **Open**: `deps` has no
+`RRECOMMENDS` rows, so the one recipe the build pulled in through them is not explained by
+any `deps` view (`recipe show=packages` and `pkgdata package_info` show it).
+
+### The build directory's layout: settled
+
+From the build directory after these runs (bitbake-semantics.md, "Build output" and "Task
+signatures", where each is recorded): `WORKDIR` = `tmp/work/<MULTIMACH_TARGET_SYS>/<PN>/<PV>`
+with the subdirectories a full build makes; `T` = `WORKDIR/temp` with
+`log.do_<task>.<pid>`, `run.do_<task>.<pid>` and `depsig.do_<task>.<pid>` (each with its
+symlink) and `run.<helper>.<pid>`; `log.task_order` appended per run until `WORKDIR` is
+removed (format checked on 31 real lines, `real_log_task_order_format`); the run files'
+`# line: N, file: F` comments and the mapping the digester applies (checked on a real
+`oe_runconf` frame, `real_configure_failure_log_and_line_mapping`), with
+`EXPORT_FUNCTIONS` stubs as `# line: 1, file: autogenerated`; stamps
+`<PV>.<task>.<hash>` and `<PV>.<task>.sigdata.<hash>` (the `do_packagedata` stamp with the
+`.dogbonedark` suffix, none for `do_build`'s sigdata) and the sstate cache names with
+`.siginfo`. Not settled: a second BitBake client's failure behind a long build (only one
+client at a time was allowed here), cancel with `BB_SERVER_TIMEOUT` set.
+
+### BitBake commands run in y1-build
+
+All in the kas build, one client at a time; curl the only target, the only recipe cleaned.
+
+| Command | Through | Result |
+|---|---|---|
+| `bitbake curl` | kas, yocto-kiss files | succeeded, 919 tasks, 28 min 31 s (the first build) |
+| `bitbake-getvar --value PKGDATA_DIR`, `oe-pkgdata-util find-path / list-pkg-files / lookup-recipe / list-pkgs / package-info` (three shells) | kas, yocto-kiss files | read-only |
+| `bitbake-diffsigs -c never -t curl do_configure` (sous-chef `sigs`, before the change) | init-script runner | "Only one matching sigdata file" |
+| `bitbake -n curl` | kas, `kas-scratch.yaml`, no bbappend | nothing to run |
+| `bitbake curl` with `EXTRA_OECONF:append = " --disable-dict"` | kas-scratch | succeeded, 11 tasks |
+| `bitbake-diffsigs -c never -t curl do_configure / do_compile / do_install` | kas-scratch, and through sous-chef's `sigs` (init-script) twice | the comparisons above |
+| `bitbake curl` with `--with-libpsl` | kas-scratch | failed in `do_configure` (on purpose) |
+| `bitbake curl` with the failing `do_compile:prepend` | kas-scratch | failed in `do_compile` (on purpose) |
+| `bitbake -c cleanall curl`, then `bitbake curl` (`bitbake` tool) | init-script | succeeded, 6 s and 41 s |
+| `bitbake -c cleanall curl`, `bitbake curl`, cancel (twice: before and after the fix); `bitbake-layers show-layers` after the second | init-script | cancelled; the first build went on to its end. An `op=layers` was also started 3 s after that first cancel and was killed when the MCP client closed a moment later: unintended, a second client while the orphaned build still ran (the cookerdaemon log shows no connection from it, and the build finished normally) |
+| `bitbake -e curl` (authoritative `var`) | init-script | read-only, 3.9 s |
+| `bitbake -n -c generate_vex curl`, `bitbake -c generate_vex curl` with `inherit vex` | kas-scratch | one task, succeeded |
+| `bitbake curl` (bbappend removed) | kas, yocto-kiss files | succeeded, 11 tasks ran, `bblayers.conf` and `local.conf` back as before |
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,
@@ -708,6 +1021,17 @@ false`):
 outputs. In the kas build, the fetches left `build/downloads/` (curl's tarball and the
 uninative shim) and `build/tmp/work/.../curl/` and `.../broken-fetch/`. `build/conf/` is as
 kas writes it (the scratch layer was removed again by the next plain `kas shell`).
+
+Since y1-build: the kas build directory holds the build of curl (14 GB at the end: `tmp/` with
+`work/`, `pkgdata/`, `deploy/ipk/`, `deploy/cve/curl_cve.json`, `log/cve/` (the VEX
+experiment's index file, left by the class), `stamps/`, `sysroots-components/`;
+`sstate-cache/`; `downloads/` with every source of the 78 recipes). curl itself was rebuilt
+at the end without the scratch bbappend (`Attempted 919 tasks of which 908 didn't need to
+be rerun`), and `conf/bblayers.conf` and `conf/local.conf` are as kas writes them for
+yocto-kiss's files (identical to the copies taken before, `runs/y1-build/conf-before/` and
+`conf-after/`). `scratch/meta-scratch/recipes-test/` holds only `broken-fetch` again. The
+raw outputs, the sous-chef configuration, cache and helper scripts are in
+`{{LIVE}}/runs/y1-build/`.
 
 To remove: `rm -r {{LIVE}}/scratch {{LIVE}}/runs/verify`, and if wanted
 `{{LIVE}}/yocto-kiss/build/downloads` and `{{LIVE}}/yocto-kiss/build/tmp/work` (BitBake

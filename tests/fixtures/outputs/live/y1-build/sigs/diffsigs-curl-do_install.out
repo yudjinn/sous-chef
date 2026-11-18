@@ -1,0 +1,11 @@
+NOTE: Reconnecting to bitbake server...
+Hash for task dependency curl:do_compile changed from 068a669ebb8f5cc68974f32704a0e9975797cb5f69afef60e36a907d3f77880d to f5f8b21606eb5f175faafbe31aa6dd1d0bcb512ce2e94293b48da077140df95d
+    Hash for task dependency curl:do_configure changed from 7ee05dbc4c2109710f0305e9cd4e5d8039f415e527fd25750d9eb14c37d610b6 to 8a1a4041e93f80660ce296a8dc8805c8827549a7be2be702db5fb4c6cc39e6cd
+        basehash changed from 470219a95e8b1401f1dcf4404ddf6a9fda36a38d23ab41f54401d3b99cc7e08e to ba225ab203b07c9fefcc60aadd7f17c32f5c358f156f6284af4178e73f0a8733
+        Variable EXTRA_OECONF value changed:
+        @@ -1,4 +1,4 @@
+        -     --disable-libcurl-option     --without-libpsl     --enable-optimize     --with-ca-bundle=${CURL_CA_BUNDLE_BASE_DIR}/ssl/certs/ca-certificates.crt     ${@'--without-ssl' if (bb.utils.filter('PACKAGECONFIG', 'gnutls mbedtls openssl schannel', d) == '') else ''}     WATT_ROOT=${STAGING_DIR_TARGET}${prefix} ${DISABLE_STATIC} ${PACKAGECONFIG_CONFARGS}
+        +     --disable-libcurl-option     --without-libpsl     --enable-optimize     --with-ca-bundle=${CURL_CA_BUNDLE_BASE_DIR}/ssl/certs/ca-certificates.crt     ${@'--without-ssl' if (bb.utils.filter('PACKAGECONFIG', 'gnutls mbedtls openssl schannel', d) == '') else ''}     WATT_ROOT=${STAGING_DIR_TARGET}${prefix} ${DISABLE_STATIC} ${PACKAGECONFIG_CONFARGS} --disable-dict
+         PACKAGECONFIG{gnutls} = Unset
+         PACKAGECONFIG{mbedtls} = Unset
+         PACKAGECONFIG{openssl} = Set

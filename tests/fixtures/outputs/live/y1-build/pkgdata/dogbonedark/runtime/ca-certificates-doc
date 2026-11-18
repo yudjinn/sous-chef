@@ -1,0 +1,13 @@
+PN: ca-certificates
+PV: 20260816
+PR: r0
+PKGV: 20260816
+PKGR: r0
+LICENSE: GPL-2.0-or-later & MPL-2.0
+DESCRIPTION:ca-certificates-doc: This package includes PEM files of CA certificates to allow SSL-based applications to check for the authenticity of SSL connections. This derived from Debian's CA Certificates.  This package contains documentation.
+SUMMARY:ca-certificates-doc: Common CA certificates - Documentation files
+SECTION:ca-certificates-doc: doc
+PKG:ca-certificates-doc: ca-certificates-doc
+FILES:ca-certificates-doc: /usr/share/doc /usr/share/man /usr/share/info /usr/share/gtk-doc             /usr/share/gnome/help
+FILES_INFO:ca-certificates-doc: {"/usr/share/man/man8/update-ca-certificates.8": 3719}
+PKGSIZE:ca-certificates-doc: 3719

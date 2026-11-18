@@ -1,0 +1,9 @@
+NOTE: Starting bitbake server...
+basehash changed from 470219a95e8b1401f1dcf4404ddf6a9fda36a38d23ab41f54401d3b99cc7e08e to ba225ab203b07c9fefcc60aadd7f17c32f5c358f156f6284af4178e73f0a8733
+Variable EXTRA_OECONF value changed:
+@@ -1,4 +1,4 @@
+-     --disable-libcurl-option     --without-libpsl     --enable-optimize     --with-ca-bundle=${CURL_CA_BUNDLE_BASE_DIR}/ssl/certs/ca-certificates.crt     ${@'--without-ssl' if (bb.utils.filter('PACKAGECONFIG', 'gnutls mbedtls openssl schannel', d) == '') else ''}     WATT_ROOT=${STAGING_DIR_TARGET}${prefix} ${DISABLE_STATIC} ${PACKAGECONFIG_CONFARGS}
++     --disable-libcurl-option     --without-libpsl     --enable-optimize     --with-ca-bundle=${CURL_CA_BUNDLE_BASE_DIR}/ssl/certs/ca-certificates.crt     ${@'--without-ssl' if (bb.utils.filter('PACKAGECONFIG', 'gnutls mbedtls openssl schannel', d) == '') else ''}     WATT_ROOT=${STAGING_DIR_TARGET}${prefix} ${DISABLE_STATIC} ${PACKAGECONFIG_CONFARGS} --disable-dict
+ PACKAGECONFIG{gnutls} = Unset
+ PACKAGECONFIG{mbedtls} = Unset
+ PACKAGECONFIG{openssl} = Set

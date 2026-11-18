@@ -2,9 +2,11 @@
 
 A real Yocto Wrynose build environment that sous-chef is checked against (M9): the
 [bootlin/yocto-kiss](https://github.com/bootlin/yocto-kiss) project, set up with kas and,
-separately, with `bitbake-setup`. It lives outside the repository. Nothing in it is ever
-built: only parse-only commands and the fetch of one recipe have been run
-(live-verification.md).
+separately, with `bitbake-setup`. It lives outside the repository. Until y1-build only
+parse-only commands and the fetch of one recipe were run; since y1-build (2026-11-18) the
+kas build has built one recipe, `curl`, with what BitBake scheduled for it (919 tasks, 78
+recipes, 28.5 min from an empty sstate cache, 13 GB after the first build, 14 GB at the end): live-verification.md, "The first real
+build".
 
 Everything below was observed on 2026-11-17 on the user's machine (Arch-based; kas reports
 "EndeavourOS rolling"; Python 3.14).
@@ -176,6 +178,12 @@ parse-only commands (`bitbake -p`, `bitbake -e`, `bitbake-getvar`, `bitbake-laye
 one small recipe. Nothing that compiles, no image, no `kas build`, no `bitbake kiss-image`.
 `do_unpack` and `do_patch` may need native tools built first; check with `bitbake -n` before
 running them.
+
+For y1-build the user widened this to one target: `curl` may be built, any of its tasks
+run, and it alone cleaned (`cleanall`) and rebuilt; nothing else is a target, nothing else is
+cleaned, and `sstate-cache`, `downloads` and `tmp` are kept. Experiments on curl's metadata
+go in a `curl_%.bbappend` in `scratch/meta-scratch`, entered through
+`scratch/kas-scratch.yaml`, and are removed afterwards.
 
 ## Host tools
 

@@ -1715,8 +1715,25 @@ What `recipe show=cve` reproduces (x4). Read in OE-core Wrynose `33a6bd6c`
 (`meta/lib/oe/cve_check.py`, `meta/classes/vex.bbclass`, `meta/conf/cve-check-map.conf`,
 `meta/lib/oe/patch.py`), and with `git show` on the `scarthgap` and `kirkstone` branch
 tips (`meta/classes/cve-check.bbclass`, `meta/lib/oe/cve_check.py`), and the `nanbield` /
-`mickledore` tips for when `CVE_STATUS` appeared. Never checked against a build: the live
-build directory has no CVE output.
+`mickledore` tips for when `CVE_STATUS` appeared. **Checked against a real report**
+(y1-build, 2026-11-18; `tests/fixtures/outputs/live/y1-build/cve/`): `inherit vex` in a
+`curl_%.bbappend` (the class is in `classes/`, so a recipe may inherit it; it touches
+curl only, not the other recipes' signatures) and `bitbake -c generate_vex curl` (one
+task, no dependencies, no network: `do_generate_vex` reads only the metadata and the
+patches) wrote `tmp/deploy/cve/curl_cve.json` and the same file in `tmp/log/cve/` with
+`cve-summary-index.txt` naming it. Its package has `name`, `layer` (`meta`), `version`,
+`products` (`[{"product": "curl", "cvesInRecord": "No"}, {"product": "libcurl", ...}]`, the
+product part of each `CVE_PRODUCT` word, de-duplicated), `cpes` (six
+`cpe:2.3:*:<vendor>:<product>:8.19.0:*:*:*:*:*:*:*`) and 28 issues: 21 `Patched` with
+`detail` `fix-file-included` and `patch-file` (a list of absolute paths, two for a CVE
+fixed by two patches), 7 `Ignored` from `CVE_STATUS` (`detail` and `description`); no
+NVD fields. The ids, statuses and details are what the rules below give for the recipe
+(`recipe show=cve` matched all 28). The `BuildCompleted` handlers of the class
+(`vex_save_summary_handler`, `vex_cleanup`) did not run when only a recipe inherits it: no
+`cve-summary.json` was written and the index file was left behind. `sbom-cve-check` was not
+tried: it needs `python3-sbom-cve-check-native` built and its database recipes'
+`do_patch` (`SBOM_CVE_CHECK_UPDATE_DB_DEPENDENCIES`, fetched CVE lists), so other
+recipes and the network.
 
 - **Classes.** Kirkstone and Scarthgap have `cve-check.bbclass` (`do_cve_check`, needs the
   NVD database from `cve-update-nvd2-native`, network); Scarthgap and Wrynose have
@@ -1823,7 +1840,24 @@ reproduces it from the indexed statements:
   `run.<function>.<pid>` without a symlink for every helper function run
   (`base_do_fetch`, `extend_recipe_sysroot`, `sstate_*`, ...), `depsig.do_<task>.<pid>`
   with a symlink, and `log.task_order` with one line per task:
-  `<YYYYMMDD-HHMMSS.ffffff> do_<task> (<pid>): log.do_<task>.<pid>`.
+  `<YYYYMMDD-HHMMSS.ffffff> do_<task> (<pid>): log.do_<task>.<pid>`. **After full builds**
+  (y1-build, `tests/fixtures/outputs/live/y1-build/log/log.task_order`, checked by
+  `tests/live_build.rs`): the same layout for every task (`log.do_<task>` and
+  `run.do_<task>` symlinks for each task that ran, 21 at the end, `do_cleansstate`,
+  `do_cleanall` and `do_generate_vex` among them; `depsig.do_<task>` for the 11 sstate
+  tasks; and `run.<helper>.<pid>` for each helper per run: `sstate_*`,
+  `extend_recipe_sysroot`, `autotools_preconfigure`, `package_do_shlibs`, ...);
+  `log.task_order` gains a line per run, appended across builds (the fetch of the day before
+  stayed first) until `WORKDIR` is removed: after `bitbake -c cleanall curl` `T` holds
+  `log.do_cleansstate` and `log.do_cleanall` of that run, which are the first two lines of
+  a new `log.task_order`.
+  `WORKDIR` itself held `build/`, `sources/`, `image/`, `package/`, `packages-split/`,
+  `pkgdata/`, `pkgdata-pdata-input/`, `pkgdata-sysroot/`, `sysroot-destdir/`,
+  `recipe-sysroot/`, `recipe-sysroot-native/`, `deploy-ipks/`, `deploy-source-date-epoch/`,
+  `license-destdir/`, `spdx/`, `pseudo/`, `source-date-epoch/`, `temp/`, and the files
+  `configure.sstate` and `debugsources.list`. In the sstate cache an archive is
+  `<h0h1>/<h2h3>/sstate:<PN>:<MULTIMACH_TARGET_SYS>:<PV>:<PR>:<SSTATE_PKGARCH>:14:<hash>_<task>.tar.zst`
+  (`14`: `SSTATE_VERSION`) with `.siginfo` beside it.
 - Cooker logs: `BB_CONSOLELOG ?= "${LOG_DIR}/cooker/${MACHINE}/${DATETIME}.log"`, i.e.
   `tmp/log/cooker/<machine>/<datetime>.log` (OE-core `bitbake.conf`).
 - Failure text, as printed by bitbake 5495a54 (2026-11-16) and OE-core 9518ce9:
@@ -1832,7 +1866,12 @@ reproduces it from the indexed statements:
     `<PF> <task>: ` (`ERROR: hello-1.0-r0 do_compile: ...`).
   - knotty prints `ERROR: Logfile of failure stored in: <path>`, then the log under
     `Log data follows:` with `| ` (or ` | ` when `BBINCLUDELOGS_LINES` is set) prefixes,
-    but only when `BBINCLUDELOGS` is set and no `ERROR` was logged during the task. Then
+    but only when `BBINCLUDELOGS` is set and no `ERROR` was logged during the task; an
+    `ERROR` logged with `forcelog` does not count (`build.py` `ErrorCheckHandler`): that is
+    what the shell's `bbfatal_log` sends (`bb.error(value, forcelog=True)`), so OE's
+    `configure failed` (from `bbfatal_log`) still gets the log printed (**seen live**,
+    y1-build: `ERROR: curl-8.19.0-r0 do_configure: configure failed`, the `Execution of`
+    line, `Logfile of failure stored in:`, then `Log data follows:` and 355 `| ` lines). Then
     `ERROR: Task (<recipe file>:<task>) failed with exit code '<n>'` (runqueue), and at
     the end `Summary: N task(s) failed:` with `  <file>:<task>` and `    log: <path>`.
   - A failing shell task: `ERROR: Execution of '<run file>' failed with exit code <n>`
@@ -1846,7 +1885,18 @@ reproduces it from the indexed statements:
     run-file line `L` in a function whose comment is at 0-based index `i` to metadata line
     `n + L - i - 2`. build.py can also add `Backtrace (metadata-relative locations):`, but
     only from the exception's captured stdout, which is `None` when the output is logged,
-    so it is not expected in task logs (not seen in a real log).
+    so it is not expected in task logs (not seen in a real log). **Confirmed live**
+    (y1-build, BitBake 2.18.0, bash; `tests/fixtures/outputs/live/y1-build/log/`): a failed
+    `do_configure` logged `WARNING: <T>/run.do_configure.<pid>:279 exit 1 from 'exit 1'`
+    and frames `#1: bbfatal_log, <run file>, line 279` ... `#5: main, <run file>, line 283`,
+    one per line after a tab; `Execution of '<run file>' failed with exit code 1` was on
+    the console (with the `<PF> <task>: ` prefix), not in the log; and the mapping holds: the
+    `oe_runconf` frame (run-file line 255, its `# line: 87, file: .../autotools.bbclass`
+    comment at 0-based index 244) is `autotools.bbclass:96`, the `bbfatal_log "configure
+    failed"` line. An `EXPORT_FUNCTIONS` stub is emitted as `# line: 1, file: autogenerated`
+    then `do_compile() {`, and a `do_compile:prepend` from a bbappend is written **inside
+    that stub**, before `autotools_do_compile`, under the same comment: a failure in the
+    prepend maps to `autogenerated:<n>`, not to the bbappend.
   - OE's `bbfatal_log` / `die` print `ERROR: <message>` (e.g. `oe_runmake failed`,
     `configure failed`).
   - A failing python task: `ERROR: Error executing a python function in exec_func_python()
@@ -1887,7 +1937,10 @@ reproduces it from the indexed statements:
   - QA: `ERROR: QA Issue: <message> [<class>]` (or `WARNING:`), then
     `ERROR: Fatal QA errors were found, failing task.` (`meta/lib/oe/qa.py`).
   - The compiler, configure, make, wget and quilt messages inside logs are those tools'
-    own formats; they were not checked against a source.
+    own formats; they were not checked against a source. Seen live: autoconf's
+    `configure: error: <message>` (curl, y1-build), followed by OE's `NOTE: The following
+    config.log files may provide further information.`, `NOTE: <B>/config.log` and
+    `ERROR: configure failed`; wget's (see Fetch).
 
 ### Task signatures
 
@@ -1909,7 +1962,8 @@ branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
 - **Names.** In the stamps directory `<STAMP>.<task>.sigdata.<unihash>` (with a task hash)
   or `.sigbasedata.<basehash>`, `STAMP = "${STAMPS_DIR}/${MULTIMACH_TARGET_SYS}/${PN}/${PV}"`,
   `STAMPS_DIR ?= "${TMPDIR}/stamps"`; in the sstate cache `<SSTATE_PKG>.siginfo` (the hash
-  after the last `:`, before `_`). `find_siginfo` globs the stamps directory first
+  after the last `:`, before `_`; **seen live**: `sstate:curl:armv7at2hf-neon-oe-linux-gnueabi:8.19.0:r0:armv7at2hf-neon:14:<hash>_package.tar.zst.siginfo`,
+  and in the stamps directory `8.19.0.do_configure.sigdata.<hash>`). `find_siginfo` globs the stamps directory first
   (`MULTIMACH_TARGET_SYS`, `PV`, `PR` as `*`), then the sstate cache.
 - **`bitbake-diffsigs -t <pn> <task>`** (`do_` added when missing) takes the two newest
   signatures by mtime; with one it prints `ERROR: Only one matching sigdata file found for
@@ -1937,8 +1991,28 @@ branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
   `mc:<mc>:<pn>:<task>` (`build_pnid`). 2.0 (Kirkstone): recipe file ids shortened by
   `clean_basepath` to `<dir>/<file>.bb:<task>`, with `:virtual:<class>...` (and
   `:mc:<name>`) after the task for a variant.
-- Never checked against two real signatures: the live build ran only two fetches, so it
-  holds one signature per task; the tests use output hand-written from the code above.
+- **Confirmed on a real build** (y1-build, 2026-11-18; `tests/fixtures/outputs/live/y1-build/sigs/`,
+  `tests/live_build.rs`): after curl was built, then rebuilt with `EXTRA_OECONF:append = "
+  --disable-dict"` from a scratch bbappend, `bitbake-diffsigs -c never -t curl do_configure`
+  printed `basehash changed from A to B` and `Variable EXTRA_OECONF value changed:` followed
+  by a **unified diff** (the value starts with a newline): `@@ -1,4 +1,4 @@`, the whole old
+  value on one `-` line, the whole new one on one `+` line, then context lines `
+  PACKAGECONFIG{gnutls} = Unset` ... `PACKAGECONFIG{openssl} = Set` (one space first: the
+  `contains` entries of the value's varvals, for its `bb.utils.filter('PACKAGECONFIG', ...)`
+  python); no `---` / `+++` header. `-t curl do_compile` printed `Hash for task dependency
+  curl:do_configure changed from A to B` and that comparison indented by four spaces;
+  `do_install` two levels (eight spaces). Before the change: `ERROR: Only one matching
+  sigdata file found for the specified task (curl do_configure)` on stderr. The client's own
+  lines come first on stdout: `NOTE: Starting bitbake server...`, or, when the previous
+  client's server had not exited yet (a second `bitbake-diffsigs` 3 s after the first),
+  `NOTE: Reconnecting to bitbake server...` and `NOTE: Retrying server connection (#1)...
+  (<time>)` lines (seven seen). Stamp names: `<PV>.<task>.<taskhash>` (empty) and
+  `<PV>.<task>.sigdata.<hash>` in `tmp/stamps/<MULTIMACH_TARGET_SYS>/<PN>/`, both kept for
+  each run (the old ones stay, so two sigdata files exist after the rebuild); `do_packagedata`'s
+  stamp has the `stamp-extra-info` suffix (`.<taskhash>.dogbonedark`, `MACHINE`) but its
+  sigdata file has none; the noexec `do_build` has a stamp and no sigdata file. No change
+  reached curl through a dependency's hash in this round (none of curl's dependencies
+  changed), so that case is still checked only on hand-written output.
 
 ### Package data
 
@@ -1947,8 +2021,21 @@ What the `pkgdata` tool reads (x4). Read in OE-core Wrynose `33a6bd6c`
 `meta/classes-global/package.bbclass` `PKGDATA_VARS`, `emit_pkgdata[dirs]`;
 `scripts/oe-pkgdata-util`; `meta/conf/bitbake.conf`), with `git show` on `scarthgap`
 (the same `packagedata.py` / `package.bbclass`) and `kirkstone` (`emit_pkgdata` in
-`meta/classes/package.bbclass`, the same format). Never checked against a build: the live
-build directory has no package data.
+`meta/classes/package.bbclass`, the same format). **Confirmed on a real build** (y1-build,
+2026-11-18: `bitbake curl` on the kas build, BitBake 2.18.0, OE-core `33a6bd6c`; samples in
+`tests/fixtures/outputs/live/y1-build/`, test `tests/live_build.rs`): `PKGDATA_DIR` is
+`<build>/tmp/pkgdata/dogbonedark` (static value = `bitbake-getvar --value PKGDATA_DIR`);
+`runtime/<pkg>` has the lines and `PKGSIZE` (the sum of the `FILES_INFO` sizes, symlinks
+counted by their own size, e.g. `/usr/lib/libcurl.so.4` 16) as below; `debian.bbclass`
+renamed `libcurl` (`PKG:libcurl: libcurl4`, `runtime-reverse/libcurl4 -> ../runtime/libcurl`);
+`RPROVIDES:libcurl:  libcurl (=8.19.0)` (two spaces; the `:\s+` of `read_pkgdatafile` eats
+both) gives `runtime-rprovides/libcurl/libcurl`, the directory named without the version
+constraint; empty packages (`curl-staticdev`, `curl-locale`) have a `runtime/` file but no
+`.packaged` and no `runtime-reverse/` link. The one escaped name of the build
+(ca-certificates, `F\\u0151tan\\u00fas...` in the file, `Főtanúsítvány` on disk) prints
+as `Főtanús...` in `oe-pkgdata-util find-path` and `list-pkg-files`, as described
+below. `find-path` prints in `os.walk` order (not sorted). Besides the files below the
+directory also holds `extended/` and `debugsources/` (zstd, not read).
 
 - **Where.** `PKGDATA_DIR = "${TMPDIR}/pkgdata/${MACHINE}"` (`bitbake.conf`), filled by
   `do_packagedata`'s sstate (`sstate-outputdirs = "${PKGDATA_DIR}"`).
@@ -2100,6 +2187,19 @@ Checked 2026-11-17 against bitbake `master` (`lib/bb/main.py`, `lib/bb/cooker.py
   after the cancel and exited by itself about 3 s later ("No timeout, exiting.",
   "Exiting as we could obtain the lock"), because with `BB_SERVER_TIMEOUT` unset the server
   leaves once its client is gone. With `BB_SERVER_TIMEOUT` set it would stay (not tried).
+  **During a build** (y1-build, `bitbake curl` from the `bitbake` tool, cancelled 22 s in,
+  in `do_configure`) the server does **not** stop when its client is killed: the
+  cookerdaemon log has `Disconnecting Client` at the cancel, and the server went on
+  scheduling (`do_compile` with `make -j 16`, then `do_install` to
+  `do_create_package_spdx`) until the build was complete 20 s later, then "No timeout,
+  exiting.". What stops it is the client's own interrupt handling (`ui/knotty.py`): on the
+  first SIGINT (`KeyboardInterrupt`) it prints "Keyboard Interrupt, closing down..." and
+  sends `stateShutdown` (no new tasks), on the second "Second Keyboard Interrupt,
+  stopping..." and `stateForceShutdown` (running tasks killed: `NOTE: Sending SIGTERM to
+  remaining 1 tasks`), and it exits once the server reports the end (`Execution was
+  interrupted, returning a non-zero exit code.`). Live: two SIGINTs 1 s apart, the client
+  gone 3.6 s after the first, the server 1 s after it. A SIGTERM to the client has no such
+  handler.
 - **A second client** (settled on the live environment): while `bitbake -e curl` ran, `bitbake-layers
   show-layers` started in a second shell printed `NOTE: Reconnecting to bitbake server...`,
   **waited**, and completed normally (exit 0) half a second after the first client
@@ -2830,9 +2930,11 @@ against BitBake's behaviour or output:
   exists on yocto-kiss (every `inherit` in an `.inc` there is reached from recipes only).
 - `bitbake -e`: the `# expansion of NAME threw ...` line is from `emit_var`, not seen in
   real output.
-- Task logs: the compiler, configure, make, wget and quilt messages are those tools' own
-  formats, not checked against a source; build.py's `Backtrace (metadata-relative
-  locations):` was not seen in a real log.
+- Task logs: the compiler, make and quilt messages are those tools' own formats, not
+  checked against a source (autoconf's `configure: error:` and wget's were seen in real
+  logs; a real compiler error was not: the y1-build compile failure printed a
+  compiler-style line by hand); build.py's `Backtrace (metadata-relative locations):` was
+  not seen in a real log (the real failures had the run-file backtrace only).
 - Running BitBake: the second client's failure after about 20 s of waiting (from
   `lib/bb/main.py`, not observed); the server's behaviour on cancel with
   `BB_SERVER_TIMEOUT` set (not tried).

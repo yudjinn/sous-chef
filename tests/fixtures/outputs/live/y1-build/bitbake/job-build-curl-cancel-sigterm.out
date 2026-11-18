@@ -1,0 +1,53 @@
+NOTE: Reconnecting to bitbake server...
+NOTE: Retrying server connection (#1)... (23:16:14.024106)
+Loading cache...done.
+Loaded 2086 entries from dependency cache.
+NOTE: Resolving any missing task queue dependencies
+
+Build Configuration:
+BB_VERSION           = "2.18.0"
+BUILD_SYS            = "x86_64-linux"
+NATIVELSBSTRING      = "endeavouros"
+TARGET_SYS           = "arm-oe-linux-gnueabi"
+MACHINE              = "dogbonedark"
+SDKMACHINE           = "x86_64"
+DISTRO               = "kiss"
+DISTRO_VERSION       = "1.0"
+TUNE_FEATURES        = "arm armv7a vfp thumb neon callconvention-hard"
+meta-arm             
+meta-arm-toolchain   = "wrynose:673e8d7c5dcd14de58092eb73e6ecc5eee5c1735"
+meta-kiss            
+meta-kiss-ti         = "wrynose:cc621c5d5725a51af9abb7b0d531cf6f9264a468"
+meta-scratch         = "<unknown>:<unknown>"
+meta                 = "wrynose:33a6bd6cc8a9a976902081642414bd67adc74879"
+
+WARNING: Your host glibc version (2.44) is newer than that in uninative (2.43). Disabling uninative so that sstate is not corrupted.
+Initialising tasks...Sstate summary: Wanted 11 Local 0 Mirrors 0 Missed 11 Current 366 (0% match, 97% complete)
+done.
+NOTE: Executing Tasks
+NOTE: Running task 781 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_recipe_qa)
+NOTE: Running task 891 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_create_recipe_spdx)
+NOTE: recipe curl-8.19.0-r0: task do_recipe_qa: Started
+NOTE: recipe curl-8.19.0-r0: task do_create_recipe_spdx: Started
+NOTE: recipe curl-8.19.0-r0: task do_recipe_qa: Succeeded
+NOTE: Running task 903 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_fetch)
+NOTE: recipe curl-8.19.0-r0: task do_fetch: Started
+NOTE: recipe curl-8.19.0-r0: task do_create_recipe_spdx: Succeeded
+NOTE: recipe curl-8.19.0-r0: task do_fetch: Succeeded
+NOTE: Running task 904 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_unpack)
+NOTE: Running task 905 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_prepare_recipe_sysroot)
+NOTE: recipe curl-8.19.0-r0: task do_unpack: Started
+NOTE: recipe curl-8.19.0-r0: task do_prepare_recipe_sysroot: Started
+NOTE: recipe curl-8.19.0-r0: task do_prepare_recipe_sysroot: Succeeded
+NOTE: recipe curl-8.19.0-r0: task do_unpack: Succeeded
+NOTE: Running task 906 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_patch)
+NOTE: recipe curl-8.19.0-r0: task do_patch: Started
+NOTE: recipe curl-8.19.0-r0: task do_patch: Succeeded
+NOTE: Running task 907 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_deploy_source_date_epoch)
+NOTE: Running task 908 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_populate_lic)
+NOTE: recipe curl-8.19.0-r0: task do_deploy_source_date_epoch: Started
+NOTE: recipe curl-8.19.0-r0: task do_populate_lic: Started
+NOTE: recipe curl-8.19.0-r0: task do_populate_lic: Succeeded
+NOTE: recipe curl-8.19.0-r0: task do_deploy_source_date_epoch: Succeeded
+NOTE: Running task 909 of 919 ({{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl_8.19.0.bb:do_configure)
+NOTE: recipe curl-8.19.0-r0: task do_configure: Started

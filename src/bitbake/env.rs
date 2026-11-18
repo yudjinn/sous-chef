@@ -94,6 +94,14 @@ pub struct KasRun {
 /// How long a terminated process group gets between SIGTERM and SIGKILL.
 pub const KILL_GRACE: Duration = Duration::from_secs(2);
 
+/// How long a cancelled BitBake client gets, after its two SIGINTs, to stop its build and
+/// exit before it is terminated ([`Supervised::interrupt`]).
+pub const INTERRUPT_WAIT: Duration = Duration::from_secs(60);
+
+/// The pause between the first SIGINT (knotty: `stateShutdown`, no new tasks) and the
+/// second (`stateForceShutdown`, running tasks killed).
+pub const INTERRUPT_REPEAT: Duration = Duration::from_secs(1);
+
 /// How long [`Supervised::terminate`] waits, after SIGKILL, for the group to be empty. A
 /// killed process is gone once the kernel has scheduled its exit, and a member whose parent
 /// was the leader is reaped by init; on a loaded machine that took over 20 ms in tests.
@@ -606,6 +614,13 @@ impl ProcessGroup {
         }
     }
 
+    /// Sends SIGINT to every process in the group.
+    pub fn interrupt(&self) {
+        if let Some(p) = self.pgid {
+            sys::signal_group(p, sys::SIGINT);
+        }
+    }
+
     /// Sends SIGKILL to every process in the group.
     pub fn kill(&self) {
         if let Some(p) = self.pgid {
@@ -707,12 +722,48 @@ impl Supervised {
                 Ok(Finish::Exited(status?))
             }
             Err(finish) => {
+                // A cancelled BitBake client is interrupted first: terminating it would leave
+                // its server building ([`Supervised::interrupt`]).
+                if matches!(finish, Finish::Cancelled) && self.interrupt().await {
+                    self.reaped = true;
+                    return Ok(finish);
+                }
                 // A member that outlives the wait (one in uninterruptible sleep, say) is not
                 // reported; SIGKILL has been sent to it.
                 let _gone = self.terminate().await?;
                 Ok(finish)
             }
         }
+    }
+
+    /// Stops a BitBake client the way Ctrl-C twice does: SIGINT to the group (knotty sends
+    /// the server `stateShutdown`), [`INTERRUPT_REPEAT`] later a second SIGINT
+    /// (`stateForceShutdown`: the server kills the running tasks), then up to
+    /// [`INTERRUPT_WAIT`] for the leader to exit (the client waits for the server to report
+    /// the build ended) and up to [`INTERRUPT_REPEAT`] more for the group to empty. Returns
+    /// whether the leader exited and the group is empty; if not, the caller terminates.
+    ///
+    /// Why: the BitBake server runs in a session of its own, outside the job's group, and
+    /// keeps building when its client dies; live (docs/live-verification.md, y1-build) a
+    /// SIGTERM to the group of `bitbake curl` ended the client and the build went on for
+    /// 20 s to its end. Through SIGINT the client stays connected and tells the server.
+    pub async fn interrupt(&mut self) -> bool {
+        self.group.interrupt();
+        if tokio::time::timeout(INTERRUPT_REPEAT, self.child.wait())
+            .await
+            .is_err()
+        {
+            self.group.interrupt();
+            if tokio::time::timeout(INTERRUPT_WAIT, self.child.wait())
+                .await
+                .is_err()
+            {
+                return false;
+            }
+        }
+        // The leader is gone; what is left (a shell's background child, which ignores SIGINT)
+        // gets a moment, then the caller terminates it.
+        self.group.wait_gone(INTERRUPT_REPEAT).await
     }
 
     /// SIGTERM to the group, up to [`KILL_GRACE`] for the leader to exit, then SIGKILL to
@@ -781,6 +832,7 @@ impl Collector {
 
 #[cfg(unix)]
 mod sys {
+    pub const SIGINT: i32 = 2;
     pub const SIGTERM: i32 = 15;
     pub const SIGKILL: i32 = 9;
     /// `ESRCH`, "no such process": 3 on Linux and the BSDs (`errno.h`).
@@ -830,6 +882,7 @@ mod sys {
 
 #[cfg(not(unix))]
 mod sys {
+    pub const SIGINT: i32 = 2;
     pub const SIGTERM: i32 = 15;
     pub const SIGKILL: i32 = 9;
     pub fn signal_group(_pgid: u32, _sig: i32) {}

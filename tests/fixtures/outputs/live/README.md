@@ -59,3 +59,33 @@ Commands are run from `{{LIVE}}/yocto-kiss` with `KAS=../venv/bin/kas` and
 | `bitbake-setup-build/{bblayers,local}.conf`, `conf-summary.txt` | that build's `conf/` (`conf-notes.txt` and `templateconf.cfg` are empty; `site.conf` is a symlink to `../../../site.conf`) |
 | `bitbake-setup-build/site.conf` | `{{LIVE}}/bitbake-builds/site.conf` |
 | `bitbake-setup-build/init-build-env-environment.diff` | `diff` of `env \| sort` before and after `. init-build-env` in `env -i PATH=/usr/bin:/bin TERM=dumb LANG=en_US.UTF-8 bash` |
+
+## y1-build: the first real build (2026-11-18)
+
+Recorded from the first build ever run in this environment: `bitbake curl` on the kas build
+(`$KAS shell $FILES -c 'bitbake curl'`, 919 tasks of 78 recipes, 28 min 31 s from an empty
+`sstate-cache`, succeeded), and the experiments on curl that followed
+(`docs/live-verification.md`, "The first real build"). Same versions and commits as above.
+Under `y1-build/`; the same scrubbing as above.
+
+| File | Command / source |
+|---|---|
+| `y1-build/pkgdata/dogbonedark/` | a copy of `build/tmp/pkgdata/dogbonedark/` after the build, **trimmed** to curl's files (`curl`, `runtime/curl*`, `runtime/libcurl*`, the `runtime-reverse/` links of curl's packaged packages, `runtime-rprovides/libcurl/`) and ca-certificates' (`runtime/ca-certificates*`, `runtime-reverse/ca-certificates`: its `FILES_INFO` holds the one escaped file name of the build). Symlinks kept; the files themselves unchanged |
+| `y1-build/oe-pkgdata-util.out` | `$KAS shell $FILES -c 'set -x; bitbake-getvar --value PKGDATA_DIR; oe-pkgdata-util find-path /usr/bin/curl; ... list-pkg-files ...; lookup-recipe ...; list-pkgs -p curl; package-info curl libcurl libcurl4; ...'` (the `set -x` lines name each command; `list-pkg-files -s` is not an option and failed) |
+| `y1-build/oe-pkgdata-util-find-path.out` | `oe-pkgdata-util find-path '*'` (same shell), **trimmed** to the lines of curl's and ca-certificates' packages (1062 of 10505) |
+| `y1-build/oe-pkgdata-util-list-pkg-files-l-curl.out` | `oe-pkgdata-util list-pkg-files -l -p curl` |
+| `y1-build/sigs/curl_%.bbappend.dict` | the scratch bbappend of the experiment (`{{LIVE}}/scratch/meta-scratch/recipes-test/curl/curl_%.bbappend`, removed afterwards) |
+| `y1-build/sigs/diffsigs-curl-do_{configure,compile,install}.out` | after `bitbake curl` with that bbappend: `$KAS shell ../scratch/kas-scratch.yaml -c 'bitbake-diffsigs -c never -t curl do_configure; ... do_compile; ... do_install'`, split per command, kas's INFO lines removed (stdout and stderr together) |
+| `y1-build/sigs/diffsigs-curl-do_compile-reconnect.out` | the same `do_compile` comparison as sous-chef's `sigs` captured it (the handle's content) when it ran 3 s after the previous `bitbake-diffsigs`: seven `NOTE: Reconnecting` / `Retrying server connection` lines first |
+| `y1-build/log/console-configure-fail.out` | `$KAS shell ../scratch/kas-scratch.yaml -c 'bitbake curl'` with the bbappend `EXTRA_OECONF:append = " --with-libpsl"` (exit 1; kas's INFO lines removed) |
+| `y1-build/log/log.do_configure.1749535`, `run.do_configure.1749535` | that task's log and run file from `${T}` |
+| `y1-build/log/console-compile-fail.out` | the same command with a bbappend whose `do_compile:prepend` echoes a compiler-style error line and runs `false` (exit 1; kas's INFO lines removed) |
+| `y1-build/log/log.do_compile.1757933`, `run.do_compile.1757933` | that task's log and run file |
+| `y1-build/log/log.task_order` | curl's `${T}/log.task_order` after these runs (the fetch of 2026-11-17 first) |
+| `y1-build/bitbake/job-build-curl.out` | the output of job 2 of the `bitbake` tool, `op=build target=curl` after `op=clean args=["cleanall"]` (init-script mode; the job's handle content) |
+| `y1-build/bitbake/job-build-curl-cancel-sigterm.out` | the same after `op=cancel` 22 s in, before the fix (SIGTERM to the job's group: the client's output stops, the server built on) |
+| `y1-build/bitbake/job-build-curl-cancel-sigint.out` | the same with the fix (two SIGINTs): knotty's interrupt messages and `Execution was interrupted` |
+| `y1-build/bitbake/cookerdaemon-cancel-excerpt.log` | lines of `build/bitbake-cookerdaemon.log` around both cancels (the server's `Disconnecting Client` and its end 20 s later; `stateShutdown`, `stateForceShutdown`) |
+| `y1-build/cve/curl_%.bbappend.vex` | the scratch bbappend for the CVE report (`inherit vex`, removed afterwards) |
+| `y1-build/cve/curl_cve.json` | `build/tmp/deploy/cve/curl_cve.json` after `$KAS shell ../scratch/kas-scratch.yaml -c 'bitbake -c generate_vex curl'` |
+

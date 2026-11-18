@@ -1,0 +1,15 @@
+PN: ca-certificates
+PV: 20260816
+PR: r0
+PKGV: 20260816
+PKGR: r0
+LICENSE: GPL-2.0-or-later & MPL-2.0
+DESCRIPTION:ca-certificates-dev: This package includes PEM files of CA certificates to allow SSL-based applications to check for the authenticity of SSL connections. This derived from Debian's CA Certificates.  This package contains symbolic links, header files, and related items necessary for software development.
+SUMMARY:ca-certificates-dev: Common CA certificates - Development files
+RRECOMMENDS:ca-certificates-dev: ca-certificates (= 20260816-r0) openssl-dev openssl-bin-dev
+SECTION:ca-certificates-dev: devel
+PKG:ca-certificates-dev: ca-certificates-dev
+ALLOW_EMPTY:ca-certificates-dev: 1
+FILES:ca-certificates-dev: /usr/include /lib/lib*.so /usr/lib/lib*.so /usr/lib/*.la                 /usr/lib/*.o /usr/lib/pkgconfig /usr/share/pkgconfig                 /usr/share/aclocal /lib/*.o                 /usr/lib/ca-certificates/*.la /lib/*.la                 /usr/lib/cmake /usr/share/cmake
+FILES_INFO:ca-certificates-dev: {}
+PKGSIZE:ca-certificates-dev: 0

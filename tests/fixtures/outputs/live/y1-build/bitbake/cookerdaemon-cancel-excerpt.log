@@ -1,0 +1,18 @@
+1779574 23:16:17.503693 Registering idle function <function BBCooker.buildTargets.<locals>.buildTargetsIdle at 0x7f826f3838a0>
+1779574 23:16:17.503731 Removing idle function <bound method Command.runAsyncCommand of <bb.command.Command object at 0x7f827a4686e0>>
+1779574 23:16:35.315312 Processing Client
+1779574 23:16:35.315404 Disconnecting Client (socket: True)
+1779574 23:16:55.051502 Removing idle function <function BBCooker.buildTargets.<locals>.buildTargetsIdle at 0x7f826f3838a0> at idleFinish
+1779574 23:16:55.051948 Parse cache invalidated
+1779574 23:16:55.051976 No timeout, exiting.
+1779574 23:16:56.055071 Exiting (socket: True)
+1779574 23:16:56.061412 Exiting as we could obtain the lock
+1801428 23:24:04.076926 Running command ['stateShutdown']
+1801428 23:24:04.077005 Sending reply (None, None)
+1801428 23:24:04.077075 Command Completed (socket: True)
+1801428 23:24:05.077478 Running command ['stateForceShutdown']
+1801428 23:24:05.077545 Sending reply (None, None)
+1801428 23:24:05.077608 Command Completed (socket: True)
+1801428 23:24:06.341443 Exception Traceback (most recent call last):
+1801428 23:24:07.348829 Exiting (socket: True)
+1801428 23:24:07.355111 Exiting as we could obtain the lock

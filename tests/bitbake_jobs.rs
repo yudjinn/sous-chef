@@ -668,6 +668,40 @@ async fn cancel_kills_a_job_that_ignores_sigterm() {
     }
 }
 
+/// y1-build: a cancel interrupts a BitBake client twice (SIGINT, as Ctrl-C twice) and lets
+/// it exit by itself, because terminating it leaves the BitBake server, outside the job's
+/// group, building on (seen live). The fake behaves as knotty and ignores SIGTERM, so it
+/// stops in time only if the interrupts reach it.
+#[tokio::test]
+async fn cancel_interrupts_the_client_twice_and_lets_it_stop() {
+    let f = fixture();
+    let pidfile = f.root.join("fake.pids");
+    f.fake(&[
+        ("FAKEBB_ON_INT", "1"),
+        ("FAKEBB_PIDFILE", &pidfile.display().to_string()),
+    ]);
+    f.call(target(Op::Build, "hello")).await.unwrap();
+    wait_for_file(&pidfile).await;
+    let pid = fs::read_to_string(&pidfile).unwrap();
+    let started = Instant::now();
+    let out = f.call(args(Op::Cancel)).await.unwrap();
+    assert!(out.contains("state\tcancelled\n"), "{out}");
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(!alive(pid.trim()), "the fake client survived");
+    let job = f.ctx.jobs.get("job:1").unwrap();
+    let stored = f.ctx.handles.get(&job.handle.unwrap()).unwrap();
+    let stored = String::from_utf8_lossy(&stored);
+    assert!(
+        stored.contains("Keyboard Interrupt, closing down..."),
+        "{stored}"
+    );
+    assert!(
+        stored.contains("Second Keyboard Interrupt, stopping..."),
+        "{stored}"
+    );
+    assert!(stored.contains("fakebb: build stopped"), "{stored}");
+}
+
 /// The pid of a child that has exited and been reaped.
 fn dead_pid() -> u32 {
     let mut c = std::process::Command::new("true").spawn().unwrap();

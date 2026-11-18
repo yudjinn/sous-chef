@@ -1,0 +1,15 @@
+PN: curl
+PV: 8.19.0
+PR: r0
+PKGV: 8.19.0
+PKGR: r0
+LICENSE: curl
+DESCRIPTION:curl-dbg: It uses URL syntax to transfer data to and from servers. curl is a widely used because of its ability to be flexible and complete complex tasks. For example, you can use curl for things like user authentication, HTTP post, SSL connections, proxy support, FTP uploads, and more!  This package contains ELF symbols and related sources for debugging purposes.
+SUMMARY:curl-dbg: Command line tool and library for client-side URL transfers - Debugging files
+RRECOMMENDS:curl-dbg: glibc-dbg libcrypto-dbg libcurl-dbg libidn2-dbg libssl-dbg openssl-dbg zlib-dbg
+SECTION:curl-dbg: devel
+PKG:curl-dbg: curl-dbg
+ALLOW_EMPTY:curl-dbg: 1
+FILES:curl-dbg: /usr/lib/debug /usr/lib/debug-static /usr/src/debug
+FILES_INFO:curl-dbg: {"/usr/bin/.debug/curl": 827964, "/usr/lib/.debug/libcurl.so.4.8.0": 3605552}
+PKGSIZE:curl-dbg: 4433516

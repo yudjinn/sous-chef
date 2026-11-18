@@ -2,7 +2,8 @@
 //!
 //! Trigger: `PostToolUse` on `Bash` whose `tool_input.command` runs `bitbake`, `devtool` or
 //! `bitbake-layers` (the first word of any command in it, after variable assignments and
-//! `sudo` / `time` / `env` / `nice` / `exec`; also `kas build`, `kas-container build` and a
+//! `sudo` / `time` / `env` / `nice` / `exec` and their options, with the value of those
+//! that take one, such as `env -u NETRC_FILE`; also `kas build`, `kas-container build` and a
 //! `kas shell` / `kas-container shell` whose `-c` command runs one of them, see
 //! [`runs_bitbake`]), and whose output (`tool_response.stdout`
 //! plus `stderr`) is larger than [`MIN_BYTES`]. Anything else passes through untouched.
@@ -96,12 +97,7 @@ pub fn runs_bitbake(command: &str) -> bool {
                 .split_whitespace()
                 .map(|w| w.trim_matches(|c| c == '"' || c == '\''))
                 .collect();
-            let Some(pos) = words.iter().position(|w| {
-                !(WRAPPERS.contains(w)
-                    || (w.contains('=') && !w.starts_with('-'))
-                    || w.starts_with('-') // options of a wrapper (`nice -n 5`)
-                    || w.chars().all(|c| c.is_ascii_digit()))
-            }) else {
+            let Some(pos) = command_word(&words) else {
                 return false;
             };
             let w = words[pos];
@@ -114,6 +110,63 @@ pub fn runs_bitbake(command: &str) -> bool {
             }
             KAS_PROGRAMS.contains(&name) && kas_runs_bitbake(&words[pos + 1..], segment)
         })
+}
+
+/// Options of the [`WRAPPERS`] that take the next word as their value, so that word is not
+/// the command: `env -u NETRC_FILE kas ...` (how this project's live environment runs kas,
+/// docs/live-environment.md), `env -C <dir>`, `sudo -u <user>`, `nice -n 5`, `time -f
+/// <format>`.
+const WRAPPER_VALUE_OPTIONS: &[&str] = &[
+    "-u",
+    "--unset",
+    "-C",
+    "--chdir",
+    "-g",
+    "--group",
+    "--user",
+    "-D",
+    "-h",
+    "--host",
+    "-p",
+    "--prompt",
+    "-r",
+    "--role",
+    "-t",
+    "--type",
+    "-U",
+    "--other-user",
+    "-T",
+    "--command-timeout",
+    "-n",
+    "--adjustment",
+    "-f",
+    "--format",
+    "-o",
+    "--output",
+];
+
+/// The index of the command word of a simple command: the first word that is not a
+/// `NAME=value` assignment, a [`WRAPPERS`] word, a wrapper's option (with its value, see
+/// [`WRAPPER_VALUE_OPTIONS`]) or a number.
+fn command_word(words: &[&str]) -> Option<usize> {
+    let mut i = 0;
+    let mut after_wrapper = false;
+    while let Some(w) = words.get(i) {
+        if WRAPPERS.contains(w) {
+            after_wrapper = true;
+            i += 1;
+        } else if after_wrapper && WRAPPER_VALUE_OPTIONS.contains(w) {
+            i += 2;
+        } else if (w.contains('=') && !w.starts_with('-'))
+            || w.starts_with('-')
+            || w.chars().all(|c| c.is_ascii_digit())
+        {
+            i += 1;
+        } else {
+            return Some(i);
+        }
+    }
+    None
 }
 
 /// After `kas` / `kas-container`: whether the subcommand builds, or is a `shell` whose
@@ -317,6 +370,12 @@ mod tests {
             "kas shell kas.yml --command='devtool status'",
             "kas-container shell kas.yml -c 'bitbake -p'",
             "cd yocto-kiss && kas build kas/kiss.yaml",
+            // How docs/live-environment.md runs kas: `env -u NAME` takes a value (y1-build:
+            // the hook passed this through before).
+            "env -u NETRC_FILE ../venv/bin/kas shell ../scratch/kas-scratch.yaml -c 'bitbake curl'",
+            "env -u NETRC_FILE -C yocto-kiss kas build kas/kiss.yaml",
+            "sudo -u builder bitbake hello",
+            "env --unset=NETRC_FILE bitbake hello",
         ] {
             assert!(runs_bitbake(c), "{c}");
         }
@@ -331,6 +390,8 @@ mod tests {
             "kas --version",
             "pip install kas",
             "echo kas build",
+            "env -u NETRC_FILE ../venv/bin/kas dump kas/kiss.yaml",
+            "env -u bitbake true",
         ] {
             assert!(!runs_bitbake(c), "{c}");
         }

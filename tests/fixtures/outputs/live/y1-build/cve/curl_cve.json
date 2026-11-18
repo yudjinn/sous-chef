@@ -1,0 +1,272 @@
+{
+  "version": "1",
+  "package": [
+    {
+      "name": "curl",
+      "layer": "meta",
+      "version": "8.19.0",
+      "products": [
+        {
+          "product": "curl",
+          "cvesInRecord": "No"
+        },
+        {
+          "product": "libcurl",
+          "cvesInRecord": "No"
+        }
+      ],
+      "cpes": [
+        "cpe:2.3:*:haxx:curl:8.19.0:*:*:*:*:*:*:*",
+        "cpe:2.3:*:haxx:libcurl:8.19.0:*:*:*:*:*:*:*",
+        "cpe:2.3:*:curl:curl:8.19.0:*:*:*:*:*:*:*",
+        "cpe:2.3:*:curl:libcurl:8.19.0:*:*:*:*:*:*:*",
+        "cpe:2.3:*:libcurl:libcurl:8.19.0:*:*:*:*:*:*:*",
+        "cpe:2.3:*:daniel_stenberg:curl:8.19.0:*:*:*:*:*:*:*"
+      ],
+      "issue": [
+        {
+          "id": "CVE-2024-32928",
+          "status": "Ignored",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2024-32928",
+          "detail": "ignored",
+          "description": "CURLOPT_SSL_VERIFYPEER was disabled on google cloud services causing a potential man in the middle attack"
+        },
+        {
+          "id": "CVE-2026-10536",
+          "status": "Ignored",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-10536",
+          "detail": "not-applicable-config",
+          "description": "applicable only with HTTP/2"
+        },
+        {
+          "id": "CVE-2026-11352",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-11352",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-11352.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-11586",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-11586",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-11586.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-12064",
+          "status": "Ignored",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-12064",
+          "detail": "not-applicable-config",
+          "description": "SCP/SFTP support is not enabled in PACKAGECONFIG"
+        },
+        {
+          "id": "CVE-2026-13608",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-13608",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-13608.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-4873",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-4873",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-4873.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-5545",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-5545",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-5545.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-5773",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-5773",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-5773.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-6253",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-6253",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-6253.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-6276",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-6276",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-6276.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-6429",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-6429",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-6429-dependent.patch",
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-6429.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-7009",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-7009",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-7009.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-7168",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-7168",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-7168.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-80229",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-80229",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-80229.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-80230",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-80230",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-80230.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-82209",
+          "status": "Ignored",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-82209",
+          "detail": "not-applicable-config",
+          "description": "public suffix list support is disabled by the recipe with --without-libpsl"
+        },
+        {
+          "id": "CVE-2026-8286",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-8286",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-8286.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-8458",
+          "status": "Ignored",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-8458",
+          "detail": "not-applicable-config",
+          "description": "applicable only with GSS-API-backed Negotiate authentication"
+        },
+        {
+          "id": "CVE-2026-8924",
+          "status": "Ignored",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-8924",
+          "detail": "not-applicable-config",
+          "description": "public suffix list support is disabled by the recipe with --without-libpsl"
+        },
+        {
+          "id": "CVE-2026-8925",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-8925",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-8925.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-8927",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-8927",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-8927.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-8932",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-8932",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-8932-dependent.patch",
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-8932.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-9079",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-9079",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-9079.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-9080",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-9080",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-9080.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-9545",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-9545",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-9545-01.patch",
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-9545-02.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-9546",
+          "status": "Patched",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-9546",
+          "detail": "fix-file-included",
+          "patch-file": [
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-9546-01.patch",
+            "{{LIVE}}/yocto-kiss/build/../openembedded-core/meta/recipes-support/curl/curl/CVE-2026-9546-02.patch"
+          ]
+        },
+        {
+          "id": "CVE-2026-9547",
+          "status": "Ignored",
+          "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-9547",
+          "detail": "not-applicable-config",
+          "description": "vulnerable libssh backend is not enabled by the recipe"
+        }
+      ]
+    }
+  ]
+}

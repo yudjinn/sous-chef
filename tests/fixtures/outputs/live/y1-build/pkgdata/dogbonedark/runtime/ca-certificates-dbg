@@ -1,0 +1,14 @@
+PN: ca-certificates
+PV: 20260816
+PR: r0
+PKGV: 20260816
+PKGR: r0
+LICENSE: GPL-2.0-or-later & MPL-2.0
+DESCRIPTION:ca-certificates-dbg: This package includes PEM files of CA certificates to allow SSL-based applications to check for the authenticity of SSL connections. This derived from Debian's CA Certificates.  This package contains ELF symbols and related sources for debugging purposes.
+SUMMARY:ca-certificates-dbg: Common CA certificates - Debugging files
+SECTION:ca-certificates-dbg: devel
+PKG:ca-certificates-dbg: ca-certificates-dbg
+ALLOW_EMPTY:ca-certificates-dbg: 1
+FILES:ca-certificates-dbg: /usr/lib/debug /usr/lib/debug-static /usr/src/debug
+FILES_INFO:ca-certificates-dbg: {}
+PKGSIZE:ca-certificates-dbg: 0

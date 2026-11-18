@@ -1,0 +1,87 @@
+2026-11-18 22:53:30 - INFO     - kas 5.5 started on EndeavourOS rolling
+2026-11-18 22:53:30 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss
+2026-11-18 22:53:30 - INFO     - Using {{LIVE}}/yocto-kiss as root for repository meta-kiss-ti
+2026-11-18 22:53:30 - INFO     - Repository bitbake already contains 6e260eb6ab1631607ea414d9ff8ede1155faa5d9 as commit
+2026-11-18 22:53:30 - INFO     - Repository meta-arm already contains 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735 as commit
+2026-11-18 22:53:30 - INFO     - Repository openembedded-core already contains 33a6bd6cc8a9a976902081642414bd67adc74879 as commit
+2026-11-18 22:53:30 - INFO     - Repository bitbake checked out to 6e260eb6ab1631607ea414d9ff8ede1155faa5d9
+2026-11-18 22:53:30 - INFO     - Repository openembedded-core checked out to 33a6bd6cc8a9a976902081642414bd67adc74879
+2026-11-18 22:53:30 - INFO     - Repository meta-arm checked out to 673e8d7c5dcd14de58092eb73e6ecc5eee5c1735
+2026-11-18 22:53:30 - INFO     - To start the default build, run: bitbake -c build kiss-image
++zsh:1> bitbake-getvar --value PKGDATA_DIR
+{{LIVE}}/yocto-kiss/build/tmp/pkgdata/dogbonedark
++zsh:1> oe-pkgdata-util find-path /usr/bin/curl
+curl: /usr/bin/curl
++zsh:1> oe-pkgdata-util find-path '*libcurl.so*'
+curl-dbg: /usr/lib/.debug/libcurl.so.4.8.0
+libcurl: /usr/lib/libcurl.so.4
+libcurl: /usr/lib/libcurl.so.4.8.0
+curl-dev: /usr/lib/libcurl.so
++zsh:1> oe-pkgdata-util list-pkg-files curl
+curl:
+	/usr/bin/curl
+	/usr/bin/wcurl
++zsh:1> oe-pkgdata-util list-pkg-files -s libcurl
+oe-pkgdata-util list-pkg-files: error: unrecognized arguments: -s
+usage: oe-pkgdata-util list-pkg-files [-h] [-r] [-p RECIPE] [-u] [-l]
+                                      [pkg ...]
+
+Lists files included in one or more packages
+
+arguments:
+  pkg                  Package name to report on (if -p/--recipe is not
+                       specified)
+
+options:
+  -h, --help           show this help message and exit
+  -r, --runtime        Specified package(s) are runtime package names instead
+                       of recipe-space package names
+  -p, --recipe RECIPE  Report on all packages produced by the specified recipe
+  -u, --unpackaged     Include unpackaged (i.e. empty) packages (only useful
+                       with -p/--recipe)
+  -l, --long           Show more information per file
++zsh:1> oe-pkgdata-util list-pkg-files -r libcurl4
+libcurl4:
+	/usr/lib/libcurl.so.4
+	/usr/lib/libcurl.so.4.8.0
++zsh:1> oe-pkgdata-util lookup-recipe curl libcurl libcurl4 curl-dev
+curl
+curl
+curl
+curl
++zsh:1> oe-pkgdata-util list-pkgs -p curl
+curl
+curl-dbg
+curl-dev
+curl-doc
+curl-src
+libcurl
++zsh:1> oe-pkgdata-util package-info curl libcurl libcurl4
+curl 8.19.0-r0 curl 8.19.0-r0 156605
+libcurl 8.19.0-r0 curl 8.19.0-r0 432452
+libcurl4 8.19.0-r0 curl 8.19.0-r0 432452
++zsh:1> oe-pkgdata-util list-pkg-files curl-dev
+curl-dev:
+	/usr/bin/curl-config
+	/usr/include/curl/curl.h
+	/usr/include/curl/curlver.h
+	/usr/include/curl/easy.h
+	/usr/include/curl/header.h
+	/usr/include/curl/mprintf.h
+	/usr/include/curl/multi.h
+	/usr/include/curl/options.h
+	/usr/include/curl/stdcheaders.h
+	/usr/include/curl/system.h
+	/usr/include/curl/typecheck-gcc.h
+	/usr/include/curl/urlapi.h
+	/usr/include/curl/websockets.h
+	/usr/lib/libcurl.so
+	/usr/lib/pkgconfig/libcurl.pc
+	/usr/share/aclocal/libcurl.m4
++zsh:1> oe-pkgdata-util list-pkgs -p curl -r
+curl
+curl-dbg
+curl-dev
+curl-doc
+curl-src
+libcurl4
