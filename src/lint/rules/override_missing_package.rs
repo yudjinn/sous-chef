@@ -40,6 +40,7 @@
 use std::collections::HashSet;
 
 use crate::index::{Index, query};
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::words;
@@ -62,11 +63,29 @@ impl Rule for OverrideMissingPackage {
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
-        let Some(file) = cx.file else { return };
+        out.extend(self.scan(cx, false).into_iter().map(|(f, _)| f));
+    }
+
+    /// Suggested: `:${PN}` inserted right after the variable's base name (`RDEPENDS =` to
+    /// `RDEPENDS:${PN} =`, `pkg_postinst()` to `pkg_postinst:${PN}()`). Which package the
+    /// line is for is a decision (`${PN}-dev`, a split package), and the result replaces
+    /// whatever else gave `RDEPENDS:${PN}` its value, so it needs a look.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        self.scan(cx, true)
+            .into_iter()
+            .filter_map(|(finding, fix)| fix.map(|fix| FixedFinding { finding, fix }))
+            .collect()
+    }
+}
+
+impl OverrideMissingPackage {
+    fn scan(&self, cx: &LintContext<'_>, want_fix: bool) -> Vec<(Finding, Option<Fix>)> {
+        let mut out = Vec::new();
+        let Some(file) = cx.file else { return out };
         // Asked of the index only when there is something to report.
         let mut without_packages: Option<bool> = None;
         if cx.kind == Some(FileKind::Class) && class_without_packages(cx, file) {
-            return;
+            return out;
         }
         for s in &file.statements {
             let (var, is_fn) = match &s.kind {
@@ -88,12 +107,12 @@ impl Rule for OverrideMissingPackage {
                 continue;
             }
             if *without_packages.get_or_insert_with(|| in_recipes_without_packages(cx)) {
-                return;
+                return Vec::new();
             }
             let written = helpers::colon_name(var);
             let fixed = helpers::joined(&format!("{}:${{PN}}", var.base), &var.overrides, ':');
             let parens = if is_fn { "()" } else { "" };
-            out.push(helpers::finding(
+            let finding = helpers::finding(
                 self,
                 cx,
                 LineSpan::line(s.span.start),
@@ -103,8 +122,31 @@ impl Rule for OverrideMissingPackage {
                      `{fixed}{parens}` (or the package it is for)",
                     base = var.base
                 ),
-            ));
+            );
+            let fix = want_fix
+                .then(|| {
+                    let source = cx.source?;
+                    let name = fix::statement_name(source, s)?;
+                    let text = source.get(name.clone())?;
+                    // The base as written starts the name; `:${PN}` goes right after it.
+                    let rest = text.strip_prefix(var.base.as_str())?;
+                    if !(rest.is_empty() || rest.starts_with(':')) {
+                        return None;
+                    }
+                    Fix::in_file(
+                        cx,
+                        vec![Edit::insert(name.start + var.base.len(), ":${PN}")],
+                        format!(
+                            "`{written}{parens}` becomes `{fixed}{parens}`, for the main \
+                             package (check that this is the package meant)"
+                        ),
+                        Safety::Suggested,
+                    )
+                })
+                .flatten();
+            out.push((finding, fix));
         }
+        out
     }
 }
 

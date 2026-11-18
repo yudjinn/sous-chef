@@ -18,6 +18,7 @@
 
 use crate::eval::{self, DataStore, VarOp};
 use crate::index::query::{self, StatementFilter, StatementRow};
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::{ParsedFile, StatementKind};
@@ -36,6 +37,61 @@ impl Rule for OverridePlusEqualsOnDefault {
 
     fn default_severity(&self) -> Severity {
         Severity::Warning
+    }
+
+    /// Suggested: `VAR += "x"` becomes `VAR:append = " x"` (`=+` a `:prepend` with the
+    /// trailing space; `.=` / `=.` the same keyword without adding a space), the line the
+    /// message gives. The default is then kept, which is the rule's point; the text is also
+    /// added at the end of parsing, so it now survives a later plain `VAR =` too, which needs
+    /// a look. A finding in the build directory's `local.conf` is never written (not a
+    /// writable layer); the fix is shown.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        let (Some(file), Some(source)) = (cx.file, cx.source) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        self.check(cx, &mut found);
+        found
+            .into_iter()
+            .filter_map(|finding| {
+                let s = file
+                    .statements
+                    .iter()
+                    .find(|s| s.span.start == finding.loc.lines.start)?;
+                let StatementKind::Assign { var, op, .. } = &s.kind else {
+                    return None;
+                };
+                let keyword = match op {
+                    AssignOp::Append | AssignOp::AppendDot => "append",
+                    AssignOp::Prepend | AssignOp::PrependDot => "prepend",
+                    _ => return None,
+                };
+                let p = fix::assign_parts(source, s)?;
+                let name = format!("{}:{keyword}", var.base);
+                let mut edits = vec![
+                    Edit::replace(p.name.clone(), name.clone()),
+                    Edit::replace(p.op.clone(), "="),
+                ];
+                match op {
+                    AssignOp::Append => edits.push(Edit::insert(p.open + 1, " ")),
+                    AssignOp::Prepend => edits.push(Edit::insert(p.close, " ")),
+                    _ => {}
+                }
+                let fix = Fix::in_file(
+                    cx,
+                    edits,
+                    format!(
+                        "`{} {}` becomes `{name} =`, which keeps the `?=` default (and is also \
+                         kept by a later plain `{} =`)",
+                        var.base,
+                        op.as_str(),
+                        var.base
+                    ),
+                    Safety::Suggested,
+                )?;
+                Some(FixedFinding { finding, fix })
+            })
+            .collect()
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {

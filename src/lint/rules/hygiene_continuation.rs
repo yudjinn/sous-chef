@@ -13,6 +13,7 @@
 //! A comment line inside a continued statement is not reported here: BitBake rejects it,
 //! and `hygiene/parse-error` already reports the parser's diagnostic for it as an error.
 
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
@@ -31,6 +32,38 @@ impl Rule for HygieneContinuation {
 
     fn default_severity(&self) -> Severity {
         Severity::Warning
+    }
+
+    /// Safe, for whitespace after a trailing `\` only: the whitespace between the `\` and the
+    /// end of the line is removed (the line terminator stays). BitBake right-strips every
+    /// line before it joins continuations, so it reads the file exactly as before. The blank
+    /// line that ends a continued statement has no fix: whether the blank line or the `\` is
+    /// the mistake is the author's call.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        let Some(source) = cx.source else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        self.check(cx, &mut found);
+        found
+            .into_iter()
+            .filter(|f| f.message.starts_with("whitespace after the trailing"))
+            .filter_map(|finding| {
+                let line = fix::physical_line(source, finding.loc.lines.start)?;
+                let content = source.get(line.start..line.content_end)?;
+                let kept = content.trim_end_matches(fix::py_space);
+                if !kept.ends_with('\\') || kept.len() == content.len() {
+                    return None;
+                }
+                let fix = Fix::in_file(
+                    cx,
+                    vec![Edit::delete(line.start + kept.len()..line.content_end)],
+                    "remove the whitespace after the trailing `\\`",
+                    Safety::Safe,
+                )?;
+                Some(FixedFinding { finding, fix })
+            })
+            .collect()
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {

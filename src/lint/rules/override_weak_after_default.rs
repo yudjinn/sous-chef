@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::StatementKind;
@@ -26,6 +27,46 @@ impl Rule for OverrideWeakAfterDefault {
 
     fn default_severity(&self) -> Severity {
         Severity::Info
+    }
+
+    /// Safe: the `??=` statement is removed, its whole lines with their terminators and
+    /// nothing else. It cannot change a final value: the name already has a value from the
+    /// earlier `=` / `:=` / `?=` of the same file, a weak default is used only for a name
+    /// without one, and the `unset` that would clear that value clears the default with it
+    /// (`delVar`). No fix for `export NAME ??=`, which also sets the export flag.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        let (Some(file), Some(source)) = (cx.file, cx.source) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        self.check(cx, &mut found);
+        found
+            .into_iter()
+            .filter_map(|finding| {
+                let s = file.statements.iter().find(|s| {
+                    s.span.start == finding.loc.lines.start
+                        && matches!(
+                            &s.kind,
+                            StatementKind::Assign {
+                                op: AssignOp::WeakDefault,
+                                export: false,
+                                ..
+                            }
+                        )
+                })?;
+                let StatementKind::Assign { var, .. } = &s.kind else {
+                    return None;
+                };
+                let lines = fix::statement_lines(source, s)?;
+                let fix = Fix::in_file(
+                    cx,
+                    vec![Edit::delete(lines)],
+                    format!("remove `{} ??=`, which never applies", key(var)),
+                    Safety::Safe,
+                )?;
+                Some(FixedFinding { finding, fix })
+            })
+            .collect()
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {

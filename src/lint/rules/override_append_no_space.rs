@@ -17,6 +17,7 @@
 //! without the space; an empty value adds nothing and does not count. A python end
 //! (`${@...}` or anything ending in a `}` that is not a plain reference) is never judged.
 
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers::{self, ListKind, ValueEdge};
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::{ParsedFile, StatementKind};
@@ -38,7 +39,23 @@ impl Rule for OverrideAppendNoSpace {
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
-        let Some(file) = cx.file else { return };
+        out.extend(self.scan(cx, false).into_iter().map(|(f, _)| f));
+    }
+
+    /// Safe: one space inserted right after the opening quote (`:append`) or right before the
+    /// closing quote (`:prepend`), the separator BitBake does not add; nothing else changes.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        self.scan(cx, true)
+            .into_iter()
+            .filter_map(|(finding, fix)| fix.map(|fix| FixedFinding { finding, fix }))
+            .collect()
+    }
+}
+
+impl OverrideAppendNoSpace {
+    fn scan(&self, cx: &LintContext<'_>, want_fix: bool) -> Vec<(Finding, Option<Fix>)> {
+        let mut out = Vec::new();
+        let Some(file) = cx.file else { return out };
         for s in &file.statements {
             let StatementKind::Assign { var, op, value, .. } = &s.kind else {
                 continue;
@@ -79,13 +96,26 @@ impl Rule for OverrideAppendNoSpace {
                 ),
                 _ => continue,
             };
-            out.push(helpers::finding(
-                self,
-                cx,
-                LineSpan::line(s.span.start),
-                msg,
-            ));
+            let finding = helpers::finding(self, cx, LineSpan::line(s.span.start), msg);
+            let fix = want_fix
+                .then(|| {
+                    let p = fix::assign_parts(cx.source?, s)?;
+                    let (at, what) = if appends {
+                        (p.open + 1, "leading")
+                    } else {
+                        (p.close, "trailing")
+                    };
+                    Fix::in_file(
+                        cx,
+                        vec![Edit::insert(at, " ")],
+                        format!("add the {what} space to the `{name}` value"),
+                        Safety::Safe,
+                    )
+                })
+                .flatten();
+            out.push((finding, fix));
         }
+        out
     }
 }
 

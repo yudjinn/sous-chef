@@ -45,6 +45,7 @@
 //! each one becomes a note in the report, so a typo is visible without making every lint run
 //! fail. Unknown ids in [`Options::rules`] are an error (the caller typed them just now).
 
+pub mod fix;
 pub mod helpers;
 pub mod rules;
 
@@ -173,6 +174,13 @@ pub trait Rule: Sync {
     /// `hygiene/variable-order`). Default: true.
     fn default_enabled(&self) -> bool {
         true
+    }
+
+    /// Fixes for what this rule reports in `cx` (`lint --fix`, see [`fix`]): each finding
+    /// exactly as [`Rule::check`] pushes it, with a [`fix::Fix`]. Findings without a fix are
+    /// left out. Called with the context `check` gets (file and layer scope). Default: none.
+    fn fixes(&self, _cx: &LintContext<'_>) -> Vec<fix::FixedFinding> {
+        Vec::new()
     }
 }
 
@@ -1256,6 +1264,16 @@ pub struct LintCliArgs {
     /// Also lint layers that are not writable.
     #[arg(long)]
     pub all: bool,
+    /// Fix what can be fixed safely: a dry run printing a diff per file (see --write).
+    #[arg(long)]
+    pub fix: bool,
+    /// Also apply suggested fixes (they change meaning the way the rule recommends); implies
+    /// --fix.
+    #[arg(long)]
+    pub fix_suggested: bool,
+    /// With --fix: write the fixes into the writable layers, then lint the changed files.
+    #[arg(long)]
+    pub write: bool,
 }
 
 /// Runs `sous-chef lint`, printing the report to stdout. Returns the process exit code: 1 if
@@ -1269,6 +1287,11 @@ pub fn cli(cfg: &Config, args: &LintCliArgs) -> Result<i32> {
     let mut index = Index::open(&ws)?;
     index.refresh(&ws)?;
     let mut stdout = std::io::stdout().lock();
+    if args.fix || args.fix_suggested || args.write {
+        let code = cli_fix_with(&ws, &mut index, cfg, args, &mut stdout)?;
+        stdout.flush()?;
+        return Ok(code);
+    }
     let code = cli_with(&ws, &index, cfg, args, &mut stdout)?;
     stdout.flush()?;
     Ok(code)
@@ -1296,6 +1319,46 @@ pub fn cli_with(
     }
     Ok(exit_code(
         &report.findings,
+        args.fail_on.unwrap_or(Severity::Error),
+    ))
+}
+
+/// `sous-chef lint --fix` on an open, refreshed index, writing to `out`: [`fix::run`] with
+/// the CLI's target and options, rendered as text ([`fix::render_text`]) or JSON. The exit
+/// status is that of the findings left (after writing: the changed files linted again).
+pub fn cli_fix_with(
+    ws: &Workspace,
+    index: &mut Index,
+    cfg: &Config,
+    args: &LintCliArgs,
+    out: &mut dyn Write,
+) -> Result<i32> {
+    if args.write && !(args.fix || args.fix_suggested) {
+        return Err(Error::Invalid {
+            msg: "--write applies fixes: pass it with --fix or --fix-suggested".into(),
+        });
+    }
+    let target = resolve_target(ws, index, args.target.as_deref(), &cfg.work_dir)?;
+    let options = Options {
+        rules: args.rules.clone(),
+        min_severity: args.severity,
+        all: args.all,
+    };
+    let fix_options = fix::FixOptions {
+        suggested: args.fix_suggested,
+        write: args.write,
+    };
+    let report = fix::run(ws, index, cfg, &target, &options, &fix_options)?;
+    let text = match args.format.unwrap_or_default() {
+        Format::Text => fix::render_text(&report),
+        Format::Json => serde_json::to_string(&report).unwrap_or_else(|_| "{}".into()),
+    };
+    out.write_all(text.as_bytes())?;
+    if !text.ends_with('\n') {
+        out.write_all(b"\n")?;
+    }
+    Ok(exit_code(
+        &report.final_findings(),
         args.fail_on.unwrap_or(Severity::Error),
     ))
 }

@@ -275,6 +275,16 @@ workspace").
 
 Global flags: `--build-dir DIR`, `--config FILE`, `--layer DIR` (repeatable).
 
+**Fixing findings.** `sous-chef lint --fix [TARGET]` prints, per file, a unified diff of
+the fixes it can make and a summary (fixes available, safe and suggested, by rule); nothing
+is written until `--write`. Safe fixes preserve meaning or are exactly what BitBake requires
+(legacy `_` override names to `:`, the missing space of an `:append`, whitespace after a
+trailing `\`, ...); suggested ones change meaning the way the rule recommends and are
+applied only with `--fix-suggested`. Writing goes through the scaffold engine: writable
+layers only, a file changed since it was read is refused, then the changed files are linted
+again and any new finding is reported. The `lint` tool takes `fix`, `fix_suggested` and
+`write`. Which rules have a fix: [docs/lint-rules.md](docs/lint-rules.md), "Fixes".
+
 ### kas projects
 
 A kas project needs no extra setup when exactly one kas file sits next to the kas build
