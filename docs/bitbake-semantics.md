@@ -1819,6 +1819,62 @@ reproduces it from the indexed statements:
   `add_tasks` and can call `bb.build.addtask` / `deltask`; `do_x[deps]` can also be set as a
   flag directly; neither is seen statically.
 
+### Runtime dependencies and recommendations
+
+What makes BitBake build a recipe for another one, read (y3-leftovers, 2026-11-19) in
+BitBake 2.18.0 `6e260eb6` (`lib/bb/cache.py`, `lib/bb/taskdata.py`, `lib/bb/runqueue.py`)
+and OE-core Wrynose `33a6bd6c` (`classes-global/base.bbclass`, `package.bbclass`,
+`package_ipk.bbclass` and the other `package_*`, `insane.bbclass`, `classes/create-spdx-3.0.bbclass`,
+`classes-recipe/native.bbclass`), checked against `bitbake -g curl` on the live build
+(`task-depends.dot`, 78 recipes in `pn-buildlist`; live-verification.md, "y3-leftovers").
+
+- **Which runtime relations count.** `bb.cache.CoreRecipeInfo` reads `RDEPENDS` and
+  `RRECOMMENDS` only: `depvar` of the plain variable and `pkgvar` per package of
+  `PACKAGES`; `add_cacheData` gives each package `rundeps[fn][pkg] = RDEPENDS +
+  RDEPENDS:<pkg>` and `runrecs[fn][pkg] = RRECOMMENDS + RRECOMMENDS:<pkg>` (so the plain
+  variable applies to every package). `TaskData.add_tasks` puts the words of both into the
+  recipe's run targets (`rdepids`; "Added runtime recommendations" is only its debug
+  message). From there they are the same: `add_unresolved` finds an `RPROVIDES` provider
+  for each run target, and one with none (`NoRProvider`, `MultipleRProvider`) goes to
+  `remove_runtarget`, which fails every recipe naming it, so a recommendation nothing
+  provides fails the build as a missing `RDEPENDS` does. `RSUGGESTS`, `RCONFLICTS`,
+  `RREPLACES` and `RPROVIDES` (other than as providers) are not read by the cache's
+  dependency fields: they cause no task. `BAD_RECOMMENDATIONS` and
+  `PACKAGE_INSTALL_ATTEMPTONLY` act at rootfs time (image classes), not in the build.
+- **Which tasks they pull.** A run target matters through the `rdeptask` and `recrdeptask`
+  flags (`runqueue.py`: `rdeptask` adds the named task of the provider of each run target,
+  `recrdeptask` does so recursively over build and run targets). OE-core sets
+  `do_build[rdeptask] += "do_package_write_<type>"` and `do_package_write_<type>[rdeptask]
+  = "do_packagedata"` (the `package_*` classes), `do_build[rdeptask] += "do_package_qa"` and
+  `do_package_qa[rdeptask] = "do_packagedata"` (`insane.bbclass`), and with SPDX 3
+  `do_create_package_spdx[rdeptask] = "do_create_spdx"`. Seen in `task-depends.dot`:
+  `curl.do_build -> ca-certificates.do_package_write_ipk` and `-> ...do_package_qa`,
+  `curl.do_package_write_ipk -> ca-certificates.do_packagedata`; ca-certificates is named by
+  no other relation of curl than `RRECOMMENDS:libcurl` (`curl_8.19.0.bb:200`).
+- **`PACKAGECONFIG`.** `base.bbclass` appends field 4 to `RDEPENDS:${PN}` and field 5 to
+  `RRECOMMENDS:${PN}` (`appendVar`, with the `-native` / `nativesdk-` / multilib renaming
+  of `expandFilter` for both `DEPENDS` and `RRECOMMENDS`).
+- **Build dependencies besides `DEPENDS`.** The `depends` flag of a task
+  (`<recipe>:<task>` words; `runqueue.py` makes the task wait for that task of the
+  provider). Static in OE-core for `do_patch` (`PATCHDEPENDENCY`, `patch.bbclass`),
+  `do_populate_sysroot` and `do_package_qa` (`POPULATESYSROOTDEPS`, `staging.bbclass`,
+  `insane.bbclass`: `virtual/cross-binutils`, rewritten to its provider by
+  `handleVirtRecipeProviders`); with python for `do_package_write_ipk`
+  (`oe.utils.build_depends_string(PACKAGE_WRITE_DEPS, ...)`) and `do_create_spdx`; added
+  by anonymous python for the fakeroot tasks (`virtual/fakeroot-native`, base.bbclass
+  lines 571-579), `do_unpack` (the decompressors of `SRC_URI`: `xz-native`, `zstd-native`,
+  ...; base.bbclass 658-690), `do_package` (`PACKAGE_DEPENDS`: `rpm-native
+  dwarfsrcfiles-native file-native`, package.bbclass 232-243). `update-alternatives.bbclass`
+  adds `virtual/update-alternatives` to `DEPENDS` by anonymous python (`ua_extend_depends`;
+  opkg-utils on this build).
+- **Native variants.** `native_virtclass_handler` installs `native_filter(val, pn, bpn,
+  selfref=False)` on `DEPENDS` (and the filter with `selfref=True` on the runtime
+  variables) when `PN` ends with `-native` and `"native"` is a substring of
+  `BBCLASSEXTEND`; every read of `DEPENDS`, the cache's included, gets the filtered words,
+  so `python3-native`'s `expat` is `expat-native` (seen: `python3-native.do_prepare_recipe_sysroot
+  -> expat-native.do_populate_sysroot`). The evaluator does not compute this filter; `deps`
+  applies it to the words it lists.
+
 ## Build output
 
 - Task logs: `${T}/log.do_<task>.<pid>` with a symlink `log.do_<task>` to the latest run;

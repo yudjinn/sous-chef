@@ -341,6 +341,8 @@ pub fn resolve_selected_variant_in(
 
 /// The evaluation target of a recipe file, or of its class-extended variant
 /// (`virtual:<word>:<layer>:<path>`, see `eval::variant`).
+pub use views::task_names;
+
 pub fn eval_label(recipe: &RecipeRow, variant: Option<&ClassExtend>) -> String {
     match variant {
         Some(ext) => format!("{}{}", ext.virtual_prefix(), file_label(&recipe.file)),
@@ -1684,6 +1686,30 @@ mod views {
             })
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    /// The tasks of the evaluated recipe, in the order `addtask` added them, without those a
+    /// later `deltask` removed: the same events as [`tasks`] (tasks added or deleted by
+    /// anonymous python are not seen).
+    pub fn task_names(index: &Index, ds: &DataStore) -> Result<Vec<String>> {
+        let mut order: Vec<String> = Vec::new();
+        for e in task_events(index, ds)? {
+            match e {
+                Event::Add { name, .. } => {
+                    let t = prefixed(&name);
+                    if !order.contains(&t) {
+                        order.push(t);
+                    }
+                }
+                Event::Del { names, .. } => {
+                    for n in ds.expand(&names).text.split_whitespace() {
+                        let task = prefixed(n);
+                        order.retain(|x| *x != task);
+                    }
+                }
+            }
+        }
+        Ok(order)
     }
 
     pub fn tasks(index: &Index, ds: &DataStore) -> Result<Table> {

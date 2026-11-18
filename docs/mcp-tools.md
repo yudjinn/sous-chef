@@ -734,11 +734,23 @@ the flags of the selected options, with a note.
   the recipe that provides it (provider selection; `-` when no recipe of the workspace
   does; a `BBCLASSEXTEND` variant such as `-native` is a provider of its name and of its
   rewritten `PROVIDES`, shown as `curl-native (the `native` variant of curl 8.19.0)`), then the build
-  dependencies of the selected `PACKAGECONFIG` options. `depth` follows the selected
+  dependencies of the selected `PACKAGECONFIG` options, then (since y3) the recipes the
+  `depends` flags of the recipe's tasks name (`do_patch[depends] (do_populate_sysroot)`,
+  one row per recipe with the tasks counted; a name already in `DEPENDS` is not repeated;
+  what anonymous python adds is named in a note). In a native variant (`PN` ending in
+  `-native`, `native` in `BBCLASSEXTEND`) the `DEPENDS` words are shown as BitBake reads
+  them through `native.bbclass`'s `native_filter` (`expat` as `expat-native`, source
+  `DEPENDS (native_filter)`, the recipe's own name left out). `depth` follows the selected
   providers.
-- `runtime`: rows `package dep source loc`: per package of `PACKAGES`, the words of
-  `RDEPENDS:<package>`, then the runtime dependencies of the selected `PACKAGECONFIG`
-  options (on `${PN}`).
+- `runtime`: rows `package dep relation source loc`: the plain `RDEPENDS` and
+  `RRECOMMENDS` (package `(every package)`: BitBake adds them to each), then per package of
+  `PACKAGES` the words of `RDEPENDS:<package>` (relation `depends`) and
+  `RRECOMMENDS:<package>` (relation `recommends`), then the runtime dependencies (field 4,
+  `depends`) and recommendations (field 5, `recommends`) of the selected `PACKAGECONFIG`
+  options (on `${PN}`). Recommendations are built as dependencies are (bitbake-semantics.md,
+  "Runtime dependencies and recommendations"); `RSUGGESTS`, `RCONFLICTS` and `RREPLACES`
+  build nothing and are not listed. What `do_package` adds is known only after a build
+  (`pkgdata package_info`).
 - `packageconfig`: rows `option selected enable disable build runtime loc`, one per
   `PACKAGECONFIG[option]` flag (fields 1 to 4), and a note with the value of
   `PACKAGECONFIG` and where it is set. Fields 5 and 6 are not shown. BitBake's own flags

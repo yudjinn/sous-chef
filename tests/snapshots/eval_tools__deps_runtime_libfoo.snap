@@ -2,7 +2,8 @@
 source: tests/eval_tools.rs
 expression: r
 ---
-package	dep	source	loc
-libfoo-dev	libfoo	RDEPENDS:libfoo-dev	meta-core:recipes-core/libfoo/libfoo_2.0.bb:18
-libfoo	zlib	PACKAGECONFIG[zlib]	meta-core:recipes-core/libfoo/libfoo_2.0.bb:15
+package	dep	relation	source	loc
+libfoo-dev	libfoo	depends	RDEPENDS:libfoo-dev	meta-core:recipes-core/libfoo/libfoo_2.0.bb:18
+libfoo	zlib	depends	PACKAGECONFIG[zlib]	meta-core:recipes-core/libfoo/libfoo_2.0.bb:15
 note: PACKAGECONFIG rows: OE-Core's base.bbclass adds the build (field 3) and runtime (field 4) dependencies of the selected options with anonymous python, which is not run; they are listed from the flags
+note: each recipe providing one of these is built with its own build dependencies (deps <recipe>); what do_package adds (the shared-library and pkg-config RDEPENDS, debian renames) is known only after a build: pkgdata package_info shows it
