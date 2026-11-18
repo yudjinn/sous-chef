@@ -88,6 +88,18 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After w11-final
+
+Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/w11-final/`, release build) after the variant `PROVIDES`
+filter, the variant class order and the new skip notes: 1090 values compared, 701 equal
+(+1 after whitespace), 357 flagged (25 literal differs), 31 known gap, 0 bug. One row
+moved: `gmp-native` `PROVIDES`, equal after normalising whitespace before, is now equal:
+`native_virtclass_handler`'s `native_filter` is computed on the static value and joins the
+words with one space, as BitBake's does (bitbake-semantics.md, "Providers and versions").
+Of the equal values 148 carry a flag (149 before: `PROVIDES` of the native variant is no
+longer flagged). Every other row of `classes.tsv` is unchanged.
+
 ## After w10-eval
 
 Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
@@ -480,6 +492,14 @@ static value is a pointer list; the test recognises functions by the value's sha
   and every reason, so it is not comparable with the 83. The notes as they stand (static
   values only, `MACHINEOVERRIDES` holding python): "would skip" on no recipe, "may skip" on
   124, among them all 83; no recipe the real values skip lacks a note.
+  **w11**: the two reasons are modelled (bitbake-semantics.md, "Skipped recipes") and the
+  test runs them with the dumps' `DISTRO_FEATURES`, `MACHINE_FEATURES`,
+  `COMBINED_FEATURES`, `IMAGE_FEATURES`, `TUNE_FEATURES`, `PREFERRED_PROVIDER_*` and
+  `BB_MULTI_PROVIDER_ALLOWED`: 237 recipes judged skipped, still none parsed by BitBake;
+  `show-appends` agreement 21 of 24 (u-boot, musl, systemd, linux-yocto-dev and
+  edk2-firmware now agree); the 3 left (`linux-yocto_6.18.bb`, `optee-os` x2) have a
+  `COMPATIBLE_MACHINE` that is not static. The static notes: "would skip" on 13 recipes
+  (none parsed by BitBake; the test now fails if one is), "may skip" on 274.
 
 ## How far to trust static mode
 

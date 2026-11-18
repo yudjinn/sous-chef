@@ -2205,14 +2205,23 @@ against BitBake's behaviour or output:
   (the live environment ran only `kas checkout`, `kas dump` and `kas shell -c`); the kas
   keys sous-chef does not read (`env`, `patches`, ...) were not looked at.
 - The skip and license notes ("Skipped recipes", `INCOMPATIBLE_LICENSE`, the `BBMASK`
-  difference note): from the BitBake and OE-core source and fixture tests. No "would skip"
-  note fires on yocto-kiss (its `MACHINEOVERRIDES` holds python, `INCOMPATIBLE_LICENSE` is
-  unset). (w10) The machine and host checks themselves were compared with BitBake by
+  difference note): from the BitBake and OE-core source and fixture tests. (w11) On
+  yocto-kiss 13 "would skip" notes fire (the virtual-provider and `features_check` checks),
+  none for a recipe BitBake parsed and none for one `show-appends` lists as not skipped;
+  the machine and host checks there still give "may skip" only (`MACHINEOVERRIDES` holds
+  python), and `INCOMPATIBLE_LICENSE` is unset. (w10) The machine and host checks themselves were compared with BitBake by
   running them with the `MACHINEOVERRIDES` / `HOST_SYS` from the `bitbake -e` dumps
   (differential.md, "Workspace-level comparisons", skip checks): 83 recipes judged skipped,
   none of them one BitBake parsed, 16 of 24 `show-appends` verdicts the same and the other
-  8 skipped by BitBake for values or checks outside them. The license check and a "would
-  skip" note on real static values remain uncompared.
+  8 skipped by BitBake for values or checks outside them. (w11) With the `features_check`
+  and virtual-provider checks added: 21 of 24 the same; the 3 left have a
+  `COMPATIBLE_MACHINE` that is not static. Not compared: the license check, and the
+  reason BitBake gives (the comparison sees only skipped or not, so a "would skip" note
+  naming a later check than the one BitBake raises first is not caught).
+- The variant class order on Scarthgap ("Class-extended variants") and the `native`
+  `PROVIDES` filter: from the BitBake / OE-core source and fixture tests; the filter's
+  result matched `bitbake -e gmp-native` (`PROVIDES`, differential.md "After w11-final");
+  no Scarthgap workspace was run.
 - The class type of an `inherit` in an `.inc` that a `.conf` or a global class reaches
   ("Which handler parses an included file"): from the source and tests; no such `inherit`
   exists on yocto-kiss (every `inherit` in an `.inc` there is reached from recipes only).

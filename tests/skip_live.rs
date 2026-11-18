@@ -9,7 +9,10 @@
 //! of the bitbake-setup build is evaluated statically (machine `dogbonedark`, distro `kiss`)
 //! for its own `COMPATIBLE_MACHINE`, `COMPATIBLE_HOST` and `SKIP_RECIPE[PN]`, and the checks
 //! the skip notes make (`eval::compatible_machine`, `eval::compatible_host`) are run with the
-//! real values. BitBake's answer: a recipe with a dump was parsed, so not skipped; the
+//! real values; (w11) also `features_check.bbclass` with the dumps' `<KIND>_FEATURES` and the
+//! `RecipeParsed` virtual-provider check with their `PREFERRED_PROVIDER_*` and
+//! `BB_MULTI_PROVIDER_ALLOWED` (`eval::skips`), and it fails when a static "would skip" note
+//! names a recipe BitBake parsed. BitBake's answer: a recipe with a dump was parsed, so not skipped; the
 //! `bitbake-layers show-appends` output (`runs/differential/show-appends.out`) marks
 //! recipes with bbappends `(skipped)` or not; the parse summary says how many were skipped
 //! in all (435, variants included, any reason).
@@ -410,7 +413,7 @@ fn skip_checks_agree_with_bitbake() {
         }
     }
     println!(
-        "would skip with BitBake's MACHINEOVERRIDES / HOST_SYS: {} recipes ({reasons:?}); not decidable statically: {}",
+        "would skip with BitBake's values (MACHINEOVERRIDES, HOST_SYS, the *_FEATURES, PREFERRED_PROVIDER_*): {} recipes ({reasons:?}); not decidable statically: {}",
         skip.len(),
         unknown.len()
     );

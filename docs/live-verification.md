@@ -116,7 +116,8 @@ them in) against `bitbake-layers show-appends`.
   linux-yocto recipes; `trusted-firmware-a_%` on four versions; `optee-os_%` twice on two
   versions; `u-boot_%`, `musl_%`, `systemd_%`, `systemd-boot_%`, `edk2-firmware_%`,
   `libts_%`, `ts-sp-smm-gateway_%`). BitBake also marks most of them `(skipped)`
-  (`COMPATIBLE_MACHINE` and friends), which sous-chef does not model (known).
+  (`COMPATIBLE_MACHINE` and friends), which sous-chef did not model then (known; since w6 /
+  w8 / w11 the skip notes do, see "After w10 and w11").
 - **Bug B2: application order of same-priority bbappends.** For `optee-os_4.9.0.bb` and
   `optee-os_git.bb` BitBake applies `recipes-security/optee-ftpm/optee-os_%.bbappend` then
   `recipes-security/optee/optee-os_%.bbappend`; sous-chef the other way round.
@@ -223,7 +224,10 @@ the recipe's own files).
 | `virtual/libc` | `glibc 2.43 (PREFERRED_VERSION_glibc = "2.43%")`, selected by `PREFERRED_PROVIDER_virtual/libc` (`tclibc-glibc.inc:13`) | `FILE=.../glibc_2.43.bb`, `PREFERRED_VERSION_glibc="2.43%"`, `PV="2.43+git"` (the recipe sets `PV`; sous-chef's version column is the file name's) |
 | `curl-native` | "no recipe in the workspace provides curl-native"; `recipe curl-native` is "not found" | `FILE=.../curl_8.19.0.bb`, `PN="curl-native"`, `CLASSOVERRIDE="class-native"` |
 
-The `-native` miss is the known `BBCLASSEXTEND` gap. While there: for the native variant
+The `-native` miss was the known `BBCLASSEXTEND` gap at the time; closed since: w10
+evaluates variants and makes them providers of their name, w11 also of the `PROVIDES`
+their class rewrites and beside real recipes of the same name ("Status after the fix
+rounds" below). While there: for the native variant
 BitBake leaves **`FILE_LAYERNAME` as `None`** (`set cookerdata.py:513 [_parse_recipe]
 "None"`, no `FILE_LAYERNAME=` line) and its `OVERRIDES` contains a literal
 `layer-${FILE_LAYERNAME}` (recorded in bitbake-semantics.md). Test:
@@ -486,7 +490,8 @@ Wrynose source in the workspace and the release branches of the BitBake clone:
   There is: `cooker.handlePrefProviders` reads `PREFERRED_PROVIDERS` (words
   `providee:provider`) from the configuration into `recipecaches.preferred`;
   `providers.filterProviders` then lets `PREFERRED_PROVIDER_<name>` override it. sous-chef
-  ignores `PREFERRED_PROVIDERS` (a gap; yocto-kiss does not set it).
+  ignored `PREFERRED_PROVIDERS` then (a gap; yocto-kiss does not set it); since w10 it reads
+  it as BitBake does (bitbake-semantics.md, "Providers and versions").
 - `PREFERRED_PROVIDER_*` is read from the configuration datastore only
   (`filterProviders(..., cfgData, ...)`): **confirmed** in the source, and observed (the
   machine conf's value decides `virtual/kernel`).
@@ -543,8 +548,9 @@ Wrynose source in the workspace and the release branches of the BitBake clone:
 | B17 | `scaffold kind=recipe` for a recipe that exists in another layer gives no shadowing note | `src/scaffold/recipe.rs` | — |
 | B18 | Every `var` final line carries the `OVERRIDES` unresolved note ("left as written: TCOVERRIDE") even when the variable does not reference it | `src/mcp/tools/var.rs` | — |
 
-Gaps confirmed (known, not bugs): `BBCLASSEXTEND` providers (`curl-native`), skipped
-recipes (`COMPATIBLE_MACHINE`; BitBake skips 435), `addfragments`, `PREFERRED_PROVIDERS`.
+Gaps confirmed at the time (known, not bugs): `BBCLASSEXTEND` providers (`curl-native`),
+skipped recipes (`COMPATIBLE_MACHINE`; BitBake skips 435), `addfragments`,
+`PREFERRED_PROVIDERS`. What became of each: "After the later rounds" below.
 
 ## Status after the fix rounds (2026-11-17)
 
@@ -586,10 +592,12 @@ Still open from the list above: the Grep context-line format and live Bash and E
 (need a live Claude Code session); how `bitbake-layers add-layer` edits `bblayers.conf`;
 the first release with `python_hatchling`; the second client's failure after a long wait;
 cancel with `BB_SERVER_TIMEOUT` set. The `bitbake -e` format item is settled (T5.5,
-bitbake-semantics.md "Build output"). Known gaps: `BBCLASSEXTEND` providers (since w6 such
-a name is an error naming the base recipe), skipped recipes (since w6 / w8 a "would skip" /
-"may skip" note when the values allow, which never fires on yocto-kiss because its
-`MACHINEOVERRIDES` holds python), `PREFERRED_PROVIDERS`; `addfragments` is no longer one.
+bitbake-semantics.md "Build output"). Known gaps at that point: `BBCLASSEXTEND` providers
+(then, since w6, such a name was an error naming the base recipe), skipped recipes (since
+w6 / w8 a "would skip" / "may skip" note when the values allow, which then never fired on
+yocto-kiss because its `MACHINEOVERRIDES` holds python), `PREFERRED_PROVIDERS`;
+`addfragments` was no longer one. `BBCLASSEXTEND` providers and `PREFERRED_PROVIDERS` were
+closed later, and the skip notes now fire on yocto-kiss (w10, w11; next sections).
 
 ## After the later rounds (w9-final, 2026-11-18)
 
@@ -600,6 +608,46 @@ audit test and the live release diff test); no BitBake or kas process was starte
 the kas build: default 1 finding, `--all` 625 findings in 1718 files, unchanged since w6
 (lint-rules.md, "On a real workspace"); the differential on the existing dumps is unchanged
 (differential.md, "After w9-final").
+
+## After w10 and w11 (w11-final, 2026-11-18)
+
+w10 added class-extended variants (evaluated as BitBake makes them, providers of their
+name), `PREFERRED_PROVIDERS`, `BBMASK` recomputed from its inputs, and compared the skip
+checks with BitBake's values (`tests/skip_live.rs`): 8 recipes BitBake skipped were not
+"would skip" there (u-boot, musl, systemd for reasons the checks did not model;
+linux-yocto, linux-yocto-dev, edk2-firmware, optee-os 4.9.0 and git for a
+`COMPATIBLE_MACHINE` that is not static). w11 modelled the two missing reasons
+(`features_check.bbclass` and the `RecipeParsed` virtual-provider skip; bitbake-semantics.md
+"Skipped recipes"), made a variant a provider through the `PROVIDES` its class rewrites and
+beside a real recipe of its name, and ordered a variant's class against the deferred
+inherits as each BitBake branch does. Re-measured at the end of `w11-final` with the
+release build, no BitBake or kas process started (outputs in
+`{{LIVE}}/runs/w11-final/`):
+
+- Skip comparison (`tests/skip_live.rs`, BitBake's values from the existing dumps): 3 of
+  the 8 disagreements remain: linux-yocto 6.18, optee-os 4.9.0 and optee-os git, whose
+  `COMPATIBLE_MACHINE` is not static (linux-yocto's `PN` neither, so the virtual-provider
+  check cannot decide it either). u-boot and musl are now skipped by the virtual-provider
+  check (`PREFERRED_PROVIDER_virtual/bootloader` = u-boot-kiss, `virtual/libc` = glibc),
+  systemd by `features_check` (`REQUIRED_DISTRO_FEATURES` systemd and usrmerge missing),
+  linux-yocto-dev (`virtual/kernel`) and edk2-firmware (`virtual/bootloader`) by the
+  virtual-provider check. Agreement with `show-appends`: 21 of 24 (was 16). With the real
+  values 237 recipes are judged skipped (reasons: 83 machine or host, 150
+  `features_check`, 12 virtual provider; a recipe can have two), none of them one BitBake parsed and none listed
+  by `show-appends` as not skipped. The notes from static values alone: "would skip" for
+  13 recipes (w10: 0), none of them one BitBake parsed (the test fails on that), "may skip"
+  for 274 (w10: 124), most of them `features_check` notes, because the static
+  `DISTRO_FEATURES` of yocto-kiss holds python.
+- Differential on the existing dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`): 1090 values
+  compared, 701 equal (+1 after whitespace), 357 flagged, 31 known gap, 0 bug
+  (differential.md, "After w11-final").
+- Lint on the kas build (`sous-chef lint --severity info`, run from the kas project
+  directory, because a kas project named in `sous-chef.toml` takes its work directory, where
+  remote repositories are checked out, from the working directory): default 1 finding in 13
+  files; `--all` 625 findings in 1718 files (0 E, 166 W, 459 I), in 14.5 s: unchanged
+  (lint-rules.md).
+- `SOUS_CHEF_LIVE=... cargo test --release --test live_verify --test audit --test
+  release_diff --test skip_live -- --ignored`: all pass (14, 1, 1, 1).
 
 ## Left in the environment
 

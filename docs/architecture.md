@@ -849,7 +849,7 @@ and version only, no configuration) was still what `item`, `search` and the `bba
 generator used after wave 4; since wave 5 they use `recipe::resolve_selected` (provider
 selection), and `bitbake::logs` is the remaining user. Not handled by provider selection:
 `BBCLASSEXTEND` variants until w10 (`-native` names found no provider; since w10 a variant
-is a provider of its name, see "As implemented after wave 5"), `SKIP_RECIPE`, `COMPATIBLE_*` and `INCOMPATIBLE_LICENSE` (since w6 / w8 only a
+is a provider of its name, since w11 also of its rewritten `PROVIDES`, see "As implemented after wave 5"), `SKIP_RECIPE`, `COMPATIBLE_*`, `INCOMPATIBLE_LICENSE`, `features_check` and the `RecipeParsed` virtual-provider skip (since w6 / w8 / w11 only a
 note on the evaluation). A file a static `BBMASK` masks is no candidate since w6 (the
 index's `not_collected` mark).
 
@@ -1098,7 +1098,9 @@ As for wave 5: the additions of the rounds after it (w6: `w6-audit`, `w6-fix`; w
 added MCP progress notifications (the MCP server section), `[handles]` retention
 ("Configuration") and the job queue behind a read-only job ("Jobs", below), and
 `w10-eval`, which added class-extended variants, `PREFERRED_PROVIDERS` and the `BBMASK`
-inputs); the module docs in the
+inputs; w11: `w11-final`, which added lint progress per file, the `features_check` and
+`RecipeParsed` skip notes, variants as providers through their rewritten `PROVIDES`, and
+the variant class order per BitBake branch); the module docs in the
 named files are the detailed reference. Two tools were added (`audit`, `diff`, both
 deferred, so `TOOLS` has 16 rows: 6 always loaded, 10 deferred), each also a CLI subcommand.
 
