@@ -78,10 +78,10 @@ from a real session give the expected context; the skill's tool names are all re
   `bash_grep`) follows **`grep_read`**, because it is the Grep annotation; the BitBake
   digest (handler `bash`) follows `bash`. A `sous-chef.toml` that does not load (an
   unknown key, say) switches nothing off; the handlers then fail open on it.
-- **No `license` in the manifest.** The repository has no license yet; `claude plugin
-  validate` passes, but its directory-submission check reports `LICENSE_MISSING`. Set
-  `license` (or add a `LICENSE`) when one is chosen. No icon either (a directory warning
-  only).
+- **`license: "MIT"`** in `plugin.json` and in the marketplace entry (a display field both
+  accept), matching [`LICENSE`](../LICENSE) at the repository root. `claude plugin validate
+  ./plugin` (Claude Code 2.1.327) passes, and its directory-submission checks report one
+  warning only: `ICON_MISSING` (the plugin has no icon).
 
 ### Plugin format (confirmed)
 
