@@ -105,6 +105,7 @@ impl Handler for EditFollowUp {
                     rules,
                     min_severity: Some(Severity::Warning),
                     all: false,
+                    ..Options::default()
                 },
             )?;
             let n = report.findings.len();

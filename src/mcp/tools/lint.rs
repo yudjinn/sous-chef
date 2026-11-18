@@ -15,7 +15,7 @@ use crate::mcp::{Ctx, progress};
 use crate::release::Release;
 use crate::render::{self, Format};
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct Args {
     /// A recipe, a file pointer or a layer name; default: writable layers.
     pub target: Option<String>,
@@ -27,6 +27,11 @@ pub struct Args {
     pub budget_tokens: Option<usize>,
     /// `text` (default) or `json`.
     pub format: Option<Format>,
+    /// Also check against this release (a codename), as if each layer claimed it in
+    /// `LAYERSERIES_COMPAT`.
+    pub as_release: Option<String>,
+    /// With `as_release`: check against that release only.
+    pub only_release: Option<bool>,
 }
 
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
@@ -42,6 +47,8 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         rules: args.rules.clone().unwrap_or_default(),
         min_severity: args.severity,
         all: false,
+        as_release: tool_as_release(&args)?,
+        only_release: args.only_release.unwrap_or(false),
     };
     let mut report = progress::blocking(|| {
         lint::run_progress(
@@ -65,6 +72,19 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         args.format.unwrap_or_default(),
         budget,
     ))
+}
+
+/// `as_release` parsed; `only_release` without it is an error.
+fn tool_as_release(args: &Args) -> Result<Option<Release>> {
+    if args.only_release == Some(true) && args.as_release.is_none() {
+        return Err(crate::error::Error::Invalid {
+            msg: "only_release needs as_release".into(),
+        });
+    }
+    args.as_release
+        .as_deref()
+        .map(|s| Release::parse_arg(s, "as_release"))
+        .transpose()
 }
 
 /// The engine's per-file hook ([`lint::Progress`]): one MCP progress update `done` of

@@ -65,6 +65,7 @@ fn args(target: Option<&str>) -> Args {
         severity: None,
         budget_tokens: None,
         format: None,
+        ..Args::default()
     }
 }
 

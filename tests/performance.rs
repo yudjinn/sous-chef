@@ -342,6 +342,7 @@ fn live_performance() {
         rules: Vec::new(),
         min_severity: None,
         all,
+        ..lint::Options::default()
     };
     for (label, target, all, reps) in [
         (
