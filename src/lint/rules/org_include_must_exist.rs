@@ -18,6 +18,7 @@
 use std::path::Path;
 
 use crate::index::query;
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::{IncludeMode, StatementKind};
@@ -61,6 +62,50 @@ impl Rule for OrgIncludeMustExist {
 
     fn default_severity(&self) -> Severity {
         Severity::Warning
+    }
+
+    /// Safe, for `include` of an essential file only: the keyword becomes `require`. The
+    /// rule reports it only when the index resolved the file, and BitBake's `include` and
+    /// `require` read a file they find the same way (`IncludeNode.eval` passes `error_out`
+    /// to `ConfHandler.include`, which matters only when the file is not found), so the
+    /// change is exactly the rule's correction: a missing file now stops the parse. A
+    /// `require` that does not resolve has no fix (the right path is not known).
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        let (Some(file), Some(source)) = (cx.file, cx.source) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        self.check(cx, &mut found);
+        found
+            .into_iter()
+            .filter(|f| f.message.starts_with("`include "))
+            .filter_map(|finding| {
+                let st = file.statements.iter().find(|s| {
+                    s.span == finding.loc.lines
+                        && matches!(
+                            s.kind,
+                            StatementKind::Include {
+                                mode: IncludeMode::Include,
+                                ..
+                            }
+                        )
+                })?;
+                let text = source.get(st.bytes.clone())?;
+                let rest = text.strip_prefix("include")?;
+                if !rest.starts_with(fix::py_space) {
+                    return None;
+                }
+                let at = st.bytes.start;
+                let fix = Fix::in_file(
+                    cx,
+                    vec![Edit::replace(at..at + "include".len(), "require")],
+                    "`include` becomes `require` (the file is found, so it is read the same way; \
+                     a missing one now stops the parse)",
+                    Safety::Safe,
+                )?;
+                Some(FixedFinding { finding, fix })
+            })
+            .collect()
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {

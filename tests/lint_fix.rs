@@ -22,10 +22,12 @@ use sous_chef::index::Index;
 use sous_chef::lint::fix::{self, FixOptions, Safety};
 use sous_chef::lint::rules::{
     hygiene_continuation::HygieneContinuation, org_class_export_functions::OrgClassExportFunctions,
+    org_include_must_exist::OrgIncludeMustExist, org_inherit_defer::OrgInheritDefer,
     org_layer_conf::OrgLayerConf, override_append_no_space::OverrideAppendNoSpace,
     override_append_vs_plus_equals::OverrideAppendVsPlusEquals,
     override_filesextrapaths::OverrideFilesextrapaths,
     override_legacy_syntax::OverrideLegacySyntax, override_missing_package::OverrideMissingPackage,
+    override_plus_equals_on_default::OverridePlusEqualsOnDefault,
     override_plus_equals_with_override::OverridePlusEqualsWithOverride,
     override_weak_after_default::OverrideWeakAfterDefault,
 };
@@ -431,6 +433,9 @@ fn rules_without_a_fix_offer_none() {
         "hygiene/continuation",
         "org/class-export-functions",
         "org/layer-conf",
+        "org/include-must-exist",
+        "org/inherit-defer",
+        "override/plus-equals-on-default",
     ];
     let env = Env::new();
     for r in lint::all_rules() {
@@ -970,5 +975,99 @@ fn the_cli_runs_fix_mode() {
     };
     assert!(
         lint::cli_fix_with(&env.ws, &mut env.index, &env.config, &bad, &mut Vec::new()).is_err()
+    );
+}
+
+/// Runs one rule's fixes on `target` (`suggested`, write), returns the report.
+fn fix_one(env: &mut Env, rule: &dyn Rule, target: &Target, suggested: bool) -> fix::FixReport {
+    let rules: [&dyn Rule; 1] = [rule];
+    fix::run_with(
+        &env.ws,
+        &mut env.index,
+        &env.config,
+        target,
+        &Options::default(),
+        &FixOptions {
+            suggested,
+            write: true,
+        },
+        &rules,
+        &lint::Replay,
+    )
+    .unwrap()
+}
+
+#[test]
+fn include_must_exist_fix_makes_it_require() {
+    let bb = "meta-mine/recipes-app/inc/inc_1.0.bb";
+    let mut env = Env::with(
+        &[
+            (bb, "include inc-common.inc\nrequire inc-missing.inc\n"),
+            (
+                "meta-mine/recipes-app/inc/inc-common.inc",
+                "LICENSE = \"MIT\"\n",
+            ),
+        ],
+        &["meta-mine"],
+    );
+    let t = files(&env, &[bb]);
+    let r = fix_one(&mut env, &OrgIncludeMustExist, &t, false);
+    assert_eq!(r.available.len(), 1, "the missing require has no fix");
+    assert_eq!(r.available[0].fix.safety, Safety::Safe);
+    assert_eq!(
+        env.read(bb),
+        "require inc-common.inc\nrequire inc-missing.inc\n"
+    );
+    let after = r.after.unwrap();
+    assert_eq!((after.fixed.len(), after.remaining.len()), (1, 1));
+    assert!(after.new.is_empty());
+}
+
+#[test]
+fn inherit_defer_fix_is_suggested() {
+    let bb = "meta-mine/recipes-app/d/d_1.0.bb";
+    let conf = fixture_path("ws/meta-mine/conf/layer.conf");
+    let conf = fs::read_to_string(conf)
+        .unwrap()
+        .replace("kirkstone scarthgap wrynose", "scarthgap wrynose");
+    let text = "DCLASS = \"autotoolsish\"\ninherit ${DCLASS}\nDCLASS = \"base\"\n";
+    let mut env = Env::with(
+        &[(bb, text), ("meta-mine/conf/layer.conf", &conf)],
+        &["meta-mine"],
+    );
+    let t = files(&env, &[bb]);
+    let r = fix_one(&mut env, &OrgInheritDefer, &t, false);
+    assert_eq!(r.suggested_skipped.len(), 1);
+    assert_eq!(env.read(bb), text, "suggested only");
+    let r = fix_one(&mut env, &OrgInheritDefer, &t, true);
+    assert_eq!(env.read(bb), text.replace("inherit ", "inherit_defer "));
+    let after = r.after.unwrap();
+    assert!(
+        after.new.is_empty() && after.remaining.is_empty(),
+        "{after:?}"
+    );
+}
+
+#[test]
+fn plus_equals_on_default_fix_is_shown_for_the_build_directory() {
+    // The fixture's finding is in build/conf/local.conf, which is never written.
+    let mut env = Env::new();
+    let before = env.read("build/conf/local.conf");
+    let r = fix_one(
+        &mut env,
+        &OverridePlusEqualsOnDefault,
+        &Target::Layer("build".into()),
+        true,
+    );
+    assert_eq!(env.read("build/conf/local.conf"), before);
+    assert_eq!(r.not_writable.len(), 1);
+    let f = &r.not_writable[0];
+    assert_eq!(f.fix.safety, Safety::Suggested);
+    assert_eq!(
+        f.fix.apply_to(&before).unwrap(),
+        before.replace(
+            "DISTRO_FEATURES += \"wayland\"",
+            "DISTRO_FEATURES:append = \" wayland\""
+        )
     );
 }

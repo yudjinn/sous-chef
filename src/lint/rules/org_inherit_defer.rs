@@ -16,6 +16,7 @@
 use std::ops::RangeInclusive;
 
 use crate::index::query;
+use crate::lint::fix::{self, Edit, Fix, FixedFinding, Safety};
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::parse::{ParsedFile, StatementKind};
@@ -120,6 +121,47 @@ impl Rule for OrgInheritDefer {
 
     fn releases(&self) -> RangeInclusive<Release> {
         helpers::feature_range(Feature::InheritDefer)
+    }
+
+    /// Suggested: the keyword `inherit` becomes `inherit_defer`, nothing else. The class is
+    /// then chosen by the variable's final value, as the rule recommends, but it is also
+    /// parsed at the end of the recipe instead of at this line, so its plain assignments
+    /// now come after the recipe's own: that needs a look.
+    fn fixes(&self, cx: &LintContext<'_>) -> Vec<FixedFinding> {
+        let (Some(file), Some(source)) = (cx.file, cx.source) else {
+            return Vec::new();
+        };
+        let mut found = Vec::new();
+        self.check(cx, &mut found);
+        found
+            .into_iter()
+            .filter_map(|finding| {
+                let st = file.statements.iter().find(|s| {
+                    s.span == finding.loc.lines
+                        && matches!(
+                            s.kind,
+                            StatementKind::Inherit {
+                                deferred: false,
+                                ..
+                            }
+                        )
+                })?;
+                let rest = source.get(st.bytes.clone())?.strip_prefix("inherit")?;
+                if !rest.starts_with(fix::py_space) {
+                    return None;
+                }
+                let at = st.bytes.start;
+                let fix = Fix::in_file(
+                    cx,
+                    vec![Edit::replace(at..at + "inherit".len(), "inherit_defer")],
+                    "`inherit` becomes `inherit_defer`: the class is chosen by the final value, \
+                     and parsed after the recipe (its plain assignments now win over the \
+                     recipe's)",
+                    Safety::Suggested,
+                )?;
+                Some(FixedFinding { finding, fix })
+            })
+            .collect()
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
