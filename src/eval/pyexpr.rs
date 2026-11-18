@@ -297,6 +297,7 @@ fn tokenize(code: &str) -> Result<Vec<Tok>, Stop> {
                 '.' => ".",
                 '+' => "+",
                 '-' => "-",
+                '%' => "%",
                 '=' => "=",
                 _ => return Err(unsupported(format!("`{ch}`"))),
             },
@@ -538,6 +539,10 @@ enum Node {
         args: Vec<Node>,
     },
     Index(Box<Node>, Box<Node>),
+    /// `fmt % args`.
+    Format(Box<Node>, Box<Node>),
+    /// A tuple: only the right operand of `%`.
+    Tuple(Vec<Node>),
     Add(Box<Node>, Box<Node>),
     Not(Box<Node>),
     And(Box<Node>, Box<Node>),
@@ -563,7 +568,7 @@ impl Node {
     fn funcs(&self, out: &mut Vec<Func>) {
         match self {
             Node::Lit(_) => {}
-            Node::List(v) => v.iter().for_each(|n| n.funcs(out)),
+            Node::List(v) | Node::Tuple(v) => v.iter().for_each(|n| n.funcs(out)),
             Node::Call { func, args, kwargs } => {
                 if !out.contains(func) {
                     out.push(*func);
@@ -575,7 +580,11 @@ impl Node {
                 recv.funcs(out);
                 args.iter().for_each(|n| n.funcs(out));
             }
-            Node::Index(a, b) | Node::Add(a, b) | Node::And(a, b) | Node::Or(a, b) => {
+            Node::Index(a, b)
+            | Node::Add(a, b)
+            | Node::And(a, b)
+            | Node::Or(a, b)
+            | Node::Format(a, b) => {
                 a.funcs(out);
                 b.funcs(out);
             }
@@ -761,14 +770,25 @@ impl Parser {
     }
 
     fn sum(&mut self) -> Result<Node, Stop> {
-        let mut l = self.unary()?;
+        let mut l = self.term()?;
         while self.is_op("+") {
             self.pos += 1;
-            let r = self.unary()?;
+            let r = self.term()?;
             l = Node::Add(Box::new(l), Box::new(r));
         }
         if self.is_op("-") {
             return Err(unsupported("subtraction"));
+        }
+        Ok(l)
+    }
+
+    /// `unary ('%' unary)*` (python's `*` level; only `%` is accepted).
+    fn term(&mut self) -> Result<Node, Stop> {
+        let mut l = self.unary()?;
+        while self.is_op("%") {
+            self.pos += 1;
+            let r = self.unary()?;
+            l = Node::Format(Box::new(l), Box::new(r));
         }
         Ok(l)
     }
@@ -853,16 +873,35 @@ impl Parser {
                 Ok(Node::Lit(PyVal::Int(n)))
             }
             Tok::Op("(") => {
+                // A parenthesised expression, or a tuple (only `%` accepts one).
                 self.pos += 1;
-                if self.is_op(")") {
-                    return Err(unsupported("a tuple"));
+                self.nest()?;
+                let mut items = Vec::new();
+                let mut tuple = false;
+                loop {
+                    if self.is_op(")") {
+                        self.pos += 1;
+                        break;
+                    }
+                    items.push(self.expr()?);
+                    if self.is_kw("for") {
+                        return Err(unsupported("a generator"));
+                    }
+                    if self.is_op(",") {
+                        tuple = true;
+                        self.pos += 1;
+                    } else if !self.is_op(")") {
+                        return Err(unsupported("expected `,` or `)`"));
+                    }
                 }
-                let n = self.expr()?;
-                if self.is_op(",") {
-                    return Err(unsupported("a tuple"));
+                self.depth -= 1;
+                if items.len() == 1 && !tuple {
+                    items
+                        .pop()
+                        .ok_or_else(|| unsupported("an empty expression"))
+                } else {
+                    Ok(Node::Tuple(items))
                 }
-                self.eat_op(")")?;
-                Ok(n)
             }
             Tok::Op("[") => {
                 self.pos += 1;
@@ -1039,6 +1078,24 @@ fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
                 eval_node(orelse, env)
             }
         }
+        Node::Tuple(_) => Err(unsupported("a tuple outside `%`")),
+        Node::Format(fmt, args) => {
+            let fmt = eval_node(fmt, env)?;
+            let PyVal::Str(fmt) = fmt else {
+                return Err(unsupported(format!("`%` on {}", fmt.type_name())));
+            };
+            let args: Vec<PyVal> = match &**args {
+                Node::Tuple(items) => items
+                    .iter()
+                    .map(|i| eval_node(i, env))
+                    .collect::<Result<_, _>>()?,
+                other => vec![eval_node(other, env)?],
+            };
+            if args.iter().any(|a| matches!(a, PyVal::List(_) | PyVal::D)) {
+                return Err(unsupported("`%` with a list or d"));
+            }
+            Ok(PyVal::Str(percent_format(&fmt, &args)?))
+        }
         Node::Index(base, idx) => {
             let (base, idx) = (eval_node(base, env)?, eval_node(idx, env)?);
             let PyVal::List(items) = base else {
@@ -1079,6 +1136,40 @@ fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
             call(*func, bound, env)
         }
     }
+}
+
+/// `fmt % args` (python's printf-style formatting) for the conversions `%s` (`str()`), `%d`
+/// of an integer or a boolean, and `%%`; any other conversion, flag, width or mapping key is
+/// not reproduced. The number of arguments must match, as python requires.
+fn percent_format(fmt: &str, args: &[PyVal]) -> Result<String, Stop> {
+    let mut out = String::with_capacity(fmt.len());
+    let mut it = fmt.chars();
+    let mut next = args.iter();
+    while let Some(c) = it.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('%') => out.push('%'),
+            Some('s') => {
+                let a = next
+                    .next()
+                    .ok_or_else(|| unsupported("not enough arguments for `%`"))?;
+                out.push_str(&to_text(a)?);
+            }
+            Some('d') => match next.next() {
+                Some(PyVal::Int(i)) => out.push_str(&i.to_string()),
+                Some(PyVal::Bool(b)) => out.push_str(if *b { "1" } else { "0" }),
+                _ => return Err(unsupported("`%d` of something other than an integer")),
+            },
+            _ => return Err(unsupported("a `%` conversion outside `%s`, `%d`, `%%`")),
+        }
+    }
+    if next.next().is_some() {
+        return Err(unsupported("not all arguments converted by `%`"));
+    }
+    Ok(out)
 }
 
 /// Python's binding of positional and keyword arguments to `func`'s parameters.
@@ -1822,6 +1913,19 @@ mod tests {
         assert_eq!(ok("d.expand('${A}-b')", v), "a-b");
         assert_eq!(ok("'a\\'b\\\\c\\n'", v), "a'b\\c\n");
         assert_eq!(ok("('x')", v), "x");
+        assert_eq!(ok("'-%s' % 'x'", v), "-x");
+        assert_eq!(ok("'%s:%d' % ('a', 1)", v), "a:1");
+        assert_eq!(ok("'%%%s' % None", v), "%None");
+        assert_eq!(ok("'a' + 'b%s' % 'c'", v), "abc");
+        assert_eq!(ok("'abc' % ()", v), "abc");
+        assert_eq!(ok("'%s' % ('x',)", v), "x");
+        assert_eq!(
+            ok(
+                " ('-%s'       % d.getVar('M').split()[-1].replace('-d16', 'd16')) if (d.getVar('M') != '') else ''",
+                &[("M", "-mfpu=neon -mfpu=vfpv3-d16")]
+            ),
+            "--mfpu=vfpv3d16"
+        );
         assert_eq!(ok("'a' if 'b' else 'c' if 1 else 'd'", v), "a");
         assert_eq!(ok("bb.utils.contains('X', 'a', 'y', 'n', d,)", v), "y");
     }
@@ -1859,7 +1963,15 @@ mod tests {
             "d.getVar",
             "d.getVar('X').split",
             "d.getVar('X').upper",
-            "'%s' % 'x'",
+            "'%r' % 'x'",
+            "'%s %s' % 'x'",
+            "'%s' % ('x', 'y')",
+            "'%5s' % 'x'",
+            "'%(a)s' % 'x'",
+            "'%s' % ['a']",
+            "'%d' % '1'",
+            "'x%' % ()",
+            "('a', 'b') + ('c',)",
             "'a' * 2",
             "1 - 1",
             "-d.getVar('X')",

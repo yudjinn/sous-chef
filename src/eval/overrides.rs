@@ -154,7 +154,7 @@ impl Source for Eval<'_> {
     fn unset_doubt(&self, name: &str, exp: &mut Expander) -> Option<String> {
         let base = base_of(name);
         let notes = &self.ds.notes;
-        if notes.python_vars.contains(base) {
+        if notes.python_vars.contains(base) || notes.python_vars.contains(name) {
             return Some("anonymous python may set it".into());
         }
         if notes.uncertain_vars.contains(base) {
@@ -188,7 +188,8 @@ impl Source for Eval<'_> {
     }
 
     fn lookup_flag(&self, name: &str, flag: &str, exp: &mut Expander) -> Option<Option<Value>> {
-        let doubt = self.ds.notes.python_vars.contains(base_of(name))
+        let doubt = (self.ds.notes.python_vars.contains(base_of(name))
+            || self.ds.notes.python_vars.contains(name))
             || self.ds.notes.uncertain_vars.contains(base_of(name))
             || self.ds.notes.unresolved_vars.contains_key(base_of(name));
         let Some(raw) = self.ds.raw_flag(name, flag) else {
@@ -240,7 +241,9 @@ impl Eval<'_> {
         let c = self.compose(name, true, exp, trace, 0);
         let mut v = c.parsed?;
         // Anonymous python may change this variable (recorded by the replay, T3.4).
-        if self.ds.notes.python_vars.contains(base_of(name)) {
+        if self.ds.notes.python_vars.contains(base_of(name))
+            || self.ds.notes.python_vars.contains(name)
+        {
             v.unevaluated_python = true;
         }
         // A file reached through a reference whose value is not certain changes it
@@ -487,6 +490,12 @@ pub struct PythonLog {
     pub overrides: Vec<PyEvent>,
 }
 
+/// `a` is `b` with some elements left out (order kept).
+fn is_subsequence(a: &[String], b: &[String]) -> bool {
+    let mut it = b.iter();
+    a.iter().all(|x| it.any(|y| y == x))
+}
+
 fn dedupe(events: &[PyEvent]) -> Vec<PyEvent> {
     let mut out: Vec<PyEvent> = Vec::new();
     for e in events {
@@ -631,7 +640,16 @@ impl DataStore {
         let first =
             OverrideState::from_value(self.value_with("OVERRIDES", &OverrideState::default()));
         let second = OverrideState::from_value(self.value_with("OVERRIDES", &first));
-        if first.list == second.list && first.has_empty == second.has_empty {
+        // BitBake's second pass is only a check: it is fatal when it differs, so when BitBake
+        // gives a value at all, OVERRIDES is the first pass (computed with no override
+        // active, as here, so its known entries are exact). When the first pass has unknown
+        // entries, the second pass runs under unknown decisions and may know fewer entries
+        // (python whose inputs are now uncertain): that is no sign of instability. Only a
+        // known entry the first pass did not have is.
+        let fewer_known = first.uncertain()
+            && is_subsequence(&second.list, &first.list)
+            && (!second.has_empty || first.has_empty);
+        if (first.list == second.list && first.has_empty == second.has_empty) || fewer_known {
             first
         } else {
             OverrideState {
