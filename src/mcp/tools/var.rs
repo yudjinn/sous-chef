@@ -164,6 +164,19 @@ pub fn recipe_target(
         Some(r) if !r.contains(':') && !query::find_recipes(index, r)?.is_empty() => {
             Some(r.to_string())
         }
+        // A variant pointer (`virtual:native:<layer>:<path>`): the evaluator takes it.
+        Some(r) if eval::variant::split_virtual(r).is_some() => {
+            let (ext, file) = eval::variant::split_virtual(r).ok_or_else(|| Error::Invalid {
+                msg: format!("bad variant pointer {r:?}"),
+            })?;
+            let row = recipe::resolve_recipe(index, file, None)?;
+            Some(format!(
+                "{}{}:{}",
+                ext.virtual_prefix(),
+                row.file.layer,
+                row.file.path.display()
+            ))
+        }
         // A class-extended variant (`gmp-native`): the evaluator makes it from the base
         // recipe as BitBake does (eval::variant).
         Some(r) if !r.contains(':') && recipe::class_extend_variant(index, r)?.is_some() => {

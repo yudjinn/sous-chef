@@ -1063,7 +1063,7 @@ and Langdale workspaces). The fix rounds changed what several rules report (lint
 ### As implemented after wave 5
 
 As for wave 5: the additions of the rounds after it (w6: `w6-audit`, `w6-fix`; w7:
-`w7-diff`, `w7-fix`; w8: `w8-tools`, `w8-eval`; w9: `w9-final`); the module docs in the
+`w7-diff`, `w7-fix`; w8: `w8-tools`, `w8-eval`; w9: `w9-final`; w10: `w10-eval`); the module docs in the
 named files are the detailed reference. Two tools were added (`audit`, `diff`, both
 deferred, so `TOOLS` has 16 rows: 6 always loaded, 10 deferred), each also a CLI subcommand.
 

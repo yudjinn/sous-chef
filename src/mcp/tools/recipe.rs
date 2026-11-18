@@ -266,6 +266,9 @@ pub fn resolve_selected_variant(
     version: Option<&str>,
 ) -> Result<(RecipeRow, Option<String>, Option<ClassExtend>)> {
     let name = name.trim();
+    if let Some((ext, file)) = eval::variant::split_virtual(name) {
+        return Ok((resolve_recipe(index, file, version)?, None, Some(ext)));
+    }
     if !name.contains(':')
         && query::find_recipes(index, name)?.is_empty()
         && class_extend_variant(index, name)?.is_some()

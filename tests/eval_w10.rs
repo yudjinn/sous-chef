@@ -329,6 +329,37 @@ async fn the_tools_show_a_variant() {
     .await
     .unwrap();
     assert!(out.contains("\"native\""), "{out}");
+    // The variant pointer the recipe view shows is accepted as `recipe` too.
+    const PTR: &str = "virtual:native:meta-core:recipes-core/libfoo/libfoo_2.0.bb";
+    let out = var::run(
+        &ctx,
+        var::Args {
+            name: "PN".into(),
+            recipe: Some(PTR.into()),
+            machine: None,
+            distro: None,
+            authoritative: false,
+            flags: false,
+            budget_tokens: Some(4000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(out.contains("libfoo-native"), "{out}");
+    let out = recipe::run(
+        &ctx,
+        recipe::Args {
+            name: PTR.into(),
+            version: None,
+            show: recipe::Show::Summary,
+            budget_tokens: Some(4000),
+            format: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(out.contains("the `native` variant of libfoo"), "{out}");
     let out = deps::run(
         &ctx,
         deps::Args {
