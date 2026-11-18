@@ -1279,6 +1279,13 @@ through `variant::provides_forms(name)` (new, with `variant::native_filter`,
 `variant::add_suffix`, `variant::explode_deps`, OE-core's and BitBake's functions) and
 evaluates them. The replay computes `native_virtclass_handler`'s `PROVIDES` filter
 (`Replay::apply_native_provides_filter`) instead of flagging it, when the value is static.
+Variant class order (w11, `src/release.rs`): `ClassExtendOrder { BaseDeferredThenClass,
+PerVariantDeferred }`, `BitbakeSource { dir, version, order }`, `bitbake_version(init_py)`,
+`class_extend_order_in(ast_py)`, `workspace_bitbake(&[Layer]) ->
+Option<Arc<BitbakeSource>>` (cached per directory), `class_extend_order(Release,
+Option<&BitbakeSource>) -> (ClassExtendOrder, Option<String>)`; `replay::recipe_pass` runs the
+base's deferred inherits before making the variant for `BaseDeferredThenClass`
+(`Replay::run_deferred`), and `Replay::extend_variant` takes the order.
 Skip notes (w11, `eval::skips`, public): `Words`, `Check`, `KindLists`, `FEATURE_KINDS`,
 `features_kind`, `features_skip(kind, kind_value, any_of, required, conflict, features) ->
 Option<String>`, `virtual_provider_skip(p, preferred, pn) -> Option<String>`; the replay

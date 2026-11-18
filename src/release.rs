@@ -416,6 +416,153 @@ pub fn lint_releases(
     out
 }
 
+// ---------------------------------------------------------------------------------------
+// The workspace's BitBake: when a class-extended variant's class is inherited
+
+/// How BitBake inherits a variant's class (`BBCLASSEXTEND`), relative to the recipe's
+/// deferred inherits (`inherit_defer`). bitbake-semantics.md, "Class-extended variants".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClassExtendOrder {
+    /// BitBake before `139f61fe9` (2.8.0 up to Scarthgap 5.0.10, Styhead 2.10, Walnascar
+    /// 2.12): `multi_finalize` runs the recipe's deferred inherits once, on the base
+    /// recipe after its bbappends, before any variant is made; each variant then inherits
+    /// its class at once.
+    BaseDeferredThenClass,
+    /// `139f61fe9` "ast: Change deferred inherits to happen per recipe" (Scarthgap 5.0.11
+    /// on, BitBake 2.16 on): the class is appended to the variant's deferred inherits, which
+    /// `finalize` runs per variant, so the class comes after the recipe's deferred inherits
+    /// and those are evaluated in the variant.
+    PerVariantDeferred,
+}
+
+/// What the workspace's BitBake source says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BitbakeSource {
+    /// The BitBake directory (`.../bitbake`).
+    pub dir: std::path::PathBuf,
+    /// `lib/bb/__init__.py` `__version__`.
+    pub version: Option<String>,
+    /// From `lib/bb/parse/ast.py` `multi_finalize`: whether `extendfunc` appends the class
+    /// to `__BBDEFINHERITS` or inherits it at once; `None` when neither line is there.
+    pub order: Option<ClassExtendOrder>,
+}
+
+/// `__version__ = "x.y.z"` from the text of `lib/bb/__init__.py`.
+pub fn bitbake_version(init_py: &str) -> Option<String> {
+    init_py.lines().find_map(|l| {
+        let rest = l.trim().strip_prefix("__version__")?.trim_start();
+        let v = rest.strip_prefix('=')?.trim().trim_matches(['"', '\'']);
+        (!v.is_empty()).then(|| v.to_string())
+    })
+}
+
+/// The order `ast.py`'s `multi_finalize` uses, from its text: `139f61fe9` on branch `2.8`
+/// appends `(extendedmap[name], fn, 0)` to `__BBDEFINHERITS`; branches `2.16` and `2.18` call
+/// `BBHandler.inherit_defer(extendedmap[name], fn, 0, d)`; before, `extendfunc` calls
+/// `bb.parse.BBHandler.inherit(extendedmap[name], fn, 0, d)`.
+pub fn class_extend_order_in(ast_py: &str) -> Option<ClassExtendOrder> {
+    if ast_py.contains("inherits.append((extendedmap[name], fn, 0))")
+        || ast_py.contains("BBHandler.inherit_defer(extendedmap[name], fn, 0, d)")
+    {
+        Some(ClassExtendOrder::PerVariantDeferred)
+    } else if ast_py.contains("bb.parse.BBHandler.inherit(extendedmap[name], fn, 0, d)") {
+        Some(ClassExtendOrder::BaseDeferredThenClass)
+    } else {
+        None
+    }
+}
+
+/// The BitBake checkout next to the OE-core layer (collection `core`), found as OE-core's
+/// `scripts/oe-buildenv-internal` does: `$OEROOT/bitbake`, else `$OEROOT/../bitbake`, where
+/// `OEROOT` is the directory above the layer (the one holding `oe-init-build-env`). Read
+/// once per directory per process.
+pub fn workspace_bitbake(layers: &[Layer]) -> Option<std::sync::Arc<BitbakeSource>> {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Option<Arc<BitbakeSource>>>>> = OnceLock::new();
+    let core = layers
+        .iter()
+        .find(|l| l.collections.iter().any(|c| c == "core"))?;
+    let oeroot = core.root.parent()?.to_path_buf();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(c) = cache.lock()
+        && let Some(hit) = c.get(&oeroot)
+    {
+        return hit.clone();
+    }
+    let found = [oeroot.join("bitbake"), oeroot.join("../bitbake")]
+        .into_iter()
+        .find(|d| d.join("lib/bb/__init__.py").is_file())
+        .map(|dir| {
+            let version = std::fs::read_to_string(dir.join("lib/bb/__init__.py"))
+                .ok()
+                .and_then(|t| bitbake_version(&t));
+            let order = std::fs::read_to_string(dir.join("lib/bb/parse/ast.py"))
+                .ok()
+                .and_then(|t| class_extend_order_in(&t));
+            Arc::new(BitbakeSource {
+                dir,
+                version,
+                order,
+            })
+        });
+    if let Ok(mut c) = cache.lock() {
+        c.insert(oeroot, found.clone());
+    }
+    found
+}
+
+/// The order for `release`, with the workspace's BitBake (`bb`) when found, and a note when
+/// it is not known. Whinlatter (BitBake 2.16) on: per variant. Styhead (2.10) and Walnascar
+/// (2.12): at once, after the base's deferred inherits (their branches never got
+/// `139f61fe9`). Scarthgap: BitBake 2.8.0 is the version of Yocto 5.0 to 5.0.12, and
+/// `139f61fe9` came in with 5.0.11; `__version__` became 2.8.1 in 5.0.13 (`1c9ec1ffd`). So
+/// `ast.py` decides, then a version from 2.8.1 on; without either the order of 5.0 to
+/// 5.0.10 is used and the note says so.
+pub fn class_extend_order(
+    release: Release,
+    bb: Option<&BitbakeSource>,
+) -> (ClassExtendOrder, Option<String>) {
+    if release.has(Feature::ClassExtendDeferred) {
+        return (ClassExtendOrder::PerVariantDeferred, None);
+    }
+    if release != Release::Scarthgap {
+        return (ClassExtendOrder::BaseDeferredThenClass, None);
+    }
+    if let Some(o) = bb.and_then(|b| b.order) {
+        return (o, None);
+    }
+    let v = bb.and_then(|b| b.version.clone());
+    let parts: Vec<u32> = v
+        .as_deref()
+        .unwrap_or("")
+        .split('.')
+        .map_while(|p| p.parse().ok())
+        .collect();
+    if parts.len() >= 3 && (parts[0], parts[1], parts[2]) >= (2, 8, 1) {
+        return (ClassExtendOrder::PerVariantDeferred, None);
+    }
+    let seen = match (bb, v) {
+        (Some(b), Some(v)) => format!(
+            "the workspace's BitBake ({}) is {v}, which Scarthgap 5.0 to 5.0.12 all report, and its ast.py was not recognised",
+            b.dir.display()
+        ),
+        (Some(b), None) => format!(
+            "the workspace's BitBake ({}) has no readable version or ast.py",
+            b.dir.display()
+        ),
+        _ => "no BitBake checkout was found next to the OE-core layer".to_string(),
+    };
+    (
+        ClassExtendOrder::BaseDeferredThenClass,
+        Some(format!(
+            "this evaluation follows Scarthgap 5.0 to 5.0.10 (BitBake 2.8.0): the recipe's deferred inherits run on the base recipe before the variant is made, then the class is inherited at once; Scarthgap 5.0.11 and later (BitBake 2.8 with 139f61fe9) append the class to the variant's own deferred inherits instead, after them; {seen}"
+        )),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -614,5 +761,61 @@ mod tests {
             lint_releases(&same, Release::Wrynose, true, Target),
             [Release::Wrynose]
         );
+    }
+
+    #[test]
+    fn class_extend_order_by_release_and_bitbake() {
+        use ClassExtendOrder::*;
+        assert_eq!(
+            bitbake_version("import os\n__version__ = \"2.8.1\"\n").as_deref(),
+            Some("2.8.1")
+        );
+        assert_eq!(bitbake_version("x = 1\n"), None);
+        let bb = |version: &str, order: Option<ClassExtendOrder>| BitbakeSource {
+            dir: PathBuf::from("/bb"),
+            version: Some(version.into()),
+            order,
+        };
+        assert_eq!(
+            class_extend_order(Release::Wrynose, None),
+            (PerVariantDeferred, None)
+        );
+        assert_eq!(
+            class_extend_order(Release::Whinlatter, None).0,
+            PerVariantDeferred
+        );
+        for r in [Release::Styhead, Release::Walnascar] {
+            assert_eq!(class_extend_order(r, None), (BaseDeferredThenClass, None));
+        }
+        let s = Release::Scarthgap;
+        assert_eq!(
+            class_extend_order(s, Some(&bb("2.8.1", None))),
+            (PerVariantDeferred, None)
+        );
+        assert_eq!(
+            class_extend_order(s, Some(&bb("2.8.0", Some(PerVariantDeferred)))),
+            (PerVariantDeferred, None)
+        );
+        assert_eq!(
+            class_extend_order(s, Some(&bb("2.8.0", Some(BaseDeferredThenClass)))),
+            (BaseDeferredThenClass, None)
+        );
+        let (o, note) = class_extend_order(s, Some(&bb("2.8.0", None)));
+        assert_eq!(o, BaseDeferredThenClass);
+        assert!(note.is_some_and(|n| n.contains("5.0 to 5.0.12")));
+        assert!(class_extend_order(s, None).1.is_some());
+        assert_eq!(
+            class_extend_order_in("    inherits.append((extendedmap[name], fn, 0))"),
+            Some(PerVariantDeferred)
+        );
+        assert_eq!(
+            class_extend_order_in("bb.parse.BBHandler.inherit_defer(extendedmap[name], fn, 0, d)"),
+            Some(PerVariantDeferred)
+        );
+        assert_eq!(
+            class_extend_order_in("bb.parse.BBHandler.inherit(extendedmap[name], fn, 0, d)"),
+            Some(BaseDeferredThenClass)
+        );
+        assert_eq!(class_extend_order_in(""), None);
     }
 }

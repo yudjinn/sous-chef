@@ -421,16 +421,18 @@ fn the_variant_class_is_deferred_and_classoverride_is_set_before_the_deferred_in
             .iter()
             .any(|(op, _)| op.kind == OpKind::EventHandler && op.value == "class-native")
     );
-    // Walnascar (BitBake 2.12): the class is inherited at once, so its CLASSOVERRIDE is
-    // set before the deferred inherits anyway.
+    // Walnascar (BitBake 2.12, `multi_finalize` on branch 2.12, corrected in w11): the
+    // recipe's deferred inherits run once on the base recipe, before the variant is made
+    // and before its class is inherited at once, so `${DEFCLASS}` is expanded as for the
+    // target. The order is known there: no note.
     let fx = modified_release("walnascar", deferred_pick);
     let ds = eval(&fx, "libfoo-native");
-    assert_eq!(text(&ds, "PICK"), "native");
+    assert_eq!(text(&ds, "PICK"), "target");
     assert!(
-        ds.replay()
+        !ds.replay()
             .target_notes
             .iter()
-            .any(|n| n.contains("inherits `native` at once")),
+            .any(|n| n.contains("deferred inherits")),
         "{:?}",
         ds.replay().target_notes
     );

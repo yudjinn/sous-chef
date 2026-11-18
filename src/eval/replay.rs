@@ -88,7 +88,7 @@ use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
 use crate::index::{self, Index};
 use crate::parse::words as pwords;
-use crate::release::Feature;
+use crate::release::{ClassExtendOrder, Feature};
 use crate::types::{AssignOp, FileKind, LineSpan, Loc, VarRef};
 use crate::workspace::Workspace;
 use crate::workspace::resolve::{self, Resolver};
@@ -968,6 +968,14 @@ fn recipe_pass(
         r.finalize(&recipe_loc)?;
         return Ok(r.ds);
     };
+    // Before BitBake's 139f61fe9 (release::ClassExtendOrder), multi_finalize runs the
+    // deferred inherits here, on the base recipe, before the variants are made.
+    let bb = crate::release::workspace_bitbake(&ws.layers);
+    let (order, order_note) = crate::release::class_extend_order(ws.release.release, bb.as_deref());
+    let had_deferred = !r.ds.notes.deferred.is_empty();
+    if order == ClassExtendOrder::BaseDeferredThenClass {
+        r.run_deferred()?;
+    }
     // ast.multi_finalize: the base is finalised on a copy, and BBCLASSEXTEND and PN are
     // read from it; the variant starts again from the datastore before finalisation.
     let safe = r.ds.fork();
@@ -1005,7 +1013,7 @@ fn recipe_pass(
         });
     }
     r.ds = safe;
-    r.extend_variant(ext, &base_pn, &recipe_loc)?;
+    r.extend_variant(ext, &base_pn, &recipe_loc, order, order_note, had_deferred)?;
     r.finalize(&recipe_loc)?;
     // The name comes from OE-core's naming (eval::variant); the variant's PN is what its
     // class made of it.
@@ -3226,18 +3234,7 @@ impl Replay<'_> {
                 );
             }
         }
-        loop {
-            let next = {
-                let notes = Arc::make_mut(&mut self.ds.notes);
-                if notes.deferred.is_empty() {
-                    None
-                } else {
-                    Some(notes.deferred.remove(0))
-                }
-            };
-            let Some(d) = next else { break };
-            self.inherit(&d.text, d.loc.as_ref(), &d.via, true, "inherit_defer")?;
-        }
+        self.run_deferred()?;
         self.class_extend_handlers(recipe);
         let incomplete = self.ds.expand_keys();
         Arc::make_mut(&mut self.ds.notes).incomplete_keys = incomplete;
@@ -3256,11 +3253,37 @@ impl Replay<'_> {
         Ok(())
     }
 
+    /// The deferred inherits, first in first out (more may be added meanwhile).
+    fn run_deferred(&mut self) -> Result<()> {
+        loop {
+            let next = {
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                if notes.deferred.is_empty() {
+                    None
+                } else {
+                    Some(notes.deferred.remove(0))
+                }
+            };
+            let Some(d) = next else { break };
+            self.inherit(&d.text, d.loc.as_ref(), &d.via, true, "inherit_defer")?;
+        }
+        Ok(())
+    }
+
     /// `extendfunc` of `ast.multi_finalize` on the copy of the datastore before
     /// finalisation: `BBEXTENDCURR` / `BBEXTENDVARIANT` for a word with an argument, else
-    /// `PN = "<pn>-<word>"`; then the class, deferred ([`Feature::ClassExtendDeferred`]) or
-    /// at once.
-    fn extend_variant(&mut self, ext: &ClassExtend, pn: &str, recipe: &Loc) -> Result<()> {
+    /// `PN = "<pn>-<word>"`; then the class, appended to the deferred inherits
+    /// ([`ClassExtendOrder::PerVariantDeferred`]) or inherited at once (the base's deferred
+    /// inherits already ran, in `recipe_pass`). `order_note`: why the order is not known.
+    fn extend_variant(
+        &mut self,
+        ext: &ClassExtend,
+        pn: &str,
+        recipe: &Loc,
+        order: ClassExtendOrder,
+        order_note: Option<String>,
+        had_deferred: bool,
+    ) -> Result<()> {
         match ext.variant() {
             Some(v) => {
                 self.ds.rewrite(
@@ -3298,21 +3321,25 @@ impl Replay<'_> {
             ext.word,
             ext.class()
         )];
-        let deferred_before = !self.ds.notes.deferred.is_empty();
-        if self.ws.release.release.has(Feature::ClassExtendDeferred) {
-            Arc::make_mut(&mut self.ds.notes).deferred.push(Deferred {
-                text: ext.class().to_string(),
-                loc: None,
-                via: Vec::new(),
-            });
-        } else {
-            if deferred_before && self.ws.release.release.has(Feature::InheritDefer) {
-                notes.push(format!(
-                    "note: on this release BitBake inherits `{}` at once, before the recipe's deferred inherits (BitBake before 2.16); the Scarthgap point releases from 5.0.11 (BitBake 2.8 with 139f61fe9) defer it after them, as 2.16 does, which this evaluation does not follow",
-                    ext.class()
-                ));
+        if let Some(why) = order_note
+            && had_deferred
+        {
+            notes.push(format!(
+                "note: the recipe has deferred inherits, and the order of `{}` against them is not known: {why}",
+                ext.class()
+            ));
+        }
+        match order {
+            ClassExtendOrder::PerVariantDeferred => {
+                Arc::make_mut(&mut self.ds.notes).deferred.push(Deferred {
+                    text: ext.class().to_string(),
+                    loc: None,
+                    via: Vec::new(),
+                });
             }
-            self.inherit(ext.class(), None, &[], false, "BBCLASSEXTEND")?;
+            ClassExtendOrder::BaseDeferredThenClass => {
+                self.inherit(ext.class(), None, &[], false, "BBCLASSEXTEND")?;
+            }
         }
         let n = Arc::make_mut(&mut self.ds.notes);
         n.variant = Some(ext.clone());

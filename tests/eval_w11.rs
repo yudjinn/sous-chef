@@ -46,7 +46,6 @@ fn modified(edit: impl FnOnce(&Path)) -> Fx {
 }
 
 /// [`modified`] on a given release.
-#[allow(dead_code)]
 fn modified_release(codename: &str, edit: impl FnOnce(&Path)) -> Fx {
     let (tmp, root, _config, ws) = temp_ws_release(codename, edit);
     index(tmp, root, ws)
@@ -513,4 +512,144 @@ fn a_real_recipe_of_the_same_name_does_not_hide_the_variant() {
         set.selected().unwrap().selection.variant.is_some(),
         "{set:?}"
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// Item 4: when a variant's class is inherited on Scarthgap
+// ---------------------------------------------------------------------------------------
+
+/// `inherit_defer ${DEFCLASS}` whose value depends on the PN it is expanded for: the
+/// variant's (`pn-libfoo-native`) picks `defnative`, the base recipe's `deftarget`.
+fn deferred_by_pn(root: &Path) {
+    class_extension(root);
+    write(
+        root,
+        "meta-core/classes-recipe/deftarget.bbclass",
+        "PICK = \"target\"\n",
+    );
+    write(
+        root,
+        "meta-core/classes-recipe/defnative.bbclass",
+        "PICK = \"native\"\n",
+    );
+    append_to(
+        root,
+        "meta-core/recipes-core/libfoo/libfoo_2.0.bb",
+        "DEFCLASS = \"deftarget\"\nDEFCLASS:pn-libfoo-native = \"defnative\"\ninherit_defer ${DEFCLASS}\n",
+    );
+}
+
+/// A BitBake checkout next to the OE-core layer (`<root>/bitbake`, OE-core's
+/// `$OEROOT/bitbake`): `__version__` and, when given, the `multi_finalize` line of
+/// `ast.py`.
+fn bitbake_checkout(root: &Path, version: &str, ast_line: Option<&str>) {
+    write(
+        root,
+        "bitbake/lib/bb/__init__.py",
+        &format!("__version__ = \"{version}\"\n"),
+    );
+    if let Some(l) = ast_line {
+        write(
+            root,
+            "bitbake/lib/bb/parse/ast.py",
+            &format!("def multi_finalize(fn, d):\n    {l}\n"),
+        );
+    }
+}
+
+fn order_notes(ds: &DataStore) -> Vec<String> {
+    ds.replay()
+        .target_notes
+        .iter()
+        .filter(|n| n.contains("order of `native`"))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn scarthgap_without_bitbake_follows_5_0_and_says_5_0_11_differs() {
+    let fx = modified_release("scarthgap", deferred_by_pn);
+    let ds = eval(&fx, "libfoo-native");
+    // 5.0 to 5.0.10: the deferred inherits ran on the base recipe.
+    assert_eq!(ds.value("PICK").unwrap().text, "target");
+    let n = order_notes(&ds);
+    assert_eq!(n.len(), 1, "{:?}", ds.replay().target_notes);
+    assert!(
+        n[0].contains("Scarthgap 5.0.11 and later")
+            && n[0].contains("no BitBake checkout was found"),
+        "{n:?}"
+    );
+    // The base recipe gets no such note.
+    assert!(order_notes(&eval(&fx, "libfoo")).is_empty());
+}
+
+#[test]
+fn scarthgap_with_bitbake_2_8_1_or_the_new_ast_defers_per_variant() {
+    for (version, line) in [
+        ("2.8.1", None),
+        ("2.8.0", Some("inherits.append((extendedmap[name], fn, 0))")),
+    ] {
+        let fx = modified_release("scarthgap", |r| {
+            deferred_by_pn(r);
+            bitbake_checkout(r, version, line);
+        });
+        let ds = eval(&fx, "libfoo-native");
+        // Deferred per variant: `${DEFCLASS}` expanded with the variant's PN.
+        assert_eq!(ds.value("PICK").unwrap().text, "native", "{version}");
+        assert!(
+            order_notes(&ds).is_empty(),
+            "{:?}",
+            ds.replay().target_notes
+        );
+    }
+}
+
+#[test]
+fn scarthgap_with_the_old_ast_or_an_unreadable_2_8_0() {
+    let fx = modified_release("scarthgap", |r| {
+        deferred_by_pn(r);
+        bitbake_checkout(
+            r,
+            "2.8.0",
+            Some("bb.parse.BBHandler.inherit(extendedmap[name], fn, 0, d)"),
+        );
+    });
+    let ds = eval(&fx, "libfoo-native");
+    assert_eq!(ds.value("PICK").unwrap().text, "target");
+    assert!(
+        order_notes(&ds).is_empty(),
+        "{:?}",
+        ds.replay().target_notes
+    );
+    // 2.8.0 and no ast.py: 5.0 to 5.0.12 all say 2.8.0, so not known; noted.
+    let fx = modified_release("scarthgap", |r| {
+        deferred_by_pn(r);
+        bitbake_checkout(r, "2.8.0", None);
+    });
+    let ds = eval(&fx, "libfoo-native");
+    assert_eq!(ds.value("PICK").unwrap().text, "target");
+    let n = order_notes(&ds);
+    assert!(
+        n.len() == 1 && n[0].contains("is 2.8.0, which Scarthgap 5.0 to 5.0.12 all report"),
+        "{:?}",
+        ds.replay().target_notes
+    );
+}
+
+#[test]
+fn styhead_walnascar_and_wrynose_get_no_order_note() {
+    for rel in ["styhead", "walnascar"] {
+        let fx = modified_release(rel, deferred_by_pn);
+        let ds = eval(&fx, "libfoo-native");
+        assert_eq!(ds.value("PICK").unwrap().text, "target", "{rel}");
+        assert!(
+            order_notes(&ds).is_empty(),
+            "{rel}: {:?}",
+            ds.replay().target_notes
+        );
+    }
+    let fx = modified(deferred_by_pn);
+    let ds = eval(&fx, "libfoo-native");
+    assert_eq!(ds.value("PICK").unwrap().text, "native");
+    assert!(order_notes(&ds).is_empty());
 }
