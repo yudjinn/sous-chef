@@ -59,3 +59,18 @@ Commands are run from `{{LIVE}}/yocto-kiss` with `KAS=../venv/bin/kas` and
 | `bitbake-setup-build/{bblayers,local}.conf`, `conf-summary.txt` | that build's `conf/` (`conf-notes.txt` and `templateconf.cfg` are empty; `site.conf` is a symlink to `../../../site.conf`) |
 | `bitbake-setup-build/site.conf` | `{{LIVE}}/bitbake-builds/site.conf` |
 | `bitbake-setup-build/init-build-env-environment.diff` | `diff` of `env \| sort` before and after `. init-build-env` in `env -i PATH=/usr/bin:/bin TERM=dumb LANG=en_US.UTF-8 bash` |
+
+## y1-build: the first real build (2026-11-18)
+
+Recorded from the first build ever run in this environment: `bitbake curl` on the kas build
+(`$KAS shell $FILES -c 'bitbake curl'`, 919 tasks of 78 recipes, 28 min 31 s from an empty
+`sstate-cache`, succeeded), and the experiments on curl that followed
+(`docs/live-verification.md`, "The first real build"). Same versions and commits as above.
+Under `y1-build/`; the same scrubbing as above.
+
+| File | Command / source |
+|---|---|
+| `y1-build/pkgdata/dogbonedark/` | a copy of `build/tmp/pkgdata/dogbonedark/` after the build, **trimmed** to curl's files (`curl`, `runtime/curl*`, `runtime/libcurl*`, the `runtime-reverse/` links of curl's packaged packages, `runtime-rprovides/libcurl/`) and ca-certificates' (`runtime/ca-certificates*`, `runtime-reverse/ca-certificates`: its `FILES_INFO` holds the one escaped file name of the build). Symlinks kept; the files themselves unchanged |
+| `y1-build/oe-pkgdata-util.out` | `$KAS shell $FILES -c 'set -x; bitbake-getvar --value PKGDATA_DIR; oe-pkgdata-util find-path /usr/bin/curl; ... list-pkg-files ...; lookup-recipe ...; list-pkgs -p curl; package-info curl libcurl libcurl4; ...'` (the `set -x` lines name each command; `list-pkg-files -s` is not an option and failed) |
+| `y1-build/oe-pkgdata-util-find-path.out` | `oe-pkgdata-util find-path '*'` (same shell), **trimmed** to the lines of curl's and ca-certificates' packages (1062 of 10505) |
+| `y1-build/oe-pkgdata-util-list-pkg-files-l-curl.out` | `oe-pkgdata-util list-pkg-files -l -p curl` |

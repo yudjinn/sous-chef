@@ -697,6 +697,66 @@ false`):
 - The four live tests (`live_verify`, `audit`, `release_diff`, `skip_live` with
   `--ignored`): all pass (14, 1, 1, 1).
 
+## The first real build (y1-build, 2026-11-18)
+
+Until this round nothing in the environment had compiled. The user allowed building one
+recipe, `curl`, with whatever BitBake schedules for it, and cleaning and rebuilding curl
+(only curl). The features written from the source alone (`pkgdata`, `sigs`, `log` on a
+compile or configure failure, the `bitbake` tool's build jobs, `recipe show=cve`) were
+checked against what that build produced. Raw outputs are in `{{LIVE}}/runs/y1-build/`;
+trimmed copies in `tests/fixtures/outputs/live/y1-build/` (README there), checked in the
+normal gate by `tests/live_build.rs`.
+
+**Setup.** The kas build only (`{{LIVE}}/yocto-kiss/build`), entered with `env -u NETRC_FILE
+../venv/bin/kas shell kas/kiss.yaml:kas/dogbonedark.yaml -c '<command>'` from `yocto-kiss/`,
+or through `../scratch/kas-scratch.yaml` for the experiments (it adds
+`scratch/meta-scratch`, where a `curl_%.bbappend` was put and removed again). sous-chef: the
+release build of branch `y1-build`, `--config {{LIVE}}/runs/y1-build/sous-chef.toml`
+(`build_dir`, `init_script = openembedded-core/oe-init-build-env`, `[bitbake] enabled =
+true`, `allow_destructive = true`), `XDG_CACHE_HOME` and `TMPDIR` under `runs/y1-build/`, and
+`PATH=/usr/sbin:/usr/bin:/sbin:/bin` (the `PATH` kas shell gives BitBake, so that the
+init-script runner sees the same host tools); MCP calls by `runs/y1-build/tools/mcp.py`.
+
+**The build.** `bitbake curl` from an empty `sstate-cache` (only curl's earlier fetch was
+there): **succeeded** in **28 min 31 s** on the 16-core host, "Attempted 919 tasks of which 2
+didn't need to be rerun and all succeeded", 78 recipes (`NOTE: recipe <PF>: task` lines: 65
+native or cross, and 13 others: curl, its target dependencies openssl, zlib, libidn2,
+libunistring, the toolchain's glibc, libgcc, libgcc-initial, gcc-runtime,
+linux-libc-headers, gcc-source, opkg-utils, and ca-certificates in `all-oe-linux`). The build directory grew from
+250 MB to 13 GB. Three warnings, none a failure: uninative disabled (host glibc 2.44 newer
+than uninative's 2.43, as before), and two upstream fetch failures recovered from
+`MIRRORS` (`ca-certificates` from deb.debian.org, `gnu-config-native` from
+git.savannah.gnu.org). No host-tool problem on this Arch host.
+
+### pkgdata: confirmed
+
+After the build, every mode against `oe-pkgdata-util` in the same environment
+(`y1-build/oe-pkgdata-util.out`):
+
+| Call | sous-chef | oe-pkgdata-util |
+|---|---|---|
+| `find_path /usr/bin/curl` | `curl`, recipe curl, loc `FILES:curl meta:conf/bitbake.conf:338-347, meta:recipes-support/curl/curl_8.19.0.bb:202` | `curl: /usr/bin/curl` |
+| `find_path *libcurl.so*` | 4 rows: `curl-dbg` `/usr/lib/.debug/libcurl.so.4.8.0`, `curl-dev` `/usr/lib/libcurl.so`, `libcurl (runtime name libcurl4)` `/usr/lib/libcurl.so.4` and `.so.4.8.0` | the same 4 (in `os.walk` order) |
+| `list_pkg_files curl` / `libcurl` / `libcurl4` / `curl-dev` | 2 / 2 / 2 / 16 files with sizes; `libcurl4` noted as the runtime name of `libcurl` | the same files (`-r libcurl4` for the runtime name); sizes equal `list-pkg-files -l` |
+| `lookup_recipe libcurl4`, `libcurl`, `curl-dev` | curl `8.19.0-r0` `meta:recipes-support/curl/curl_8.19.0.bb` | `curl` each |
+| `list_pkgs curl` | the 8 `PACKAGES` with runtime name, packaged, size: `curl-staticdev` and `curl-locale` `no (empty)` | `list-pkgs -p curl`: the 6 packaged ones; `-r` gives `libcurl4` |
+| `package_info libcurl` / `libcurl4` / `curl` | version `8.19.0-r0`, runtime name `libcurl4`, size 432452, `RDEPENDS` `glibc (>= 2.43+git0+562cd7badd) libcrypto (>= 3.5.9) libidn2 (>= 2.3.8) libssl (>= 3.5.9) zlib (>= 1.3.2)`, `RRECOMMENDS ca-certificates`, `RPROVIDES libcurl (=8.19.0)` | `libcurl 8.19.0-r0 curl 8.19.0-r0 432452`, `libcurl4 ...`, `curl 8.19.0-r0 curl 8.19.0-r0 156605` |
+
+- **`PKGDATA_DIR`**: taken from the evaluated configuration (`note: PKGDATA_DIR = ... (from
+  the evaluated configuration)`), equal to `bitbake-getvar --value PKGDATA_DIR`
+  (`{{LIVE}}/yocto-kiss/build/tmp/pkgdata/dogbonedark`). The `bitbake-getvar` and search
+  fallbacks were not needed here.
+- **Renamed package**: `PKG:libcurl: libcurl4` (debian.bbclass), shown as `libcurl (runtime
+  name libcurl4)`; found by its runtime name through `runtime-reverse/`.
+- **Escapes**: one file name of the build has them, in ca-certificates
+  (`NetLock_Arany_=Class_Gold=_Főtanúsítvány.crt`). sous-chef shows the real name (as on
+  disk in `packages-split/`); `oe-pkgdata-util` prints `Főtanúsítvány`,
+  as bitbake-semantics.md said.
+- **Whole comparison** (`tests/live_build.rs`, `real_pkgdata_find_path_equals_oe_pkgdata_util`):
+  `find_path *` over the recorded curl and ca-certificates package data gives the same 1062
+  `(package, path)` pairs as `oe-pkgdata-util find-path '*'`; the sizes equal `list-pkg-files
+  -l -p curl` and each `PKGSIZE` is their sum.
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,

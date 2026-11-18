@@ -1,0 +1,13 @@
+PN: ca-certificates
+PV: 20260816
+PR: r0
+PKGV: 20260816
+PKGR: r0
+LICENSE: GPL-2.0-or-later & MPL-2.0
+DESCRIPTION: This package includes PEM files of CA certificates to allow SSL-based applications to check for the authenticity of SSL connections. This derived from Debian's CA Certificates.
+SUMMARY: Common CA certificates
+SECTION: misc
+PKG:ca-certificates-locale: ca-certificates-locale
+FILES:ca-certificates-locale: /usr/share/locale
+FILES_INFO:ca-certificates-locale: {}
+PKGSIZE:ca-certificates-locale: 0

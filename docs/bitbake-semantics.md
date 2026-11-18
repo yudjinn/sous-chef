@@ -1947,8 +1947,21 @@ What the `pkgdata` tool reads (x4). Read in OE-core Wrynose `33a6bd6c`
 `meta/classes-global/package.bbclass` `PKGDATA_VARS`, `emit_pkgdata[dirs]`;
 `scripts/oe-pkgdata-util`; `meta/conf/bitbake.conf`), with `git show` on `scarthgap`
 (the same `packagedata.py` / `package.bbclass`) and `kirkstone` (`emit_pkgdata` in
-`meta/classes/package.bbclass`, the same format). Never checked against a build: the live
-build directory has no package data.
+`meta/classes/package.bbclass`, the same format). **Confirmed on a real build** (y1-build,
+2026-11-18: `bitbake curl` on the kas build, BitBake 2.18.0, OE-core `33a6bd6c`; samples in
+`tests/fixtures/outputs/live/y1-build/`, test `tests/live_build.rs`): `PKGDATA_DIR` is
+`<build>/tmp/pkgdata/dogbonedark` (static value = `bitbake-getvar --value PKGDATA_DIR`);
+`runtime/<pkg>` has the lines and `PKGSIZE` (the sum of the `FILES_INFO` sizes, symlinks
+counted by their own size, e.g. `/usr/lib/libcurl.so.4` 16) as below; `debian.bbclass`
+renamed `libcurl` (`PKG:libcurl: libcurl4`, `runtime-reverse/libcurl4 -> ../runtime/libcurl`);
+`RPROVIDES:libcurl:  libcurl (=8.19.0)` (two spaces; the `:\s+` of `read_pkgdatafile` eats
+both) gives `runtime-rprovides/libcurl/libcurl`, the directory named without the version
+constraint; empty packages (`curl-staticdev`, `curl-locale`) have a `runtime/` file but no
+`.packaged` and no `runtime-reverse/` link. The one escaped name of the build
+(ca-certificates, `F\\u0151tan\\u00fas...` in the file, `Főtanúsítvány` on disk) prints
+as `Főtanús...` in `oe-pkgdata-util find-path` and `list-pkg-files`, as described
+below. `find-path` prints in `os.walk` order (not sorted). Besides the files below the
+directory also holds `extended/` and `debugsources/` (zstd, not read).
 
 - **Where.** `PKGDATA_DIR = "${TMPDIR}/pkgdata/${MACHINE}"` (`bitbake.conf`), filled by
   `do_packagedata`'s sstate (`sstate-outputdirs = "${PKGDATA_DIR}"`).

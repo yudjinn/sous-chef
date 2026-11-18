@@ -1,0 +1,17 @@
+PN: curl
+PV: 8.19.0
+PR: r0
+PKGV: 8.19.0
+PKGR: r0
+LICENSE: curl
+DESCRIPTION: It uses URL syntax to transfer data to and from servers. curl is a widely used because of its ability to be flexible and complete complex tasks. For example, you can use curl for things like user authentication, HTTP post, SSL connections, proxy support, FTP uploads, and more!
+SUMMARY: Command line tool and library for client-side URL transfers
+RDEPENDS:curl: glibc (>= 2.43+git0+562cd7badd) libcurl (>= 8.19.0)
+SECTION: console/network
+PKG:curl: curl
+FILES:curl: /usr/bin/* /usr/sbin/* /usr/libexec/* /usr/lib/lib*.so.*             /etc /com /var             /bin/* /sbin/*             /lib/*.so.*             /lib/udev /usr/lib/udev             /lib/udev /usr/lib/udev             /usr/share/curl /usr/lib/curl/*             /usr/share/pixmaps /usr/share/applications             /usr/share/idl /usr/share/omf /usr/share/sounds             /usr/lib/bonobo/servers /usr/share/zsh
+FILES_INFO:curl: {"/usr/bin/curl": 145024, "/usr/bin/wcurl": 11581}
+FILERDEPENDSFLIST:curl: /usr/bin/curl /usr/bin/wcurl
+FILERDEPENDS:/usr/bin/curl:curl:  ld-linux-armhf.so.3(GLIBC_2.4) libc.so.6(GLIBC_2.34) libc.so.6(GLIBC_2.4) libcurl.so.4 libc.so.6 ld-linux-armhf.so.3 rtld(GNU_HASH)
+FILERDEPENDS:/usr/bin/wcurl:curl:  /bin/sh
+PKGSIZE:curl: 156605
