@@ -10,7 +10,10 @@
 //! ([`RepoPaths`]; `uriBaseId` `%SRCROOT%`) and `region` `startLine` / `endLine`, and
 //! `partialFingerprints` (`primaryLocationLineHash`, the key code scanning uses, and
 //! `sousChefFinding/v1`, both [`super::baseline::fingerprints`]). A file outside the
-//! repository root gets an absolute `file://` URI and no `uriBaseId`.
+//! repository root gets an absolute `file://` URI and no `uriBaseId`. Each rule also has
+//! `properties.tags` (`yocto` and its group) and `properties.problem.severity`. More than
+//! [`MAX_RESULTS`] findings (GitHub rejects such a file) are cut to the most severe by the
+//! caller ([`keep_most_severe`], `lint::ci`), with a note on stderr.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -27,6 +30,23 @@ pub const VERSION: &str = "2.1.0";
 pub const SCHEMA_URI: &str = "https://json.schemastore.org/sarif-2.1.0.json";
 /// GitHub's limit for `shortDescription` / `fullDescription`.
 pub const MAX_DESCRIPTION: usize = 1024;
+/// GitHub code scanning's limit of results per run: a SARIF file with more is rejected
+/// (docs.github.com, "SARIF support for code scanning", "Upload limits").
+pub const MAX_RESULTS: usize = 25_000;
+
+/// The indices of the findings to write when there are more than `limit`: the most severe
+/// (errors, then warnings, then info; report order within a severity), returned in report
+/// order. All of them when there are at most `limit`.
+pub fn keep_most_severe(severities: &[Severity], limit: usize) -> Vec<usize> {
+    let mut idx: Vec<usize> = (0..severities.len()).collect();
+    if idx.len() <= limit {
+        return idx;
+    }
+    idx.sort_by_key(|&i| std::cmp::Reverse(severities[i]));
+    idx.truncate(limit);
+    idx.sort_unstable();
+    idx
+}
 
 /// Paths relative to the repository root: the git top level of the working directory
 /// (`git rev-parse --show-toplevel` through [`crate::gitcmd`]), else the working directory.
@@ -120,6 +140,17 @@ struct RuleDescriptor {
     full_description: Text,
     help: Text,
     default_configuration: Level,
+    properties: RuleProperties,
+}
+
+/// The rule properties GitHub code scanning reads: `tags` (filters in the Security tab)
+/// and `problem.severity` (`error`, `warning` or `recommendation`) for a rule that is not a
+/// security rule. sous-chef has no security rule, so no `security-severity`.
+#[derive(Serialize)]
+struct RuleProperties {
+    tags: Vec<String>,
+    #[serde(rename = "problem.severity")]
+    problem_severity: &'static str,
 }
 
 #[derive(Serialize)]
@@ -266,6 +297,17 @@ pub fn render(
                 default_configuration: Level {
                     level: level(effective_severity(config, *r)),
                 },
+                properties: RuleProperties {
+                    tags: vec![
+                        "yocto".to_string(),
+                        r.id().split('/').next().unwrap_or_default().to_string(),
+                    ],
+                    problem_severity: match effective_severity(config, *r) {
+                        Severity::Error => "error",
+                        Severity::Warning => "warning",
+                        Severity::Info => "recommendation",
+                    },
+                },
             }
         })
         .collect();
@@ -342,5 +384,15 @@ mod tests {
         let d = rule_descriptions();
         assert!(d.contains_key("hygiene/release-removed"));
         assert_eq!(d.len(), all_rules().len());
+    }
+
+    #[test]
+    fn the_most_severe_results_are_kept() {
+        use Severity::*;
+        let s = [Info, Warning, Error, Info, Error, Warning];
+        assert_eq!(keep_most_severe(&s, 10), vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(keep_most_severe(&s, 3), vec![1, 2, 4]);
+        assert_eq!(keep_most_severe(&s, 2), vec![2, 4]);
+        assert!(keep_most_severe(&s, 0).is_empty());
     }
 }

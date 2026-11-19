@@ -176,6 +176,41 @@ fn workflow_command_escaping() {
     assert_eq!(escape_property("a%b\r\nc:d,e"), "a%25b%0D%0Ac%3Ad%2Ce");
 }
 
+/// GitHub shows 10 annotations of each type per step: beyond that, one notice first says
+/// how many findings of which type are only in the log.
+#[test]
+fn annotations_over_the_per_step_limit_are_announced() {
+    use sous_chef::lint::Finding;
+    use sous_chef::lint::ci::{ANNOTATIONS_PER_TYPE, annotation_overflow};
+    use sous_chef::types::{LineSpan, Loc};
+    let f = |severity, n: usize| Finding {
+        rule: "hygiene/release-syntax",
+        severity,
+        loc: Loc {
+            layer: "meta-mine".into(),
+            path: PathBuf::from(format!("recipes/a/a_{n}.bb")),
+            lines: LineSpan::line(1),
+        },
+        message: "m".into(),
+    };
+    let at_limit: Vec<Finding> = (0..ANNOTATIONS_PER_TYPE)
+        .flat_map(|n| [f(Severity::Error, n), f(Severity::Warning, n)])
+        .collect();
+    assert_eq!(annotation_overflow(&at_limit), None);
+    let mut over = at_limit;
+    over.push(f(Severity::Warning, 99));
+    let notice = annotation_overflow(&over).unwrap();
+    assert!(
+        notice.starts_with("::notice title=sous-chef lint::21 findings: 11 warnings; "),
+        "{notice}"
+    );
+    assert!(
+        notice.ends_with('\n') && notice.lines().count() == 1,
+        "{notice}"
+    );
+    assert!(!notice.contains("errors"), "{notice}");
+}
+
 /// Fingerprint and start line of each SARIF result, by rule.
 fn prints(v: &Value) -> Vec<(String, String, u64)> {
     v["runs"][0]["results"]
