@@ -423,30 +423,27 @@ async fn a_cancel_reaches_bitbake_through_kas_shell() {
 /// kas copies `TMPDIR` from its environment into BitBake's and adds it to
 /// `BB_ENV_PASSTHROUGH_ADDITIONS` (kas 5.5 `libkas.py` `get_build_environ`), so the
 /// server's own temporary directory would become BitBake's `TMPDIR` (seen live in
-/// y3-leftovers). kas mode removes it from kas's environment; the other modes leave the
-/// environment alone (OE-core's passthrough list does not have `TMPDIR`).
+/// y3-leftovers). Every mode removes it from the first process's environment (z1-env:
+/// the initialised mode too; tests/bitbake_pass_env.rs runs each mode end to end).
 #[test]
 fn kas_mode_does_not_hand_the_servers_tmpdir_to_kas() {
-    use sous_chef::bitbake::env::KAS_DROPPED_ENV;
-    assert_eq!(KAS_DROPPED_ENV, ["TMPDIR"]);
+    use sous_chef::bitbake::env::STRIPPED_ENV;
+    assert_eq!(STRIPPED_ENV, ["TMPDIR"]);
+    let removed = |cmd: &tokio::process::Command| -> Vec<String> {
+        cmd.as_std()
+            .get_envs()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect()
+    };
     let p = Project::after();
     let cmd = kas_env(&p).command("bitbake", &["curl"]).unwrap();
-    let envs: Vec<(String, Option<String>)> = cmd
-        .as_std()
-        .get_envs()
-        .map(|(k, v)| {
-            (
-                k.to_string_lossy().into_owned(),
-                v.map(|v| v.to_string_lossy().into_owned()),
-            )
-        })
-        .collect();
-    assert!(envs.contains(&("TMPDIR".to_string(), None)), "{envs:?}");
+    assert_eq!(removed(&cmd), ["TMPDIR"]);
     let plain = BbEnv {
         build_dir: p.path("build"),
         init_script: None,
         kas: None,
     };
     let cmd = plain.command("bitbake", &["curl"]).unwrap();
-    assert!(cmd.as_std().get_envs().next().is_none());
+    assert_eq!(removed(&cmd), ["TMPDIR"]);
 }

@@ -2297,10 +2297,10 @@ Checked 2026-11-17 against bitbake `master` (`lib/bb/main.py`, `lib/bb/cooker.py
   (`get_build_environ`), so a `TMPDIR` set for any other reason becomes BitBake's
   `TMPDIR`: seen live, a kas-mode job started from a server whose `TMPDIR` was a scratch
   directory ran curl's `cleanall` and build there (721 MB restored from sstate,
-  `saved_tmpdir` naming it). sous-chef's kas mode removes `TMPDIR` from kas's environment
-  (`KAS_DROPPED_ENV`). OE-core's passthrough list (`scripts/oe-buildenv-internal`,
-  `BB_ENV_PASSTHROUGH_ADDITIONS_OE`) has none of the seven, so the other modes are not
-  affected.
+  `saved_tmpdir` naming it). OE-core's passthrough list (`scripts/oe-buildenv-internal`,
+  `BB_ENV_PASSTHROUGH_ADDITIONS_OE`) has none of the seven, but the other modes can still
+  pass `TMPDIR` on (next section), so since z1-env every mode removes it from the first
+  process it starts (`STRIPPED_ENV`).
 - **A second client** (settled on the live environment): while `bitbake -e curl` ran, `bitbake-layers
   show-layers` started in a second shell printed `NOTE: Reconnecting to bitbake server...`,
   **waited**, and completed normally (exit 0) half a second after the first client
@@ -2386,6 +2386,19 @@ something else outside it are stripped (`STRIPPED_ENV`, `src/bitbake/env.rs`).
 | `DL_DIR`, `SSTATE_DIR`, `SSTATE_MIRRORS`, `BB_HASHSERVE*` | kas (copied, added); others when the additions name them | BitBake's own | BitBake's documented workflow (shared download and sstate directories) | no |
 | `BB_ENV_PASSTHROUGH`, `BB_ENV_PASSTHROUGH_ADDITIONS`, `BB_PRESERVE_ENV` | every mode except kas (which builds its own) | BitBake's own | the user's control over this very filter | no |
 | a kas file's `env` keys | kas (copied, added) | whatever the project chose | the project's own choice | no |
+
+**What sous-chef does** (`BbEnv::command`): every command it starts (`bitbake`,
+`bitbake-layers`, `bitbake-getvar`, `bitbake-diffsigs`, `devtool`, `oe-pkgdata-util`)
+gets the server's environment without the `STRIPPED_ENV` names, in all four modes. The
+name is removed from the first process (kas, the `bash` that sources the init script, or
+the program itself in initialised mode); none of `oe-init-build-env`, bitbake-setup's
+`init-build-env` or kas sets `TMPDIR`, so nothing after it can bring it back. In
+**initialised** mode it is removed too: that mode is detected from `BUILDDIR` / `BBPATH`
+(and `bitbake` on `PATH`), which the build shell sets; `TMPDIR` is set by none of the
+three ways to make that shell, so when the server has one it came from whatever started
+the server (a sandbox, a profile, a CI runner), while a `kas shell` would still hand it to
+BitBake through its additions. `git` (`src/gitcmd.rs`) keeps its environment: it reads
+`TMPDIR` only as the temporary directory.
 
 ## Build environments
 
