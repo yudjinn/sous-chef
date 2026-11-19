@@ -267,6 +267,12 @@ impl DataStore {
         let result = match kind {
             AssignOp::WeakDefault => {
                 self.var_mut(key).default = Some(new);
+                // `setVarFlag(var, "_defaultval", ...)`: a name with `:` is registered as
+                // an override variant, as `setVar` does (`_setvar_update_overrides`), so
+                // `VAR:class-target ??= "x"` replaces `VAR` when `class-target` is active.
+                if key.contains(':') {
+                    self.update_overrides(key);
+                }
                 return;
             }
             _ => combine(kind, cur, new, imm),

@@ -1,0 +1,45 @@
+
+## Files in the history (983 variables without overrides; same set of files: 980)
+
+### Files only in BitBake's history (file, count, first uses)
+{{LIVE}}/releases/kirkstone/openembedded-core/meta/classes/image_types_wic.bbclass	1	core-image-minimal:DEPENDS
+{{LIVE}}/releases/kirkstone/openembedded-core/meta/classes/populate_sdk_base.bbclass	2	core-image-minimal:PACKAGES core-image-minimal:B
+{{LIVE}}/releases/kirkstone/openembedded-core/meta/classes/populate_sdk_ext.bbclass	1	core-image-minimal:B
+### Files only in the static history (file, count, first uses)
+
+## Layers (bitbake-layers show-layers vs Workspace::discover)
+bitbake: 4 layers, static: 4 layers
+DIFF	meta	{{LIVE}}/releases/kirkstone/openembedded-core/meta	5	| static: Some(("core", "{{LIVE}}/releases/kirkstone/openembedded-core/meta", 5))
+DIFF	meta-poky	{{LIVE}}/releases/kirkstone/meta-yocto/meta-poky	5	| static: Some(("yocto", "{{LIVE}}/releases/kirkstone/meta-yocto/meta-poky", 5))
+DIFF	meta-yocto-bsp	{{LIVE}}/releases/kirkstone/meta-yocto/meta-yocto-bsp	5	| static: Some(("yoctobsp", "{{LIVE}}/releases/kirkstone/meta-yocto/meta-yocto-bsp", 5))
+DIFF	meta-oe	{{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe	5	| static: Some(("openembedded-layer", "{{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe", 5))
+
+## bbappend order (bitbake-layers show-appends vs query::appends_for)
+listed twice by show-appends (second listing skipped): ["linux-yocto_5.15.bb"]
+same	busybox_1.35.0.bb	1 bbappend(s)
+same	formfactor_0.0.bb	1 bbappend(s)
+same	linux-yocto-dev.bb	1 bbappend(s)
+same	linux-yocto_5.10.bb	1 bbappend(s)
+same	linux-yocto_5.15.bb	1 bbappend(s)
+same	psplash_git.bb	1 bbappend(s)
+same	xserver-xf86-config_0.1.bb	1 bbappend(s)
+
+## Recipe files (index vs workspace::resolve::recipe_files)
+indexed .bb: 1758; matched by BBFILES: 1745
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/openembedded-core/meta/lib/bblayers/templates/example.bb (evaluate("example"): error: not found: recipe example; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/gnome-layer/recipes-graphics/openbox/openbox-xdgmenu_0.3.bb (evaluate("openbox-xdgmenu"): error: not found: recipe openbox-xdgmenu; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-benchmark/speedtest-cli/speedtest-cli_2.1.3.bb (evaluate("speedtest-cli"): error: not found: recipe speedtest-cli; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-bsp/rwmem/rwmem_1.2.bb (evaluate("rwmem"): error: not found: recipe rwmem; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-connectivity/lirc/lirc_0.10.1.bb (evaluate("lirc"): error: not found: recipe lirc; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-connectivity/thingsboard-gateway/thingsboard-gateway_2.9.bb (evaluate("thingsboard-gateway"): error: not found: recipe thingsboard-gateway; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-dbs/mongodb/mongodb_git.bb (evaluate("mongodb"): error: not found: recipe mongodb; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-devtools/nanopb/nanopb_0.4.5.bb (evaluate("nanopb"): error: not found: recipe nanopb; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-extended/lcdproc/lcdproc_git.bb (evaluate("lcdproc"): error: not found: recipe lcdproc; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-extended/mozjs/mozjs-78_78.15.0.bb (evaluate("mozjs-78"): error: not found: recipe mozjs-78; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-support/smem/smem_1.5.bb (evaluate("smem"): error: not found: recipe smem; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/perl-layer/recipes-support/debsums/debsums_2.2.2.bb (evaluate("debsums"): error: not found: recipe debsums; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe/dynamic-layers/perl-layer/recipes-support/rasdaemon/rasdaemon_0.6.7.bb (evaluate("rasdaemon"): error: not found: recipe rasdaemon; list recipes with the recipe tool)
+
+## Configuration without an explicit machine and distro
+MACHINE = Some(Value { text: "qemux86-64", unevaluated_python: false, unresolved: [] })
+DISTRO = Some(Value { text: "poky", unevaluated_python: false, unresolved: [] })

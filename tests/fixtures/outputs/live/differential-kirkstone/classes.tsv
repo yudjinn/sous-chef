@@ -1,0 +1,1338 @@
+recipe	variable	class	cause
+curl	PN	equal	
+curl	PV	equal	
+curl	PR	flagged	unevaluated_python
+curl	FILE	equal	
+curl	FILE_LAYERNAME	unset	
+curl	SRC_URI	equal	
+curl	DEPENDS	flagged	unevaluated_python
+curl	RDEPENDS:curl	unset	
+curl	PACKAGECONFIG	equal	
+curl	PACKAGES	equal	
+curl	FILES:curl	equal	
+curl	OVERRIDES	equal	
+curl	MACHINEOVERRIDES	equal	
+curl	DISTROOVERRIDES	equal	
+curl	S	flagged	unevaluated_python
+curl	B	flagged	unevaluated_python
+curl	WORKDIR	flagged	unevaluated_python
+curl	LICENSE	equal	
+curl	INHERIT	equal	
+curl	PROVIDES	equal	
+curl	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+curl	EXTRA_OECMAKE	unset	
+curl	CFLAGS	flagged	unevaluated_python
+curl	FILESPATH	flagged	unevaluated_python
+curl	MACHINE	equal	
+curl	DISTRO	equal	
+curl	TMPDIR	equal	
+curl	BBCLASSEXTEND	equal	
+curl	BUGTRACKER	equal	
+curl	CVE_CHECK_IGNORE	equal	
+curl	CVE_PRODUCT	equal	
+curl	DESCRIPTION	equal	
+curl	FILES	equal	
+curl	HOMEPAGE	equal	
+curl	LIC_FILES_CHKSUM	equal	
+curl	MULTILIB_SCRIPTS	equal	
+curl	RANDOM	equal	
+curl	RRECOMMENDS	unset	
+curl	SECTION	equal	
+curl	SUMMARY	equal	
+zlib	PN	equal	
+zlib	PV	equal	
+zlib	PR	flagged	unevaluated_python
+zlib	FILE	equal	
+zlib	FILE_LAYERNAME	unset	
+zlib	SRC_URI	equal	
+zlib	DEPENDS	flagged	unevaluated_python
+zlib	RDEPENDS:zlib	unset	
+zlib	PACKAGECONFIG	unset	
+zlib	PACKAGES	equal	
+zlib	FILES:zlib	equal	
+zlib	OVERRIDES	equal	
+zlib	MACHINEOVERRIDES	equal	
+zlib	DISTROOVERRIDES	equal	
+zlib	S	flagged	unevaluated_python
+zlib	B	flagged	unevaluated_python
+zlib	WORKDIR	flagged	unevaluated_python
+zlib	LICENSE	equal	
+zlib	INHERIT	equal	
+zlib	PROVIDES	equal	
+zlib	EXTRA_OECONF	equal	
+zlib	EXTRA_OECMAKE	unset	
+zlib	CFLAGS	flagged	unevaluated_python
+zlib	FILESPATH	flagged	unevaluated_python
+zlib	MACHINE	equal	
+zlib	DISTRO	equal	
+zlib	TMPDIR	equal	
+zlib	BBCLASSEXTEND	equal	
+zlib	CVE_CHECK_IGNORE	equal	
+zlib	DESCRIPTION	equal	
+zlib	HOMEPAGE	equal	
+zlib	LIC_FILES_CHKSUM	equal	
+zlib	RDEPENDS:zlib-ptest	equal	
+zlib	SECTION	equal	
+zlib	SUMMARY	equal	
+zlib	UPSTREAM_CHECK_URI	equal	
+openssl	PN	equal	
+openssl	PV	equal	
+openssl	PR	flagged	unevaluated_python
+openssl	FILE	equal	
+openssl	FILE_LAYERNAME	unset	
+openssl	SRC_URI	equal	
+openssl	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:90 [ua_extend_depends]
+openssl	RDEPENDS:openssl	unset	
+openssl	PACKAGECONFIG	equal	
+openssl	PACKAGES	equal	
+openssl	FILES:openssl	equal	
+openssl	OVERRIDES	equal	
+openssl	MACHINEOVERRIDES	equal	
+openssl	DISTROOVERRIDES	equal	
+openssl	S	flagged	unevaluated_python
+openssl	B	flagged	unevaluated_python
+openssl	WORKDIR	flagged	unevaluated_python
+openssl	LICENSE	equal	
+openssl	INHERIT	equal	
+openssl	PROVIDES	equal	
+openssl	EXTRA_OECONF	equal	
+openssl	EXTRA_OECMAKE	unset	
+openssl	CFLAGS	flagged	unevaluated_python
+openssl	FILESPATH	flagged	unevaluated_python
+openssl	MACHINE	equal	
+openssl	DISTRO	equal	
+openssl	TMPDIR	equal	
+openssl	BBCLASSEXTEND	equal	
+openssl	BUGTRACKER	equal	
+openssl	CONFFILES	unset	
+openssl	CVE_CHECK_IGNORE	equal	
+openssl	CVE_PRODUCT	equal	
+openssl	CVE_VERSION_SUFFIX	equal	
+openssl	DEPRECATED_CRYPTO_FLAGS	equal	
+openssl	DESCRIPTION	equal	
+openssl	FILES	equal	
+openssl	FILES:openssl-engines	equal	
+openssl	FILES:openssl-misc	equal	
+openssl	FILES:openssl-ossl-module-legacy	equal	
+openssl	HOMEPAGE	equal	
+openssl	LIC_FILES_CHKSUM	equal	
+openssl	MULTILIB_SCRIPTS	equal	
+openssl	PTEST_BUILD_HOST_FILES	equal	
+openssl	PTEST_BUILD_HOST_PATTERN	equal	
+openssl	RDEPENDS:openssl-bin	equal	
+openssl	RDEPENDS:openssl-misc	equal	
+openssl	RDEPENDS:openssl-ptest	equal	
+openssl	RRECOMMENDS	unset	
+openssl	SECTION	equal	
+openssl	SUMMARY	equal	
+ncurses	PN	equal	
+ncurses	PV	equal	
+ncurses	PR	flagged	unevaluated_python
+ncurses	FILE	equal	
+ncurses	FILE_LAYERNAME	unset	
+ncurses	SRC_URI	equal	
+ncurses	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:90 [ua_extend_depends]
+ncurses	RDEPENDS:ncurses	unset	
+ncurses	PACKAGECONFIG	unset	
+ncurses	PACKAGES	equal	
+ncurses	FILES:ncurses	equal	
+ncurses	OVERRIDES	equal	
+ncurses	MACHINEOVERRIDES	equal	
+ncurses	DISTROOVERRIDES	equal	
+ncurses	S	flagged	unevaluated_python
+ncurses	B	flagged	unevaluated_python
+ncurses	WORKDIR	flagged	unevaluated_python
+ncurses	LICENSE	equal	
+ncurses	INHERIT	equal	
+ncurses	PROVIDES	equal	
+ncurses	EXTRA_OECONF	equal	
+ncurses	EXTRA_OECMAKE	unset	
+ncurses	CFLAGS	flagged	unevaluated_python
+ncurses	FILESPATH	flagged	unevaluated_python
+ncurses	MACHINE	equal	
+ncurses	DISTRO	equal	
+ncurses	TMPDIR	equal	
+ncurses	ALTERNATIVE	unset	
+ncurses	ALTERNATIVE_PRIORITY	equal	
+ncurses	BBCLASSEXTEND	equal	
+ncurses	BINCONFIG	equal	
+ncurses	BUILD_CPPFLAGS	flagged	unevaluated_python
+ncurses	CACHED_CONFIGUREVARS	equal	
+ncurses	CVE_VERSION	equal	
+ncurses	DESCRIPTION	equal	
+ncurses	ENABLE_WIDEC	equal	
+ncurses	EXCONFIG_ARGS	equal	
+ncurses	EXTRASITECONFIG	flagged	unevaluated_python
+ncurses	EXTRA_AUTORECONF	equal	
+ncurses	EX_TERMCAP	equal	
+ncurses	EX_TERMINFO	equal	
+ncurses	EX_TERMLIB	equal	
+ncurses	FILES:ncurses-tools	equal	
+ncurses	FILES:ncurses-terminfo	equal	
+ncurses	FILES:ncurses-terminfo-base	equal	
+ncurses	HOMEPAGE	equal	
+ncurses	LIC_FILES_CHKSUM	equal	
+ncurses	PACKAGES_DYNAMIC	equal	
+ncurses	RDEPENDS:ncurses-tools	equal	
+ncurses	RRECOMMENDS:ncurses-libtinfo	equal	
+ncurses	RSUGGESTS:ncurses-libtinfo	equal	
+ncurses	SECTION	equal	
+ncurses	SRCREV	equal	
+ncurses	SUMMARY	equal	
+ncurses	SYSROOT_DIRS	equal	
+ncurses	UPSTREAM_CHECK_GITTAGREGEX	equal	
+ncurses	_install_cfgs	flagged	unevaluated_python
+ncurses	_install_opts	equal	
+ncurses	_unifdef_cleanup	equal	
+ncurses	base_libdir	equal	
+bash	PN	equal	
+bash	PV	equal	
+bash	PR	flagged	unevaluated_python
+bash	FILE	equal	
+bash	FILE_LAYERNAME	unset	
+bash	SRC_URI	equal	
+bash	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:90 [ua_extend_depends]
+bash	RDEPENDS:bash	equal	
+bash	PACKAGECONFIG	unset	
+bash	PACKAGES	equal	
+bash	FILES:bash	equal	
+bash	OVERRIDES	equal	
+bash	MACHINEOVERRIDES	equal	
+bash	DISTROOVERRIDES	equal	
+bash	S	flagged	unevaluated_python
+bash	B	flagged	unevaluated_python
+bash	WORKDIR	flagged	unevaluated_python
+bash	LICENSE	equal	
+bash	INHERIT	equal	
+bash	PROVIDES	equal	
+bash	EXTRA_OECONF	flagged	unevaluated_python
+bash	EXTRA_OECMAKE	unset	
+bash	CFLAGS	flagged	unevaluated_python
+bash	FILESPATH	flagged	unevaluated_python
+bash	MACHINE	equal	
+bash	DISTRO	equal	
+bash	TMPDIR	equal	
+bash	ALTERNATIVE:bash	equal	
+bash	ALTERNATIVE_PRIORITY	equal	
+bash	BBCLASSEXTEND	equal	
+bash	CACHED_CONFIGUREVARS	equal	
+bash	DEBUG_OPTIMIZATION	flagged	unevaluated_python
+bash	DESCRIPTION	equal	
+bash	EXTRA_AUTORECONF	equal	
+bash	FILES:bash-bashbug	equal	
+bash	FILES:bash-loadable	equal	
+bash	HOMEPAGE	equal	
+bash	LIC_FILES_CHKSUM	equal	
+bash	PACKAGE_BEFORE_PN	equal	
+bash	RDEPENDS:bash-loadable	equal	
+bash	RDEPENDS:bash-ptest	equal	
+bash	RPROVIDES:bash	equal	
+bash	SECTION	equal	
+bash	SUMMARY	equal	
+util-linux	PN	equal	
+util-linux	PV	equal	
+util-linux	PR	flagged	unevaluated_python
+util-linux	FILE	equal	
+util-linux	FILE_LAYERNAME	unset	
+util-linux	SRC_URI	flagged	unevaluated_python
+util-linux	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:90 [ua_extend_depends]
+util-linux	RDEPENDS:util-linux	equal	
+util-linux	PACKAGECONFIG	equal	
+util-linux	PACKAGES	equal	
+util-linux	FILES:util-linux	equal	
+util-linux	OVERRIDES	equal	
+util-linux	MACHINEOVERRIDES	equal	
+util-linux	DISTROOVERRIDES	equal	
+util-linux	S	flagged	unevaluated_python
+util-linux	B	flagged	unevaluated_python
+util-linux	WORKDIR	flagged	unevaluated_python
+util-linux	LICENSE	equal	
+util-linux	INHERIT	equal	
+util-linux	PROVIDES	equal	
+util-linux	EXTRA_OECONF	flagged	unevaluated_python
+util-linux	EXTRA_OECMAKE	unset	
+util-linux	CFLAGS	flagged	unevaluated_python
+util-linux	FILESPATH	flagged	unevaluated_python
+util-linux	MACHINE	equal	
+util-linux	DISTRO	equal	
+util-linux	TMPDIR	equal	
+util-linux	ALLOW_EMPTY:util-linux	equal	
+util-linux	ALLOW_EMPTY:util-linux-swaponoff	equal	
+util-linux	ALTERNATIVE:util-linux-agetty	equal	
+util-linux	ALTERNATIVE:util-linux-doc	equal	
+util-linux	ALTERNATIVE:util-linux-last	equal	
+util-linux	ALTERNATIVE_PRIORITY	equal	
+util-linux	BBCLASSEXTEND	equal	
+util-linux	CACHED_CONFIGUREVARS	equal	
+util-linux	CONFFILES:util-linux-su	equal	
+util-linux	DESCRIPTION	equal	
+util-linux	EXTRA_OEMAKE	flagged	unevaluated_python
+util-linux	FILES:util-linux-doc	equal	
+util-linux	FILES:util-linux-dev	equal	
+util-linux	FILES:util-linux-mount	equal	
+util-linux	FILES:util-linux-runuser	equal	
+util-linux	FILES:util-linux-su	equal	
+util-linux	FILES:util-linux-pylibmount	equal	
+util-linux	FILESEXTRAPATHS	equal	
+util-linux	HOMEPAGE	equal	
+util-linux	LICENSE:util-linux-libblkid	equal	
+util-linux	LICENSE:util-linux-libfdisk	equal	
+util-linux	LICENSE:util-linux-libmount	equal	
+util-linux	LICENSE:util-linux-libsmartcols	equal	
+util-linux	LIC_FILES_CHKSUM	equal	
+util-linux	MAJOR_VERSION	flagged	unevaluated_python
+util-linux	PACKAGESPLITFUNCS	equal	
+util-linux	PACKAGES_DYNAMIC	equal	
+util-linux	PACKAGE_PREPROCESS_FUNCS	equal	
+util-linux	PTEST_BINDIR	equal	
+util-linux	RCONFLICTS:util-linux-blkid	equal	
+util-linux	RDEPENDS:util-linux-bash-completion	equal	
+util-linux	RDEPENDS:util-linux-dev	flagged	unevaluated_python
+util-linux	RDEPENDS:util-linux-ptest	equal	
+util-linux	RDEPENDS:util-linux-swaponoff	equal	
+util-linux	RPROVIDES:util-linux-dev	equal	
+util-linux	RRECOMMENDS:util-linux-ptest	equal	
+util-linux	RRECOMMENDS:util-linux	unset	
+util-linux	RREPLACES:util-linux-blkid	equal	
+util-linux	SECTION	equal	
+util-linux	SUMMARY	equal	
+util-linux	SYSTEMD_AUTO_ENABLE:util-linux-uuidd	equal	
+util-linux	SYSTEMD_AUTO_ENABLE:util-linux-fstrim	equal	
+util-linux	SYSTEMD_SERVICE:util-linux-fstrim	equal	
+util-linux	SYSTEMD_SERVICE:util-linux-uuidd	equal	
+util-linux	UTIL_LINUX_LIBDIR	equal	
+glib-2.0	PN	equal	
+glib-2.0	PV	equal	
+glib-2.0	PR	flagged	unevaluated_python
+glib-2.0	FILE	equal	
+glib-2.0	FILE_LAYERNAME	unset	
+glib-2.0	SRC_URI	flagged	unevaluated_python
+glib-2.0	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:490 [appendVar]
+glib-2.0	RDEPENDS:glib-2.0	unset	
+glib-2.0	PACKAGECONFIG	equal	
+glib-2.0	PACKAGES	equal	
+glib-2.0	FILES:glib-2.0	equal	
+glib-2.0	OVERRIDES	equal	
+glib-2.0	MACHINEOVERRIDES	equal	
+glib-2.0	DISTROOVERRIDES	equal	
+glib-2.0	S	flagged	unevaluated_python
+glib-2.0	B	flagged	unevaluated_python
+glib-2.0	WORKDIR	flagged	unevaluated_python
+glib-2.0	LICENSE	equal	
+glib-2.0	INHERIT	equal	
+glib-2.0	PROVIDES	equal	
+glib-2.0	EXTRA_OECONF	flagged	unevaluated_python
+glib-2.0	EXTRA_OECMAKE	unset	
+glib-2.0	CFLAGS	flagged	unevaluated_python
+glib-2.0	FILESPATH	flagged	unevaluated_python
+glib-2.0	MACHINE	equal	
+glib-2.0	DISTRO	equal	
+glib-2.0	TMPDIR	equal	
+glib-2.0	ARM_INSTRUCTION_SET	unset	
+glib-2.0	BBCLASSEXTEND	equal	
+glib-2.0	BUGTRACKER	equal	
+glib-2.0	CODEGEN_PYTHON_RDEPENDS	equal	
+glib-2.0	CPPFLAGS	equal	
+glib-2.0	CVE_CHECK_IGNORE	equal	
+glib-2.0	CVE_PRODUCT	equal	
+glib-2.0	DESCRIPTION	equal	
+glib-2.0	EXEEXT	equal	
+glib-2.0	EXTRA_OEMESON	flagged-literal-differs	unevaluated_python; bitbake python ops: append glib-2.0_2.72.3.bb:109 [find_meson_cross_files]
+glib-2.0	FILES:glib-2.0-utils	equal	
+glib-2.0	FILES:glib-2.0-dev	equal	
+glib-2.0	FILES:glib-2.0-dbg	equal	
+glib-2.0	FILES:glib-2.0-codegen	equal	
+glib-2.0	GTKDOC_MESON_OPTION	equal	
+glib-2.0	HOMEPAGE	equal	
+glib-2.0	LEAD_SONAME	equal	
+glib-2.0	LIC_FILES_CHKSUM	equal	
+glib-2.0	PE	equal	
+glib-2.0	RDEPENDS:glib-2.0-codegen	equal	
+glib-2.0	RDEPENDS:glib-2.0-ptest	equal	
+glib-2.0	RRECOMMENDS:glib-2.0	equal	
+glib-2.0	SECTION	equal	
+glib-2.0	SHAREDMIMEDEP	equal	
+glib-2.0	SHRT_VER	flagged	unevaluated_python
+glib-2.0	SUMMARY	equal	
+glib-2.0	USE_NLS	equal	
+dbus	PN	equal	
+dbus	PV	equal	
+dbus	PR	flagged	unevaluated_python
+dbus	FILE	equal	
+dbus	FILE_LAYERNAME	unset	
+dbus	SRC_URI	equal	
+dbus	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:490 [appendVar]
+dbus	RDEPENDS:dbus	equal	
+dbus	PACKAGECONFIG	equal	
+dbus	PACKAGES	equal	
+dbus	FILES:dbus	equal	
+dbus	OVERRIDES	equal	
+dbus	MACHINEOVERRIDES	equal	
+dbus	DISTROOVERRIDES	equal	
+dbus	S	flagged	unevaluated_python
+dbus	B	flagged	unevaluated_python
+dbus	WORKDIR	flagged	unevaluated_python
+dbus	LICENSE	equal	
+dbus	INHERIT	equal	
+dbus	PROVIDES	equal	
+dbus	EXTRA_OECONF	flagged	unevaluated_python
+dbus	EXTRA_OECMAKE	unset	
+dbus	CFLAGS	flagged	unevaluated_python
+dbus	FILESPATH	flagged	unevaluated_python
+dbus	MACHINE	equal	
+dbus	DISTRO	equal	
+dbus	TMPDIR	equal	
+dbus	BBCLASSEXTEND	equal	
+dbus	CONFFILES:dbus	equal	
+dbus	CVE_PRODUCT	equal	
+dbus	DEBIANNAME:dbus	equal	
+dbus	DESCRIPTION	equal	
+dbus	FILES:dbus-common	equal	
+dbus	FILES:dbus-tools	equal	
+dbus	FILES:dbus-lib	equal	
+dbus	FILES:dbus-dev	equal	
+dbus	HOMEPAGE	equal	
+dbus	INITSCRIPT_NAME	equal	
+dbus	INITSCRIPT_PARAMS	equal	
+dbus	LIC_FILES_CHKSUM	equal	
+dbus	OLDPKGNAME	equal	
+dbus	PACKAGE_WRITE_DEPS	equal	
+dbus	RDEPENDS:dbus-ptest	equal	
+dbus	RPROVIDES:dbus	equal	
+dbus	RRECOMMENDS:dbus-lib	equal	
+dbus	RREPLACES:dbus	equal	
+dbus	SECTION	equal	
+dbus	SUMMARY	equal	
+dbus	USERADD_PACKAGES	equal	
+dbus	USERADD_PARAM	unset	
+expat	PN	equal	
+expat	PV	equal	
+expat	PR	flagged	unevaluated_python
+expat	FILE	equal	
+expat	FILE_LAYERNAME	unset	
+expat	SRC_URI	equal	
+expat	DEPENDS	flagged	unevaluated_python
+expat	RDEPENDS:expat	unset	
+expat	PACKAGECONFIG	unset	
+expat	PACKAGES	equal	
+expat	FILES:expat	equal	
+expat	OVERRIDES	equal	
+expat	MACHINEOVERRIDES	equal	
+expat	DISTROOVERRIDES	equal	
+expat	S	flagged	unevaluated_python
+expat	B	flagged	unevaluated_python
+expat	WORKDIR	flagged	unevaluated_python
+expat	LICENSE	equal	
+expat	INHERIT	equal	
+expat	PROVIDES	equal	
+expat	EXTRA_OECONF	equal	
+expat	EXTRA_OECMAKE	equal	
+expat	CFLAGS	flagged	unevaluated_python
+expat	FILESPATH	flagged	unevaluated_python
+expat	MACHINE	equal	
+expat	DISTRO	equal	
+expat	TMPDIR	equal	
+expat	BBCLASSEXTEND	equal	
+expat	CVE_PRODUCT	equal	
+expat	DESCRIPTION	equal	
+expat	HOMEPAGE	equal	
+expat	LIC_FILES_CHKSUM	equal	
+expat	RDEPENDS:expat-ptest	equal	
+expat	SECTION	equal	
+expat	SUMMARY	equal	
+expat	UPSTREAM_CHECK_URI	equal	
+expat	VERSION_TAG	equal	
+python3	PN	equal	
+python3	PV	equal	
+python3	PR	flagged	unevaluated_python
+python3	FILE	equal	
+python3	FILE_LAYERNAME	unset	
+python3	SRC_URI	equal	
+python3	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:490 [appendVar]; append update-alternatives.bbclass:90 [ua_extend_depends]
+python3	RDEPENDS:python3	unset	
+python3	PACKAGECONFIG	equal	
+python3	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set python3_3.10.20.bb:348 [__anon_354]
+python3	FILES:python3	equal	
+python3	OVERRIDES	equal	
+python3	MACHINEOVERRIDES	equal	
+python3	DISTROOVERRIDES	equal	
+python3	S	flagged	unevaluated_python
+python3	B	flagged	unevaluated_python
+python3	WORKDIR	flagged	unevaluated_python
+python3	LICENSE	equal	
+python3	INHERIT	equal	
+python3	PROVIDES	equal	
+python3	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+python3	EXTRA_OECMAKE	unset	
+python3	CFLAGS	flagged	unevaluated_python
+python3	FILESPATH	flagged	unevaluated_python
+python3	MACHINE	equal	
+python3	DISTRO	equal	
+python3	TMPDIR	equal	
+python3	ALTERNATIVE:python3-dev	equal	
+python3	BBCLASSEXTEND	equal	
+python3	CACHED_CONFIGUREVARS	equal	
+python3	CPPFLAGS	flagged	unevaluated_python
+python3	CROSSPYTHONPATH	flagged	unevaluated_python
+python3	CVE_CHECK_IGNORE	equal	
+python3	CVE_PRODUCT	equal	
+python3	DESCRIPTION	equal	
+python3	EXTRANATIVEPATH	equal	
+python3	EXTRA_OEMAKE	flagged	unevaluated_python
+python3	FILES:python3-pydoc	flagged-literal-differs	unevaluated_python; bitbake python ops: set python3_3.10.20.bb:324 [__anon_354]; append python3_3.10.20.bb:326 [__anon_354]; append python3_3.10.20.bb:326 [__anon_354]; append python3_3.10.20.bb:326 [__anon_354]; append python3_3.10.20.bb:3...
+python3	FILES:python3-idle	flagged-literal-differs	unevaluated_python; bitbake python ops: set python3_3.10.20.bb:324 [__anon_354]; append python3_3.10.20.bb:326 [__anon_354]; append python3_3.10.20.bb:326 [__anon_354]
+python3	FILES	equal	
+python3	FILES:python3-misc	equal	
+python3	FILES:python3-man	equal	
+python3	HOMEPAGE	equal	
+python3	INCLUDE_PYCS	equal	
+python3	INSANE_SKIP:python3-dev	equal	
+python3	INSANE_SKIP:python3-ptest	equal	
+python3	LIC_FILES_CHKSUM	equal	
+python3	LTO	equal	
+python3	MULTILIB_SUFFIX	equal	
+python3	PACKAGE_PREPROCESS_FUNCS	equal	
+python3	PYTHON_MAJMIN	equal	
+python3	RDEPENDS	unset	
+python3	RDEPENDS:python3-ctypes	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.10.20.bb:337 [__anon_354]; append python3_3.10.20.bb:337 [__anon_354]; append python3_3.10.20.bb:337 [__anon_354]; append python3_3.10.20.bb:337 [__anon_354]
+python3	RDEPENDS:python3-dev	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.10.20.bb:337 [__anon_354]; append python3_3.10.20.bb:337 [__anon_354]
+python3	RDEPENDS:python3-idle	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.10.20.bb:337 [__anon_354]
+python3	RDEPENDS:python3-misc	equal	
+python3	RDEPENDS:python3-modules	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.10.20.bb:337 [__anon_354]; append python3_3.10.20.bb:337 [__anon_354]; append python3_3.10.20.bb:337 [__anon_354]; append python3_3.10.20.bb:337 [__anon_354]; append python3_3.10.20.b...
+python3	RDEPENDS:python3-ptest	equal	
+python3	RDEPENDS:python3-pydoc	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.10.20.bb:337 [__anon_354]
+python3	RDEPENDS:python3-tests	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.10.20.bb:337 [__anon_354]; append python3_3.10.20.bb:337 [__anon_354]
+python3	RDEPENDS:python3-tkinter	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.10.20.bb:337 [__anon_354]
+python3	RPROVIDES:python3-modules	equal	
+python3	RPROVIDES:python3-venv	equal	
+python3	RRECOMMENDS:python3-core	unset	
+python3	RRECOMMENDS:python3-crypt	equal	
+python3	SECTION	equal	
+python3	SSTATE_HASHEQUIV_FILEMAP	flagged	unevaluated_python
+python3	SSTATE_SCAN_FILES	equal	
+python3	SUMMARY	equal	
+python3	SYSROOT_PREPROCESS_FUNCS	equal	
+python3	UPSTREAM_CHECK_REGEX	equal	
+python3	UPSTREAM_CHECK_URI	equal	
+python3-jinja2	PN	equal	
+python3-jinja2	PV	equal	
+python3-jinja2	PR	flagged	unevaluated_python
+python3-jinja2	FILE	equal	
+python3-jinja2	FILE_LAYERNAME	unset	
+python3-jinja2	SRC_URI	flagged	unevaluated_python
+python3-jinja2	DEPENDS	flagged	unevaluated_python
+python3-jinja2	RDEPENDS:python3-jinja2	equal	
+python3-jinja2	PACKAGECONFIG	unset	
+python3-jinja2	PACKAGES	equal	
+python3-jinja2	FILES:python3-jinja2	equal	
+python3-jinja2	OVERRIDES	equal	
+python3-jinja2	MACHINEOVERRIDES	equal	
+python3-jinja2	DISTROOVERRIDES	equal	
+python3-jinja2	S	flagged	unevaluated_python
+python3-jinja2	B	flagged	unevaluated_python
+python3-jinja2	WORKDIR	flagged	unevaluated_python
+python3-jinja2	LICENSE	equal	
+python3-jinja2	INHERIT	equal	
+python3-jinja2	PROVIDES	equal	
+python3-jinja2	EXTRA_OECONF	equal	
+python3-jinja2	EXTRA_OECMAKE	unset	
+python3-jinja2	CFLAGS	flagged	unevaluated_python
+python3-jinja2	FILESPATH	flagged	unevaluated_python
+python3-jinja2	MACHINE	equal	
+python3-jinja2	DISTRO	equal	
+python3-jinja2	TMPDIR	equal	
+python3-jinja2	BBCLASSEXTEND	equal	
+python3-jinja2	CLEANBROKEN	equal	
+python3-jinja2	CVE_PRODUCT	equal	
+python3-jinja2	DESCRIPTION	equal	
+python3-jinja2	HOMEPAGE	equal	
+python3-jinja2	LIC_FILES_CHKSUM	equal	
+python3-jinja2	PYPI_PACKAGE	equal	
+python3-jinja2	RDEPENDS:python3-jinja2-ptest	equal	
+python3-packaging	PN	equal	
+python3-packaging	PV	equal	
+python3-packaging	PR	flagged	unevaluated_python
+python3-packaging	FILE	equal	
+python3-packaging	FILE_LAYERNAME	unset	
+python3-packaging	SRC_URI	flagged	unevaluated_python
+python3-packaging	DEPENDS	flagged	unevaluated_python
+python3-packaging	RDEPENDS:python3-packaging	equal	
+python3-packaging	PACKAGECONFIG	unset	
+python3-packaging	PACKAGES	equal	
+python3-packaging	FILES:python3-packaging	equal	
+python3-packaging	OVERRIDES	equal	
+python3-packaging	MACHINEOVERRIDES	equal	
+python3-packaging	DISTROOVERRIDES	equal	
+python3-packaging	S	flagged	unevaluated_python
+python3-packaging	B	flagged	unevaluated_python
+python3-packaging	WORKDIR	flagged	unevaluated_python
+python3-packaging	LICENSE	equal	
+python3-packaging	INHERIT	equal	
+python3-packaging	PROVIDES	equal	
+python3-packaging	EXTRA_OECONF	equal	
+python3-packaging	EXTRA_OECMAKE	unset	
+python3-packaging	CFLAGS	flagged	unevaluated_python
+python3-packaging	FILESPATH	flagged	unevaluated_python
+python3-packaging	MACHINE	equal	
+python3-packaging	DISTRO	equal	
+python3-packaging	TMPDIR	equal	
+python3-packaging	BBCLASSEXTEND	equal	
+python3-packaging	DESCRIPTION	equal	
+python3-packaging	HOMEPAGE	equal	
+python3-packaging	LIC_FILES_CHKSUM	equal	
+linux-yocto	PN	equal	
+linux-yocto	PV	flagged	unresolved: SRCPV
+linux-yocto	PR	flagged	unevaluated_python
+linux-yocto	FILE	equal	
+linux-yocto	FILE_LAYERNAME	unset	
+linux-yocto	SRC_URI	equal	
+linux-yocto	DEPENDS	flagged	unevaluated_python
+linux-yocto	RDEPENDS:linux-yocto	unset	
+linux-yocto	PACKAGECONFIG	unset	
+linux-yocto	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:101 [__anon_152]; append kernel-devicetree.bbclass:4 [__anon_7]
+linux-yocto	FILES:linux-yocto	equal	
+linux-yocto	OVERRIDES	equal	
+linux-yocto	MACHINEOVERRIDES	equal	
+linux-yocto	DISTROOVERRIDES	equal	
+linux-yocto	S	equal	
+linux-yocto	B	flagged	unevaluated_python
+linux-yocto	WORKDIR	flagged	unevaluated_python
+linux-yocto	LICENSE	equal	
+linux-yocto	INHERIT	equal	
+linux-yocto	PROVIDES	equal	
+linux-yocto	EXTRA_OECONF	equal	
+linux-yocto	EXTRA_OECMAKE	unset	
+linux-yocto	CFLAGS	flagged	unevaluated_python
+linux-yocto	FILESPATH	flagged	unevaluated_python
+linux-yocto	MACHINE	equal	
+linux-yocto	DISTRO	equal	
+linux-yocto	TMPDIR	equal	
+linux-yocto	BBCLASSEXTEND	equal	
+linux-yocto	COMPATIBLE_MACHINE	equal	
+linux-yocto	CVE_CHECK_IGNORE	equal	
+linux-yocto	HOMEPAGE	equal	
+linux-yocto	INSANE_SKIP	unset	
+linux-yocto	KBRANCH	equal	
+linux-yocto	KCONF_BSP_AUDIT_LEVEL	equal	
+linux-yocto	KERNEL_CC	flagged	unevaluated_python
+linux-yocto	KERNEL_DEBUG_OPTIONS	equal	
+linux-yocto	KERNEL_DEVICETREE	unset	
+linux-yocto	KERNEL_EXTRA_ARGS	flagged	unevaluated_python
+linux-yocto	KERNEL_EXTRA_FEATURES	equal	
+linux-yocto	KERNEL_FEATURES	equal	
+linux-yocto	KERNEL_LD	equal	
+linux-yocto	KMACHINE	equal	
+linux-yocto	KMETA	equal	
+linux-yocto	LIC_FILES_CHKSUM	equal	
+linux-yocto	LINUX_VERSION	equal	
+linux-yocto	LINUX_VERSION_EXTENSION	equal	
+linux-yocto	RECIPE_NO_UPDATE_REASON	equal	
+linux-yocto	SECTION	equal	
+linux-yocto	SRCREV_machine	equal	
+linux-yocto	SRCREV_meta	equal	
+linux-yocto	SUMMARY	equal	
+linux-yocto	UPSTREAM_CHECK_GITTAGREGEX	equal	
+u-boot	PN	equal	
+u-boot	PV	equal	
+u-boot	PR	flagged	unevaluated_python
+u-boot	FILE	equal	
+u-boot	FILE_LAYERNAME	unset	
+u-boot	SRC_URI	equal	
+u-boot	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:490 [appendVar]
+u-boot	RDEPENDS:u-boot	equal	
+u-boot	PACKAGECONFIG	equal	
+u-boot	PACKAGES	equal	
+u-boot	FILES:u-boot	equal	
+u-boot	OVERRIDES	equal	
+u-boot	MACHINEOVERRIDES	equal	
+u-boot	DISTROOVERRIDES	equal	
+u-boot	S	flagged	unevaluated_python
+u-boot	B	flagged	unevaluated_python
+u-boot	WORKDIR	flagged	unevaluated_python
+u-boot	LICENSE	equal	
+u-boot	INHERIT	equal	
+u-boot	PROVIDES	equal	
+u-boot	EXTRA_OECONF	equal	
+u-boot	EXTRA_OECMAKE	unset	
+u-boot	CFLAGS	flagged	unevaluated_python
+u-boot	FILESPATH	flagged	unevaluated_python
+u-boot	MACHINE	equal	
+u-boot	DISTRO	equal	
+u-boot	TMPDIR	equal	
+u-boot	ALLOW_EMPTY:u-boot-env	equal	
+u-boot	DESCRIPTION	equal	
+u-boot	EXTRA_OEMAKE	flagged	unevaluated_python
+u-boot	FILES:u-boot-env	equal	
+u-boot	FILES:u-boot-extlinux	equal	
+u-boot	HOMEPAGE	equal	
+u-boot	LIC_FILES_CHKSUM	equal	
+u-boot	PACKAGE_ARCH	equal	
+u-boot	PACKAGE_BEFORE_PN	equal	
+u-boot	PE	equal	
+u-boot	RPROVIDES:u-boot-env	equal	
+u-boot	SECTION	equal	
+u-boot	SRCREV	equal	
+u-boot	SUMMARY	equal	
+u-boot	UBOOT_INITIAL_ENV	equal	
+u-boot	UBOOT_LOCALVERSION	equal	
+core-image-minimal	PN	equal	
+core-image-minimal	PV	equal	
+core-image-minimal	PR	flagged	unevaluated_python
+core-image-minimal	FILE	equal	
+core-image-minimal	FILE_LAYERNAME	unset	
+core-image-minimal	SRC_URI	equal	
+core-image-minimal	DEPENDS	flagged	unevaluated_python
+core-image-minimal	RDEPENDS:core-image-minimal	unset	
+core-image-minimal	PACKAGECONFIG	unset	
+core-image-minimal	PACKAGES	equal	
+core-image-minimal	FILES:core-image-minimal	equal	
+core-image-minimal	OVERRIDES	equal	
+core-image-minimal	MACHINEOVERRIDES	equal	
+core-image-minimal	DISTROOVERRIDES	equal	
+core-image-minimal	S	flagged	unevaluated_python
+core-image-minimal	B	flagged	unevaluated_python
+core-image-minimal	WORKDIR	flagged	unevaluated_python
+core-image-minimal	LICENSE	equal	
+core-image-minimal	INHERIT	equal	
+core-image-minimal	PROVIDES	equal	
+core-image-minimal	EXTRA_OECONF	equal	
+core-image-minimal	EXTRA_OECMAKE	unset	
+core-image-minimal	CFLAGS	flagged	unevaluated_python
+core-image-minimal	FILESPATH	flagged	unevaluated_python
+core-image-minimal	MACHINE	equal	
+core-image-minimal	DISTRO	equal	
+core-image-minimal	TMPDIR	equal	
+core-image-minimal	IMAGE_INSTALL	equal	
+core-image-minimal	IMAGE_LINGUAS	equal	
+core-image-minimal	IMAGE_ROOTFS_EXTRA_SPACE	equal	
+core-image-minimal	IMAGE_ROOTFS_SIZE	equal	
+core-image-minimal	SUMMARY	equal	
+packagegroup-core-boot	PN	equal	
+packagegroup-core-boot	PV	equal	
+packagegroup-core-boot	PR	equal	
+packagegroup-core-boot	FILE	equal	
+packagegroup-core-boot	FILE_LAYERNAME	unset	
+packagegroup-core-boot	SRC_URI	equal	
+packagegroup-core-boot	DEPENDS	flagged	unevaluated_python
+packagegroup-core-boot	RDEPENDS:packagegroup-core-boot	equal	
+packagegroup-core-boot	PACKAGECONFIG	unset	
+packagegroup-core-boot	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set packagegroup.bbclass:33 [__anon_36]
+packagegroup-core-boot	FILES:packagegroup-core-boot	equal	
+packagegroup-core-boot	OVERRIDES	equal	
+packagegroup-core-boot	MACHINEOVERRIDES	equal	
+packagegroup-core-boot	DISTROOVERRIDES	equal	
+packagegroup-core-boot	S	flagged	unevaluated_python
+packagegroup-core-boot	B	flagged	unevaluated_python
+packagegroup-core-boot	WORKDIR	flagged	unevaluated_python
+packagegroup-core-boot	LICENSE	equal	
+packagegroup-core-boot	INHERIT	equal	
+packagegroup-core-boot	PROVIDES	equal	
+packagegroup-core-boot	EXTRA_OECONF	equal	
+packagegroup-core-boot	EXTRA_OECMAKE	unset	
+packagegroup-core-boot	CFLAGS	flagged	unevaluated_python
+packagegroup-core-boot	FILESPATH	flagged	unevaluated_python
+packagegroup-core-boot	MACHINE	equal	
+packagegroup-core-boot	DISTRO	equal	
+packagegroup-core-boot	TMPDIR	equal	
+packagegroup-core-boot	DESCRIPTION	equal	
+packagegroup-core-boot	EFI_PROVIDER	equal	
+packagegroup-core-boot	PACKAGE_ARCH	equal	
+packagegroup-core-boot	RRECOMMENDS:packagegroup-core-boot	equal	
+packagegroup-core-boot	SUMMARY	equal	
+packagegroup-core-boot	SYSVINIT_SCRIPTS	equal	
+packagegroup-core-boot	VIRTUAL-RUNTIME_dev_manager	equal	
+packagegroup-core-boot	VIRTUAL-RUNTIME_keymaps	equal	
+virtual/kernel	PN	equal	
+virtual/kernel	PV	flagged	unresolved: SRCPV
+virtual/kernel	PR	flagged	unevaluated_python
+virtual/kernel	FILE	equal	
+virtual/kernel	FILE_LAYERNAME	unset	
+virtual/kernel	SRC_URI	equal	
+virtual/kernel	DEPENDS	flagged	unevaluated_python
+virtual/kernel	RDEPENDS:linux-yocto	unset	
+virtual/kernel	PACKAGECONFIG	unset	
+virtual/kernel	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:101 [__anon_152]; append kernel-devicetree.bbclass:4 [__anon_7]
+virtual/kernel	FILES:linux-yocto	equal	
+virtual/kernel	OVERRIDES	equal	
+virtual/kernel	MACHINEOVERRIDES	equal	
+virtual/kernel	DISTROOVERRIDES	equal	
+virtual/kernel	S	equal	
+virtual/kernel	B	flagged	unevaluated_python
+virtual/kernel	WORKDIR	flagged	unevaluated_python
+virtual/kernel	LICENSE	equal	
+virtual/kernel	INHERIT	equal	
+virtual/kernel	PROVIDES	equal	
+virtual/kernel	EXTRA_OECONF	equal	
+virtual/kernel	EXTRA_OECMAKE	unset	
+virtual/kernel	CFLAGS	flagged	unevaluated_python
+virtual/kernel	FILESPATH	flagged	unevaluated_python
+virtual/kernel	MACHINE	equal	
+virtual/kernel	DISTRO	equal	
+virtual/kernel	TMPDIR	equal	
+virtual/kernel	BBCLASSEXTEND	equal	
+virtual/kernel	COMPATIBLE_MACHINE	equal	
+virtual/kernel	CVE_CHECK_IGNORE	equal	
+virtual/kernel	HOMEPAGE	equal	
+virtual/kernel	INSANE_SKIP	unset	
+virtual/kernel	KBRANCH	equal	
+virtual/kernel	KCONF_BSP_AUDIT_LEVEL	equal	
+virtual/kernel	KERNEL_CC	flagged	unevaluated_python
+virtual/kernel	KERNEL_DEBUG_OPTIONS	equal	
+virtual/kernel	KERNEL_DEVICETREE	unset	
+virtual/kernel	KERNEL_EXTRA_ARGS	flagged	unevaluated_python
+virtual/kernel	KERNEL_EXTRA_FEATURES	equal	
+virtual/kernel	KERNEL_FEATURES	equal	
+virtual/kernel	KERNEL_LD	equal	
+virtual/kernel	KMACHINE	equal	
+virtual/kernel	KMETA	equal	
+virtual/kernel	LIC_FILES_CHKSUM	equal	
+virtual/kernel	LINUX_VERSION	equal	
+virtual/kernel	LINUX_VERSION_EXTENSION	equal	
+virtual/kernel	RECIPE_NO_UPDATE_REASON	equal	
+virtual/kernel	SECTION	equal	
+virtual/kernel	SRCREV_machine	equal	
+virtual/kernel	SRCREV_meta	equal	
+virtual/kernel	SUMMARY	equal	
+virtual/kernel	UPSTREAM_CHECK_GITTAGREGEX	equal	
+busybox	PN	equal	
+busybox	PV	equal	
+busybox	PR	flagged	unevaluated_python
+busybox	FILE	equal	
+busybox	FILE_LAYERNAME	unset	
+busybox	SRC_URI	equal	
+busybox	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:90 [ua_extend_depends]
+busybox	RDEPENDS:busybox	equal	
+busybox	PACKAGECONFIG	unset	
+busybox	PACKAGES	equal	
+busybox	FILES:busybox	equal	
+busybox	OVERRIDES	equal	
+busybox	MACHINEOVERRIDES	equal	
+busybox	DISTROOVERRIDES	equal	
+busybox	S	flagged	unevaluated_python
+busybox	B	flagged	unevaluated_python
+busybox	WORKDIR	flagged	unevaluated_python
+busybox	LICENSE	equal	
+busybox	INHERIT	equal	
+busybox	PROVIDES	equal	
+busybox	EXTRA_OECONF	equal	
+busybox	EXTRA_OECMAKE	unset	
+busybox	CFLAGS	flagged	unevaluated_python
+busybox	FILESPATH	flagged	unevaluated_python
+busybox	MACHINE	equal	
+busybox	DISTRO	equal	
+busybox	TMPDIR	equal	
+busybox	ALTERNATIVE_PRIORITY	equal	
+busybox	BUGTRACKER	equal	
+busybox	BUSYBOX_SPLIT_SUID	equal	
+busybox	CONFFILES:busybox-mdev	equal	
+busybox	CONFFILES:busybox-syslog	equal	
+busybox	DESCRIPTION	equal	
+busybox	DO_IPv4	equal	
+busybox	DO_IPv6	equal	
+busybox	EXTRA_CFLAGS	flagged	unevaluated_python
+busybox	EXTRA_LDFLAGS	flagged	unevaluated_python
+busybox	EXTRA_OEMAKE	flagged	unevaluated_python
+busybox	FILES:busybox-httpd	equal	
+busybox	FILES:busybox-syslog	equal	
+busybox	FILES:busybox-mdev	equal	
+busybox	FILES:busybox-udhcpd	equal	
+busybox	FILES:busybox-udhcpc	equal	
+busybox	FILES:busybox-hwclock	equal	
+busybox	FILESEXTRAPATHS	equal	
+busybox	HOMEPAGE	equal	
+busybox	INITSCRIPT_NAME:busybox-httpd	equal	
+busybox	INITSCRIPT_NAME:busybox-hwclock	equal	
+busybox	INITSCRIPT_NAME:busybox-mdev	equal	
+busybox	INITSCRIPT_NAME:busybox-syslog	equal	
+busybox	INITSCRIPT_NAME:busybox-udhcpd	equal	
+busybox	INITSCRIPT_PACKAGES	equal	
+busybox	INITSCRIPT_PARAMS:busybox-mdev	equal	
+busybox	LIC_FILES_CHKSUM	equal	
+busybox	OE_DEL	flagged	unevaluated_python
+busybox	OE_FEATURES	flagged	unevaluated_python
+busybox	PTEST_BINDIR	equal	
+busybox	RCONFLICTS:busybox-syslog	equal	
+busybox	RDEPENDS:busybox-ptest	equal	
+busybox	RDEPENDS:busybox-syslog	equal	
+busybox	RPROVIDES:busybox	equal	
+busybox	RRECOMMENDS:busybox	equal	
+busybox	SECTION	equal	
+busybox	SUMMARY	equal	
+busybox	SYSTEMD_PACKAGES	equal	
+busybox	SYSTEMD_SERVICE:busybox-syslog	equal	
+busybox	configmangle	flagged-literal-differs	unevaluated_python; bitbake python ops: :append busybox.inc:100 [__anon_110]; :append busybox.inc:102 [__anon_110]; :append busybox.inc:105 [__anon_110]
+base-files	PN	equal	
+base-files	PV	equal	
+base-files	PR	equal	
+base-files	FILE	equal	
+base-files	FILE_LAYERNAME	unset	
+base-files	SRC_URI	equal	
+base-files	DEPENDS	flagged	unevaluated_python
+base-files	RDEPENDS:base-files	unset	
+base-files	PACKAGECONFIG	unset	
+base-files	PACKAGES	equal	
+base-files	FILES:base-files	equal	
+base-files	OVERRIDES	equal	
+base-files	MACHINEOVERRIDES	equal	
+base-files	DISTROOVERRIDES	equal	
+base-files	S	flagged	unevaluated_python
+base-files	B	flagged	unevaluated_python
+base-files	WORKDIR	flagged	unevaluated_python
+base-files	LICENSE	equal	
+base-files	INHERIT	equal	
+base-files	PROVIDES	equal	
+base-files	EXTRA_OECONF	equal	
+base-files	EXTRA_OECMAKE	unset	
+base-files	CFLAGS	flagged	unevaluated_python
+base-files	FILESPATH	flagged	unevaluated_python
+base-files	MACHINE	equal	
+base-files	DISTRO	equal	
+base-files	TMPDIR	equal	
+base-files	BASEFILESISSUEINSTALL	equal	
+base-files	CONFFILES:base-files	equal	
+base-files	DESCRIPTION	equal	
+base-files	FILES:base-files-doc	equal	
+base-files	INHIBIT_DEFAULT_DEPS	equal	
+base-files	INSANE_SKIP:base-files	equal	
+base-files	LIC_FILES_CHKSUM	equal	
+base-files	PACKAGE_ARCH	equal	
+base-files	SECTION	equal	
+base-files	SUMMARY	equal	
+base-files	SYSROOT_DIRS	equal	
+base-files	conffiles	equal	
+base-files	dirs1777	equal	
+base-files	dirs2775	equal	
+base-files	dirs2775-lsb	equal	
+base-files	dirs555	equal	
+base-files	dirs755	flagged	unevaluated_python
+base-files	dirs755-lsb	equal	
+base-files	docdir	equal	
+base-files	hostname	equal	
+base-files	volatiles	flagged	unevaluated_python
+psplash	PN	equal	
+psplash	PV	flagged	unresolved: SRCPV
+psplash	PR	flagged	unevaluated_python
+psplash	FILE	equal	
+psplash	FILE_LAYERNAME	unset	
+psplash	SRC_URI	equal	
+psplash	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:90 [ua_extend_depends]
+psplash	RDEPENDS:psplash	gap:python-at-parse	append psplash_git.bb:61 [__anon_62]
+psplash	PACKAGECONFIG	equal	
+psplash	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: prepend psplash_git.bb:50 [__anon_62]
+psplash	FILES:psplash	equal	
+psplash	OVERRIDES	equal	
+psplash	MACHINEOVERRIDES	equal	
+psplash	DISTROOVERRIDES	equal	
+psplash	S	flagged	unevaluated_python
+psplash	B	flagged	unevaluated_python
+psplash	WORKDIR	flagged	unevaluated_python
+psplash	LICENSE	equal	
+psplash	INHERIT	equal	
+psplash	PROVIDES	equal	
+psplash	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+psplash	EXTRA_OECMAKE	unset	
+psplash	CFLAGS	flagged	unevaluated_python
+psplash	FILESPATH	flagged	unevaluated_python
+psplash	MACHINE	equal	
+psplash	DISTRO	equal	
+psplash	TMPDIR	equal	
+psplash	ALTERNATIVE_PRIORITY	equal	
+psplash	DESCRIPTION	equal	
+psplash	FILESEXTRAPATHS	equal	
+psplash	HOMEPAGE	equal	
+psplash	INITSCRIPT_NAME	equal	
+psplash	INITSCRIPT_PARAMS	equal	
+psplash	LIC_FILES_CHKSUM	equal	
+psplash	SECTION	equal	
+psplash	SPLASH_IMAGES	equal	
+psplash	SRCREV	equal	
+psplash	SUMMARY	equal	
+psplash	SYSTEMD_PACKAGES	equal	
+psplash	SYSTEMD_SERVICE:psplash	equal	
+psplash	UPSTREAM_CHECK_COMMITS	equal	
+quilt-native	PN	equal	
+quilt-native	PV	equal	
+quilt-native	PR	flagged	unevaluated_python
+quilt-native	FILE	equal	
+quilt-native	FILE_LAYERNAME	unset	
+quilt-native	SRC_URI	equal	
+quilt-native	DEPENDS	flagged	unevaluated_python
+quilt-native	RDEPENDS:quilt-native	equal	
+quilt-native	PACKAGECONFIG	unset	
+quilt-native	PACKAGES	flagged	unevaluated_python
+quilt-native	FILES:quilt-native	flagged	unevaluated_python
+quilt-native	OVERRIDES	flagged	unevaluated_python
+quilt-native	MACHINEOVERRIDES	equal	
+quilt-native	DISTROOVERRIDES	equal	
+quilt-native	S	flagged	unevaluated_python
+quilt-native	B	flagged	unevaluated_python
+quilt-native	WORKDIR	flagged	unevaluated_python
+quilt-native	LICENSE	equal	
+quilt-native	INHERIT	equal	
+quilt-native	PROVIDES	equal	
+quilt-native	EXTRA_OECONF	equal	
+quilt-native	EXTRA_OECMAKE	unset	
+quilt-native	CFLAGS	flagged	unevaluated_python
+quilt-native	FILESPATH	flagged	unevaluated_python
+quilt-native	MACHINE	equal	
+quilt-native	DISTRO	equal	
+quilt-native	TMPDIR	equal	
+quilt-native	CACHED_CONFIGUREVARS	equal	
+quilt-native	CLEANBROKEN	equal	
+quilt-native	DESCRIPTION	equal	
+quilt-native	EXTRA_AUTORECONF	equal	
+quilt-native	FILES	equal	
+quilt-native	FILES:quilt-native-doc	flagged	unevaluated_python
+quilt-native	HOMEPAGE	equal	
+quilt-native	INHIBIT_AUTOTOOLS_DEPS	equal	
+quilt-native	LIC_FILES_CHKSUM	equal	
+quilt-native	PATCHTOOL	equal	
+quilt-native	RDEPENDS:quilt-native-ptest	equal	
+quilt-native	SECTION	equal	
+quilt-native	SUMMARY	equal	
+gmp-native	PN	equal	
+gmp-native	PV	equal	
+gmp-native	PR	flagged	unevaluated_python
+gmp-native	FILE	equal	
+gmp-native	FILE_LAYERNAME	unset	
+gmp-native	SRC_URI	equal	
+gmp-native	DEPENDS	flagged	unevaluated_python
+gmp-native	RDEPENDS:gmp-native	unset	
+gmp-native	PACKAGECONFIG	equal	
+gmp-native	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set native.bbclass:158 [map_dependencies]
+gmp-native	FILES:gmp-native	flagged	unevaluated_python
+gmp-native	OVERRIDES	flagged	unevaluated_python
+gmp-native	MACHINEOVERRIDES	equal	
+gmp-native	DISTROOVERRIDES	equal	
+gmp-native	S	flagged	unevaluated_python
+gmp-native	B	flagged	unevaluated_python
+gmp-native	WORKDIR	flagged	unevaluated_python
+gmp-native	LICENSE	equal	
+gmp-native	INHERIT	equal	
+gmp-native	PROVIDES	equal	
+gmp-native	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+gmp-native	EXTRA_OECMAKE	unset	
+gmp-native	CFLAGS	flagged	unevaluated_python
+gmp-native	FILESPATH	flagged	unevaluated_python
+gmp-native	MACHINE	equal	
+gmp-native	DISTRO	equal	
+gmp-native	TMPDIR	equal	
+gmp-native	ARM_INSTRUCTION_SET	unset	
+gmp-native	BBCLASSEXTEND	equal	
+gmp-native	DESCRIPTION	equal	
+gmp-native	FILES	equal	
+gmp-native	HOMEPAGE	equal	
+gmp-native	LIC_FILES_CHKSUM	equal	
+gmp-native	MIPS_INSTRUCTION_SET	equal	
+gmp-native	REVISION	equal	
+gmp-native	SECTION	equal	
+gmp-native	SSTATE_SCAN_FILES	equal	
+gmp-native	SUMMARY	equal	
+gmp-native	acpaths	equal	
+nativesdk-zlib	PN	equal	
+nativesdk-zlib	PV	equal	
+nativesdk-zlib	PR	flagged	unevaluated_python
+nativesdk-zlib	FILE	equal	
+nativesdk-zlib	FILE_LAYERNAME	unset	
+nativesdk-zlib	SRC_URI	equal	
+nativesdk-zlib	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: rename (to) classextend.py:103 [map_depends_variable]; set classextend.py:104 [map_depends_variable]; append classextend.py:105 [map_depends_variable]
+nativesdk-zlib	RDEPENDS:nativesdk-zlib	unset	
+nativesdk-zlib	PACKAGECONFIG	unset	
+nativesdk-zlib	PACKAGES	flagged	unevaluated_python
+nativesdk-zlib	FILES:nativesdk-zlib	flagged	unevaluated_python
+nativesdk-zlib	OVERRIDES	flagged	unevaluated_python
+nativesdk-zlib	MACHINEOVERRIDES	equal	
+nativesdk-zlib	DISTROOVERRIDES	equal	
+nativesdk-zlib	S	flagged	unevaluated_python
+nativesdk-zlib	B	flagged	unevaluated_python
+nativesdk-zlib	WORKDIR	flagged	unevaluated_python
+nativesdk-zlib	LICENSE	equal	
+nativesdk-zlib	INHERIT	equal	
+nativesdk-zlib	PROVIDES	equal-ws	
+nativesdk-zlib	EXTRA_OECONF	equal	
+nativesdk-zlib	EXTRA_OECMAKE	unset	
+nativesdk-zlib	CFLAGS	flagged	unevaluated_python
+nativesdk-zlib	FILESPATH	flagged	unevaluated_python
+nativesdk-zlib	MACHINE	equal	
+nativesdk-zlib	DISTRO	equal	
+nativesdk-zlib	TMPDIR	equal	
+nativesdk-zlib	BBCLASSEXTEND	equal	
+nativesdk-zlib	CVE_CHECK_IGNORE	equal	
+nativesdk-zlib	DESCRIPTION	equal	
+nativesdk-zlib	HOMEPAGE	equal	
+nativesdk-zlib	LIC_FILES_CHKSUM	equal	
+nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	
+nativesdk-zlib	SECTION	equal	
+nativesdk-zlib	SUMMARY	equal	
+nativesdk-zlib	UPSTREAM_CHECK_URI	equal	
+htop	PN	equal	
+htop	PV	equal	
+htop	PR	flagged	unevaluated_python
+htop	FILE	equal	
+htop	FILE_LAYERNAME	unset	
+htop	SRC_URI	equal	
+htop	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:490 [appendVar]
+htop	RDEPENDS:htop	equal	
+htop	PACKAGECONFIG	equal	
+htop	PACKAGES	equal	
+htop	FILES:htop	equal	
+htop	OVERRIDES	equal	
+htop	MACHINEOVERRIDES	equal	
+htop	DISTROOVERRIDES	equal	
+htop	S	flagged	unevaluated_python
+htop	B	flagged	unevaluated_python
+htop	WORKDIR	flagged	unevaluated_python
+htop	LICENSE	equal	
+htop	INHERIT	equal	
+htop	PROVIDES	equal	
+htop	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+htop	EXTRA_OECMAKE	unset	
+htop	CFLAGS	flagged	unevaluated_python
+htop	FILESPATH	flagged	unevaluated_python
+htop	MACHINE	equal	
+htop	DISTRO	equal	
+htop	TMPDIR	equal	
+htop	HOMEPAGE	equal	
+htop	LIC_FILES_CHKSUM	equal	
+htop	SECTION	equal	
+htop	SRCREV	equal	
+htop	SUMMARY	equal	
+nano	PN	equal	
+nano	PV	equal	
+nano	PR	flagged	unevaluated_python
+nano	FILE	equal	
+nano	FILE_LAYERNAME	unset	
+nano	SRC_URI	equal	
+nano	DEPENDS	flagged	unevaluated_python
+nano	RDEPENDS:nano	equal	
+nano	PACKAGECONFIG	unset	
+nano	PACKAGES	equal	
+nano	FILES:nano	equal	
+nano	OVERRIDES	equal	
+nano	MACHINEOVERRIDES	equal	
+nano	DISTROOVERRIDES	equal	
+nano	S	flagged	unevaluated_python
+nano	B	flagged	unevaluated_python
+nano	WORKDIR	flagged	unevaluated_python
+nano	LICENSE	equal	
+nano	INHERIT	equal	
+nano	PROVIDES	equal	
+nano	EXTRA_OECONF	flagged	unevaluated_python
+nano	EXTRA_OECMAKE	unset	
+nano	CFLAGS	flagged	unevaluated_python
+nano	FILESPATH	flagged	unevaluated_python
+nano	MACHINE	equal	
+nano	DISTRO	equal	
+nano	TMPDIR	equal	
+nano	DESCRIPTION	equal	
+nano	HOMEPAGE	equal	
+nano	LIC_FILES_CHKSUM	equal	
+nano	PV_MAJOR	equal	
+nano	SECTION	equal	
+nano	SUMMARY	equal	
+nano	UPSTREAM_CHECK_URI	equal	
+jq	PN	equal	
+jq	PV	flagged	unresolved: SRCPV
+jq	PR	flagged	unevaluated_python
+jq	FILE	equal	
+jq	FILE_LAYERNAME	unset	
+jq	SRC_URI	equal	
+jq	DEPENDS	flagged	unevaluated_python
+jq	RDEPENDS:jq	unset	
+jq	PACKAGECONFIG	equal	
+jq	PACKAGES	equal	
+jq	FILES:jq	equal	
+jq	OVERRIDES	equal	
+jq	MACHINEOVERRIDES	equal	
+jq	DISTROOVERRIDES	equal	
+jq	S	flagged	unevaluated_python
+jq	B	flagged	unevaluated_python
+jq	WORKDIR	flagged	unevaluated_python
+jq	LICENSE	equal	
+jq	INHERIT	equal	
+jq	PROVIDES	equal	
+jq	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+jq	EXTRA_OECMAKE	unset	
+jq	CFLAGS	flagged	unevaluated_python
+jq	FILESPATH	flagged	unevaluated_python
+jq	MACHINE	equal	
+jq	DISTRO	equal	
+jq	TMPDIR	equal	
+jq	BBCLASSEXTEND	equal	
+jq	BUGTRACKER	equal	
+jq	DESCRIPTION	equal	
+jq	HOMEPAGE	equal	
+jq	LIC_FILES_CHKSUM	equal	
+jq	SECTION	equal	
+jq	SRCREV	equal	
+jq	SUMMARY	equal	
+fmt	PN	equal	
+fmt	PV	equal	
+fmt	PR	flagged	unevaluated_python
+fmt	FILE	equal	
+fmt	FILE_LAYERNAME	unset	
+fmt	SRC_URI	equal	
+fmt	DEPENDS	flagged	unevaluated_python
+fmt	RDEPENDS:fmt	unset	
+fmt	PACKAGECONFIG	unset	
+fmt	PACKAGES	equal	
+fmt	FILES:fmt	equal	
+fmt	OVERRIDES	equal	
+fmt	MACHINEOVERRIDES	equal	
+fmt	DISTROOVERRIDES	equal	
+fmt	S	flagged	unevaluated_python
+fmt	B	flagged	unevaluated_python
+fmt	WORKDIR	flagged	unevaluated_python
+fmt	LICENSE	equal	
+fmt	INHERIT	equal	
+fmt	PROVIDES	equal	
+fmt	EXTRA_OECONF	equal	
+fmt	EXTRA_OECMAKE	equal	
+fmt	CFLAGS	flagged	unevaluated_python
+fmt	FILESPATH	flagged	unevaluated_python
+fmt	MACHINE	equal	
+fmt	DISTRO	equal	
+fmt	TMPDIR	equal	
+fmt	BBCLASSEXTEND	equal	
+fmt	DESCRIPTION	equal	
+fmt	HOMEPAGE	equal	
+fmt	LIC_FILES_CHKSUM	equal	
+fmt	SRCREV	equal	
+fmt	SUMMARY	equal	
+protobuf	PN	equal	
+protobuf	PV	equal	
+protobuf	PR	flagged	unevaluated_python
+protobuf	FILE	equal	
+protobuf	FILE_LAYERNAME	unset	
+protobuf	SRC_URI	equal	
+protobuf	DEPENDS	flagged	unevaluated_python
+protobuf	RDEPENDS:protobuf	unset	
+protobuf	PACKAGECONFIG	equal	
+protobuf	PACKAGES	equal	
+protobuf	FILES:protobuf	equal	
+protobuf	OVERRIDES	equal	
+protobuf	MACHINEOVERRIDES	equal	
+protobuf	DISTROOVERRIDES	equal	
+protobuf	S	flagged	unevaluated_python
+protobuf	B	flagged	unevaluated_python
+protobuf	WORKDIR	flagged	unevaluated_python
+protobuf	LICENSE	equal	
+protobuf	INHERIT	equal	
+protobuf	PROVIDES	equal	
+protobuf	EXTRA_OECONF	equal	
+protobuf	EXTRA_OECMAKE	unset	
+protobuf	CFLAGS	flagged	unevaluated_python
+protobuf	FILESPATH	flagged	unevaluated_python
+protobuf	MACHINE	equal	
+protobuf	DISTRO	equal	
+protobuf	TMPDIR	equal	
+protobuf	BBCLASSEXTEND	equal	
+protobuf	CVE_CHECK_IGNORE	equal	
+protobuf	DESCRIPTION	equal	
+protobuf	FILES:protobuf-compiler	equal	
+protobuf	FILES:protobuf-lite	equal	
+protobuf	HOMEPAGE	equal	
+protobuf	LANG_SUPPORT	equal	
+protobuf	LDFLAGS	flagged	unevaluated_python
+protobuf	LIC_FILES_CHKSUM	equal	
+protobuf	MIPS_INSTRUCTION_SET	equal	
+protobuf	PACKAGE_BEFORE_PN	equal	
+protobuf	RDEPENDS:protobuf-compiler	equal	
+protobuf	RDEPENDS:protobuf-dev	flagged	unevaluated_python
+protobuf	RDEPENDS:protobuf-ptest	equal	
+protobuf	SECTION	equal	
+protobuf	SRCREV	equal	
+protobuf	SUMMARY	equal	
+protobuf	TEST_SRC_DIR	equal	
+curl@default	PN	equal	
+curl@default	PV	equal	
+curl@default	PR	flagged	unevaluated_python
+curl@default	FILE	equal	
+curl@default	FILE_LAYERNAME	unset	
+curl@default	SRC_URI	equal	
+curl@default	DEPENDS	flagged	unevaluated_python
+curl@default	RDEPENDS:curl	unset	
+curl@default	PACKAGECONFIG	equal	
+curl@default	PACKAGES	equal	
+curl@default	FILES:curl	equal	
+curl@default	OVERRIDES	equal	
+curl@default	MACHINEOVERRIDES	equal	
+curl@default	DISTROOVERRIDES	equal	
+curl@default	S	flagged	unevaluated_python
+curl@default	B	flagged	unevaluated_python
+curl@default	WORKDIR	flagged	unevaluated_python
+curl@default	LICENSE	equal	
+curl@default	INHERIT	equal	
+curl@default	PROVIDES	equal	
+curl@default	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+curl@default	EXTRA_OECMAKE	unset	
+curl@default	CFLAGS	flagged	unevaluated_python
+curl@default	FILESPATH	flagged	unevaluated_python
+curl@default	MACHINE	equal	
+curl@default	DISTRO	equal	
+curl@default	TMPDIR	equal	
+curl@default	BBCLASSEXTEND	equal	
+curl@default	BUGTRACKER	equal	
+curl@default	CVE_CHECK_IGNORE	equal	
+curl@default	CVE_PRODUCT	equal	
+curl@default	DESCRIPTION	equal	
+curl@default	FILES	equal	
+curl@default	HOMEPAGE	equal	
+curl@default	LIC_FILES_CHKSUM	equal	
+curl@default	MULTILIB_SCRIPTS	equal	
+curl@default	RANDOM	equal	
+curl@default	RRECOMMENDS	unset	
+curl@default	SECTION	equal	
+curl@default	SUMMARY	equal	
+virtual/kernel@default	PN	equal	
+virtual/kernel@default	PV	flagged	unresolved: SRCPV
+virtual/kernel@default	PR	flagged	unevaluated_python
+virtual/kernel@default	FILE	equal	
+virtual/kernel@default	FILE_LAYERNAME	unset	
+virtual/kernel@default	SRC_URI	equal	
+virtual/kernel@default	DEPENDS	flagged	unevaluated_python
+virtual/kernel@default	RDEPENDS:linux-yocto	unset	
+virtual/kernel@default	PACKAGECONFIG	unset	
+virtual/kernel@default	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:101 [__anon_152]; append kernel-devicetree.bbclass:4 [__anon_7]
+virtual/kernel@default	FILES:linux-yocto	equal	
+virtual/kernel@default	OVERRIDES	equal	
+virtual/kernel@default	MACHINEOVERRIDES	equal	
+virtual/kernel@default	DISTROOVERRIDES	equal	
+virtual/kernel@default	S	equal	
+virtual/kernel@default	B	flagged	unevaluated_python
+virtual/kernel@default	WORKDIR	flagged	unevaluated_python
+virtual/kernel@default	LICENSE	equal	
+virtual/kernel@default	INHERIT	equal	
+virtual/kernel@default	PROVIDES	equal	
+virtual/kernel@default	EXTRA_OECONF	equal	
+virtual/kernel@default	EXTRA_OECMAKE	unset	
+virtual/kernel@default	CFLAGS	flagged	unevaluated_python
+virtual/kernel@default	FILESPATH	flagged	unevaluated_python
+virtual/kernel@default	MACHINE	equal	
+virtual/kernel@default	DISTRO	equal	
+virtual/kernel@default	TMPDIR	equal	
+virtual/kernel@default	BBCLASSEXTEND	equal	
+virtual/kernel@default	COMPATIBLE_MACHINE	equal	
+virtual/kernel@default	CVE_CHECK_IGNORE	equal	
+virtual/kernel@default	HOMEPAGE	equal	
+virtual/kernel@default	INSANE_SKIP	unset	
+virtual/kernel@default	KBRANCH	equal	
+virtual/kernel@default	KCONF_BSP_AUDIT_LEVEL	equal	
+virtual/kernel@default	KERNEL_CC	flagged	unevaluated_python
+virtual/kernel@default	KERNEL_DEBUG_OPTIONS	equal	
+virtual/kernel@default	KERNEL_DEVICETREE	unset	
+virtual/kernel@default	KERNEL_EXTRA_ARGS	flagged	unevaluated_python
+virtual/kernel@default	KERNEL_EXTRA_FEATURES	equal	
+virtual/kernel@default	KERNEL_FEATURES	equal	
+virtual/kernel@default	KERNEL_LD	equal	
+virtual/kernel@default	KMACHINE	equal	
+virtual/kernel@default	KMETA	equal	
+virtual/kernel@default	LIC_FILES_CHKSUM	equal	
+virtual/kernel@default	LINUX_VERSION	equal	
+virtual/kernel@default	LINUX_VERSION_EXTENSION	equal	
+virtual/kernel@default	RECIPE_NO_UPDATE_REASON	equal	
+virtual/kernel@default	SECTION	equal	
+virtual/kernel@default	SRCREV_machine	equal	
+virtual/kernel@default	SRCREV_meta	equal	
+virtual/kernel@default	SUMMARY	equal	
+virtual/kernel@default	UPSTREAM_CHECK_GITTAGREGEX	equal	

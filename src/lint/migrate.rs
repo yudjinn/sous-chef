@@ -151,6 +151,10 @@ pub fn instruction(feature: Feature, target: bool) -> String {
         (Feature::CveStatusCpe, false) => "a `cpe:` CVE_STATUS value is not understood there".into(),
         (Feature::CvePatchContentLines, true) => format!("from {first} on a patch declares CVEs on lines starting with `CVE:`"),
         (Feature::CvePatchContentLines, false) => "a patch's `CVE: CVE-...` tag is matched anywhere in its text there".into(),
+        (Feature::FileLayerName, true) => format!("from {first} on BitBake sets FILE_LAYERNAME for every recipe (and OE-core adds `layer-${{FILE_LAYERNAME}}` to OVERRIDES)"),
+        (Feature::FileLayerName, false) => "BitBake does not set FILE_LAYERNAME there: a `layer-<name>` override does not apply".into(),
+        (Feature::FeaturesBackfill, true) => "base.bbclass backfills DISTRO_FEATURES and MACHINE_FEATURES from <VAR>_BACKFILL there (opt out with <VAR>_BACKFILL_CONSIDERED)".into(),
+        (Feature::FeaturesBackfill, false) => format!("from {gone} on the defaults come from DISTRO_FEATURES_DEFAULTS / MACHINE_FEATURES_DEFAULTS (opt out with <VAR>_OPTED_OUT); there is no backfill (6.0 guide)"),
         (_, true) => "still present there".into(),
         (kept, false) => format!(
             "removed or renamed in {gone} (the {} migration guide): change each use as shown",
