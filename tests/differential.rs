@@ -810,12 +810,23 @@ fn run_recipe(
         let files = (!key.contains(':'))
             .then(|| history_files(&bb, &ds, ws, pmap, &key))
             .flatten();
+        let st = ds.value(&name);
+        // A right value that carries a flag: why it does (`DataStore::flag_causes`).
+        let mut why = why;
+        if matches!(class, Class::Equal | Class::EqualWs) && st.as_ref().is_some_and(flagged) {
+            let lname = if name.contains("${") {
+                ds.expand(&name).text
+            } else {
+                name.clone()
+            };
+            why = format!("flagged: {}", ds.flag_causes(&lname).join("; "));
+        }
         rows.push(Row {
             var: key.clone(),
             class,
             why,
             bb: bb.value(&key).map(str::to_string),
-            st: ds.value(&name),
+            st,
             files,
         });
     }
@@ -1173,6 +1184,20 @@ fn differential_against_bitbake() {
                 ))
                 .unwrap_or_default()
             );
+        }
+    }
+    // Right values that still carry a flag, with why (`DataStore::flag_causes`).
+    let _ = writeln!(report, "\n## Equal, but flagged\n");
+    for res in results.iter().filter(|r| explicit_run(&r.recipe)) {
+        for row in &res.rows {
+            if matches!(row.class, Class::Equal | Class::EqualWs)
+                && let Some(c) = row.why.strip_prefix("flagged: ")
+            {
+                let _ = writeln!(report, "{}\t{}", res.recipe, row.var);
+                for cause in c.split("; ") {
+                    let _ = writeln!(report, "\t{cause}");
+                }
+            }
         }
     }
     // Files in the history.

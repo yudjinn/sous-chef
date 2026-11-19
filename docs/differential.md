@@ -88,6 +88,39 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After acc-overflag
+
+Re-run on 2026-11-19 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/acc-overflag/`, release build) after anonymous-python
+writes whose condition is false on static values stopped flagging (bitbake-semantics.md,
+"When a value is flagged", "Anonymous python writes that cannot happen"):
+
+| | compared | equal | of which flagged | flagged | flagged, literal differs | known gap | bug |
+|---|---|---|---|---|---|---|---|
+| before (f060e9e) | 1090 | 950 | 148 | 74 | 35 | 31 | 0 |
+| after | 1090 | 950 | **88** | 74 | 35 | 31 | 0 |
+
+Every class of `classes.tsv` is unchanged; only flags on values already equal moved. For an
+equal value that still carries a flag, the cause column of `classes.tsv` now reads
+`flagged: <causes>` (`DataStore::flag_causes`), and `report.txt` lists them under
+"Equal, but flagged".
+
+**The 148, by cause** (every one was a by-name write of anonymous python, or an override
+decision on unknown `OVERRIDES` entries; none came from python in a replaced assignment, a
+`?=` / `??=` that did not apply, an inactive override, a flag, or the recipe's anonymous
+python as a whole, which the evaluator already did not flag):
+
+| Cause | Values | Now |
+|---|---|---|
+| `base.bbclass` multimachine `d.setVar('PACKAGE_ARCH', ...)` (`S`, `B`, `WORKDIR`, `CFLAGS`, ... through `MULTIMACH_TARGET_SYS`) | 104 | 48 unflagged: `PACKAGE_ARCH` already `MACHINE_ARCH` (base-files, kiss-image, linux-kiss, packagegroup-core-boot, u-boot-kiss and the two `virtual/`: 34), no `file://` in `SRC_URI` (opencsd, sl, systemd-boot: 14). 56 stay: `FILESPATH` is `base_set_filespath(...)`, not evaluated, so the machine-directory test cannot be made (in the dumps no `FILESPATH` entry named `dogbonedark` exists for those 12 targets, so they should drop once `FILESPATH` is evaluated) |
+| `multilib_script.bbclass` `d.appendVar("FILES:" + pkg, ...)` | 8 | unflagged: `if not d.getVar("MULTILIB_VARIANTS"): return` is true |
+| `base.bbclass` `appendVar('PACKAGECONFIG_CONFARGS', extraconf)` (`EXTRA_OECMAKE` of expat, `EXTRA_OECONF` of ncurses, `EXTRA_OEMESON` of systemd-boot) | 3 (+1) | unflagged: no `PACKAGECONFIG` flag (`doc`, `vardepvalue` included) gives the list an item. quilt-native `EXTRA_OECONF` also waits on `OVERRIDES` and stays |
+| `base.bbclass` `d.appendVar("EXTRANATIVEPATH", ...)` for `hg://` (python3) | 1 | unflagged: no `SRC_URI` entry has the hg scheme |
+| Override decisions on unknown `OVERRIDES` entries (gmp-native, quilt-native, nativesdk-zlib: `BUILD_ARCH` is `os.uname()`) | 14 | stay: an unknown entry could be any override name |
+| python3's manifest function (`d.appendVar('FILES:' + pypackage, ...)` from a JSON file) | 11 | stay: names and values come from a file the function reads |
+| nativesdk `ClassExtender.rename_package_variables(PACKAGEVARS)` (nativesdk-zlib `LICENSE`, `SUMMARY`, ...) | 5 | stay (and `OVERRIDES` is unknown there too) |
+| `kernel.bbclass` `d.setVar('FILES:' + kname + '-image-' + typelower, ...)` (`FILES:linux-kiss`, twice) | 2 | stay: the computed name is only known by its prefix `FILES:` |
+
 ## After x1-python
 
 Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
@@ -562,7 +595,8 @@ On this workspace, with the machine and distro given. The counts in this section
 23-target sample after the w5 fixes; the current totals, with the two `BBCLASSEXTEND`
 variants and the later rounds ("After x1-python"), are 1090 values compared, 950 equal
 (87%), 109 flagged, 31 known gap (29 path spellings, 2 `FILE_LAYERNAME` of a variant) and
-0 bug. (The README quotes the w12 numbers: 702 equal, 357 flagged.)
+0 bug; since acc-overflag 88 of the 950 equal values carry a flag (148 before).
+(The README quotes the w12 numbers: 702 equal, 357 flagged.)
 
 - **Nothing was wrong without a warning.** 1019 values compared, 0 bugs: every value that
   differed from BitBake either carried `unevaluated_python` / `unresolved` (336) or was a

@@ -31,7 +31,7 @@ sl@default	30	27	0	2	1	0	3	0	anonymous python 10 (7 opaque); unfollowed referenc
 virtual/kernel@default	27	22	0	3	2	0	3	0	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
 
 ## Totals (1090 values compared, explicit machine and distro; `unset` = unset on both sides, `not-printed` = BitBake printed no value; neither counted)
-(equal, but flagged)	148
+(equal, but flagged)	88
 equal	950
 flagged	74
 flagged-literal-differs	35
