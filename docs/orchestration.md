@@ -736,3 +736,54 @@ Left open, needs the user:
   real BitBake;
 - anything that needs BitBake to compile or to report its parse log (the user's rule: no
   large builds).
+
+## After the rounds: features, real builds, CI, multi-release accuracy
+
+Merged on `worktree-w2-integration`, in order (each with the gate re-run, and the live
+tests after the ones that touch evaluation or BitBake):
+
+- **x1 to x6** (parallel feature batch): `x1-python` (allowlist of pure python helpers,
+  `src/eval/pyexpr.rs`), `x2-migrate` (`lint --as-release` / `--only-release` /
+  `--migrate-to`, rule `hygiene/release-removed`, SARIF / GitHub output, baseline),
+  `x3-fix` (`lint --fix`), `x4-views` (`recipe show=cve`, tools `sigs` and `pkgdata`),
+  `x5-multiconfig`, `x6-benchmark` (`bench/`, docs/benchmark.md). Conflicts between
+  x2/x3, x1/x5 and x4/x5 resolved by hand, keeping both sides.
+- **x7-cleanup**: tool definitions 31.5 KB to 14.1 KB (schema boilerplate), skill 8.0 KB to
+  2.5 KB, `alwaysLoad` on six core tools, search fixes from the benchmark, rules
+  `hygiene/git-pv` and `hygiene/insane-skip`, fixes for the UNPACKDIR rules and 17 renames,
+  CVE rules through `Feature`s.
+- **y2-overhead**: plugin context cost measured in sessions: 3,694 tokens with tool search
+  on, 5,693 off (the pilot measured 9,356 before the cuts).
+- **y1-build, y3-leftovers** (the user then allowed building `curl` only): first real build
+  (28.5 min, 919 tasks, 14 GB); pkgdata, CVE view and authoritative `var` confirmed against
+  it; fixed: `bitbake op=cancel` (killed only the client), sigs word changes, log pointer
+  for `:prepend`, hook wrapper parsing, `RRECOMMENDS` in `deps`, compiler error rows,
+  cancelled-job digests, job warnings; kas mode passed the server's `TMPDIR` to BitBake.
+- **z1-env**: generic variables withheld from BitBake in every runner mode (`STRIPPED_ENV`,
+  only `TMPDIR`), `[bitbake] pass_env`, a `status` row, and `tests/env_names.rs` keeping
+  sous-chef's own variables `SOUS_CHEF_*`.
+- **ci-validate** (the repository got a remote, `yudjinn/sous-chef`): toolchain pinned to
+  stable 1.99.1 (`rust-toolchain.toml`, `rust-version = "1.89"`); CI, a lint demo that
+  uploads the fixture's SARIF to code scanning (category `sous-chef-fixture`), and a
+  tag-triggered release workflow, all passing on GitHub on the `ci-validate` branch (draft
+  PR #1); SARIF validated against the 2.1.0 schema.
+- **acc-releases, acc-overflag, acc-helpers** (parallel accuracy batch): Scarthgap and
+  Kirkstone differentials (workspaces in `sous-chef-live/releases/`, `bitbake -e` only;
+  first runs found 2 and 31 unflagged differences, all fixed); anonymous-python writes
+  proved not to happen no longer flag values (`src/eval/anon.rs`); verified class-defined
+  helpers (`src/eval/classfn.rs`) and class-extension read filters in the evaluator.
+  Conflict in `src/eval/replay.rs` resolved by pruning both write lists together.
+
+State after the accuracy merge (`4f1bc1a`): 1,301 tests pass. Differential, equal / equal
+but flagged / flagged (literal differs) / bug: Wrynose 969 / 34 / 31 (30) / **1**;
+Scarthgap 1,100 / 40 / 39 (38) / 0; Kirkstone 1,039 / 35 / 64 (35) / 0.
+
+The one bug (kiss-image `DEPENDS`) is a hole older than this batch, exposed by it: an
+unfollowed include or inherit (`inherit_defer ${IMGCLASSES}`, python the subset cannot
+evaluate) produced a note but no flag; the value had been flagged for an unrelated reason
+that acc-overflag correctly removed. Lesson for later merges: a change that removes flags
+can expose a missing flag elsewhere, so the merged tree's differential, not each branch's,
+is the one that counts. In progress: `acc-unfollowed` (flag what an unfollowed reference
+could change; follow `IMGCLASSES`; audit for the same shape), `lint-dynamic-data`
+(`hygiene/parse-error` false positives on meta-oe `dynamic-layers` data files: 369 on
+Scarthgap, 365 on Kirkstone).
