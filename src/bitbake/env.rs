@@ -139,6 +139,8 @@ pub struct BbEnv {
     pub init_script: Option<PathBuf>,
     /// Set in kas mode: commands run through `kas shell`; `init_script` is `None` then.
     pub kas: Option<KasRun>,
+    /// Names of [`STRIPPED_ENV`] the commands inherit after all (`[bitbake] pass_env`).
+    pub pass_env: Vec<String>,
 }
 
 /// The parts of the process environment detection looks at. Tests build one directly
@@ -246,6 +248,7 @@ impl BbEnv {
                 build_dir,
                 init_script: Some(absolute(script)),
                 kas: None,
+                pass_env: cfg.bitbake.pass_env.clone(),
             });
         }
 
@@ -262,6 +265,7 @@ impl BbEnv {
                     build_dir,
                     init_script: None,
                     kas: None,
+                    pass_env: cfg.bitbake.pass_env.clone(),
                 });
             }
         }
@@ -284,6 +288,7 @@ impl BbEnv {
                             files: k.files.clone(),
                             work_dir: k.work_dir.clone(),
                         }),
+                        pass_env: cfg.bitbake.pass_env.clone(),
                     });
                 }
                 Some(_) => {
@@ -314,6 +319,7 @@ impl BbEnv {
                 build_dir,
                 init_script: Some(setup),
                 kas: None,
+                pass_env: cfg.bitbake.pass_env.clone(),
             });
         }
         let mut candidates: Vec<PathBuf> = Vec::new();
@@ -331,6 +337,7 @@ impl BbEnv {
                 build_dir,
                 init_script: Some(script),
                 kas: None,
+                pass_env: cfg.bitbake.pass_env.clone(),
             }),
             None => Err(match kas_problem {
                 Some(p) => format!(
@@ -426,7 +433,9 @@ impl BbEnv {
         // On the first process (kas, bash or the program itself): what it does not have,
         // the init script, kas, the shell kas starts and BitBake cannot inherit.
         for name in STRIPPED_ENV {
-            cmd.env_remove(name);
+            if !self.pass_env.iter().any(|p| p == name) {
+                cmd.env_remove(name);
+            }
         }
         cmd.current_dir(&dir)
             .stdin(Stdio::null())

@@ -69,6 +69,9 @@ pub struct BitbakeConfig {
     pub enabled: bool,
     /// Allows `cleansstate`, `cleanall`, `devtool reset`, `devtool finish`.
     pub allow_destructive: bool,
+    /// Names of [`crate::bitbake::env::STRIPPED_ENV`] that BitBake commands inherit after
+    /// all (`pass_env = ["TMPDIR"]`). Any other name is an error ([`BitbakeConfig::check`]).
+    pub pass_env: Vec<String>,
 }
 
 impl Default for BitbakeConfig {
@@ -76,7 +79,26 @@ impl Default for BitbakeConfig {
         BitbakeConfig {
             enabled: true,
             allow_destructive: false,
+            pass_env: Vec::new(),
         }
+    }
+}
+
+impl BitbakeConfig {
+    /// Every `pass_env` name that sous-chef does not remove (so listing it changes nothing,
+    /// most likely a typo), one message each.
+    pub fn check(&self) -> Vec<String> {
+        use crate::bitbake::env::STRIPPED_ENV;
+        self.pass_env
+            .iter()
+            .filter(|n| !STRIPPED_ENV.contains(&n.as_str()))
+            .map(|n| {
+                format!(
+                    "bitbake.pass_env names {n:?}, which sous-chef never removes from BitBake's environment: it already passes; list only {}",
+                    STRIPPED_ENV.join(", ")
+                )
+            })
+            .collect()
     }
 }
 
@@ -287,7 +309,8 @@ impl Config {
                 e.message().lines().next().unwrap_or("invalid TOML")
             ),
         })?;
-        let problems = cfg.handles.check();
+        let mut problems = cfg.handles.check();
+        problems.extend(cfg.bitbake.check());
         if !problems.is_empty() {
             return Err(Error::Config {
                 msg: format!("{}: {}", origin.display(), problems.join("; ")),

@@ -2398,7 +2398,11 @@ the program itself in initialised mode); none of `oe-init-build-env`, bitbake-se
 three ways to make that shell, so when the server has one it came from whatever started
 the server (a sandbox, a profile, a CI runner), while a `kas shell` would still hand it to
 BitBake through its additions. `git` (`src/gitcmd.rs`) keeps its environment: it reads
-`TMPDIR` only as the temporary directory.
+`TMPDIR` only as the temporary directory. `[bitbake] pass_env = ["TMPDIR"]` keeps a name
+in the commands' environment; what BitBake then does with it is the mode's own rule
+above: kas always hands it on, the other modes only when `BB_ENV_PASSTHROUGH_ADDITIONS`
+(the caller's, a bitbake-setup configuration's, a `kas shell`'s) names it or with
+`BB_PRESERVE_ENV`.
 
 ## Build environments
 

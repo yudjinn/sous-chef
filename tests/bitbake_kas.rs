@@ -443,6 +443,7 @@ fn kas_mode_does_not_hand_the_servers_tmpdir_to_kas() {
         build_dir: p.path("build"),
         init_script: None,
         kas: None,
+        pass_env: Vec::new(),
     };
     let cmd = plain.command("bitbake", &["curl"]).unwrap();
     assert_eq!(removed(&cmd), ["TMPDIR"]);

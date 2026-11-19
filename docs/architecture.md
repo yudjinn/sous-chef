@@ -1518,6 +1518,7 @@ kas = ["kas/base.yaml", "kas/board.yaml"] # optional; a kas project's files, in 
 [bitbake]
 enabled = true
 allow_destructive = false                 # cleansstate, cleanall, devtool reset, devtool finish
+pass_env = ["TMPDIR"]                     # names of STRIPPED_ENV BitBake commands inherit after all; default []
 
 [lint]
 disable = ["style/variable-order"]
@@ -1539,7 +1540,7 @@ max_age_days = 14                         # handles last stored longer ago are d
 ```
 
 In code (`src/config.rs`): `Config { build_dir, layers, writable_layers, init_script,
-release, kas, bitbake: BitbakeConfig { enabled, allow_destructive }, lint: LintConfig {
+release, kas, bitbake: BitbakeConfig { enabled, allow_destructive, pass_env }, lint: LintConfig {
 disable, severity }, output: OutputConfig { budget_tokens }, hooks: HooksConfig { grep_read,
 bash, edit }, handles: HandlesConfig { max_total_mb, max_age_days }, work_dir, config_dir }`
 (`work_dir` and `config_dir`, the directory of the file read, w12, are not read from the
@@ -1549,7 +1550,10 @@ file),
 `HooksConfig::enabled(key)`, `HandlesConfig::{retention, check}` (a `[handles]` value out
 of its range, `HANDLES_MAX_TOTAL_MB` / `HANDLES_MAX_AGE_DAYS`, is an `Error::Config` from
 `Config::from_toml`, so the server serves degraded with the reason; the defaults are
-`handles::Retention::default()`). `CliOverrides { build_dir, config, layers, work_dir }` carries
+`handles::Retention::default()`). `BitbakeConfig::check` (z1-env): a `pass_env` name that is not in
+`bitbake::env::STRIPPED_ENV` is an `Error::Config` from `Config::from_toml` too
+(`bitbake.pass_env names "MACHINE", which sous-chef never removes from BitBake's
+environment: it already passes; list only TMPDIR`), so a typo is caught. `CliOverrides { build_dir, config, layers, work_dir }` carries
 the global flags `--build-dir`, `--config`, `--layer` (repeatable).
 
 With no config and no `--build-dir`, discovery walks up from the working directory looking

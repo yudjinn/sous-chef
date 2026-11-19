@@ -371,6 +371,7 @@ fn refuses_programs_outside_the_allowlist() {
         build_dir: PathBuf::from("/"),
         init_script: Some(fakebb().join(INIT_SCRIPT_NAME)),
         kas: None,
+        pass_env: Vec::new(),
     };
     for p in [
         "bash",
