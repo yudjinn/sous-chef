@@ -5,7 +5,8 @@ static evaluator of the Yocto / OpenEmbedded layers of a workspace. It answers w
 **pointers** into the layers (`layer:path:A-B` plus a one-line snippet) instead of whole
 files, and it replays a recipe's files the way BitBake does (includes, inherits, bbappends
 in layer order, then the override chain), so "where does `SRC_URI` get its value for this
-recipe on this machine" is one call with a correct answer.
+recipe on this machine" is one call with a correct answer. The pointer approach comes
+from [atlas](https://github.com/bloodfeast/atlas) (see [Credits](#credits)).
 
 It is a single Rust binary that speaks MCP over stdio, with optional hooks for Claude Code.
 It needs no build environment for lookups; it uses BitBake only when asked to run it.
@@ -641,6 +642,16 @@ files `recipe show=tree` lists, or a task log under `${T}`).
 | [docs/live-environment.md](docs/live-environment.md), [docs/live-verification.md](docs/live-verification.md) | The real Wrynose workspace sous-chef is checked against, and what was checked |
 | [plugin/README.md](plugin/README.md) | The plugin's layout, decisions and the hook wire format |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing, the gate |
+
+### Credits
+
+The pointer approach comes from [atlas](https://github.com/bloodfeast/atlas)
+(bloodfeast/atlas): answering with pointers and one-line snippets instead of whole files,
+tab-separated results under a token budget with explicit truncation markers, large output
+kept whole under a handle with a short digest and slices, a derived and deletable SQLite
+index, and hooks that fail open. sous-chef applies these to Yocto layers and adds the
+BitBake-specific parts (the static evaluator, overrides, lint, the build tools).
+[docs/overview.md](docs/overview.md) lists what was taken and what was not.
 
 ### License
 
