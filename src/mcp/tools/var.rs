@@ -142,6 +142,9 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         for n in python_eval_notes(&ds.python_log(&lookup)) {
             t.note(&n);
         }
+        for n in uncertain_notes(&ds, &lookup) {
+            t.note(&n);
+        }
     }
     for n in replay_notes(&ds, &lookup) {
         t.note(&n);
@@ -218,6 +221,39 @@ pub fn python_eval_notes(log: &eval::overrides::PythonLog) -> Vec<String> {
             "note: python not evaluated: `{}`: {}{more}",
             eval::pyexpr::short(&first.code),
             first.why.as_deref().unwrap_or("")
+        ));
+    }
+    out
+}
+
+/// At most this many `uncertain:` lines per value; the rest are counted.
+pub const MAX_CAUSE_NOTES: usize = 3;
+
+/// Why a flagged value may be wrong (`DataStore::flag_causes`): one `note: uncertain: ...`
+/// line per cause, at most [`MAX_CAUSE_NOTES`], then how many more. Nothing for a value
+/// that is not flagged.
+pub fn uncertain_notes(ds: &DataStore, name: &str) -> Vec<String> {
+    // Anonymous python that writes the variable itself by name has its own warning
+    // ([`replay_notes`]): not repeated.
+    let base = name.split(':').next().unwrap_or(name);
+    let warned: Vec<String> = naming_functions(ds, base)
+        .iter()
+        .map(|a| format!("anonymous python at {} may write {name}", a.loc))
+        .collect();
+    let causes: Vec<String> = ds
+        .flag_causes(name)
+        .into_iter()
+        .filter(|c| !warned.contains(c))
+        .collect();
+    let mut out: Vec<String> = causes
+        .iter()
+        .take(MAX_CAUSE_NOTES)
+        .map(|c| format!("note: uncertain: {c}"))
+        .collect();
+    if causes.len() > MAX_CAUSE_NOTES {
+        out.push(format!(
+            "note: uncertain: +{} more causes",
+            causes.len() - MAX_CAUSE_NOTES
         ));
     }
     out
@@ -305,12 +341,15 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
     if let Some(v) = notes.var_notes.get(&base) {
         out.extend(v.iter().cloned());
     }
-    let opaque: Vec<&eval::AnonPython> = notes.anonymous.iter().filter(|a| a.opaque).collect();
-    let naming: Vec<&eval::AnonPython> = notes
+    // A function proved to return at once writes nothing; a name whose writes were all
+    // proved not to happen is not changed here (`ReplayNotes::no_writes`).
+    let live: Vec<&eval::AnonPython> = notes
         .anonymous
         .iter()
-        .filter(|a| !a.opaque && a.sets.iter().any(|s| s.split(':').next() == Some(&base)))
+        .filter(|a| a.returns_early.is_none())
         .collect();
+    let opaque: Vec<&eval::AnonPython> = live.iter().copied().filter(|a| a.opaque).collect();
+    let naming = naming_functions(ds, &base);
     for a in &opaque {
         out.push(format!(
             "warning: anonymous python at {} changes variables through computed names or hands d to other code; it is not run, so any value, this one included, may differ",
@@ -322,6 +361,18 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
             "warning: anonymous python at {} changes {base}; it is not run, so the value shown is the one before it",
             a.loc
         ));
+    }
+    for w in notes
+        .no_writes
+        .iter()
+        .filter(|w| w.name.split(':').next() == Some(&base))
+    {
+        for (at, why) in &w.why {
+            out.push(format!(
+                "note: anonymous python at {at} does not write {} here: {why}",
+                w.name
+            ));
+        }
     }
     let other = notes.anonymous.len() - opaque.len() - naming.len();
     if other > 0 {
@@ -361,6 +412,22 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
         ));
     }
     out
+}
+
+/// The anonymous functions [`replay_notes`] warns about by name for `base`: not opaque,
+/// not proved to return at once, and writing a name of `base` that is still in
+/// `python_vars` (not proved unwritten).
+fn naming_functions<'a>(ds: &'a DataStore, base: &str) -> Vec<&'a eval::AnonPython> {
+    let notes = ds.replay();
+    notes
+        .anonymous
+        .iter()
+        .filter(|a| a.returns_early.is_none() && !a.opaque)
+        .filter(|a| {
+            a.writes()
+                .any(|e| e.split(':').next() == Some(base) && notes.python_vars.contains(e))
+        })
+        .collect()
 }
 
 /// The target notes of a multiconfig evaluation (`eval::multiconfig`: which configuration,
