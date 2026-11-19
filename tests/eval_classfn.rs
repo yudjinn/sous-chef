@@ -200,3 +200,123 @@ fn inherits_class_is_read_from_the_inherit_cache() {
     assert_eq!(certain(&ds, "AUTO"), "");
     let _ = &fx.root;
 }
+
+// ---------------------------------------------------------------------------------------
+// Class extension: the read filters of OE-core Wrynose's native.bbclass and
+// nativesdk.bbclass, reproduced only for OE-core's own text
+// (`tests/fixtures/classfn/native-handler.bbclass`, `nativesdk-handler.bbclass`).
+
+fn class_extension(r: &Path, real: bool) {
+    let native = if real {
+        fs::read_to_string(fixture_path("classfn/native-handler.bbclass")).unwrap()
+    } else {
+        // A handler of the same name with other code: nothing of it is reproduced.
+        "python native_virtclass_handler () {\n    pn = d.getVar(\"PN\")\n}\n\
+         addhandler native_virtclass_handler\n\
+         native_virtclass_handler[eventmask] = \"bb.event.RecipePreFinalise\"\n"
+            .to_string()
+    };
+    write(
+        r,
+        "meta-core/classes-recipe/native.bbclass",
+        &format!("CLASSOVERRIDE = \"class-native\"\nMACHINEOVERRIDES = \"\"\n{native}"),
+    );
+    let sdk = fs::read_to_string(fixture_path("classfn/nativesdk-handler.bbclass")).unwrap();
+    write(
+        r,
+        "meta-core/classes-recipe/nativesdk.bbclass",
+        &format!("CLASSOVERRIDE = \"class-nativesdk\"\nMACHINEOVERRIDES = \"\"\n{sdk}"),
+    );
+    // OE-core bitbake.conf's values for the feature filters.
+    let p = r.join("meta-core/conf/bitbake.conf");
+    let mut conf = fs::read_to_string(&p).unwrap();
+    conf.push_str(
+        "DISTRO_FEATURES_NATIVE ?= \"acl x11 ipv6 xattr\"\n\
+         DISTRO_FEATURES_NATIVESDK ?= \"acl x11 ipv6 xattr\"\n\
+         DISTRO_FEATURES_FILTER_NATIVE ?= \"api-documentation debuginfod opencl opengl wayland\"\n\
+         DISTRO_FEATURES_FILTER_NATIVESDK ?= \"api-documentation debuginfod opencl opengl wayland\"\n\
+         SPECIAL_PKGSUFFIX = \"-native -cross\"\n\
+         BPN = \"${@oe.utils.prune_suffix(d.getVar('PN'), d.getVar('SPECIAL_PKGSUFFIX').split(), d)}\"\n",
+    );
+    fs::write(p, conf).unwrap();
+    write(
+        r,
+        "meta-mine/recipes-app/tool/tool_1.0.bb",
+        "LICENSE = \"CLOSED\"\n\
+         DEPENDS = \"zlib pkgconf-native binutils-cross-arm tool-native virtual/libc (>= 2)\"\n\
+         PACKAGES = \"${PN}-src ${PN} libtool-x\"\n\
+         PACKAGES_DYNAMIC = \"^${PN}-locale-.*$\"\n\
+         PACKAGE_WRITE_DEPS = \"ptest-runner\"\n\
+         RDEPENDS:${PN}-src = \"bash\"\n\
+         BBCLASSEXTEND = \"native nativesdk\"\n",
+    );
+}
+
+#[test]
+fn native_read_filters_for_oe_cores_handler() {
+    let fx = modified(|r| class_extension(r, true));
+    let ds = eval(&fx, "tool-native");
+    // native_filter(val, 'tool-native', 'tool', selfref=False): the recipe itself goes, the
+    // version constraint too (explode_deps). handleVirtRecipeProviders stores the filtered
+    // words and the next read filters them again, as BitBake does: binutils-cross-arm, then
+    // binutils-native-arm, then binutils-native-arm-native.
+    assert_eq!(
+        certain(&ds, "DEPENDS"),
+        "zlib-native pkgconf-native binutils-native-arm-native virtual/libc-native"
+    );
+    assert_eq!(
+        certain(&ds, "PACKAGES"),
+        "tool-src-native tool-native libtool-x-native"
+    );
+    assert_eq!(certain(&ds, "PACKAGES_DYNAMIC"), "^tool-locale-.*-native$");
+    // A reference reads the filtered value too.
+    let e = ds.expand("${DEPENDS}");
+    assert!(e.text.starts_with("zlib-native "), "{e:?}");
+    // The runtime variables are renamed per package too, which is not reproduced.
+    flagged(&ds, "RDEPENDS:tool-native-src");
+    // set_class_filter: acl x11 ipv6 xattr, plus wayland (local.conf's DISTRO_FEATURES +=
+    // "wayland", kept by DISTRO_FEATURES_FILTER_NATIVE).
+    assert_eq!(
+        certain(&ds, "DISTRO_FEATURES"),
+        "acl ipv6 wayland x11 xattr"
+    );
+    assert!(
+        ds.replay().var_notes["DEPENDS"]
+            .iter()
+            .any(|n| n.contains("native_filter(val, 'tool-native', 'tool', selfref=False)")),
+        "{:?}",
+        ds.replay().var_notes
+    );
+    // The base recipe is not filtered.
+    let base = eval(&fx, "tool");
+    assert!(certain(&base, "DEPENDS").starts_with("zlib pkgconf-native"));
+}
+
+#[test]
+fn a_handler_with_other_code_stays_flagged() {
+    let fx = modified(|r| class_extension(r, false));
+    let ds = eval(&fx, "tool-native");
+    for v in ["DEPENDS", "PACKAGES", "DISTRO_FEATURES"] {
+        flagged(&ds, v);
+    }
+}
+
+#[test]
+fn nativesdk_filters_for_oe_cores_anonymous_python() {
+    let fx = modified(|r| class_extension(r, true));
+    let ds = eval(&fx, "nativesdk-tool");
+    // suffix_filter_deps(val, 'nativesdk', []): a -native or -cross- word stays; sorted (the
+    // words handleVirtRecipeProviders stores are filtered again on the next read), the
+    // version constraint kept.
+    assert_eq!(
+        certain(&ds, "DEPENDS"),
+        "binutils-cross-arm nativesdk-zlib pkgconf-native tool-native virtual/nativesdk-libc (>= 2)"
+    );
+    assert_eq!(certain(&ds, "PACKAGE_WRITE_DEPS"), "nativesdk-ptest-runner");
+    assert_eq!(
+        certain(&ds, "DISTRO_FEATURES"),
+        "acl ipv6 wayland x11 xattr"
+    );
+    // rename_package_variables (PACKAGES and the per-package names) is not reproduced.
+    flagged(&ds, "PACKAGES");
+}

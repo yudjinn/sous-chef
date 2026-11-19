@@ -6,8 +6,10 @@
 //!   version). Then the build dependencies of the selected `PACKAGECONFIG` options: OE-Core's
 //!   `base.bbclass` adds them to `DEPENDS` with anonymous python, which is never run, so they
 //!   are listed from the flags. Then the recipes named by the `depends` flags of the
-//!   recipe's tasks. A native variant's words are read through `native_filter`
-//!   ([`NativeDepends`]). `depth` follows the selected providers.
+//!   recipe's tasks. A class-extended variant's words are read through the read filter its
+//!   class installs on `DEPENDS` (`native_filter`, `suffix_filter_deps`), which the
+//!   evaluator records ([`DataStore::var_filter`]) and `deps` applies word by word
+//!   ([`map_word`]). `depth` follows the selected providers.
 //! - `runtime`: the plain `RDEPENDS` / `RRECOMMENDS` (every package), per package of
 //!   `PACKAGES` the words of `RDEPENDS:<package>` and `RRECOMMENDS:<package>` (relation
 //!   `depends` / `recommends`, [`RUNTIME_VARS`]), plus the runtime dependencies and
@@ -40,6 +42,7 @@ use crate::error::Result;
 use crate::eval::providers::{
     ProviderReason, ProviderSet, Providers, Selection, Setting, VersionReason,
 };
+use crate::eval::variant::VarFilter;
 use crate::eval::{self, ClassExtend, DataStore, OpKind, OpStatus};
 use crate::index::Index;
 use crate::index::query::{self, RecipeRow};
@@ -497,23 +500,42 @@ fn build(
     let mut pkgconfig = false;
     let mut task_rows = false;
     let mut native_mapped = false;
+    let mut filter_seen = false;
     let mut missing = 0;
     while let Some((d, data)) = queue.pop_front() {
         let mut next: Vec<Selection> = Vec::new();
+        // A certain value is the one BitBake reads, filtered by the evaluator already; the
+        // words of an uncertain one (and the PACKAGECONFIG fields below) are read through the
+        // filter here, word by word.
+        let filter = data.var_filter("DEPENDS").cloned();
         let value = data.value("DEPENDS");
         if value.as_ref().is_some_and(|v| v.unevaluated_python) {
             python += 1;
         }
+        let filtered = value
+            .as_ref()
+            .is_some_and(|v| !v.unevaluated_python && v.unresolved.is_empty());
+        filter_seen |= filter.is_some();
         let words = value.map(|v| dep_words(&v.text)).unwrap_or_default();
-        let filter = NativeDepends::of(&data);
+        let word_filter = if filtered { None } else { filter.as_ref() };
+        let label = filter
+            .as_ref()
+            .map(|f| {
+                f.describe()
+                    .split('(')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .unwrap_or_default();
         let mut rows: Vec<(String, String, Option<Loc>)> = Vec::new();
         for w in &words {
             let loc = word_source(&data, "DEPENDS", w);
-            match filter.map(w) {
+            match map_word(word_filter, w) {
                 Mapped::Same => rows.push((w.clone(), "DEPENDS".to_string(), loc)),
                 Mapped::To(n) => {
                     native_mapped = true;
-                    rows.push((n, "DEPENDS (native_filter)".to_string(), loc));
+                    rows.push((n, format!("DEPENDS ({label})"), loc));
                 }
                 Mapped::Dropped => native_mapped = true,
             }
@@ -521,11 +543,11 @@ fn build(
         let opts = pkg_options(&data).options;
         for o in opts.iter().filter(|o| o.selected) {
             for w in dep_words(o.field(2)) {
-                let (w, source) = match filter.map(&w) {
+                let (w, source) = match map_word(filter.as_ref(), &w) {
                     Mapped::Same => (w, format!("PACKAGECONFIG[{}]", o.name)),
                     Mapped::To(n) => {
                         native_mapped = true;
-                        (n, format!("PACKAGECONFIG[{}] (native_filter)", o.name))
+                        (n, format!("PACKAGECONFIG[{}] ({label})", o.name))
                     }
                     Mapped::Dropped => continue,
                 };
@@ -577,8 +599,10 @@ fn build(
     if task_rows {
         t.note(TASK_DEPENDS_NOTE);
     }
-    if native_mapped {
-        t.note(NATIVE_FILTER_NOTE);
+    if let Some(f) = ds.var_filter("DEPENDS")
+        && (native_mapped || filter_seen)
+    {
+        t.note(&filter_note(f));
     }
     if missing > 0 {
         t.note("note: provider - means no recipe in the workspace was found to provide the name (nor a BBCLASSEXTEND variant of a recipe whose BBCLASSEXTEND lists the class, by its name or through the PROVIDES its class rewrites); a PN or PROVIDES that needs expansion to name it is not found (binutils-cross-${TARGET_ARCH}, a PROVIDES:append:class-native)");
@@ -605,57 +629,39 @@ fn build(
     Ok(t)
 }
 
-const NATIVE_FILTER_NOTE: &str = "note: native_filter rows: in a native variant (PN ending in -native, \"native\" in BBCLASSEXTEND) OE-core's native.bbclass filters DEPENDS on every read (native_virtclass_handler: setVarFilter with oe.classextend.native_filter, selfref=False), so BitBake builds expat-native for the word expat; shown as it reads it, the recipe itself left out";
+/// The note for the rows a read filter changed.
+fn filter_note(f: &VarFilter) -> String {
+    let name = f.describe();
+    let name = name.split('(').next().unwrap_or_default().to_string();
+    format!(
+        "note: {name}: OE-core's class-extension code filters DEPENDS on every read (`d.setVarFilter`, here {}; native.bbclass's native_virtclass_handler for a native variant, nativesdk.bbclass's anonymous python for nativesdk), so BitBake builds expat-native for the word expat in a native variant; DEPENDS is listed as it reads it (the recipe itself left out), and the words of an uncertain DEPENDS or of a PACKAGECONFIG field are mapped one by one (rows marked ({name}))",
+        f.describe()
+    )
+}
 
-/// How a dependency word of `DEPENDS` reads in a recipe ([`NativeDepends::map`]).
+/// How a dependency word of `DEPENDS` reads in a recipe ([`map_word`]).
 enum Mapped {
     Same,
     To(String),
-    /// The recipe's own name (`selfref=False`).
+    /// The recipe's own name (`native_filter`'s `selfref=False`).
     Dropped,
 }
 
-/// OE-core's `native_virtclass_handler` (Wrynose `classes-recipe/native.bbclass`): when
-/// `PN` ends with `-native` and `"native" in BBCLASSEXTEND` (a substring test), it sets
-/// `d.setVarFilter("DEPENDS", "native_filter(val, pn, bpn, selfref=False)")`, so every read
-/// of `DEPENDS` (and so `bb.cache`'s, which schedules the build) gets the filtered words
-/// (`oe.classextend.native_filter`, [`crate::eval::variant::native_filter`]). The
-/// evaluator flags that filter and does not compute it (docs/bitbake-semantics.md,
-/// "Class-extended variants"); `deps` applies it to each word it lists.
-struct NativeDepends {
-    pn: String,
-    bpn: Option<String>,
-    on: bool,
-}
-
-impl NativeDepends {
-    fn of(ds: &DataStore) -> NativeDepends {
-        let pn = ds.value("PN").map(|v| v.text).unwrap_or_default();
-        let classextend = ds
-            .value("BBCLASSEXTEND")
-            .map(|v| v.text)
-            .unwrap_or_default();
-        NativeDepends {
-            on: pn.ends_with("-native") && classextend.contains("native"),
-            bpn: ds
-                .value("BPN")
-                .filter(|v| !v.unevaluated_python && v.unresolved.is_empty())
-                .map(|v| v.text),
-            pn,
-        }
+/// One word of `DEPENDS` (or of a `PACKAGECONFIG` build field, which `base.bbclass` appends
+/// to `DEPENDS`) as BitBake reads it through the read filter class-extension code installed
+/// on `DEPENDS` (recorded by the evaluator, docs/bitbake-semantics.md "Class-extended
+/// variants"; [`VarFilter::map_word`]). Words standing for unevaluated text stay.
+fn map_word(filter: Option<&VarFilter>, word: &str) -> Mapped {
+    let Some(f) = filter else {
+        return Mapped::Same;
+    };
+    if words::is_unevaluated(word) {
+        return Mapped::Same;
     }
-
-    fn map(&self, word: &str) -> Mapped {
-        if !self.on || words::is_unevaluated(word) {
-            return Mapped::Same;
-        }
-        if word == self.pn {
-            return Mapped::Dropped;
-        }
-        match eval::variant::native_filter(word, &self.pn, self.bpn.as_deref()) {
-            Some(Ok(n)) if n != word => Mapped::To(n),
-            _ => Mapped::Same,
-        }
+    match f.map_word(word) {
+        None => Mapped::Dropped,
+        Some(n) if n != word => Mapped::To(n),
+        Some(_) => Mapped::Same,
     }
 }
 

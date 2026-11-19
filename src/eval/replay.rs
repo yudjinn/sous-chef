@@ -1746,7 +1746,11 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
         // `setVar("DEPENDS", " ".join(newdeps))` all the same: the words joined with single
         // spaces. Done when that changes the text and the value is certain (an uncertain
         // value is flagged anyway, and its words may not be the ones BitBake splits).
-        if text != deps.text && !python && unresolved.is_empty() {
+        // With a read filter on DEPENDS the store holds the filtered words from now on and
+        // the next read filters them again, which can change their order
+        // (`suffix_filter_deps` sorts): stored even when the text is the same.
+        let filtered = ds.var_filter(DEPENDS).is_some();
+        if (text != deps.text || filtered) && !python && unresolved.is_empty() {
             ds.rewrite(
                 DEPENDS,
                 text,

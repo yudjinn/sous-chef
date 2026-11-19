@@ -2502,6 +2502,37 @@ mod tests {
         not_evaluated("get_base_dep", &[]);
     }
 
+    /// `oe.utils.class_filter_features` (OE-core Wrynose `lib/oe/utils.py`, with
+    /// `bb.utils.filter_string`), the expression `set_class_filter` writes.
+    #[test]
+    fn oe_class_filter_features() {
+        let v = &[
+            ("F", "acl x11 ipv6 xattr"),
+            (
+                "FILTER",
+                "api-documentation debuginfod opencl opengl wayland",
+            ),
+        ];
+        assert_eq!(
+            ok(
+                "oe.utils.class_filter_features(\"sysvinit ipv4 ipv6 wayland opengl\", \"F\", \"FILTER\", d)",
+                v
+            ),
+            "acl ipv6 opengl wayland x11 xattr"
+        );
+        // Empty defaults: filter_string returns '' before reading its argument.
+        assert_eq!(
+            ok("oe.utils.class_filter_features('', 'F', 'UNSET', d)", v),
+            "acl ipv6 x11 xattr"
+        );
+        // d.getVar(features_var).split() of None, set(None): python raises.
+        not_evaluated(
+            "oe.utils.class_filter_features('a', 'UNSET', 'FILTER', d)",
+            v,
+        );
+        not_evaluated("oe.utils.class_filter_features('a', 'F', 'UNSET', d)", v);
+    }
+
     /// `map_kernel_arch` and `map_uboot_arch` (OE-core Wrynose `kernel-arch.bbclass`): the
     /// expected values are what the verified definitions return in python 3 (`None`: the
     /// definition calls `bb.error` and returns `None`, which is not evaluated).
