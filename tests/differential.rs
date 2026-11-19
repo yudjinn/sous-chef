@@ -938,7 +938,14 @@ fn workspace_checks(w: &Ws, ws: &Workspace, idx: &Index, pmap: &[(String, String
     );
     for (i, b) in bb_layers.iter().enumerate() {
         let s = st.get(i);
-        let same = s.is_some_and(|s| s.0 == b.0 && s.1 == b.1 && s.2 == b.2);
+        // BitBake 2.0 (Kirkstone) `show-layers` prints the layer directory's basename
+        // (`get_layer_name`), later releases the collection name.
+        let same = s.is_some_and(|s| {
+            let base = Path::new(&s.1)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string());
+            (s.0 == b.0 || base.as_deref() == Some(b.0.as_str())) && s.1 == b.1 && s.2 == b.2
+        });
         let _ = writeln!(
             out,
             "{}\t{}\t{}\t{}\t| static: {:?}",

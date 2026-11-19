@@ -1,7 +1,7 @@
 recipe	variable	class	cause
 curl	PN	equal	
 curl	PV	equal	
-curl	PR	flagged	unevaluated_python
+curl	PR	equal	
 curl	FILE	equal	
 curl	FILE_LAYERNAME	unset	
 curl	SRC_URI	equal	
@@ -41,7 +41,7 @@ curl	SECTION	equal
 curl	SUMMARY	equal	
 zlib	PN	equal	
 zlib	PV	equal	
-zlib	PR	flagged	unevaluated_python
+zlib	PR	equal	
 zlib	FILE	equal	
 zlib	FILE_LAYERNAME	unset	
 zlib	SRC_URI	equal	
@@ -77,7 +77,7 @@ zlib	SUMMARY	equal
 zlib	UPSTREAM_CHECK_URI	equal	
 openssl	PN	equal	
 openssl	PV	equal	
-openssl	PR	flagged	unevaluated_python
+openssl	PR	equal	
 openssl	FILE	equal	
 openssl	FILE_LAYERNAME	unset	
 openssl	SRC_URI	equal	
@@ -127,7 +127,7 @@ openssl	SECTION	equal
 openssl	SUMMARY	equal	
 ncurses	PN	equal	
 ncurses	PV	equal	
-ncurses	PR	flagged	unevaluated_python
+ncurses	PR	equal	
 ncurses	FILE	equal	
 ncurses	FILE_LAYERNAME	unset	
 ncurses	SRC_URI	equal	
@@ -187,7 +187,7 @@ ncurses	_unifdef_cleanup	equal
 ncurses	base_libdir	equal	
 bash	PN	equal	
 bash	PV	equal	
-bash	PR	flagged	unevaluated_python
+bash	PR	equal	
 bash	FILE	equal	
 bash	FILE_LAYERNAME	unset	
 bash	SRC_URI	equal	
@@ -231,7 +231,7 @@ bash	SECTION	equal
 bash	SUMMARY	equal	
 util-linux	PN	equal	
 util-linux	PV	equal	
-util-linux	PR	flagged	unevaluated_python
+util-linux	PR	equal	
 util-linux	FILE	equal	
 util-linux	FILE_LAYERNAME	unset	
 util-linux	SRC_URI	flagged	unevaluated_python
@@ -303,7 +303,7 @@ util-linux	SYSTEMD_SERVICE:util-linux-uuidd	equal
 util-linux	UTIL_LINUX_LIBDIR	equal	
 glib-2.0	PN	equal	
 glib-2.0	PV	equal	
-glib-2.0	PR	flagged	unevaluated_python
+glib-2.0	PR	equal	
 glib-2.0	FILE	equal	
 glib-2.0	FILE_LAYERNAME	unset	
 glib-2.0	SRC_URI	flagged	unevaluated_python
@@ -357,7 +357,7 @@ glib-2.0	SUMMARY	equal
 glib-2.0	USE_NLS	equal	
 dbus	PN	equal	
 dbus	PV	equal	
-dbus	PR	flagged	unevaluated_python
+dbus	PR	equal	
 dbus	FILE	equal	
 dbus	FILE_LAYERNAME	unset	
 dbus	SRC_URI	equal	
@@ -407,7 +407,7 @@ dbus	USERADD_PACKAGES	equal
 dbus	USERADD_PARAM	unset	
 expat	PN	equal	
 expat	PV	equal	
-expat	PR	flagged	unevaluated_python
+expat	PR	equal	
 expat	FILE	equal	
 expat	FILE_LAYERNAME	unset	
 expat	SRC_URI	equal	
@@ -444,7 +444,7 @@ expat	UPSTREAM_CHECK_URI	equal
 expat	VERSION_TAG	equal	
 python3	PN	equal	
 python3	PV	equal	
-python3	PR	flagged	unevaluated_python
+python3	PR	equal	
 python3	FILE	equal	
 python3	FILE_LAYERNAME	unset	
 python3	SRC_URI	equal	
@@ -516,7 +516,7 @@ python3	UPSTREAM_CHECK_REGEX	equal
 python3	UPSTREAM_CHECK_URI	equal	
 python3-jinja2	PN	equal	
 python3-jinja2	PV	equal	
-python3-jinja2	PR	flagged	unevaluated_python
+python3-jinja2	PR	equal	
 python3-jinja2	FILE	equal	
 python3-jinja2	FILE_LAYERNAME	unset	
 python3-jinja2	SRC_URI	flagged	unevaluated_python
@@ -551,7 +551,7 @@ python3-jinja2	PYPI_PACKAGE	equal
 python3-jinja2	RDEPENDS:python3-jinja2-ptest	equal	
 python3-packaging	PN	equal	
 python3-packaging	PV	equal	
-python3-packaging	PR	flagged	unevaluated_python
+python3-packaging	PR	equal	
 python3-packaging	FILE	equal	
 python3-packaging	FILE_LAYERNAME	unset	
 python3-packaging	SRC_URI	flagged	unevaluated_python
@@ -582,7 +582,7 @@ python3-packaging	HOMEPAGE	equal
 python3-packaging	LIC_FILES_CHKSUM	equal	
 linux-yocto	PN	equal	
 linux-yocto	PV	flagged	unresolved: SRCPV
-linux-yocto	PR	flagged	unevaluated_python
+linux-yocto	PR	equal	
 linux-yocto	FILE	equal	
 linux-yocto	FILE_LAYERNAME	unset	
 linux-yocto	SRC_URI	equal	
@@ -634,7 +634,7 @@ linux-yocto	SUMMARY	equal
 linux-yocto	UPSTREAM_CHECK_GITTAGREGEX	equal	
 u-boot	PN	equal	
 u-boot	PV	equal	
-u-boot	PR	flagged	unevaluated_python
+u-boot	PR	equal	
 u-boot	FILE	equal	
 u-boot	FILE_LAYERNAME	unset	
 u-boot	SRC_URI	equal	
@@ -677,7 +677,7 @@ u-boot	UBOOT_INITIAL_ENV	equal
 u-boot	UBOOT_LOCALVERSION	equal	
 core-image-minimal	PN	equal	
 core-image-minimal	PV	equal	
-core-image-minimal	PR	flagged	unevaluated_python
+core-image-minimal	PR	equal	
 core-image-minimal	FILE	equal	
 core-image-minimal	FILE_LAYERNAME	unset	
 core-image-minimal	SRC_URI	equal	
@@ -744,7 +744,7 @@ packagegroup-core-boot	VIRTUAL-RUNTIME_dev_manager	equal
 packagegroup-core-boot	VIRTUAL-RUNTIME_keymaps	equal	
 virtual/kernel	PN	equal	
 virtual/kernel	PV	flagged	unresolved: SRCPV
-virtual/kernel	PR	flagged	unevaluated_python
+virtual/kernel	PR	equal	
 virtual/kernel	FILE	equal	
 virtual/kernel	FILE_LAYERNAME	unset	
 virtual/kernel	SRC_URI	equal	
@@ -796,7 +796,7 @@ virtual/kernel	SUMMARY	equal
 virtual/kernel	UPSTREAM_CHECK_GITTAGREGEX	equal	
 busybox	PN	equal	
 busybox	PV	equal	
-busybox	PR	flagged	unevaluated_python
+busybox	PR	equal	
 busybox	FILE	equal	
 busybox	FILE_LAYERNAME	unset	
 busybox	SRC_URI	equal	
@@ -911,7 +911,7 @@ base-files	hostname	equal
 base-files	volatiles	flagged	unevaluated_python
 psplash	PN	equal	
 psplash	PV	flagged	unresolved: SRCPV
-psplash	PR	flagged	unevaluated_python
+psplash	PR	equal	
 psplash	FILE	equal	
 psplash	FILE_LAYERNAME	unset	
 psplash	SRC_URI	equal	
@@ -952,7 +952,7 @@ psplash	SYSTEMD_SERVICE:psplash	equal
 psplash	UPSTREAM_CHECK_COMMITS	equal	
 quilt-native	PN	equal	
 quilt-native	PV	equal	
-quilt-native	PR	flagged	unevaluated_python
+quilt-native	PR	equal	
 quilt-native	FILE	equal	
 quilt-native	FILE_LAYERNAME	unset	
 quilt-native	SRC_URI	equal	
@@ -992,7 +992,7 @@ quilt-native	SECTION	equal
 quilt-native	SUMMARY	equal	
 gmp-native	PN	equal	
 gmp-native	PV	equal	
-gmp-native	PR	flagged	unevaluated_python
+gmp-native	PR	equal	
 gmp-native	FILE	equal	
 gmp-native	FILE_LAYERNAME	unset	
 gmp-native	SRC_URI	equal	
@@ -1031,7 +1031,7 @@ gmp-native	SUMMARY	equal
 gmp-native	acpaths	equal	
 nativesdk-zlib	PN	equal	
 nativesdk-zlib	PV	equal	
-nativesdk-zlib	PR	flagged	unevaluated_python
+nativesdk-zlib	PR	equal	
 nativesdk-zlib	FILE	equal	
 nativesdk-zlib	FILE_LAYERNAME	unset	
 nativesdk-zlib	SRC_URI	equal	
@@ -1067,7 +1067,7 @@ nativesdk-zlib	SUMMARY	equal
 nativesdk-zlib	UPSTREAM_CHECK_URI	equal	
 htop	PN	equal	
 htop	PV	equal	
-htop	PR	flagged	unevaluated_python
+htop	PR	equal	
 htop	FILE	equal	
 htop	FILE_LAYERNAME	unset	
 htop	SRC_URI	equal	
@@ -1099,7 +1099,7 @@ htop	SRCREV	equal
 htop	SUMMARY	equal	
 nano	PN	equal	
 nano	PV	equal	
-nano	PR	flagged	unevaluated_python
+nano	PR	equal	
 nano	FILE	equal	
 nano	FILE_LAYERNAME	unset	
 nano	SRC_URI	equal	
@@ -1133,7 +1133,7 @@ nano	SUMMARY	equal
 nano	UPSTREAM_CHECK_URI	equal	
 jq	PN	equal	
 jq	PV	flagged	unresolved: SRCPV
-jq	PR	flagged	unevaluated_python
+jq	PR	equal	
 jq	FILE	equal	
 jq	FILE_LAYERNAME	unset	
 jq	SRC_URI	equal	
@@ -1168,7 +1168,7 @@ jq	SRCREV	equal
 jq	SUMMARY	equal	
 fmt	PN	equal	
 fmt	PV	equal	
-fmt	PR	flagged	unevaluated_python
+fmt	PR	equal	
 fmt	FILE	equal	
 fmt	FILE_LAYERNAME	unset	
 fmt	SRC_URI	equal	
@@ -1201,7 +1201,7 @@ fmt	SRCREV	equal
 fmt	SUMMARY	equal	
 protobuf	PN	equal	
 protobuf	PV	equal	
-protobuf	PR	flagged	unevaluated_python
+protobuf	PR	equal	
 protobuf	FILE	equal	
 protobuf	FILE_LAYERNAME	unset	
 protobuf	SRC_URI	equal	
@@ -1246,7 +1246,7 @@ protobuf	SUMMARY	equal
 protobuf	TEST_SRC_DIR	equal	
 curl@default	PN	equal	
 curl@default	PV	equal	
-curl@default	PR	flagged	unevaluated_python
+curl@default	PR	equal	
 curl@default	FILE	equal	
 curl@default	FILE_LAYERNAME	unset	
 curl@default	SRC_URI	equal	
@@ -1286,7 +1286,7 @@ curl@default	SECTION	equal
 curl@default	SUMMARY	equal	
 virtual/kernel@default	PN	equal	
 virtual/kernel@default	PV	flagged	unresolved: SRCPV
-virtual/kernel@default	PR	flagged	unevaluated_python
+virtual/kernel@default	PR	equal	
 virtual/kernel@default	FILE	equal	
 virtual/kernel@default	FILE_LAYERNAME	unset	
 virtual/kernel@default	SRC_URI	equal	

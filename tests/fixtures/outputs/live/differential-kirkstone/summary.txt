@@ -3,42 +3,42 @@
 workspace kirkstone: release kirkstone (LAYERSERIES_CORENAMES), MACHINE qemux86-64, DISTRO poky
 
 recipe	compared	equal	equal-ws	flagged	gap	bug	unset-both	not-printed	note
-curl	36	28	0	8	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 2
-zlib	32	25	0	7	0	0	4	0	anonymous python 10 (5 opaque); unfollowed references 2
-openssl	45	38	0	7	0	0	5	0	anonymous python 13 (8 opaque); unfollowed references 2
-ncurses	55	45	0	10	0	0	5	0	anonymous python 11 (6 opaque); unfollowed references 2
-bash	41	32	0	9	0	0	3	0	anonymous python 12 (7 opaque); unfollowed references 2
-util-linux	69	57	0	12	0	0	3	0	anonymous python 13 (8 opaque); unfollowed references 2
-glib-2.0	50	39	0	11	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 2
-dbus	47	39	0	8	0	0	3	0	anonymous python 14 (9 opaque); unfollowed references 2
-expat	34	27	0	7	0	0	3	0	anonymous python 11 (5 opaque); unfollowed references 2
-python3	67	45	0	22	0	0	5	0	anonymous python 13 (8 opaque); unfollowed references 2
-python3-jinja2	32	24	0	8	0	0	3	0	anonymous python 10 (5 opaque); unfollowed references 2
-python3-packaging	28	20	0	8	0	0	3	0	anonymous python 9 (4 opaque); unfollowed references 2
-linux-yocto	46	36	0	10	0	0	6	0	anonymous python 15 (9 opaque); unfollowed references 2
-u-boot	41	33	0	8	0	0	2	0	anonymous python 12 (4 opaque); unfollowed references 2
-core-image-minimal	28	21	0	7	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 3
+curl	36	29	0	7	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 2
+zlib	32	26	0	6	0	0	4	0	anonymous python 10 (5 opaque); unfollowed references 2
+openssl	45	39	0	6	0	0	5	0	anonymous python 13 (8 opaque); unfollowed references 2
+ncurses	55	46	0	9	0	0	5	0	anonymous python 11 (6 opaque); unfollowed references 2
+bash	41	33	0	8	0	0	3	0	anonymous python 12 (7 opaque); unfollowed references 2
+util-linux	69	58	0	11	0	0	3	0	anonymous python 13 (8 opaque); unfollowed references 2
+glib-2.0	50	40	0	10	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 2
+dbus	47	40	0	7	0	0	3	0	anonymous python 14 (9 opaque); unfollowed references 2
+expat	34	28	0	6	0	0	3	0	anonymous python 11 (5 opaque); unfollowed references 2
+python3	67	46	0	21	0	0	5	0	anonymous python 13 (8 opaque); unfollowed references 2
+python3-jinja2	32	25	0	7	0	0	3	0	anonymous python 10 (5 opaque); unfollowed references 2
+python3-packaging	28	21	0	7	0	0	3	0	anonymous python 9 (4 opaque); unfollowed references 2
+linux-yocto	46	37	0	9	0	0	6	0	anonymous python 15 (9 opaque); unfollowed references 2
+u-boot	41	34	0	7	0	0	2	0	anonymous python 12 (4 opaque); unfollowed references 2
+core-image-minimal	28	22	0	6	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 3
 packagegroup-core-boot	32	25	0	7	0	0	3	0	anonymous python 11 (6 opaque); unfollowed references 2
-virtual/kernel	46	36	0	10	0	0	6	0	provider linux-yocto (PreferredProvider); anonymous python 15 (9 opaque); unfollowed references 2
-busybox	64	51	0	13	0	0	3	0	anonymous python 14 (8 opaque); unfollowed references 2
+virtual/kernel	46	37	0	9	0	0	6	0	provider linux-yocto (PreferredProvider); anonymous python 15 (9 opaque); unfollowed references 2
+busybox	64	52	0	12	0	0	3	0	anonymous python 14 (8 opaque); unfollowed references 2
 base-files	44	36	0	8	0	0	4	0	anonymous python 9 (4 opaque); unfollowed references 2
-psplash	39	28	0	10	1	0	2	0	anonymous python 14 (9 opaque); unfollowed references 2
-quilt-native	37	26	0	11	0	0	3	0	anonymous python 11 (6 opaque); unfollowed references 2
-gmp-native	35	24	0	11	0	0	4	0	anonymous python 10 (5 opaque); unfollowed references 2
-nativesdk-zlib	32	21	1	10	0	0	4	0	anonymous python 11 (6 opaque); unfollowed references 2
-htop	30	22	0	8	0	0	2	0	anonymous python 10 (5 opaque); unfollowed references 2
-nano	31	23	0	8	0	0	3	0	anonymous python 10 (5 opaque); unfollowed references 2
-jq	32	23	0	9	0	0	3	0	anonymous python 10 (5 opaque); unfollowed references 2
-fmt	30	23	0	7	0	0	3	0	anonymous python 11 (5 opaque); unfollowed references 2
-protobuf	42	33	0	9	0	0	3	0	anonymous python 11 (6 opaque); unfollowed references 2
-curl@default	36	28	0	8	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 2
-virtual/kernel@default	46	36	0	10	0	0	6	0	provider linux-yocto (PreferredProvider); anonymous python 15 (9 opaque); unfollowed references 2
+psplash	39	29	0	9	1	0	2	0	anonymous python 14 (9 opaque); unfollowed references 2
+quilt-native	37	27	0	10	0	0	3	0	anonymous python 11 (6 opaque); unfollowed references 2
+gmp-native	35	25	0	10	0	0	4	0	anonymous python 10 (5 opaque); unfollowed references 2
+nativesdk-zlib	32	22	1	9	0	0	4	0	anonymous python 11 (6 opaque); unfollowed references 2
+htop	30	23	0	7	0	0	2	0	anonymous python 10 (5 opaque); unfollowed references 2
+nano	31	24	0	7	0	0	3	0	anonymous python 10 (5 opaque); unfollowed references 2
+jq	32	24	0	8	0	0	3	0	anonymous python 10 (5 opaque); unfollowed references 2
+fmt	30	24	0	6	0	0	3	0	anonymous python 11 (5 opaque); unfollowed references 2
+protobuf	42	34	0	8	0	0	3	0	anonymous python 11 (6 opaque); unfollowed references 2
+curl@default	36	29	0	7	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 2
+virtual/kernel@default	46	37	0	9	0	0	6	0	provider linux-yocto (PreferredProvider); anonymous python 15 (9 opaque); unfollowed references 2
 
 ## Totals (1145 values compared, explicit machine and distro; `unset` = unset on both sides, `not-printed` = BitBake printed no value; neither counted)
 (equal, but flagged)	47
-equal	880
+equal	906
 equal-ws	1
-flagged	228
+flagged	202
 flagged-literal-differs	35
 gap:python-at-parse	1
 unset	100
@@ -49,7 +49,6 @@ CFLAGS	28
 DEPENDS	28
 FILESPATH	28
 WORKDIR	28
-PR	26
 S	26
 EXTRA_OECONF	11
 RDEPENDS	10
@@ -69,3 +68,4 @@ EXTRASITECONFIG	1
 EXTRA_CFLAGS	1
 EXTRA_LDFLAGS	1
 EXTRA_OEMESON	1
+LDFLAGS	1

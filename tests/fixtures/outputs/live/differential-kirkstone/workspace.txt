@@ -9,10 +9,10 @@
 
 ## Layers (bitbake-layers show-layers vs Workspace::discover)
 bitbake: 4 layers, static: 4 layers
-DIFF	meta	{{LIVE}}/releases/kirkstone/openembedded-core/meta	5	| static: Some(("core", "{{LIVE}}/releases/kirkstone/openembedded-core/meta", 5))
-DIFF	meta-poky	{{LIVE}}/releases/kirkstone/meta-yocto/meta-poky	5	| static: Some(("yocto", "{{LIVE}}/releases/kirkstone/meta-yocto/meta-poky", 5))
-DIFF	meta-yocto-bsp	{{LIVE}}/releases/kirkstone/meta-yocto/meta-yocto-bsp	5	| static: Some(("yoctobsp", "{{LIVE}}/releases/kirkstone/meta-yocto/meta-yocto-bsp", 5))
-DIFF	meta-oe	{{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe	5	| static: Some(("openembedded-layer", "{{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe", 5))
+same	meta	{{LIVE}}/releases/kirkstone/openembedded-core/meta	5	| static: Some(("core", "{{LIVE}}/releases/kirkstone/openembedded-core/meta", 5))
+same	meta-poky	{{LIVE}}/releases/kirkstone/meta-yocto/meta-poky	5	| static: Some(("yocto", "{{LIVE}}/releases/kirkstone/meta-yocto/meta-poky", 5))
+same	meta-yocto-bsp	{{LIVE}}/releases/kirkstone/meta-yocto/meta-yocto-bsp	5	| static: Some(("yoctobsp", "{{LIVE}}/releases/kirkstone/meta-yocto/meta-yocto-bsp", 5))
+same	meta-oe	{{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe	5	| static: Some(("openembedded-layer", "{{LIVE}}/releases/kirkstone/meta-openembedded/meta-oe", 5))
 
 ## bbappend order (bitbake-layers show-appends vs query::appends_for)
 listed twice by show-appends (second listing skipped): ["linux-yocto_5.15.bb"]

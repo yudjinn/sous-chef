@@ -129,3 +129,27 @@ fn weak_default_on_an_override_name_is_selected() {
         assert_eq!(text(&ds, "WEAKOFF"), None, "{rel}");
     }
 }
+
+#[test]
+fn pr_from_the_file_name_as_kirkstone_bitbake_conf_computes_it() {
+    // OE-core bitbake.conf on kirkstone .. mickledore:
+    // PR = "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[2] or 'r0'}".
+    let (_tmp, _root, _cfg, ws) = temp_ws_release("kirkstone", |root| {
+        append_to(
+            root,
+            "meta-core/conf/bitbake.conf",
+            "PR = \"${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[2] or 'r0'}\"\n",
+        );
+        fs::write(
+            root.join("meta-core/recipes-core/libfoo/libbar_1.0_r7.bb"),
+            "LICENSE = \"MIT\"\n",
+        )
+        .unwrap();
+    });
+    for (recipe, want) in [("libfoo", "r0"), ("libbar", "r7")] {
+        let ds = evaluate(&ws, recipe);
+        let v = ds.value("PR").unwrap();
+        assert_eq!(v.text, want, "{recipe}");
+        assert!(!v.unevaluated_python, "{recipe}: {v:?}");
+    }
+}

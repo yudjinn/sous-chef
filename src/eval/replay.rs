@@ -2045,12 +2045,35 @@ const SPECIAL_PKGSUFFIX: &[&str] = &[
 ];
 
 /// Variables computed from `FILE` in the recipe pass, in dependency order.
-const COMPUTED: &[&str] = &["PN", "PV", "BPN", "BP", "FILE_DIRNAME", "THISDIR"];
+const COMPUTED: &[&str] = &["PN", "PV", "PR", "BPN", "BP", "FILE_DIRNAME", "THISDIR"];
+
+/// OE-core's `PR` in `bitbake.conf` on the branches `kirkstone`, `langdale` and
+/// `mickledore` (`nanbield` and later: `PR = "r0"`).
+const PR_FROM_FILE: &str = "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[2] or 'r0'}";
+
+/// The third `_` part of a `.bb` / `.bbappend` name (`bb.parse.vars_from_file(...)[2]`,
+/// BitBake 2.0 `lib/bb/parse/__init__.py`), when not empty.
+fn pr_from_file(file: &str) -> Option<String> {
+    let p = Path::new(file);
+    let ext = p.extension().and_then(|e| e.to_str());
+    if !matches!(ext, Some("bb") | Some("bbappend")) {
+        return None;
+    }
+    let parts: Vec<&str> = p.file_stem()?.to_str()?.split('_').collect();
+    if parts.len() > 3 {
+        return None;
+    }
+    parts
+        .get(2)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
 
 /// Assignments to these names make the computed values be looked at again.
 const COMPUTED_INPUTS: &[&str] = &[
     "PN",
     "PV",
+    "PR",
     "BPN",
     "BP",
     "FILE_DIRNAME",
@@ -2285,9 +2308,20 @@ impl<'a> Replay<'a> {
                 // OE-Core's BP is plain text; python here is somebody else's.
                 continue;
             }
+            // PR: only OE-core's own expression (Kirkstone to Mickledore `bitbake.conf`;
+            // `PR = "r0"` from Nanbield on), never set when absent.
+            if name == "PR"
+                && !(ours
+                    || content
+                        .as_ref()
+                        .is_some_and(|c| c.text.trim() == PR_FROM_FILE))
+            {
+                continue;
+            }
             let text = match name {
                 "PN" => pn.clone().unwrap_or_else(|| "defaultpkgname".into()),
                 "PV" => pv.clone().unwrap_or_else(|| "1.0".into()),
+                "PR" => pr_from_file(&file).unwrap_or_else(|| "r0".into()),
                 "BPN" => self.prune_suffix(),
                 "BP" => "${BPN}-${PV}".to_string(),
                 _ => Path::new(&file)
@@ -4567,6 +4601,11 @@ mod tests {
         assert_eq!(vars_from_file("/a/app.bb"), (Some("app".into()), None));
         assert_eq!(vars_from_file("/a/hello.inc"), (None, None));
         assert_eq!(vars_from_file("/a/a_b_c_d.bb"), (None, None));
+        assert_eq!(pr_from_file("/a/hello_1.1_r3.bb").as_deref(), Some("r3"));
+        assert_eq!(pr_from_file("/a/hello_1.1.bb"), None);
+        assert_eq!(pr_from_file("/a/hello_1.1_.bb"), None);
+        assert_eq!(pr_from_file("/a/a_b_c_d.bb"), None);
+        assert_eq!(pr_from_file("/a/a_b_c.inc"), None);
     }
 
     #[test]
