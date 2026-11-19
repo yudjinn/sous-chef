@@ -369,7 +369,7 @@ followed although its value is uncertain (``note: `inherit_defer
 toolchain/${TOOLCHAIN}` ... was followed as "toolchain/gcc", but it depends on python or on
 overrides that are not all known; another value would read other files, so every value is
 flagged``); a note for each reference followed only for the words it reads whatever its
-python gives (``note: `inherit_defer ${IMGCLASSES}` at ... was followed for the words it reads
+python gives, when the files it did not read write the variable (``note: `inherit_defer ${IMGCLASSES}` at ... was followed for the words it reads
 whatever its python gives; it may also read populate_sdk_ext, which sous-chef did not read: the
 values they change are flagged``); a warning per
 anonymous python function that changes the variable by name, and

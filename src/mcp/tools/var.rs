@@ -411,8 +411,13 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
             u.kind, u.text, u.expanded
         ));
     }
-    // References followed only for the words certain whatever the python gives.
-    for e in notes.ref_effects.iter().filter(|e| e.vars.is_some()) {
+    // References followed only for the words certain whatever the python gives, whose
+    // unread files write this variable.
+    for e in notes
+        .ref_effects
+        .iter()
+        .filter(|e| e.vars.as_ref().is_some_and(|m| m.contains_key(&base)))
+    {
         let at = e
             .loc
             .as_ref()
