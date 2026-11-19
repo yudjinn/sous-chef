@@ -284,15 +284,12 @@ fn init_script_mode_strips_tmpdir_and_keeps_bitbakes_own_variables() {
     init_script_mode("", &[]);
 }
 
-#[test]
-fn a_pass_env_name_reaches_bitbake() {
-    init_script_mode("pass_env = [\"TMPDIR\"]\n", &["TMPDIR"]);
-
-    // kas mode too: kas would then hand it to BitBake (kas 5.5 `get_build_environ`).
+/// kas mode: the fixture kas project after `kas checkout`, the fake kas first on `PATH`.
+fn kas_mode(pass_env: &str, passed: &[&str]) {
     let p = kas_support::Project::after();
     std::fs::write(
         p.path("sous-chef.toml"),
-        "kas = [\"kas/base.yaml\", \"kas/board.yaml\"]\n[bitbake]\npass_env = [\"TMPDIR\"]\n",
+        format!("kas = [\"kas/base.yaml\", \"kas/board.yaml\"]\n[bitbake]\n{pass_env}"),
     )
     .unwrap();
     let scratch = tempfile::tempdir().unwrap();
@@ -302,6 +299,53 @@ fn a_pass_env_name_reaches_bitbake() {
     let mut s = Server::start(&p.root, &env);
     assert!(s.mode().contains("(kas)"), "{}", s.mode());
     let got = s.bitbake_env(&out);
-    check("kas", &got, scratch.path(), &["TMPDIR"]);
+    check("kas", &got, scratch.path(), passed);
     s.finish();
+}
+
+/// Initialised mode: the server is started as from a build shell (`BUILDDIR`, `BBPATH`,
+/// the fake BitBake on `PATH`), no init script configured.
+fn initialised_mode(pass_env: &str, passed: &[&str]) {
+    let (tmp, root) = workspace(&format!("[bitbake]\n{pass_env}"));
+    let out = tmp.path().join("env.out");
+    let mut env = server_env(tmp.path(), &out);
+    env.push(("BUILDDIR", root.join("build").into_os_string()));
+    env.push(("BBPATH", root.join("build").into_os_string()));
+    env.push(("PATH", path_with(&fakebb("bin"))));
+    let mut s = Server::start(&root, &env);
+    assert!(s.mode().contains("(initialised)"), "{}", s.mode());
+    let got = s.bitbake_env(&out);
+    check("initialised", &got, tmp.path(), passed);
+    s.finish();
+}
+
+#[test]
+fn bitbake_setup_mode_strips_tmpdir_and_keeps_bitbakes_own_variables() {
+    let (tmp, root) = workspace(&init_script(&fakebb("init-build-env"), ""));
+    let out = tmp.path().join("env.out");
+    let mut s = Server::start(&root, &server_env(tmp.path(), &out));
+    assert!(s.mode().contains("(bitbake-setup)"), "{}", s.mode());
+    let got = s.bitbake_env(&out);
+    check("bitbake-setup", &got, tmp.path(), &[]);
+    s.finish();
+}
+
+#[test]
+fn kas_mode_strips_tmpdir_and_keeps_bitbakes_own_variables() {
+    kas_mode("", &[]);
+}
+
+/// Initialised mode strips too: the build shell's own scripts never set `TMPDIR`, so the
+/// server's came from whatever started it (docs/bitbake-semantics.md).
+#[test]
+fn initialised_mode_strips_tmpdir_and_keeps_bitbakes_own_variables() {
+    initialised_mode("", &[]);
+}
+
+#[test]
+fn a_pass_env_name_reaches_bitbake() {
+    init_script_mode("pass_env = [\"TMPDIR\"]\n", &["TMPDIR"]);
+    // kas would then hand it to BitBake (kas 5.5 `get_build_environ`).
+    kas_mode("pass_env = [\"TMPDIR\"]\n", &["TMPDIR"]);
+    initialised_mode("pass_env = [\"TMPDIR\"]\n", &["TMPDIR"]);
 }
