@@ -7,7 +7,7 @@ name: lint demo
 
 on:
   push:
-    branches: [dev]
+    branches: [dev, ci-validate]
   workflow_dispatch:
 
 concurrency:
