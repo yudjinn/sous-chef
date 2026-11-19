@@ -32,7 +32,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::datastore::{Keyword, Piece, base_of, split_keyword};
-use super::expand::{Expander, PyEvent, Source};
+use super::expand::{Expander, PyEvent, Source, has_python};
 use super::{DataStore, OpStatus, Value, VarOp};
 use crate::parse::words;
 
@@ -272,6 +272,154 @@ impl Eval<'_> {
         Some(v)
     }
 
+    /// [`DataStore::flag_causes`] for `name`, reached through `path` (the references from
+    /// the asked variable down to `name`'s referrer).
+    fn causes(
+        &self,
+        name: &str,
+        path: &mut Vec<String>,
+        seen: &mut HashSet<String>,
+        out: &mut Vec<String>,
+    ) {
+        const MAX_PATH: usize = 24;
+        if path.len() > MAX_PATH || !seen.insert(name.to_string()) {
+            return;
+        }
+        let mut exp = Expander::new();
+        let entered = exp.enter(name);
+        let mut trace = Trace::default();
+        let composed = self.compose(name, true, &mut exp, &mut trace, 0);
+        let v = self.finalise(name, &mut exp, &mut Trace::default());
+        exp.leave(entered);
+        let Some(v) = v else { return };
+        if !v.unevaluated_python && v.unresolved.is_empty() {
+            return;
+        }
+        // `path` ends with `name`; what came before it is how the asked value reaches it.
+        let via = match path.len() {
+            0 | 1 => String::new(),
+            2..=4 => format!(", used via {}", path[..path.len() - 1].join(" > ")),
+            n => format!(
+                ", used via {} > {} > ... > {}",
+                path[0],
+                path[1],
+                path[n - 2]
+            ),
+        };
+        let used = |s: String| format!("{s}{via}");
+        let before = out.len();
+        let notes = &self.ds.notes;
+        let base = base_of(name);
+        let push = |out: &mut Vec<String>, s: String| {
+            if !out.contains(&s) {
+                out.push(s);
+            }
+        };
+        // Anonymous python, or a handler or filter that is not run.
+        if notes.python_vars.contains(base) || notes.python_vars.contains(name) {
+            let mut any = false;
+            for a in &notes.anonymous {
+                if a.entries.iter().any(|(e, _)| e == base || e == name) {
+                    any = true;
+                    push(
+                        out,
+                        used(format!("anonymous python at {} may write {name}", a.loc)),
+                    );
+                }
+            }
+            if !any {
+                push(
+                    out,
+                    used(format!(
+                        "python that is not run (an event handler or class filter) may change {name}"
+                    )),
+                );
+            }
+        }
+        if notes.uncertain_vars.contains(base) {
+            push(
+                out,
+                used(format!(
+                    "{name} is set in a file reached through an include or inherit whose value is not certain"
+                )),
+            );
+        }
+        if let Some(us) = notes.unresolved_vars.get(base) {
+            push(
+                out,
+                used(format!(
+                    "a statement sous-chef could not apply may set {name} (it needs {})",
+                    us.join(", ")
+                )),
+            );
+        }
+        let unknown_entries = (trace.inactive_seen || trace.multi_active) && self.ovr.uncertain();
+        if trace.consulted && (self.ovr.unstable || unknown_entries) {
+            let what = if self.ovr.unstable {
+                "OVERRIDES, which does not reach a stable value".to_string()
+            } else {
+                match self.ovr.unevaluated.first() {
+                    Some(e) => format!(
+                        "OVERRIDES entries that are not known statically (`{}`)",
+                        super::pyexpr::short(e)
+                    ),
+                    None => "OVERRIDES entries that are not known statically".to_string(),
+                }
+            };
+            push(
+                out,
+                used(format!(
+                    "which override variant or conditional :append/:prepend/:remove of {name} applies depends on {what}"
+                )),
+            );
+        }
+        // Its own text: python, undefined variables; then the references, in order.
+        let mut texts: Vec<String> = composed.raw.into_iter().collect();
+        if let Some(l) = self.ds.vars.get(name) {
+            for p in &l.removes {
+                if self.ovr.cond_active(p.cond.as_deref()) {
+                    texts.push(p.text.clone());
+                }
+            }
+        }
+        for t in &texts {
+            if let Some(code) = first_python(t) {
+                let why = exp
+                    .python_log()
+                    .iter()
+                    .find(|e| !e.evaluated && e.code == code)
+                    .and_then(|e| e.why.clone());
+                if why.is_some() || has_python(&v.text) {
+                    let why = why.map(|w| format!(": {w}")).unwrap_or_default();
+                    push(
+                        out,
+                        used(format!(
+                            "{name} holds python that is not evaluated: `{}`{why}",
+                            super::pyexpr::short(&code)
+                        )),
+                    );
+                }
+            }
+        }
+        let refs: Vec<String> = texts
+            .iter()
+            .flat_map(|t| super::expand::var_refs(t))
+            .collect();
+        for r in &refs {
+            if v.unresolved.contains(r) && self.ds.value_with(r, self.ovr).is_none() {
+                push(out, used(format!("{name} uses ${{{r}}}, which is not set")));
+            }
+        }
+        for r in refs {
+            path.push(r.clone());
+            self.causes(&r, path, seen, out);
+            path.pop();
+        }
+        if out.len() == before && path.is_empty() {
+            push(out, format!("{name} is flagged (the cause was not traced)"));
+        }
+    }
+
     fn piece_active(&self, p: &Piece, trace: &mut Trace) -> bool {
         if p.cond.is_some() {
             trace.consulted = true;
@@ -481,6 +629,31 @@ fn split_keep_whitespace(s: &str) -> Vec<&str> {
     words::split_keep_whitespace(s)
 }
 
+/// The code of the first `${@...}` in `text` (to the first `}` on its line, as
+/// `has_python` finds it), trimmed as the python log records it.
+fn first_python(text: &str) -> Option<String> {
+    let mut rest = text;
+    while let Some(pos) = rest.find("${@") {
+        let after = &rest[pos + 3..];
+        let line = after.split('\n').next().unwrap_or("");
+        // `has_python`: at least one character, then a `}`; take the balanced end when the
+        // braces nest (`${@{...}}`), else the first `}`.
+        let mut depth = 0usize;
+        for (i, c) in line.char_indices() {
+            match c {
+                '{' => depth += 1,
+                '}' if depth == 0 && i > 0 => {
+                    return Some(line[..i].trim_matches(super::pyexpr::py_space).to_string());
+                }
+                '}' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        rest = &rest[pos + 1..];
+    }
+    None
+}
+
 /// What [`DataStore::python_log`] found.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PythonLog {
@@ -565,6 +738,25 @@ impl DataStore {
         PythonLog { own, overrides }
     }
 
+    /// Why the value of `name` is flagged (`unevaluated_python` or `unresolved`), one short
+    /// line per cause, at the variable that carries it: anonymous python that may write it,
+    /// python left in its text, an override decision that waits on unknown `OVERRIDES`
+    /// entries, a file reached through an uncertain reference, a statement that could not
+    /// be applied, an undefined variable. A cause found in a referenced variable says
+    /// through which references (`via WORKDIR > PACKAGE_ARCH`). Empty when the value is not
+    /// flagged. The causes are listed in the order met, each once.
+    pub fn flag_causes(&self, name: &str) -> Vec<String> {
+        let ovr = self.override_state();
+        let ev = Eval {
+            ds: self,
+            ovr: &ovr,
+        };
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        ev.causes(name, &mut Vec::new(), &mut seen, &mut out);
+        out
+    }
+
     /// [`DataStore::python_log`] for a text expanded against the store.
     pub fn python_log_of_text(&self, text: &str) -> Vec<PyEvent> {
         let ovr = self.override_state();
@@ -621,6 +813,24 @@ impl DataStore {
                 ovr: &ovr,
             },
         )
+    }
+
+    /// The python value of the expression `code` (`pyexpr`'s subset) against the store,
+    /// reading certain values only (`d.getVar` of a value with python, undefined variables,
+    /// an uncertain override decision or an anonymous-python write stops it, and so does an
+    /// unset variable something may still set): what anonymous python's `if <code>:` would
+    /// test. `None` when it cannot be told.
+    pub(crate) fn python_value(&self, code: &str) -> Option<super::pyexpr::PyVal> {
+        let ovr = self.override_state();
+        Expander::new()
+            .python_value(
+                code,
+                &Eval {
+                    ds: self,
+                    ovr: &ovr,
+                },
+            )
+            .ok()
     }
 
     /// Expanded value of `name[flag]` (flags have no overrides or appends; a `??=` flag

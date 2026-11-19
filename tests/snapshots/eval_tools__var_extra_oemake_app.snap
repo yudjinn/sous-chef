@@ -7,5 +7,5 @@ shadowed	?=	-	meta-core:conf/bitbake.conf:43	EXTRA_OEMAKE ?= ""
 applied	=	-	meta-mine:recipes-app/app/app_0.1.bb:9	EXTRA_OEMAKE = "GREETING=${APP_GREETING}"
 final: "GREETING=hello"
 note: python evaluated statically (pure helpers, exact): `'hi' if d.getVar('MACHINE') == 'boardx' else 'hello'`
-warning: anonymous python at meta-mine:recipes-app/app/app_0.1.bb:13-16 changes EXTRA_OEMAKE; it is not run, so the value shown is the one before it
-note: 1 value depends on python and was not evaluated; use authoritative=true
+note: anonymous python at meta-mine:recipes-app/app/app_0.1.bb:13-16 does not write EXTRA_OEMAKE here: every write is under a false condition: `d.getVar('MACHINE') == 'boardx'`
+note: 1 anonymous python function was not run (none changes EXTRA_OEMAKE by name)

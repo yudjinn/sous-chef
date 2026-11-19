@@ -68,7 +68,7 @@ pub enum PyVal {
 
 impl PyVal {
     /// Python truth value.
-    fn truthy(&self) -> Result<bool, Stop> {
+    pub(crate) fn truthy(&self) -> Result<bool, Stop> {
         Ok(match self {
             PyVal::None => false,
             PyVal::Bool(b) => *b,

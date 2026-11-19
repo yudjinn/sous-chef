@@ -13,15 +13,15 @@ curl	FILES:curl	equal
 curl	OVERRIDES	equal	
 curl	MACHINEOVERRIDES	equal	
 curl	DISTROOVERRIDES	equal	
-curl	S	equal	
-curl	B	equal	
-curl	WORKDIR	equal	
+curl	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+curl	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+curl	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 curl	LICENSE	equal	
 curl	INHERIT	equal	
 curl	PROVIDES	equal	
 curl	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 curl	EXTRA_OECMAKE	unset	
-curl	CFLAGS	equal	
+curl	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 curl	FILESPATH	flagged	unevaluated_python
 curl	MACHINE	equal	
 curl	DISTRO	equal	
@@ -83,7 +83,7 @@ linux-kiss	DEPENDS	flagged	unevaluated_python
 linux-kiss	RDEPENDS:linux-kiss	unset	
 linux-kiss	PACKAGECONFIG	unset	
 linux-kiss	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:118 [__anon_168]; append kernel-devicetree.bbclass:10 [__anon_13]
-linux-kiss	FILES:linux-kiss	equal	
+linux-kiss	FILES:linux-kiss	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:60-168 may write FILES:linux-kiss
 linux-kiss	OVERRIDES	equal	
 linux-kiss	MACHINEOVERRIDES	equal	
 linux-kiss	DISTROOVERRIDES	equal	
@@ -227,15 +227,15 @@ zlib	FILES:zlib	equal
 zlib	OVERRIDES	equal	
 zlib	MACHINEOVERRIDES	equal	
 zlib	DISTROOVERRIDES	equal	
-zlib	S	equal	
-zlib	B	equal	
-zlib	WORKDIR	equal	
+zlib	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+zlib	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+zlib	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 zlib	LICENSE	equal	
 zlib	INHERIT	equal	
 zlib	PROVIDES	equal	
 zlib	EXTRA_OECONF	equal	
 zlib	EXTRA_OECMAKE	unset	
-zlib	CFLAGS	equal	
+zlib	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 zlib	FILESPATH	flagged	unevaluated_python
 zlib	MACHINE	equal	
 zlib	DISTRO	equal	
@@ -265,15 +265,15 @@ openssl	FILES:openssl	equal
 openssl	OVERRIDES	equal	
 openssl	MACHINEOVERRIDES	equal	
 openssl	DISTROOVERRIDES	equal	
-openssl	S	equal	
-openssl	B	equal	
-openssl	WORKDIR	equal	
+openssl	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+openssl	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+openssl	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 openssl	LICENSE	equal	
 openssl	INHERIT	equal	
 openssl	PROVIDES	equal	
 openssl	EXTRA_OECONF	equal	
 openssl	EXTRA_OECMAKE	unset	
-openssl	CFLAGS	equal	
+openssl	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 openssl	FILESPATH	flagged	unevaluated_python
 openssl	MACHINE	equal	
 openssl	DISTRO	equal	
@@ -317,15 +317,15 @@ busybox	FILES:busybox	equal
 busybox	OVERRIDES	equal	
 busybox	MACHINEOVERRIDES	equal	
 busybox	DISTROOVERRIDES	equal	
-busybox	S	equal	
-busybox	B	equal	
-busybox	WORKDIR	equal	
+busybox	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+busybox	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via S > UNPACKDIR > ... > MULTIMACH_TARGET_SYS
+busybox	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 busybox	LICENSE	equal	
 busybox	INHERIT	equal	
 busybox	PROVIDES	equal	
 busybox	EXTRA_OECONF	equal	
 busybox	EXTRA_OECMAKE	unset	
-busybox	CFLAGS	equal	
+busybox	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 busybox	FILESPATH	flagged	unevaluated_python
 busybox	MACHINE	equal	
 busybox	DISTRO	equal	
@@ -336,9 +336,9 @@ busybox	BUSYBOX_SPLIT_SUID	equal
 busybox	CONFFILES:busybox-mdev	equal	
 busybox	CONFFILES:busybox-syslog	equal	
 busybox	DESCRIPTION	equal	
-busybox	EXTRA_CFLAGS	equal	
+busybox	EXTRA_CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via CFLAGS > TARGET_CFLAGS > ... > MULTIMACH_TARGET_SYS
 busybox	EXTRA_LDFLAGS	equal	
-busybox	EXTRA_OEMAKE	equal	
+busybox	EXTRA_OEMAKE	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via CC > TOOLCHAIN_OPTIONS > ... > MULTIMACH_TARGET_SYS
 busybox	FILES:busybox-httpd	equal	
 busybox	FILES:busybox-syslog	equal	
 busybox	FILES:busybox-mdev	equal	
@@ -383,15 +383,15 @@ dropbear	FILES:dropbear	equal
 dropbear	OVERRIDES	equal	
 dropbear	MACHINEOVERRIDES	equal	
 dropbear	DISTROOVERRIDES	equal	
-dropbear	S	equal	
-dropbear	B	equal	
-dropbear	WORKDIR	equal	
+dropbear	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+dropbear	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+dropbear	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 dropbear	LICENSE	equal	
 dropbear	INHERIT	equal	
 dropbear	PROVIDES	equal	
 dropbear	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 dropbear	EXTRA_OECMAKE	unset	
-dropbear	CFLAGS	equal	
+dropbear	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 dropbear	FILESPATH	flagged	unevaluated_python
 dropbear	MACHINE	equal	
 dropbear	DISTRO	equal	
@@ -431,15 +431,15 @@ ncurses	FILES:ncurses	equal
 ncurses	OVERRIDES	equal	
 ncurses	MACHINEOVERRIDES	equal	
 ncurses	DISTROOVERRIDES	equal	
-ncurses	S	equal	
-ncurses	B	equal	
-ncurses	WORKDIR	equal	
+ncurses	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+ncurses	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+ncurses	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 ncurses	LICENSE	equal	
 ncurses	INHERIT	equal	
 ncurses	PROVIDES	equal	
 ncurses	EXTRA_OECONF	equal	
 ncurses	EXTRA_OECMAKE	unset	
-ncurses	CFLAGS	equal	
+ncurses	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 ncurses	FILESPATH	flagged	unevaluated_python
 ncurses	MACHINE	equal	
 ncurses	DISTRO	equal	
@@ -471,7 +471,7 @@ ncurses	SRCREV	equal
 ncurses	SUMMARY	equal	
 ncurses	SYSROOT_DIRS	equal	
 ncurses	UPSTREAM_CHECK_GITTAGREGEX	equal	
-ncurses	_install_cfgs	equal	
+ncurses	_install_cfgs	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via D > WORKDIR > MULTIMACH_TARGET_SYS
 ncurses	_install_opts	equal	
 ncurses	_unifdef_cleanup	equal	
 ncurses	base_libdir	equal	
@@ -489,15 +489,15 @@ dbus	FILES:dbus	equal
 dbus	OVERRIDES	equal	
 dbus	MACHINEOVERRIDES	equal	
 dbus	DISTROOVERRIDES	equal	
-dbus	S	equal	
-dbus	B	equal	
-dbus	WORKDIR	equal	
+dbus	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+dbus	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+dbus	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 dbus	LICENSE	equal	
 dbus	INHERIT	equal	
 dbus	PROVIDES	equal	
 dbus	EXTRA_OECONF	flagged	unevaluated_python
 dbus	EXTRA_OECMAKE	unset	
-dbus	CFLAGS	equal	
+dbus	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 dbus	FILESPATH	flagged	unevaluated_python
 dbus	MACHINE	equal	
 dbus	DISTRO	equal	
@@ -580,15 +580,15 @@ util-linux	FILES:util-linux	equal
 util-linux	OVERRIDES	equal	
 util-linux	MACHINEOVERRIDES	equal	
 util-linux	DISTROOVERRIDES	equal	
-util-linux	S	equal	
-util-linux	B	equal	
-util-linux	WORKDIR	equal	
+util-linux	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+util-linux	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+util-linux	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 util-linux	LICENSE	equal	
 util-linux	INHERIT	equal	
 util-linux	PROVIDES	equal	
 util-linux	EXTRA_OECONF	flagged	unevaluated_python
 util-linux	EXTRA_OECMAKE	unset	
-util-linux	CFLAGS	equal	
+util-linux	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 util-linux	FILESPATH	flagged	unevaluated_python
 util-linux	MACHINE	equal	
 util-linux	DISTRO	equal	
@@ -604,7 +604,7 @@ util-linux	CONFFILES:util-linux-su	equal
 util-linux	CVE_PRODUCT	equal	
 util-linux	DEFAULT_LICENSES	equal	
 util-linux	DESCRIPTION	equal	
-util-linux	EXTRA_OEMAKE	equal	
+util-linux	EXTRA_OEMAKE	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via CFLAGS > TARGET_CFLAGS > ... > MULTIMACH_TARGET_SYS
 util-linux	FILES:util-linux-doc	equal	
 util-linux	FILES:util-linux-dev	equal	
 util-linux	FILES:util-linux-mount	equal	
@@ -693,17 +693,17 @@ gmp-native	FILESPATH	flagged	unevaluated_python
 gmp-native	MACHINE	equal	
 gmp-native	DISTRO	equal	
 gmp-native	TMPDIR	equal	
-gmp-native	ARM_INSTRUCTION_SET	equal	
+gmp-native	ARM_INSTRUCTION_SET	equal	flagged: which override variant or conditional :append/:prepend/:remove of ARM_INSTRUCTION_SET applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 gmp-native	BBCLASSEXTEND	equal	
-gmp-native	DESCRIPTION	equal	
-gmp-native	FILES	equal	
+gmp-native	DESCRIPTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+gmp-native	FILES	equal	flagged: which override variant or conditional :append/:prepend/:remove of FILES applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 gmp-native	HOMEPAGE	equal	
 gmp-native	LIC_FILES_CHKSUM	equal	
 gmp-native	MIPS_INSTRUCTION_SET	equal	
 gmp-native	REVISION	equal	
-gmp-native	SECTION	equal	
+gmp-native	SECTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 gmp-native	SSTATE_SCAN_FILES	equal	
-gmp-native	SUMMARY	equal	
+gmp-native	SUMMARY	equal	flagged: which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 nativesdk-zlib	PN	equal	
 nativesdk-zlib	PV	equal	
 nativesdk-zlib	PR	equal	
@@ -721,10 +721,10 @@ nativesdk-zlib	DISTROOVERRIDES	equal
 nativesdk-zlib	S	flagged	unevaluated_python
 nativesdk-zlib	B	flagged	unevaluated_python
 nativesdk-zlib	WORKDIR	flagged	unevaluated_python
-nativesdk-zlib	LICENSE	equal	
+nativesdk-zlib	LICENSE	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write LICENSE
 nativesdk-zlib	INHERIT	equal	
 nativesdk-zlib	PROVIDES	equal	
-nativesdk-zlib	EXTRA_OECONF	equal	
+nativesdk-zlib	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of DISABLE_STATIC applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 nativesdk-zlib	EXTRA_OECMAKE	unset	
 nativesdk-zlib	CFLAGS	flagged	unevaluated_python
 nativesdk-zlib	FILESPATH	flagged	unevaluated_python
@@ -733,21 +733,21 @@ nativesdk-zlib	DISTRO	equal
 nativesdk-zlib	TMPDIR	equal	
 nativesdk-zlib	BBCLASSEXTEND	equal	
 nativesdk-zlib	CVE_PRODUCT	equal	
-nativesdk-zlib	DESCRIPTION	equal	
+nativesdk-zlib	DESCRIPTION	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write DESCRIPTION; which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known staticall...
 nativesdk-zlib	HOMEPAGE	equal	
-nativesdk-zlib	LDFLAGS	equal	
+nativesdk-zlib	LDFLAGS	equal	flagged: which override variant or conditional :append/:prepend/:remove of TARGET_LDFLAGS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 nativesdk-zlib	LIC_FILES_CHKSUM	equal	
 nativesdk-zlib	PREMIRRORS	equal	
-nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	
-nativesdk-zlib	SECTION	equal	
-nativesdk-zlib	SUMMARY	equal	
+nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write RDEPENDS:nativesdk-zlib-ptest; which override variant or conditional :append/:prepend/:remove of RDEPENDS:nativesdk-zlib-ptest applies depends on OVERRIDES ...
+nativesdk-zlib	SECTION	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write SECTION; which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@o...
+nativesdk-zlib	SUMMARY	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write SUMMARY; which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@o...
 nativesdk-zlib	UPSTREAM_CHECK_URI	equal	
 quilt-native	PN	equal	
 quilt-native	PV	equal	
 quilt-native	PR	equal	
 quilt-native	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 quilt-native	FILE_LAYERNAME	equal	
-quilt-native	SRC_URI	equal	
+quilt-native	SRC_URI	equal	flagged: which override variant or conditional :append/:prepend/:remove of SRC_URI applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 quilt-native	DEPENDS	flagged	unevaluated_python
 quilt-native	RDEPENDS:quilt-native	equal	
 quilt-native	PACKAGECONFIG	unset	
@@ -762,7 +762,7 @@ quilt-native	WORKDIR	flagged	unevaluated_python
 quilt-native	LICENSE	equal	
 quilt-native	INHERIT	equal	
 quilt-native	PROVIDES	equal	
-quilt-native	EXTRA_OECONF	equal	
+quilt-native	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of USRBINPATH applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:...
 quilt-native	EXTRA_OECMAKE	unset	
 quilt-native	CFLAGS	flagged	unevaluated_python
 quilt-native	FILESPATH	flagged	unevaluated_python
@@ -771,17 +771,17 @@ quilt-native	DISTRO	equal
 quilt-native	TMPDIR	equal	
 quilt-native	CACHED_CONFIGUREVARS	equal	
 quilt-native	CLEANBROKEN	equal	
-quilt-native	DESCRIPTION	equal	
-quilt-native	FILES	equal	
+quilt-native	DESCRIPTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	FILES	equal	flagged: which override variant or conditional :append/:prepend/:remove of FILES applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 quilt-native	FILES:quilt-native-doc	flagged	unevaluated_python
 quilt-native	HOMEPAGE	equal	
 quilt-native	INHIBIT_AUTOTOOLS_DEPS	equal	
 quilt-native	LIC_FILES_CHKSUM	equal	
 quilt-native	PACKAGE_WRITE_DEPS	flagged	unevaluated_python
 quilt-native	PATCHTOOL	equal	
-quilt-native	RDEPENDS:quilt-native-ptest	equal	
-quilt-native	SECTION	equal	
-quilt-native	SUMMARY	equal	
+quilt-native	RDEPENDS:quilt-native-ptest	equal	flagged: which override variant or conditional :append/:prepend/:remove of RDEPENDS:quilt-native-ptest applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	SECTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	SUMMARY	equal	flagged: which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 expat	PN	equal	
 expat	PV	equal	
 expat	PR	equal	
@@ -796,15 +796,15 @@ expat	FILES:expat	equal
 expat	OVERRIDES	equal	
 expat	MACHINEOVERRIDES	equal	
 expat	DISTROOVERRIDES	equal	
-expat	S	equal	
-expat	B	equal	
-expat	WORKDIR	equal	
+expat	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+expat	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+expat	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 expat	LICENSE	equal	
 expat	INHERIT	equal	
 expat	PROVIDES	equal	
 expat	EXTRA_OECONF	equal	
 expat	EXTRA_OECMAKE	equal	
-expat	CFLAGS	equal	
+expat	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 expat	FILESPATH	flagged	unevaluated_python
 expat	MACHINE	equal	
 expat	DISTRO	equal	
@@ -834,15 +834,15 @@ glib-2.0	FILES:glib-2.0	equal
 glib-2.0	OVERRIDES	equal	
 glib-2.0	MACHINEOVERRIDES	equal	
 glib-2.0	DISTROOVERRIDES	equal	
-glib-2.0	S	equal	
-glib-2.0	B	equal	
-glib-2.0	WORKDIR	equal	
+glib-2.0	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+glib-2.0	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+glib-2.0	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 glib-2.0	LICENSE	equal	
 glib-2.0	INHERIT	equal	
 glib-2.0	PROVIDES	equal	
 glib-2.0	EXTRA_OECONF	flagged	unevaluated_python
 glib-2.0	EXTRA_OECMAKE	unset	
-glib-2.0	CFLAGS	equal	
+glib-2.0	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 glib-2.0	FILESPATH	flagged	unevaluated_python
 glib-2.0	MACHINE	equal	
 glib-2.0	DISTRO	equal	
@@ -934,19 +934,19 @@ python3	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: 
 python3	RDEPENDS:python3	unset	
 python3	PACKAGECONFIG	equal	
 python3	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set python3_3.14.10.bb:429 [__anon_436]
-python3	FILES:python3	equal	
+python3	FILES:python3	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write FILES:python3
 python3	OVERRIDES	equal	
 python3	MACHINEOVERRIDES	equal	
 python3	DISTROOVERRIDES	equal	
-python3	S	equal	
-python3	B	equal	
-python3	WORKDIR	equal	
+python3	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+python3	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+python3	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 python3	LICENSE	equal	
 python3	INHERIT	equal	
 python3	PROVIDES	equal	
 python3	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 python3	EXTRA_OECMAKE	unset	
-python3	CFLAGS	equal	
+python3	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 python3	FILESPATH	flagged	unevaluated_python
 python3	MACHINE	equal	
 python3	DISTRO	equal	
@@ -954,19 +954,19 @@ python3	TMPDIR	equal
 python3	ALTERNATIVE:python3-dev	equal	
 python3	BBCLASSEXTEND	equal	
 python3	CACHED_CONFIGUREVARS	equal	
-python3	CPPFLAGS	equal	
-python3	CROSSPYTHONPATH	equal	
+python3	CPPFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via STAGING_INCDIR > STAGING_DIR_HOST > ... > MULTIMACH_TARGET_SYS
+python3	CROSSPYTHONPATH	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via STAGING_LIBDIR_NATIVE > STAGING_DIR_NATIVE > ... > MULTIMACH_TARGET_SYS
 python3	CVE_PRODUCT	equal	
 python3	DESCRIPTION	equal	
 python3	DEV_PKG_DEPENDENCY	equal	
 python3	EXTRANATIVEPATH	equal	
-python3	EXTRA_OEMAKE	equal	
+python3	EXTRA_OEMAKE	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via STAGING_LIBDIR > STAGING_DIR_HOST > ... > MULTIMACH_TARGET_SYS
 python3	FILES:python3-pydoc	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:412 [__anon_436]
 python3	FILES:python3-idle	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]
 python3	FILES:python3-tkinter	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]
-python3	FILES	equal	
-python3	FILES:python3-misc	equal	
-python3	FILES:python3-man	equal	
+python3	FILES	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write FILES
+python3	FILES:python3-misc	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write FILES:python3-misc
+python3	FILES:python3-man	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write FILES:python3-man
 python3	HOMEPAGE	equal	
 python3	INCLUDE_PYCS	equal	
 python3	INSANE_SKIP:python3-dev	equal	
@@ -978,22 +978,22 @@ python3	PACKAGE_PREPROCESS_FUNCS	equal
 python3	PYTHON_MAJMIN	equal	
 python3	RDEPENDS	unset	
 python3	RDEPENDS:python3-idle	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:418 [__anon_436]
-python3	RDEPENDS:python3-misc	equal	
+python3	RDEPENDS:python3-misc	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write RDEPENDS:python3-misc
 python3	RDEPENDS:python3-modules	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:418 [__anon_436]; append python3_3.14.10.bb:418 [__anon_436]; append python3_3.14.10.bb:418 [__anon_436]; append python3_3.14.10.bb:418 [__anon_436]; append python3_3.14.10.b...
-python3	RDEPENDS:python3-ptest	equal	
+python3	RDEPENDS:python3-ptest	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write RDEPENDS:python3-ptest
 python3	RDEPENDS:python3-pydoc	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:418 [__anon_436]
 python3	RDEPENDS:python3-tests	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:418 [__anon_436]; append python3_3.14.10.bb:418 [__anon_436]
 python3	RDEPENDS:python3-tkinter	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:418 [__anon_436]
-python3	RPROVIDES:python3-modules	equal	
-python3	RPROVIDES:python3-venv	equal	
+python3	RPROVIDES:python3-modules	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write RPROVIDES:python3-modules
+python3	RPROVIDES:python3-venv	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write RPROVIDES:python3-venv
 python3	RRECOMMENDS:python3-core	unset	
-python3	RRECOMMENDS:python3-crypt	equal	
-python3	RRECOMMENDS:python3-ctypes	equal	
+python3	RRECOMMENDS:python3-crypt	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write RRECOMMENDS:python3-crypt
+python3	RRECOMMENDS:python3-ctypes	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write RRECOMMENDS:python3-ctypes
 python3	SECTION	equal	
 python3	SKIPPED_TESTS	equal	
 python3	SSTATE_HASHEQUIV_FILEMAP	flagged	unevaluated_python
 python3	SSTATE_SCAN_FILES	equal	
-python3	SUMMARY	equal	
+python3	SUMMARY	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.14.10.bb:360-436 may write SUMMARY
 python3	SYSROOT_DIRS	equal	
 python3	SYSROOT_PREPROCESS_FUNCS	equal	
 python3	UPSTREAM_CHECK_REGEX	equal	
@@ -1011,15 +1011,15 @@ bash	FILES:bash	equal
 bash	OVERRIDES	equal	
 bash	MACHINEOVERRIDES	equal	
 bash	DISTROOVERRIDES	equal	
-bash	S	equal	
-bash	B	equal	
-bash	WORKDIR	equal	
+bash	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+bash	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+bash	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 bash	LICENSE	equal	
 bash	INHERIT	equal	
 bash	PROVIDES	equal	
 bash	EXTRA_OECONF	flagged	unevaluated_python
 bash	EXTRA_OECMAKE	unset	
-bash	CFLAGS	equal	
+bash	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 bash	FILESPATH	flagged	unevaluated_python
 bash	MACHINE	equal	
 bash	DISTRO	equal	
@@ -1027,7 +1027,7 @@ bash	TMPDIR	equal
 bash	ALTERNATIVE:bash	equal	
 bash	ALTERNATIVE_PRIORITY	equal	
 bash	BBCLASSEXTEND	equal	
-bash	BUILD_CFLAGS	equal	
+bash	BUILD_CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via BUILD_CPPFLAGS > STAGING_INCDIR_NATIVE > ... > MULTIMACH_TARGET_SYS
 bash	CACHED_CONFIGUREVARS	equal	
 bash	DEBUG_OPTIMIZATION	equal	
 bash	DESCRIPTION	equal	
@@ -1085,7 +1085,7 @@ virtual/kernel	DEPENDS	flagged	unevaluated_python
 virtual/kernel	RDEPENDS:linux-kiss	unset	
 virtual/kernel	PACKAGECONFIG	unset	
 virtual/kernel	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:118 [__anon_168]; append kernel-devicetree.bbclass:10 [__anon_13]
-virtual/kernel	FILES:linux-kiss	equal	
+virtual/kernel	FILES:linux-kiss	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:60-168 may write FILES:linux-kiss
 virtual/kernel	OVERRIDES	equal	
 virtual/kernel	MACHINEOVERRIDES	equal	
 virtual/kernel	DISTROOVERRIDES	equal	
@@ -1166,15 +1166,15 @@ curl@default	FILES:curl	equal
 curl@default	OVERRIDES	equal	
 curl@default	MACHINEOVERRIDES	equal	
 curl@default	DISTROOVERRIDES	equal	
-curl@default	S	equal	
-curl@default	B	equal	
-curl@default	WORKDIR	equal	
+curl@default	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
+curl@default	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
+curl@default	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
 curl@default	LICENSE	equal	
 curl@default	INHERIT	equal	
 curl@default	PROVIDES	equal	
 curl@default	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 curl@default	EXTRA_OECMAKE	unset	
-curl@default	CFLAGS	equal	
+curl@default	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
 curl@default	FILESPATH	flagged	unevaluated_python
 curl@default	MACHINE	equal	
 curl@default	DISTRO	equal	
@@ -1236,7 +1236,7 @@ virtual/kernel@default	DEPENDS	flagged	unevaluated_python
 virtual/kernel@default	RDEPENDS:linux-kiss	unset	
 virtual/kernel@default	PACKAGECONFIG	unset	
 virtual/kernel@default	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:118 [__anon_168]; append kernel-devicetree.bbclass:10 [__anon_13]
-virtual/kernel@default	FILES:linux-kiss	equal	
+virtual/kernel@default	FILES:linux-kiss	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:60-168 may write FILES:linux-kiss
 virtual/kernel@default	OVERRIDES	equal	
 virtual/kernel@default	MACHINEOVERRIDES	equal	
 virtual/kernel@default	DISTROOVERRIDES	equal	

@@ -561,7 +561,9 @@ fn compare_classifies_differences() {
         mc: None,
         recipe: Some("app".into()),
         version: None,
-        machine: None,
+        // On boardx the anonymous python's `if` is true: it appends ` BOARD=1`, as the
+        // dump below has it (on qemux86 the write is known not to happen).
+        machine: Some("boardx".into()),
         distro: None,
     };
     let ds = sous_chef::eval::evaluate(&index, &ws, &target).unwrap();
@@ -576,8 +578,8 @@ fn compare_classifies_differences() {
 #
 # $EXTRA_OEMAKE
 #   set /x/app.bb:9
-#     \"GREETING=hello\"
-EXTRA_OEMAKE=\"GREETING=hello BOARD=1\"
+#     \"GREETING=hi\"
+EXTRA_OEMAKE=\"GREETING=hi BOARD=1\"
 #
 # $ONLYBB
 #   set /x/a.conf:1

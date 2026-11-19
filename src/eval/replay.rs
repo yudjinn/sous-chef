@@ -78,6 +78,7 @@ use regex::Regex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use super::anon::{self, Guard, NoWrite};
 use super::datastore::{Content, OpKind, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
 use super::license;
@@ -119,8 +120,19 @@ pub struct ReplayNotes {
     /// runs those for every recipe too).
     pub anonymous: Vec<AnonPython>,
     /// Base names of variables that anonymous python changes by a literal name; their
-    /// values carry `unevaluated_python`.
+    /// values carry `unevaluated_python`. A name whose every write is proved not to happen
+    /// on this recipe is taken out at finalisation and listed in
+    /// [`ReplayNotes::no_writes`] (`eval::anon`).
     pub python_vars: BTreeSet<String>,
+    /// Names of [`ReplayNotes::python_vars`] that came from something other than an
+    /// anonymous function's write (an event handler not run, a filter not computed): never
+    /// taken out.
+    #[serde(skip)]
+    pub(crate) fixed_python_vars: BTreeSet<String>,
+    /// Names anonymous python writes, but not on this recipe: every write to them was
+    /// proved not to happen (`eval::anon`), so they are not in `python_vars`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub no_writes: Vec<NoWrite>,
     /// Base names of variables a statement the replay could not apply would have set
     /// (`MACHINE` and `DISTRO` when the `addfragments` list cannot be expanded), with the
     /// names that stood in the way; their values carry those names in `unresolved`.
@@ -191,6 +203,25 @@ pub struct AnonPython {
     /// It also changes variables through a computed name, or passes `d` to other code, so
     /// its effect is not known even by name.
     pub opaque: bool,
+    /// Proved to return at once on this recipe (why), so it writes nothing (`eval::anon`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub returns_early: Option<String>,
+    /// The `python_vars` entries it contributes, each with the condition of known OE-core
+    /// code its writes are under (`None`: unconditional, as far as the replay knows).
+    #[serde(skip)]
+    pub(crate) entries: Vec<(String, Option<Guard>)>,
+    /// The conditions of its leading `if <cond>: return` statements.
+    #[serde(skip)]
+    pub(crate) early_returns: Vec<String>,
+}
+
+impl AnonPython {
+    /// The names it writes, as recorded in [`ReplayNotes::python_vars`] (a base name for a
+    /// literal write, the full expanded name for a write through a local wrapper, the
+    /// variables of `PACKAGEVARS` for `rename_package_variables`).
+    pub fn writes(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|(e, _)| e.as_str())
+    }
 }
 
 /// A reference statement the replay did not follow.
@@ -1658,6 +1689,7 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
         let notes = Arc::make_mut(&mut ds.notes);
         if list.unevaluated_python {
             notes.python_vars.insert(DEPENDS.to_string());
+            notes.fixed_python_vars.insert(DEPENDS.to_string());
         }
         let e = notes
             .unresolved_vars
@@ -1759,6 +1791,7 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
     let notes = Arc::make_mut(&mut ds.notes);
     if python {
         notes.python_vars.insert(DEPENDS.to_string());
+        notes.fixed_python_vars.insert(DEPENDS.to_string());
     }
     if !unresolved.is_empty() {
         let e = notes
@@ -2610,16 +2643,30 @@ impl<'a> Replay<'a> {
             Some(b) => python_writes(b),
             None => (Vec::new(), true),
         };
+        // The conditions the writes are under that may be decided at finalisation.
+        let conds = body.as_deref().map(anon::analyse).unwrap_or_default();
+        let guard_of = |s: &str, wrapper: bool| {
+            conds
+                .guarded
+                .iter()
+                .find(|(n, g)| n == s && matches!(g, Guard::PackageconfigList { .. }) == wrapper)
+                .map(|(_, g)| g.clone())
+        };
         let mut bases = Vec::new();
+        let mut entries: Vec<(String, Option<Guard>)> = Vec::new();
         for s in &sets {
             let e = self.ds.expand(s);
-            bases.push(base_of(&e.text).to_string());
+            let b = base_of(&e.text).to_string();
+            entries.push((b.clone(), guard_of(s, false)));
+            bases.push(b);
         }
         // Names written through a local wrapper (`appendVar('PACKAGECONFIG_CONFARGS', ...)`
         // in base.bbclass): recorded under their full expanded name.
         let mut sets = sets;
         for s in body.as_deref().map(wrapper_writes).unwrap_or_default() {
-            bases.push(self.ds.expand(&s).text);
+            let e = self.ds.expand(&s).text;
+            entries.push((e.clone(), guard_of(&s, true)));
+            bases.push(e);
             if !sets.contains(&s) {
                 sets.push(s);
             }
@@ -2631,7 +2678,10 @@ impl<'a> Replay<'a> {
             .is_some_and(|b| b.contains(".rename_package_variables("))
             && let Some(v) = self.ds.value("PACKAGEVARS")
         {
-            bases.extend(pwords::known_words(&v.text).into_iter().map(str::to_string));
+            for w in pwords::known_words(&v.text) {
+                entries.push((w.to_string(), None));
+                bases.push(w.to_string());
+            }
         }
         // nativesdk.bbclass's `set_filter("PROVIDES", ...)`: BitBake applies the filter when
         // the value is read, so finalisation computes it (`apply_provides_filter`) or flags
@@ -2645,6 +2695,7 @@ impl<'a> Replay<'a> {
             .flatten();
         if sdk.is_some() {
             bases.retain(|b| b != "PROVIDES");
+            entries.retain(|(b, _)| b != "PROVIDES");
         }
         let notes = Arc::make_mut(&mut self.ds.notes);
         if let Some(guard) = sdk {
@@ -2657,6 +2708,9 @@ impl<'a> Replay<'a> {
             name,
             sets,
             opaque,
+            returns_early: None,
+            entries,
+            early_returns: conds.early_returns,
         });
         self.ds.ovr_cache = OnceLock::new();
     }
@@ -3473,6 +3527,8 @@ impl Replay<'_> {
         // installs.)
         self.features_backfill();
         self.nativesdk_anonymous_filter();
+        // Writes of anonymous python whose conditions are false here do not happen.
+        self.resolve_anonymous_writes();
         if self.ws.release.release.has(Feature::RecipeVirtualProviders) {
             virtual_recipe_providers(&mut self.ds, recipe);
         }
@@ -3484,6 +3540,35 @@ impl Replay<'_> {
             Arc::make_mut(&mut self.ds.notes).target_notes.extend(skip);
         }
         Ok(())
+    }
+
+    /// Takes out of `python_vars` the names whose anonymous-python writes are all proved not
+    /// to happen on this recipe, and marks the functions that return at once
+    /// (`eval::anon`). A path counts as a directory when it is one on disk or holds an
+    /// overlay file.
+    fn resolve_anonymous_writes(&mut self) {
+        let overlay = self.overlay;
+        let is_dir = |p: &Path| {
+            p.is_dir() || overlay.is_some_and(|o| o.paths().any(|f| f.starts_with(p) && f != p))
+        };
+        anon::resolve(&mut self.ds, &is_dir);
+        let returns: Vec<Option<String>> = self
+            .ds
+            .notes
+            .anonymous
+            .iter()
+            .map(|a| {
+                a.early_returns
+                    .iter()
+                    .find_map(|c| anon::early_return_taken(&self.ds, c))
+            })
+            .collect();
+        if returns.iter().any(Option::is_some) {
+            let notes = Arc::make_mut(&mut self.ds.notes);
+            for (a, r) in notes.anonymous.iter_mut().zip(returns) {
+                a.returns_early = r;
+            }
+        }
     }
 
     /// The deferred inherits, first in first out (more may be added meanwhile).
@@ -3741,6 +3826,7 @@ impl Replay<'_> {
         }
         let notes = Arc::make_mut(&mut self.ds.notes);
         notes.python_vars.insert("PROVIDES".into());
+        notes.fixed_python_vars.insert("PROVIDES".into());
         let line = format!(
             "note: {} at {loc}) filters PROVIDES with {} (OE-core lib/oe/classextend.py), which BitBake applies when the value is read; {why}, so the value shown is the one before the filter",
             filter.who(),
@@ -4044,6 +4130,7 @@ impl Replay<'_> {
         let notes = Arc::make_mut(&mut self.ds.notes);
         for v in vars {
             notes.python_vars.insert(v.clone());
+            notes.fixed_python_vars.insert(v.clone());
             let line = format!(
                 "note: {handler} (an OE-core event handler at {loc}, run before finalisation) {how} {v}; it is not run, so the value shown is the one before it"
             );

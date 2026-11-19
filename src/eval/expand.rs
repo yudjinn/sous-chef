@@ -302,10 +302,21 @@ impl Expander {
     }
 
     fn run_python(&mut self, code: &str, src: &dyn Source) -> Result<String, Stop> {
+        let v = self.python_value(code, src)?;
+        pyexpr::to_text(&v)
+    }
+
+    /// The python value of the expression `code` (the [`pyexpr`] subset), reading only
+    /// certain values from `src`, as `${@code}` would compute it before `str()`. Used for
+    /// the conditions of anonymous python (`eval::anon`).
+    pub(crate) fn python_value(
+        &mut self,
+        code: &str,
+        src: &dyn Source,
+    ) -> Result<pyexpr::PyVal, Stop> {
         let e = pyexpr::parse(code)?;
         let mut env = ExpEnv { exp: self, src };
-        let v = pyexpr::eval(&e, &mut env)?;
-        pyexpr::to_text(&v)
+        pyexpr::eval(&e, &mut env)
     }
 
     /// The value to substitute for `${name}`, or `None` to leave the reference in place
@@ -427,6 +438,20 @@ pub fn expand(text: &str, lookup: impl Fn(&str) -> Option<String>) -> Value {
         }
     }
     Expander::new().expand(text, &Raw(lookup))
+}
+
+/// The names of the plain `${NAME}` references in `text`, in order, each once.
+pub(crate) fn var_refs(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = text;
+    while let Some(p) = rest.find("${") {
+        let after = &rest[p + 2..];
+        if let Some(n) = var_ref_len(after) {
+            push_unique(&mut out, &after[..n]);
+        }
+        rest = &rest[p + 1..];
+    }
+    out
 }
 
 /// Length of the variable name at the start of `s` (the text after `${`) if `s` starts with a

@@ -1,0 +1,11 @@
+---
+source: tests/eval_tools.rs
+expression: out
+---
+status	op	override	loc	snippet
+shadowed	?=	-	meta-core:conf/bitbake.conf:43	EXTRA_OEMAKE ?= ""
+applied	=	-	meta-mine:recipes-app/app/app_0.1.bb:9	EXTRA_OEMAKE = "GREETING=${APP_GREETING}"
+final: "GREETING=hi"
+note: python evaluated statically (pure helpers, exact): `'hi' if d.getVar('MACHINE') == 'boardx' else 'hello'`
+warning: anonymous python at meta-mine:recipes-app/app/app_0.1.bb:13-16 changes EXTRA_OEMAKE; it is not run, so the value shown is the one before it
+note: 1 value depends on python and was not evaluated; use authoritative=true
