@@ -879,6 +879,20 @@ fn run_recipe(
             )
         })
         .collect();
+    details.extend(n.uncertain_references.iter().map(|r| {
+        format!(
+            "uncertain reference {} {:?} at {} followed as {:?} (python {}, unresolved {:?})",
+            r.kind,
+            r.text,
+            r.loc
+                .as_ref()
+                .map(|l| l.to_string())
+                .unwrap_or_else(|| "-".into()),
+            r.expanded,
+            r.python,
+            r.unresolved
+        )
+    }));
     details.extend(n.anonymous.iter().map(|a| {
         format!(
             "anonymous python {} opaque={} sets={:?}",

@@ -160,6 +160,11 @@ pub struct ReplayNotes {
     /// normalised): a file created there would have been read. See [`super::Overlay`].
     #[serde(skip)]
     pub(crate) probed_missing: BTreeSet<PathBuf>,
+    /// The configuration evaluated: its multiconfig name, `""` for the default one (whose
+    /// `BB_CURRENT_MC` is `default` before BitBake 2.12, while BitBake's task ids still use
+    /// `""`, `runqueue.py` `add_mc_dependencies`).
+    #[serde(skip)]
+    pub(crate) config_name: String,
     /// `__BBTASKS`: the tasks `addtask` added and `deltask` did not remove, in order (see
     /// [`DataStore::tasks`]).
     #[serde(skip)]
@@ -839,9 +844,16 @@ fn config_pass(
     }
     // A multiconfig pass: `parseConfigurationFiles(..., mc)` sets BB_CURRENT_MC on a fresh
     // copy of the base datastore before any file is read (eval::multiconfig).
-    if let Some(mc) = &target.mc {
-        put(&mut r.ds, "BB_CURRENT_MC", mc);
-    }
+    // The default configuration has a name too: `""` from BitBake 2.12 on, `default` before
+    // (`parseConfigurationFiles(..., mc = "default")`), so OE-core's multiconfig `require` in
+    // `bitbake.conf` resolves exactly (nothing, or the empty `conf/multiconfig/default.conf`).
+    let mc = match &target.mc {
+        Some(mc) => mc.as_str(),
+        None if ws.release.release.has(Feature::DefaultMcNamedDefault) => "default",
+        None => "",
+    };
+    put(&mut r.ds, "BB_CURRENT_MC", mc);
+    Arc::make_mut(&mut r.ds.notes).config_name = target.mc.clone().unwrap_or_default();
 
     // bblayers.conf; TOPDIR is its build directory. BBPATH starts as the build directory:
     // OE-core's build environment exports `BBPATH=$BUILDDIR` (scripts/oe-buildenv-internal)

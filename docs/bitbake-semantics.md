@@ -1684,10 +1684,15 @@ directory: kas writes none.
   saying nothing of it was read. `machine` / `distro` arguments are pinned on top, as in the
   default configuration. The cache key includes the name, so each configuration is a
   configuration pass of its own. A target note names the configuration and the file.
-- The default configuration is replayed as before: **`BB_CURRENT_MC` is not set** there
-  (BitBake sets `""`, or `default` before 2.12), so the Wrynose `require` is a python
-  reference that is not followed and the Kirkstone / Scarthgap one an undefined reference
-  (OE-core's empty `default.conf` is not read).
+- The default configuration sets `BB_CURRENT_MC` as BitBake does (acc-unfollowed; before,
+  it was left unset and both forms of the `require` were unfollowed references): `""` from
+  BitBake 2.12 on, `default` before (`Feature::DefaultMcNamedDefault`). So the Wrynose
+  python `require` requires nothing (`include`/`require` split the expanded text on
+  whitespace and include each word, `ConfHandler.include`: an empty text includes nothing,
+  for `require` too), and the Kirkstone / Scarthgap one reads OE-core's empty
+  `conf/multiconfig/default.conf`. Both are resolved exactly. `mcdepends` still decides
+  `applies` against `""` for the default configuration: BitBake's task ids name it `""`
+  (`runqueue.py` `add_mc_dependencies`, `if mc == frommc`) whatever its `BB_CURRENT_MC`.
 - The workspace's configurations (`multiconfig::list`, shown by `status`): `BBMULTICONFIG`
   of the default configuration, split as BitBake does (uncertain when python, an
   unresolved name or an uncertain include may change it), each name with the first
@@ -2960,6 +2965,7 @@ and must not be used to report an error. No row is marked *verify* at present.
 | `CvePatchContentLines` | patch contents are read line by line (every id on a line starting with `CVE:`; a file-name id needs four or more digits after the year); before, `CVE:( CVE-\d{4}-\d+)+` anywhere | 5.2 walnascar | (current) | `def parse_cves_from_patch_contents` on `walnascar`, `whinlatter`, `wrynose`, not on `styhead` (`87c6da6816` "cve-check: Rework patch parsing", contained in `walnascar` and later) |
 | `FileLayerName` | BitBake sets `FILE_LAYERNAME` for a recipe before parsing it | 4.3 nanbield (BitBake 2.6) | (current) | BitBake `cookerdata.py` `_parse_recipe`: `bb_data.setVar("FILE_LAYERNAME", layername)` on branch `2.8`, absent on `2.0`; added by `7090a14b0` (contained in branches `2.6` and later, not `2.4`); `bitbake -e` on Kirkstone prints no `FILE_LAYERNAME` (acc-releases) |
 | `FeaturesBackfill` | OE-core's `base.bbclass` anonymous python calls `oe.utils.features_backfill` for `DISTRO_FEATURES` and `MACHINE_FEATURES`: every word of `<VAR>_BACKFILL` in neither `<VAR>` nor `<VAR>_BACKFILL_CONSIDERED` is appended (`d.appendVar`, i.e. `<VAR>:append`) | 4.0 kirkstone (floor) | 5.3 whinlatter | `base.bbclass` anonymous python on `kirkstone` (`classes/`), `scarthgap` and `whinlatter` (`classes-global/`), not on `wrynose`, which has `<VAR>_DEFAULTS` and `oe.utils.filter_default_features` in `bitbake.conf` (OE-core `159148f4de`, `3194d6868d`); `lib/oe/utils.py` `features_backfill` the same on kirkstone and scarthgap; `bitbake -e packagegroup-core-boot` on both: `append utils.py:133 [features_backfill] " rtc qemu-usermode"` (acc-releases) |
+| `DefaultMcNamedDefault` | The default configuration is named `default`: `parseConfigurationFiles(prefiles, postfiles, mc = "default")` sets `BB_CURRENT_MC = "default"`, so OE-core's `require conf/multiconfig/${BB_CURRENT_MC}.conf` reads its empty `meta/conf/multiconfig/default.conf`; later `BB_CURRENT_MC = ""` | 4.0 kirkstone (floor) | 5.1 styhead (BitBake 2.10) | BitBake `cookerdata.py` `parseConfigurationFiles(..., mc = "default")` on `kirkstone` (2.0) and `scarthgap` (2.8), `mc = ""` on Wrynose's 2.18; dropped by `0fa0d8d76` ("cooker/cache: Drop mc 'default' string value", first released in 2.12 / Walnascar); OE-core `bitbake.conf:817` (kirkstone) and `:828` (scarthgap) require the file, `:824` on Wrynose has the python form that requires nothing for `""` (acc-unfollowed) |
 | `AssignmentWhitespaceWarning` | BitBake warns about an assignment without whitespace on both sides of the operator ("has a lack of whitespace around the assignment") | 5.3 whinlatter (BitBake 2.16) | (current) | guide 5.3, "Space around equal assignment"; BitBake `24772dd2a` "parse/ConfHandler: Add warning for deprecated whitespace usage" in `ConfHandler.feeder` (the `whitespace` / `whitespace2` groups of `__config_regexp__`), on branch `2.16`, not `2.12` |
 
 Renames older than the floor (no `Feature`: every supported release rejects them):

@@ -261,8 +261,9 @@ fn the_multiconfig_file_sets_the_machine_and_its_values() {
     assert_eq!(text(&tiny, "MACHINE"), "qemux86");
     assert_eq!(text(&musl, "BB_CURRENT_MC"), "musl");
     assert_eq!(text(&tiny, "BB_CURRENT_MC"), "tiny");
-    // The default configuration does not set it (unchanged from before multiconfig).
-    assert!(default.value("BB_CURRENT_MC").is_none());
+    // The default configuration's name: `""` on BitBake 2.12 and later (the fixture is
+    // Wrynose), as `parseConfigurationFiles` sets it.
+    assert_eq!(text(&default, "BB_CURRENT_MC"), "");
     assert!(
         text(&musl, "TMPDIR").ends_with("/tmp-mc-musl"),
         "{}",
@@ -337,23 +338,42 @@ fn the_older_require_form_works_too() {
     let musl = eval_in(&fx, &cache, None, Some("musl"));
     assert_eq!(text(&musl, "MACHINE"), "boardx");
     assert_eq!(text(&musl, "MCWEAK"), "musl");
-    // The default configuration is replayed as before: the reference is left unexpanded.
+    // The default configuration of a Wrynose workspace has `BB_CURRENT_MC = ""`: this
+    // form requires `conf/multiconfig/.conf`, which does not exist (BitBake: "Could not
+    // require file conf/multiconfig/.conf"; OE-core changed the line for that reason).
     let default = eval_in(&fx, &cache, None, None);
-    assert!(default.replay().references.iter().any(|r| r.text
-        == "conf/multiconfig/${BB_CURRENT_MC}.conf"
-        && matches!(&r.problem, RefProblem::Undefined(v) if v == &["BB_CURRENT_MC".to_string()])));
-}
-
-#[test]
-fn the_default_pass_keeps_the_python_require_unfollowed() {
-    let fx = fixture();
-    let default = eval_in(&fx, &ConfigCache::new(), None, None);
     assert!(
         default
             .replay()
             .references
             .iter()
-            .any(|r| r.kind == "require" && r.problem == RefProblem::Python)
+            .any(|r| r.text == "conf/multiconfig/${BB_CURRENT_MC}.conf"
+                && r.problem == RefProblem::NotFound("conf/multiconfig/.conf".into())),
+        "{:?}",
+        default.replay().references
+    );
+}
+
+/// The default configuration's `BB_CURRENT_MC` is `""` (BitBake 2.12 and later), so the
+/// Wrynose python `require` requires nothing: resolved, not left unfollowed.
+#[test]
+fn the_default_pass_resolves_the_python_require_to_nothing() {
+    let fx = fixture();
+    let default = eval_in(&fx, &ConfigCache::new(), None, None);
+    assert!(
+        !default
+            .replay()
+            .references
+            .iter()
+            .any(|r| r.kind == "require" && r.text.contains("multiconfig")),
+        "{:?}",
+        default.replay().references
+    );
+    assert!(
+        !default
+            .files()
+            .iter()
+            .any(|v| v.loc.path.starts_with("conf/multiconfig"))
     );
     let musl = eval_in(&fx, &ConfigCache::new(), None, Some("musl"));
     assert!(
