@@ -257,10 +257,21 @@ pub enum Feature {
     /// parsing", on the walnascar branch, not on styhead). Before, `CVE:( CVE-\d{4}-\d+)+`
     /// anywhere in the text.
     CvePatchContentLines,
+    /// BitBake sets `FILE_LAYERNAME` (the collection whose `BBFILE_PATTERN` matches the
+    /// recipe) before parsing a recipe (`cookerdata.py` `_parse_recipe`, BitBake `7090a14b0`,
+    /// on branch `2.6` and later, not `2.4` or `2.0`). Before, it is not set at all.
+    FileLayerName,
+    /// OE-core's `base.bbclass` anonymous python backfills features:
+    /// `oe.utils.features_backfill("DISTRO_FEATURES", d)` and `("MACHINE_FEATURES", d)`
+    /// append every word of `<VAR>_BACKFILL` that is in neither `<VAR>` nor
+    /// `<VAR>_BACKFILL_CONSIDERED` (`d.appendVar`). Wrynose replaces it with
+    /// `<VAR>_DEFAULTS` and `oe.utils.filter_default_features` in `bitbake.conf`
+    /// (OE-core `159148f4de`, `3194d6868d`).
+    FeaturesBackfill,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 24] = [
+    pub const ALL: [Feature; 26] = [
         Feature::SplitClassDirs,
         Feature::InheritDefer,
         Feature::IncludeAll,
@@ -285,6 +296,8 @@ impl Feature {
         Feature::CveStatus,
         Feature::CveStatusCpe,
         Feature::CvePatchContentLines,
+        Feature::FileLayerName,
+        Feature::FeaturesBackfill,
     ];
 
     /// The first supported release that has the feature.
@@ -300,7 +313,7 @@ impl Feature {
             | Feature::ClassExtendDeferred
             | Feature::DeferredInheritsClassOverride
             | Feature::AssignmentWhitespaceWarning => Release::Whinlatter,
-            Feature::CveStatus => Release::Nanbield,
+            Feature::CveStatus | Feature::FileLayerName => Release::Nanbield,
             Feature::CveStatusCpe => Release::Styhead,
             Feature::CvePatchContentLines => Release::Walnascar,
             Feature::UnpackDir => Release::Styhead,
@@ -313,7 +326,8 @@ impl Feature {
             | Feature::KeptUntilScarthgap
             | Feature::KeptUntilStyhead
             | Feature::KeptUntilWalnascar
-            | Feature::KeptUntilWhinlatter => Release::FLOOR,
+            | Feature::KeptUntilWhinlatter
+            | Feature::FeaturesBackfill => Release::FLOOR,
         }
     }
 
@@ -329,7 +343,7 @@ impl Feature {
             Feature::KeptUntilScarthgap => Some(Release::Scarthgap),
             Feature::KeptUntilStyhead => Some(Release::Styhead),
             Feature::KeptUntilWalnascar => Some(Release::Walnascar),
-            Feature::KeptUntilWhinlatter => Some(Release::Whinlatter),
+            Feature::KeptUntilWhinlatter | Feature::FeaturesBackfill => Some(Release::Whinlatter),
             _ => None,
         }
     }
@@ -363,7 +377,9 @@ impl Feature {
             | Feature::AssignmentWhitespaceWarning
             | Feature::CveStatus
             | Feature::CveStatusCpe
-            | Feature::CvePatchContentLines => true,
+            | Feature::CvePatchContentLines
+            | Feature::FileLayerName
+            | Feature::FeaturesBackfill => true,
         }
     }
 
@@ -776,6 +792,8 @@ mod tests {
             (CveStatus, false, true, true),
             (CveStatusCpe, false, false, true),
             (CvePatchContentLines, false, false, true),
+            (FileLayerName, false, true, true),
+            (FeaturesBackfill, true, true, false),
         ];
         assert_eq!(table.len(), Feature::ALL.len());
         for (f, k, s, w) in table {
@@ -808,6 +826,10 @@ mod tests {
         assert!(Release::Walnascar.has(KeptUntilWalnascar));
         assert!(!Release::Whinlatter.has(KeptUntilWalnascar));
         assert!(!Release::Walnascar.has(AssignmentWhitespaceWarning));
+        assert!(!Release::Mickledore.has(FileLayerName));
+        assert!(Release::Nanbield.has(FileLayerName));
+        assert!(Release::Whinlatter.has(FeaturesBackfill));
+        assert!(!Release::Wrynose.has(FeaturesBackfill));
         assert!(!Release::Mickledore.has(CveStatus));
         assert!(Release::Nanbield.has(CveStatus));
         assert!(!Release::Scarthgap.has(CveStatusCpe));

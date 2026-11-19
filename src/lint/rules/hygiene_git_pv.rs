@@ -19,6 +19,7 @@
 use crate::eval::OpStatus;
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
+use crate::release::Feature;
 use crate::types::{FileKind, LineSpan};
 
 pub struct HygieneGitPv;
@@ -71,15 +72,25 @@ impl Rule for HygieneGitPv {
         if !fetches_git {
             return;
         }
-        out.push(helpers::finding(
-            self,
-            cx,
-            LineSpan::line(1),
+        // Up to Mickledore `package.bbclass` adds no source revision to PKGV at all
+        // (Kirkstone's `package_convert_pr_autoinc` only replaces AUTOINC): `${SRCPV}` in PV
+        // is what carries it ([`Feature::KeptUntilMickledore`]).
+        let srcpv = helpers::releases_having(cx, Feature::KeptUntilMickledore);
+        let message = if srcpv.is_empty() {
             format!(
                 "`{stem}.bb` sets no PV, so BitBake takes it from the file name: PV is `git`, \
                  with no version number and no `+`, so no source revision is added to PKGV and \
                  a new SRCREV gives packages of the same version; set `PV = \"<version>+git\"`"
-            ),
-        ));
+            )
+        } else {
+            format!(
+                "`{stem}.bb` sets no PV, so BitBake takes it from the file name: PV is `git`, \
+                 with no version number and no source revision (on {} only `${{SRCPV}}` in PV \
+                 puts the revision in the package version), so a new SRCREV gives packages of \
+                 the same version; set `PV = \"<version>+git${{SRCPV}}\"`",
+                helpers::release_list(&srcpv)
+            )
+        };
+        out.push(helpers::finding(self, cx, LineSpan::line(1), message));
     }
 }

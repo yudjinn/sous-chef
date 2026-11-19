@@ -1,0 +1,24 @@
+# Workspace description for tests/differential.rs and scripts/differential.sh
+# (docs/differential.md, "Other releases"; the workspace: scripts/release-env.sh).
+# Paths are relative to $SOUS_CHEF_LIVE. Format: wrynose.ws.
+name = scarthgap
+build = releases/scarthgap/build
+init = oe:releases/scarthgap/openembedded-core
+path = 
+dumps = runs/acc-releases/scarthgap
+recorded = differential-scarthgap
+machine = qemux86-64
+distro = poky
+# autotools, meson, cmake, plain make
+recipes = curl zlib openssl ncurses bash util-linux glib-2.0 dbus expat
+# python: the interpreter, setuptools / pep517 (flit) modules
+recipes = python3 python3-jinja2 python3-packaging
+# kernel, bootloader, image, packagegroup, providers
+recipes = linux-yocto u-boot core-image-minimal packagegroup-core-boot virtual/kernel
+# bbappends from meta-yocto (base-files only on scarthgap)
+recipes = busybox base-files psplash
+# -native recipe file, BBCLASSEXTEND variants
+recipes = quilt-native gmp-native nativesdk-zlib
+# meta-oe
+recipes = htop nano jq fmt protobuf
+probe = curl virtual/kernel

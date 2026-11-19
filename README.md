@@ -112,22 +112,32 @@ Code's Grep and Glob honour it, so three baseline sessions did not find OE-core 
 
 ### Accuracy
 
-Static answers were compared with `bitbake -e` on the same workspace (yocto-kiss, Wrynose,
-MACHINE `dogbonedark`, DISTRO `kiss`; 23 recipes and two `BBCLASSEXTEND` variants;
-[docs/differential.md](docs/differential.md); re-measured for x7-cleanup on the same dumps):
+Static answers were compared with `bitbake -e` on the same workspace: on Wrynose, yocto-kiss
+(MACHINE `dogbonedark`, DISTRO `kiss`; 23 recipes and two `BBCLASSEXTEND` variants;
+re-measured for x7-cleanup on the same dumps), and on Scarthgap and Kirkstone, OE-core,
+meta-yocto and meta-oe (MACHINE `qemux86-64`, DISTRO `poky`; 28 targets each, 5 of them
+from meta-oe; acc-releases) ([docs/differential.md](docs/differential.md)):
 
-| Values compared | Equal to BitBake | Differ, and flagged | Documented gap | Differ without a flag |
-|---|---|---|---|---|
-| 1090 | 950 (87%) | 109 | 31 | 0 |
+| Release | Values compared | Equal to BitBake | Differ, and flagged | Documented gap | Differ without a flag |
+|---|---|---|---|---|---|
+| Wrynose (6.0) | 1090 | 950 (87%) | 109 | 31 | 0 |
+| Scarthgap (5.0) | 1186 | 1033 (87%) | 150 | 3 | 0 |
+| Kirkstone (4.0) | 1145 | 907 (79%) | 237 | 1 | 0 |
 
-(Before x1 evaluated the allowlisted python helpers: 702 equal, 357 flagged.)
+(Before x1 evaluated the allowlisted python helpers, Wrynose: 702 equal, 357 flagged. The
+first Scarthgap and Kirkstone runs found 2 and 31 values that differed without a flag; the
+release-specific causes were fixed, see differential.md, "Other releases".)
 
 A flagged value carries `depends on python, not evaluated` or names an unresolved
-reference; for those, `var` with `authoritative: true` asks BitBake. The 31 gaps are 29
-paths that BitBake spells through bitbake-setup's symlinked `layers/` directory and
+reference; for those, `var` with `authoritative: true` asks BitBake. On Wrynose the 31 gaps
+are 29 paths that BitBake spells through bitbake-setup's symlinked `layers/` directory and
 sous-chef through the symlink's target (the same files), and 2 `FILE_LAYERNAME` values of a
-variant, which `bitbake -e <variant>` shows differently from a build. The measurement covers one
-machine, one distro and one release; functions and variable flags were not compared.
+variant, which `bitbake -e <variant>` shows differently from a build; the release workspaces
+have no symlinks, so only the variant gap (Scarthgap) and one value set by a recipe's
+anonymous python remain. Kirkstone has more flagged values because its work directory holds
+`${EXTENDPE}` (python with `int()`), which flags `WORKDIR`, `S` and `B` in every recipe. Each
+release was measured with one machine and one distro; functions and variable flags were not
+compared.
 
 ### Speed
 

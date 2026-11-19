@@ -224,6 +224,12 @@ Checked against `ast.py` `DataNode.eval` and `data_smart.py`, BitBake master (20
 - `?=` on a variable that has a value re-stores the same value (no effect).
 - `??=` stores a separate default (`_defaultval`); the last one wins; it is used only when the
   variable has no plain value at the end.
+- **`??=` on an override name takes part in the override selection.** `setVarFlag(var,
+  "_defaultval", ...)` runs `_setvar_update_overrides(var)` when `var` has a `:`, as
+  `setVar` does, and `getVarFlag` of the selected variant falls back to its `_defaultval`, so
+  `PACKAGECONFIG:class-target ??= "readline gdbm"` (Kirkstone's `python3_3.10.20.bb`) is the
+  target recipe's `PACKAGECONFIG`. `data_smart.py` on branches `2.0`, `2.8` and `2.18`;
+  confirmed by `bitbake -e python3` on Kirkstone (acc-releases).
 - `:=` expands the value immediately against a copy of the current datastore (overrides and
   appends included). Undefined references stay as `${X}` text and can still expand later.
 - `VAR:append += "x"` is legal (with a warning) and appends `" x"`: the current value of the
@@ -1049,6 +1055,15 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
   `oe.utils.prune_suffix(PN, SPECIAL_PKGSUFFIX)` (then `MLPREFIX` stripped);
   `FILE_DIRNAME` (bitbake.conf) and `THISDIR` (base.bbclass, "only works properly with
   immediate expansion") = `dirname(FILE)`. `BP = "${BPN}-${PV}"` is plain text.
+  **`PR`** on Kirkstone, Langdale and Mickledore is python too: `PR =
+  "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[2] or 'r0'}"` (part 2 of the file
+  name, BitBake 2.0 pads the parts with `None`); from Nanbield on `PR = "r0"` (OE-core
+  `bitbake.conf` on those branches). The replay computes it the same way, only for that exact
+  text (acc-releases).
+- **`FILE_LAYERNAME`** does not exist before BitBake 2.6 (`Feature::FileLayerName`):
+  BitBake 2.0's `_parse_recipe` sets only `__BBMULTICONFIG`, Kirkstone's `bitbake.conf` has
+  no `FILE_LAYERNAME` and its `OVERRIDES` no `layer-` entry; added by `7090a14b0` "cooker:
+  Add FILE_LAYERNAME variable" (branches `2.6` and later). From then on:
 - **`FILE_LAYERNAME`** is set with `setVar` before the recipe is parsed (so it beats
   OE-Core's `FILE_LAYERNAME ??= "config"`). Its value is the **collection name** (not the
   layer directory name) of the first `BBFILE_PATTERN_<c>` regex that matches the recipe path
@@ -2241,6 +2256,13 @@ Checked 2026-11-17 against bitbake `master` (`lib/bb/main.py`, `lib/bb/cooker.py
 `scripts/lib/devtool/build.py`); the devtool positionals were also checked on OE-core
 `kirkstone` (`standard.py`), where they are the same.
 
+- **Older BitBake (acc-releases, 2026-11-19).** `bitbake-layers show-layers` on BitBake 2.0
+  prints the layer directory's basename in its first column (`bblayers/query.py`
+  `get_layer_name`: `os.path.basename(layerdir)`), on 2.8 and later the collection name.
+  BitBake 2.0 does not parse on python 3.14: `asyncrpc/serv.py` `serve_as_process` starts the
+  hash equivalence server through `multiprocessing`, whose default start method there
+  (`forkserver`) pickles the process target, a local function (`_pickle.PicklingError`);
+  with python 3.12 it parses. BitBake 2.8 parses on 3.14.
 - `bitbake` options: `-k` / `--continue` (`dest="halt"`, store_false: "Continue as much as
   possible after an error"), `-f` / `--force` ("Force the specified targets/task to run
   (invalidating any existing stamp file)"), `-c` / `--cmd` (the task, e.g. `compile`),
@@ -2719,6 +2741,8 @@ and must not be used to report an error. No row is marked *verify* at present.
 | `CveStatus` | OE-core's CVE check reads `CVE_STATUS[<id>]`, `CVE_CHECK_STATUSMAP`, `CVE_STATUS_GROUPS` (before: `CVE_CHECK_IGNORE` only) | 4.3 nanbield | (current) | OE-core `meta/lib/oe/cve_check.py`: `def decode_cve_status` on `nanbield`, `scarthgap`, `styhead`, `walnascar`, `whinlatter`, `wrynose`, absent on `kirkstone`, `langdale`, `mickledore` (`34f682a24b` "cve-check: add option to add additional patched CVEs", contained in `nanbield` and later) |
 | `CveStatusCpe` | a `CVE_STATUS` value may be `detail: cpe:vendor:product:description`, and the status counts only for a matching `CVE_PRODUCT` | 5.1 styhead | (current) | `decode_cve_status` compares `status_split[1].strip() == "cpe"` on `styhead` and later, not on `scarthgap` (`abca80a716` "cve-check: encode affected product/vendor in CVE_STATUS", contained in `styhead` and later) |
 | `CvePatchContentLines` | patch contents are read line by line (every id on a line starting with `CVE:`; a file-name id needs four or more digits after the year); before, `CVE:( CVE-\d{4}-\d+)+` anywhere | 5.2 walnascar | (current) | `def parse_cves_from_patch_contents` on `walnascar`, `whinlatter`, `wrynose`, not on `styhead` (`87c6da6816` "cve-check: Rework patch parsing", contained in `walnascar` and later) |
+| `FileLayerName` | BitBake sets `FILE_LAYERNAME` for a recipe before parsing it | 4.3 nanbield (BitBake 2.6) | (current) | BitBake `cookerdata.py` `_parse_recipe`: `bb_data.setVar("FILE_LAYERNAME", layername)` on branch `2.8`, absent on `2.0`; added by `7090a14b0` (contained in branches `2.6` and later, not `2.4`); `bitbake -e` on Kirkstone prints no `FILE_LAYERNAME` (acc-releases) |
+| `FeaturesBackfill` | OE-core's `base.bbclass` anonymous python calls `oe.utils.features_backfill` for `DISTRO_FEATURES` and `MACHINE_FEATURES`: every word of `<VAR>_BACKFILL` in neither `<VAR>` nor `<VAR>_BACKFILL_CONSIDERED` is appended (`d.appendVar`, i.e. `<VAR>:append`) | 4.0 kirkstone (floor) | 5.3 whinlatter | `base.bbclass` anonymous python on `kirkstone` (`classes/`), `scarthgap` and `whinlatter` (`classes-global/`), not on `wrynose`, which has `<VAR>_DEFAULTS` and `oe.utils.filter_default_features` in `bitbake.conf` (OE-core `159148f4de`, `3194d6868d`); `lib/oe/utils.py` `features_backfill` the same on kirkstone and scarthgap; `bitbake -e packagegroup-core-boot` on both: `append utils.py:133 [features_backfill] " rtc qemu-usermode"` (acc-releases) |
 | `AssignmentWhitespaceWarning` | BitBake warns about an assignment without whitespace on both sides of the operator ("has a lack of whitespace around the assignment") | 5.3 whinlatter (BitBake 2.16) | (current) | guide 5.3, "Space around equal assignment"; BitBake `24772dd2a` "parse/ConfHandler: Add warning for deprecated whitespace usage" in `ConfHandler.feeder` (the `whitespace` / `whitespace2` groups of `__config_regexp__`), on branch `2.16`, not `2.12` |
 
 Renames older than the floor (no `Feature`: every supported release rejects them):

@@ -967,7 +967,10 @@ fn recipe_pass(
             what: format!("layer of {recipe_loc}"),
         })?;
     let layername = file_layername(&r.ds, ws, &abs, &recipe.layer);
-    if let Some(l) = &layername {
+    // BitBake before 2.6 (Kirkstone) sets no FILE_LAYERNAME ([`Feature::FileLayerName`]).
+    if let Some(l) = &layername
+        && ws.release.release.has(Feature::FileLayerName)
+    {
         put(&mut r.ds, "FILE_LAYERNAME", l);
     }
     let not_collected = query::not_collected(index, recipe.id)?;
@@ -2042,12 +2045,35 @@ const SPECIAL_PKGSUFFIX: &[&str] = &[
 ];
 
 /// Variables computed from `FILE` in the recipe pass, in dependency order.
-const COMPUTED: &[&str] = &["PN", "PV", "BPN", "BP", "FILE_DIRNAME", "THISDIR"];
+const COMPUTED: &[&str] = &["PN", "PV", "PR", "BPN", "BP", "FILE_DIRNAME", "THISDIR"];
+
+/// OE-core's `PR` in `bitbake.conf` on the branches `kirkstone`, `langdale` and
+/// `mickledore` (`nanbield` and later: `PR = "r0"`).
+const PR_FROM_FILE: &str = "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[2] or 'r0'}";
+
+/// The third `_` part of a `.bb` / `.bbappend` name (`bb.parse.vars_from_file(...)[2]`,
+/// BitBake 2.0 `lib/bb/parse/__init__.py`), when not empty.
+fn pr_from_file(file: &str) -> Option<String> {
+    let p = Path::new(file);
+    let ext = p.extension().and_then(|e| e.to_str());
+    if !matches!(ext, Some("bb") | Some("bbappend")) {
+        return None;
+    }
+    let parts: Vec<&str> = p.file_stem()?.to_str()?.split('_').collect();
+    if parts.len() > 3 {
+        return None;
+    }
+    parts
+        .get(2)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
 
 /// Assignments to these names make the computed values be looked at again.
 const COMPUTED_INPUTS: &[&str] = &[
     "PN",
     "PV",
+    "PR",
     "BPN",
     "BP",
     "FILE_DIRNAME",
@@ -2282,9 +2308,20 @@ impl<'a> Replay<'a> {
                 // OE-Core's BP is plain text; python here is somebody else's.
                 continue;
             }
+            // PR: only OE-core's own expression (Kirkstone to Mickledore `bitbake.conf`;
+            // `PR = "r0"` from Nanbield on), never set when absent.
+            if name == "PR"
+                && !(ours
+                    || content
+                        .as_ref()
+                        .is_some_and(|c| c.text.trim() == PR_FROM_FILE))
+            {
+                continue;
+            }
             let text = match name {
                 "PN" => pn.clone().unwrap_or_else(|| "defaultpkgname".into()),
                 "PV" => pv.clone().unwrap_or_else(|| "1.0".into()),
+                "PR" => pr_from_file(&file).unwrap_or_else(|| "r0".into()),
                 "BPN" => self.prune_suffix(),
                 "BP" => "${BPN}-${PV}".to_string(),
                 _ => Path::new(&file)
@@ -3432,7 +3469,9 @@ impl Replay<'_> {
         Arc::make_mut(&mut self.ds.notes).incomplete_keys = incomplete;
         self.multilib_postkeyexp(recipe);
         // (BitBake runs anonymous python here, which the replay does not, except for the
-        // PROVIDES filter nativesdk.bbclass's installs.)
+        // features backfill of base.bbclass and the PROVIDES filter nativesdk.bbclass's
+        // installs.)
+        self.features_backfill();
         self.nativesdk_anonymous_filter();
         if self.ws.release.release.has(Feature::RecipeVirtualProviders) {
             virtual_recipe_providers(&mut self.ds, recipe);
@@ -3582,6 +3621,85 @@ impl Replay<'_> {
     /// installs the `PROVIDES` filter), at the point BitBake runs anonymous python: the
     /// filter is set when `PN` starts with `nativesdk-` (or the function has no such guard);
     /// when `PN` is not known statically, `PROVIDES` is flagged.
+    /// OE-core `base.bbclass` anonymous python up to Whinlatter ([`Feature::FeaturesBackfill`]):
+    /// `oe.utils.features_backfill("DISTRO_FEATURES", d)` (and `MACHINE_FEATURES`) appends
+    /// (`d.appendVar`, a `:append`) every word of `<VAR>_BACKFILL` that is in neither `<VAR>`
+    /// nor `<VAR>_BACKFILL_CONSIDERED`. Done for each call found in a recorded anonymous
+    /// function; when one of the three values is not known statically, `<VAR>` is flagged
+    /// instead.
+    fn features_backfill(&mut self) {
+        static CALL: LazyLock<Option<Regex>> = LazyLock::new(|| {
+            Regex::new(r#"\boe\.utils\.features_backfill\(\s*["']([A-Za-z0-9_]+)["']\s*,\s*d\s*\)"#)
+                .ok()
+        });
+        if !self.ws.release.release.has(Feature::FeaturesBackfill) {
+            return;
+        }
+        let Some(call) = CALL.as_ref() else { return };
+        let locs: Vec<Loc> = self
+            .ds
+            .notes
+            .anonymous
+            .iter()
+            .map(|a| a.loc.clone())
+            .collect();
+        for loc in locs {
+            let Some(body) = self.body_text(&loc) else {
+                continue;
+            };
+            let vars: Vec<String> = call
+                .captures_iter(&body)
+                .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+                .collect();
+            for var in vars {
+                self.backfill_one(&var, &loc);
+            }
+        }
+    }
+
+    fn backfill_one(&mut self, var: &str, loc: &Loc) {
+        let known = |name: &str| -> Option<Vec<String>> {
+            match self.ds.value(name) {
+                None => Some(Vec::new()),
+                Some(v) if !v.unevaluated_python && v.unresolved.is_empty() => {
+                    Some(v.text.split_whitespace().map(str::to_string).collect())
+                }
+                Some(_) => None,
+            }
+        };
+        let (Some(features), Some(backfill), Some(considered)) = (
+            known(var),
+            known(&format!("{var}_BACKFILL")),
+            known(&format!("{var}_BACKFILL_CONSIDERED")),
+        ) else {
+            Arc::make_mut(&mut self.ds.notes)
+                .python_vars
+                .insert(var.to_string());
+            return;
+        };
+        let add: Vec<&str> = backfill
+            .iter()
+            .filter(|f| !features.contains(f) && !considered.contains(f))
+            .map(String::as_str)
+            .collect();
+        if add.is_empty() {
+            return;
+        }
+        self.ds.apply(VarOp {
+            var: VarRef {
+                base: var.to_string(),
+                overrides: vec!["append".to_string()],
+                flag: None,
+                legacy_syntax: false,
+            },
+            op: AssignOp::Set,
+            value: format!(" {}", add.join(" ")),
+            loc: loc.clone(),
+            via: Vec::new(),
+            kind: OpKind::EventHandler,
+        });
+    }
+
     fn nativesdk_anonymous_filter(&mut self) {
         if self.ds.notes.nativesdk_anon.is_none() {
             return;
@@ -4483,6 +4601,11 @@ mod tests {
         assert_eq!(vars_from_file("/a/app.bb"), (Some("app".into()), None));
         assert_eq!(vars_from_file("/a/hello.inc"), (None, None));
         assert_eq!(vars_from_file("/a/a_b_c_d.bb"), (None, None));
+        assert_eq!(pr_from_file("/a/hello_1.1_r3.bb").as_deref(), Some("r3"));
+        assert_eq!(pr_from_file("/a/hello_1.1.bb"), None);
+        assert_eq!(pr_from_file("/a/hello_1.1_.bb"), None);
+        assert_eq!(pr_from_file("/a/a_b_c_d.bb"), None);
+        assert_eq!(pr_from_file("/a/a_b_c.inc"), None);
     }
 
     #[test]
