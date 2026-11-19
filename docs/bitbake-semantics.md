@@ -589,6 +589,81 @@ or a filter put in `python_vars` (`ReplayNotes::fixed_python_vars`) are never ta
 As before, a function that writes through names that cannot be read (`opaque`) gets a
 warning in the tools but does not flag other values.
 
+### References that cannot be followed exactly
+
+Checked in BitBake 2.18.0 (yocto-kiss), 2.8 (Scarthgap) and 2.0 (Kirkstone), the same code
+in all three, for acc-unfollowed (`kiss-image` `DEPENDS` was wrong and unflagged because
+`inherit_defer ${IMGCLASSES}` was dropped):
+
+- **`include` / `require`** (`ast.IncludeNode.eval` → `ConfHandler.include`): the argument
+  is expanded (`data.expand`, python run) and **split on whitespace**; each word is
+  included in order (`include_single_file`: the including file's directory, then `BBPATH`,
+  `bb.utils.which`). An empty argument includes nothing, for `require` too (zero words).
+  A word that names no file: `include` does nothing (`logger.debug2("CONF file '%s' not
+  found")`), `require` raises `ParseError("Could not include required file ...")`.
+- **`inherit`** (`BBHandler.inherit`): `d.expand(files).split()`, each word in order: a
+  word in `BB_DEFER_BBCLASSES` is deferred, else `classes-<type>/<w>.bbclass` then
+  `classes/<w>.bbclass` along `BBPATH`; not found is `ParseError("Could not inherit file
+  ...")`; a class in `__inherit_cache` is not read again. **`inherit_defer`**
+  (`InheritDeferredNode`) stores the text; `ast.finalize` expands and inherits it after the
+  recipe and its bbappends.
+- So a reference the replay cannot expand reads files BitBake does read (unless BitBake
+  fails), and they may set any variable, before or after (`:append`, `:remove`, an override
+  variant, a `?=` that then wins, anonymous python). A reference that is not found, closes a
+  cycle, uses a directive the release lacks, or another fatal error stops BitBake's parse:
+  there is no value to compare, and the reference stays a note.
+
+**sous-chef** (`Replay::follow_partial`, `ReplayNotes::ref_effects`,
+`DataStore::flag_causes`):
+
+- A reference whose argument holds python or undefined variables and is not covered below:
+  **every value is flagged**, with the cause `an inherit at <loc> could not be followed
+  (<why>); the files it would read may change any value, <name> included`. So is every
+  value after a reference followed with an uncertain value (`inherit_defer
+  toolchain/${TOOLCHAIN}` while `OVERRIDES` holds python): another value reads other files.
+  Measured on the three differentials with nothing narrowed (the two `bitbake.conf`
+  references below unresolved): every compared value flagged (Wrynose: 656 equal values all
+  flagged, `gmp-native` and `nativesdk-zlib` not evaluated because `PN` itself is flagged).
+- `bitbake.conf`'s multiconfig `require` resolves exactly once `BB_CURRENT_MC` is set as
+  BitBake sets it ("Multiconfig"): nothing on Wrynose, the empty
+  `conf/multiconfig/default.conf` on Kirkstone / Scarthgap.
+- **Partly followed** (the narrowing, all of it provable): the argument is expanded with a
+  hole for each `${@...}` that cannot be evaluated although only its own code stands in the
+  way (no uncertain substitution built it, it reads no value holding a hole;
+  `DataStore::expand_with_holes`), and nothing else in the text may be uncertain. Each hole
+  must have a known set of exact values (`pyexpr::candidates`): a list literal subscripted
+  by anything gives one of its elements (`['', 'populate_sdk_ext']['linux' in
+  d.getVar("SDK_OS")]`), `a if c else b`, `bb.utils.contains` / `contains_any` /
+  `oe.utils.conditional` with five positional arguments and `oe.utils.ifelse` with three
+  give one of their two value arguments (BitBake `lib/bb/utils.py`, OE-core
+  `lib/oe/utils.py`: no other return), python raising fails the expansion. A word without a
+  hole is read whatever the python gives, and is followed in order; a word with holes is one
+  of a known list of word lists, each read on a copy of the store (`Replay::probe`, with the
+  deferred inherits it adds), then dropped. The variables those files assign (with the
+  override conditions of each write), the names their anonymous python writes and the
+  effects of references inside them are recorded; a value is flagged when its base is one of
+  them and the write may apply (every element of its override condition is in a known
+  `OVERRIDES`, or `OVERRIDES` is uncertain). The cause: `an inherit_defer at <loc> could not
+  be followed exactly (python in IMGCLASSES); populate_sdk_ext, which it may read and
+  sous-chef did not, would change <name>`. A `:=` that expands a value so flagged is added
+  to the effect (its stored text would lose the flag). `bb.data.inherits_class` of a class
+  that may be read is not certain.
+- **The host's `os.uname()`**: `include conf/machine-sdk/${SDKMACHINE}.conf` with
+  `SDKMACHINE ??= "${BUILD_ARCH}"`, `BUILD_ARCH := "${@os.uname()[4]}"`. sous-chef never
+  evaluates `os.uname()`; it takes `os.uname()[0]` and `[4]` (with `.lower()`) to be one
+  path component without whitespace (on Linux: `Linux`, and the kernel's architecture name:
+  `x86_64`, `aarch64`, `armv7l`). **This is the one assumption about the host, not about
+  BitBake.** With it, an `include` / `require` word `<prefix><T><suffix>` reads, for each
+  `T`, the first file of that shape along the search path, or nothing: every such file the
+  replay can read is read on a copy, as above (OE-core's `conf/machine-sdk/*.conf`: plain
+  `SDK_ARCH`, `SDK_CC_ARCH`, `SDK_MACHINE_FEATURES`, `ABIEXTENSION:class-nativesdk`).
+
+Measured after the narrowing (docs/differential.md): no value changed class on Wrynose
+or Scarthgap; on Kirkstone `core-image-minimal` `PACKAGES` is now "equal, but flagged"
+(`populate_sdk_base` / `populate_sdk_ext` behind the python of `IMGCLASSES`); `kiss-image`
+`DEPENDS` is followed into `image_types_wic` and flagged for its own python
+(`bb.utils.contains_any("BUILD_ARCH", ...)`, the host again).
+
 ### Legacy syntax
 
 Before Yocto 3.4 ("honister") overrides were written with `_`: `VAR_append`, `VAR_foo`,

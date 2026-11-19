@@ -363,10 +363,15 @@ part of `OVERRIDES` is unknown (a value with no conditional operation in its his
 carries it), or `(may differ: depends on unresolved X)` when a statement the replay could
 not apply may set it (`MACHINE` when the `addfragments` list does not expand); the
 evaluation's notes (see `recipe`: an uncollected file, the machine's source, no `MACHINE`);
-a count of references not followed (python, undefined variables, missing files); a note for
-each reference followed although its value is uncertain (``note: `inherit_defer
+a count of references not followed (python, undefined variables, missing files; every value
+the files they would read may change is flagged, acc-unfollowed); a note for each reference
+followed although its value is uncertain (``note: `inherit_defer
 toolchain/${TOOLCHAIN}` ... was followed as "toolchain/gcc", but it depends on python or on
-overrides that are not all known; values its files set are flagged``); a warning per
+overrides that are not all known; another value would read other files, so every value is
+flagged``); a note for each reference followed only for the words it reads whatever its
+python gives (``note: `inherit_defer ${IMGCLASSES}` at ... was followed for the words it reads
+whatever its python gives; it may also read populate_sdk_ext, which sous-chef did not read: the
+values they change are flagged``); a warning per
 anonymous python function that changes the variable by name, and
 one for each that is opaque (changes variables through computed names or hands `d` to other
 code), since anonymous python is never run; a count of the other anonymous functions;

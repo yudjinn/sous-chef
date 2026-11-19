@@ -1004,7 +1004,7 @@ mod views {
         if !notes.references.is_empty() {
             let n = notes.references.len();
             t.note(&format!(
-                "note: {n} include/inherit {} not followed (python, undefined variables or missing files); values from those files are missing",
+                "note: {n} include/inherit {} not followed (python, undefined variables or missing files); every value the files they would read may change is flagged (a missing file or a cycle stops BitBake itself)",
                 if n == 1 { "reference was" } else { "references were" }
             ));
         }

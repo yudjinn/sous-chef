@@ -684,7 +684,7 @@ core-image-minimal	SRC_URI	equal
 core-image-minimal	DEPENDS	flagged	unevaluated_python
 core-image-minimal	RDEPENDS:core-image-minimal	unset	
 core-image-minimal	PACKAGECONFIG	unset	
-core-image-minimal	PACKAGES	equal	
+core-image-minimal	PACKAGES	equal	flagged: an inherit at meta:classes/image.bbclass:19 could not be followed exactly (python in IMGCLASSES); populate_sdk_base, populate_sdk_ext, which it may read and sous-chef did not, would change PACKAGES
 core-image-minimal	FILES:core-image-minimal	equal	
 core-image-minimal	OVERRIDES	equal	
 core-image-minimal	MACHINEOVERRIDES	equal	

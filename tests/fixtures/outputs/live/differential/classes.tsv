@@ -156,7 +156,7 @@ kiss-image	PR	equal
 kiss-image	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 kiss-image	FILE_LAYERNAME	equal	
 kiss-image	SRC_URI	equal	
-kiss-image	DEPENDS	bug	bitbake last op: set ast.py:506; static last applied: meta-kiss:recipes-core/images/kiss-image.bb:1 Set
+kiss-image	DEPENDS	flagged	unevaluated_python
 kiss-image	RDEPENDS:kiss-image	unset	
 kiss-image	PACKAGECONFIG	unset	
 kiss-image	PACKAGES	equal	

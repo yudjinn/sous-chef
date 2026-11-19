@@ -752,6 +752,17 @@ whose every anonymous-python write is proved not to happen on the recipe is take
 `python_vars` at finalisation and listed in `no_writes: Vec<NoWrite { name, why: Vec<(Loc,
 String)> }>`; `AnonPython::returns_early` says why a function writes nothing, and
 `AnonPython::writes()` lists the `python_vars` entries it contributes.
+Since `acc-unfollowed` (bitbake-semantics.md "References that cannot be followed exactly")
+**an unfollowed reference counts**: `ref_effects: Vec<RefEffect { loc, via, kind, text, why,
+not_read, vars: Option<BTreeMap<base, Vec<override conditions>>> }>` says what the files a
+reference did not read may change; `vars: None` (python or undefined variables in an
+argument that cannot be narrowed, a reference followed with an uncertain value) flags every
+value; `Some` (a reference followed for the words certain whatever its python gives,
+`Replay::follow_partial`, the rest read on a copy, `Replay::probe`) flags the values whose
+base is written there under conditions that may hold. A `RefIssue` that stops BitBake
+itself (`NotFound` of a `require` / `inherit`, `Cycle`, `NotInRelease`, `Fatal`) stays a
+note. `DataStore::expand_with_holes` and `pyexpr::candidates` are the two pieces this rests
+on.
 `DataStore::flag_causes(name)` gives one short line per cause of a value's flag (anonymous
 python by function, python left in a text, an override decision on unknown `OVERRIDES`
 entries, an uncertain reference, a statement not applied, an undefined variable), at the

@@ -388,7 +388,7 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
     if !notes.references.is_empty() {
         let n = notes.references.len();
         out.push(format!(
-            "note: {n} include/inherit {} not followed (python, undefined variables or missing files); values from those files are missing",
+            "note: {n} include/inherit {} not followed (python, undefined variables or missing files); every value the files they would read may change is flagged (a missing file or a cycle stops BitBake itself)",
             if n == 1 { "reference was" } else { "references were" }
         ));
     }
@@ -407,8 +407,22 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
             )
         };
         out.push(format!(
-            "note: `{} {}`{at} was followed as {:?}, but {why}; values its files set are flagged",
+            "note: `{} {}`{at} was followed as {:?}, but {why}; another value would read other files, so every value is flagged",
             u.kind, u.text, u.expanded
+        ));
+    }
+    // References followed only for the words certain whatever the python gives.
+    for e in notes.ref_effects.iter().filter(|e| e.vars.is_some()) {
+        let at = e
+            .loc
+            .as_ref()
+            .map(|l| format!(" at {l}"))
+            .unwrap_or_default();
+        out.push(format!(
+            "note: `{} {}`{at} was followed for the words it reads whatever its python gives; it may also read {}, which sous-chef did not read: the values they change are flagged",
+            e.kind,
+            e.text,
+            e.not_read.join(", ")
         ));
     }
     out

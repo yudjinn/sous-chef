@@ -1114,6 +1114,75 @@ pub fn eval(e: &Expr, env: &mut dyn Env) -> Result<PyVal, Stop> {
     eval_node(&e.0, env)
 }
 
+/// Most possible values [`candidates`] lists.
+const MAX_CANDIDATES: usize = 16;
+
+/// The values `str()` of `e` may take when `e` cannot be evaluated, each one exact: `None`
+/// unless every way the expression can end is a sub-expression that evaluates exactly. What
+/// python guarantees, whatever the unknown part is (python never reaches a value other than
+/// these: it returns one of them or raises, and a raise fails BitBake's expansion):
+///
+/// - `[a, b, ...][i]`, a list literal subscripted by anything: one of the elements (or an
+///   `IndexError` / `TypeError`);
+/// - `a if c else b`: `a` or `b`;
+/// - `bb.utils.contains(var, items, a, b, d)`, `bb.utils.contains_any(...)` and
+///   `oe.utils.conditional(var, value, a, b, d)` with five positional arguments: `a` or `b`
+///   (BitBake 2.18 `lib/bb/utils.py`, OE-core `lib/oe/utils.py`: every path returns
+///   `truevalue` or `falsevalue`);
+/// - `oe.utils.ifelse(c, a, b)` with three positional arguments: `a` or `b`.
+///
+/// An expression that evaluates is its one value.
+pub fn candidates(e: &Expr, env: &mut dyn Env) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    node_candidates(&e.0, env, &mut out, 0)?;
+    Some(out)
+}
+
+fn node_candidates(n: &Node, env: &mut dyn Env, out: &mut Vec<String>, depth: usize) -> Option<()> {
+    if depth > MAX_NESTING {
+        return None;
+    }
+    if let Ok(v) = eval_node(n, env) {
+        let t = to_text(&v).ok()?;
+        if !out.contains(&t) {
+            out.push(t);
+        }
+        return (out.len() <= MAX_CANDIDATES).then_some(());
+    }
+    match n {
+        Node::Index(base, _) => {
+            let Node::List(items) = &**base else {
+                return None;
+            };
+            for i in items {
+                node_candidates(i, env, out, depth + 1)?;
+            }
+            Some(())
+        }
+        Node::IfElse { body, orelse, .. } => {
+            node_candidates(body, env, out, depth + 1)?;
+            node_candidates(orelse, env, out, depth + 1)
+        }
+        Node::Call { func, args, kwargs }
+            if matches!(
+                func,
+                Func::BbContains | Func::BbContainsAny | Func::OeConditional
+            ) && args.len() == 5
+                && kwargs.is_empty() =>
+        {
+            node_candidates(&args[2], env, out, depth + 1)?;
+            node_candidates(&args[3], env, out, depth + 1)
+        }
+        Node::Call { func, args, kwargs }
+            if *func == Func::OeIfelse && args.len() == 3 && kwargs.is_empty() =>
+        {
+            node_candidates(&args[1], env, out, depth + 1)?;
+            node_candidates(&args[2], env, out, depth + 1)
+        }
+        _ => None,
+    }
+}
+
 fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
     match n {
         Node::Lit(v) => Ok(v.clone()),
@@ -2323,6 +2392,55 @@ mod tests {
 
     fn not_evaluated(code: &str, pairs: &[(&str, &str)]) {
         assert!(run(code, &mut env(pairs)).is_err(), "{code} was evaluated");
+    }
+
+    fn cands(code: &str, e: &mut Vars) -> Option<Vec<String>> {
+        candidates(&parse(code).ok()?, e)
+    }
+
+    #[test]
+    fn candidates_of_expressions_that_cannot_be_evaluated() {
+        let mut e = env(&[("IMAGE_FSTYPES", "wic")]);
+        e.uncertain.push("SDK_OS".into());
+        // OE-core image.bbclass's IMGCLASSES word: a list indexed by a boolean.
+        assert_eq!(
+            cands(
+                r#"['', 'populate_sdk_ext']['linux' in d.getVar("SDK_OS")]"#,
+                &mut e
+            ),
+            Some(vec!["".to_string(), "populate_sdk_ext".to_string()])
+        );
+        assert_eq!(
+            cands("'a' if d.getVar('SDK_OS') else 'b'", &mut e),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(
+            cands("bb.utils.contains('SDK_OS', 'linux', 'x', '', d)", &mut e),
+            Some(vec!["x".to_string(), "".to_string()])
+        );
+        assert_eq!(
+            cands("oe.utils.ifelse(d.getVar('SDK_OS'), 'y', 'n')", &mut e),
+            Some(vec!["y".to_string(), "n".to_string()])
+        );
+        // Evaluable: its one value.
+        assert_eq!(
+            cands(
+                "bb.utils.contains_any('IMAGE_FSTYPES', 'live iso', 'image-live', '', d)",
+                &mut e
+            ),
+            Some(vec!["".to_string()])
+        );
+        // A result that is not a literal of the expression: not known.
+        assert_eq!(cands("d.getVar('SDK_OS')", &mut e), None);
+        assert_eq!(
+            cands(
+                "[d.getVar('SDK_OS'), 'x'][d.getVar('SDK_OS') == 'a']",
+                &mut e
+            ),
+            None
+        );
+        // Outside the subset altogether.
+        assert_eq!(cands("os.uname()[4]", &mut e), None);
     }
 
     #[test]

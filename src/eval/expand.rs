@@ -107,11 +107,45 @@ pub struct Expander {
     cyclic: Vec<String>,
     /// Every `${@...}` met, in order (see [`PyEvent`]).
     python_log: Vec<PyEvent>,
+    /// Hole mode ([`Expander::with_holes`]): the code of each `${@...}` that could not be
+    /// evaluated although it was built from certain text only, replaced in the text by
+    /// [`hole`]`(i)` for its index `i` here.
+    holes: Option<Vec<String>>,
+}
+
+/// The character around a hole's index in a text expanded in hole mode.
+pub(crate) const HOLE: char = '\u{1}';
+
+/// The placeholder for hole `i`.
+pub(crate) fn hole(i: usize) -> String {
+    format!("{HOLE}{i}{HOLE}")
 }
 
 impl Expander {
     pub fn new() -> Expander {
         Expander::default()
+    }
+
+    /// An expander in hole mode: a `${@...}` that is not evaluated only because the code
+    /// itself cannot be (outside the subset, or it reads a value that is not certain) is
+    /// replaced by a placeholder ([`hole`]) and does not make the result uncertain; code built
+    /// from an uncertain substitution, or reading a value that holds a hole, stays as text
+    /// and does. So a result that is certain is BitBake's text except for the holes, and the
+    /// holes are exactly the code BitBake runs there ([`Expander::holes`]).
+    pub(crate) fn with_holes() -> Expander {
+        Expander {
+            holes: Some(Vec::new()),
+            ..Expander::default()
+        }
+    }
+
+    /// The codes of the holes, by index.
+    pub(crate) fn holes(&self) -> &[String] {
+        self.holes.as_deref().unwrap_or(&[])
+    }
+
+    pub(crate) fn holds_hole(&self, text: &str) -> bool {
+        self.holes.is_some() && text.contains(HOLE)
     }
 
     /// Expands `text`, which is not the value of any variable (no owner for cycle detection).
@@ -216,7 +250,7 @@ impl Expander {
                             for u in &v.unresolved {
                                 push_unique(&mut acc.unresolved, u);
                             }
-                            if !certain(&v) {
+                            if !certain(&v) || self.holds_hole(&v.text) {
                                 let start = result.len();
                                 taints.push((start, start + v.text.len(), name.to_string()));
                             }
@@ -280,27 +314,43 @@ impl Expander {
                 .iter()
                 .find(|(ta, tb, _)| ta < tb && *ta < b && a < *tb)
                 .map(|(_, _, n)| n.clone());
-            let r = if swallowed {
-                Err("some python in this text has an unterminated string, so BitBake replaces none of it".to_string())
+            // `Err(Err(why))`: the code was built from something uncertain; `Err(Ok(why))`:
+            // the code itself could not be evaluated.
+            let r: Result<String, Result<String, String>> = if swallowed {
+                Err(Err("some python in this text has an unterminated string, so BitBake replaces none of it".to_string()))
             } else if let Some(n) = taint {
-                Err(format!("{n}, substituted into it, is not certain"))
+                Err(Err(format!("{n}, substituted into it, is not certain")))
             } else if tainted_before {
-                Err("it was built from a value that is not certain".to_string())
+                Err(Err(
+                    "it was built from a value that is not certain".to_string()
+                ))
             } else {
                 match self.run_python(code(m), src) {
                     Ok(t) => Ok(t),
-                    Err(Stop::Uncertain(w)) => Err(w),
-                    Err(Stop::Unsupported(w)) => Err(format!("not in the evaluated subset ({w})")),
+                    Err(Stop::Uncertain(w)) => Err(Ok(w)),
+                    Err(Stop::Unsupported(w)) => {
+                        Err(Ok(format!("not in the evaluated subset ({w})")))
+                    }
                 }
             };
+            let own = matches!(&r, Err(Ok(_)));
             match r {
                 Ok(t) => {
                     self.log(code(m), None);
                     out.push_str(&t);
                 }
                 Err(w) => {
+                    let w = w.unwrap_or_else(|w| w);
                     self.log(code(m), Some(w));
-                    out.push_str(&s[a..b]);
+                    let c = code(m).trim_matches(pyexpr::py_space).to_string();
+                    match self.holes.as_mut() {
+                        // Only the code itself stood in the way: a hole.
+                        Some(h) if own && !c.contains(HOLE) => {
+                            h.push(c);
+                            out.push_str(&hole(h.len() - 1));
+                        }
+                        _ => out.push_str(&s[a..b]),
+                    }
                 }
             }
         }
@@ -332,6 +382,19 @@ impl Expander {
         let e = pyexpr::parse(code)?;
         let mut env = ExpEnv { exp: self, src };
         pyexpr::eval(&e, &mut env)
+    }
+
+    /// The values `str()` of the expression `code` may take, when it cannot be evaluated
+    /// but its possible results are string literals written in it
+    /// ([`pyexpr::candidates`]); reads only certain values from `src`.
+    pub(crate) fn python_candidates(
+        &mut self,
+        code: &str,
+        src: &dyn Source,
+    ) -> Option<Vec<String>> {
+        let e = pyexpr::parse(code).ok()?;
+        let mut env = ExpEnv { exp: self, src };
+        pyexpr::candidates(&e, &mut env)
     }
 
     /// The value to substitute for `${name}`, or `None` to leave the reference in place
@@ -379,6 +442,9 @@ impl pyexpr::Env for ExpEnv<'_, '_> {
             )));
         }
         match exp.resolve(name, self.src) {
+            Some(v) if exp.holds_hole(&v.text) => Err(Stop::Uncertain(format!(
+                "{name} holds python that is not evaluated"
+            ))),
             Some(v) if certain(&v) => Ok(Some(v.text)),
             Some(v) => Err(Stop::Uncertain(why_uncertain(name, &v))),
             None => match self.src.unset_doubt(name, exp) {
@@ -392,6 +458,9 @@ impl pyexpr::Env for ExpEnv<'_, '_> {
         match self.src.lookup_flag(name, flag, self.exp) {
             None => Err(Stop::Unsupported("d.getVarFlag here".into())),
             Some(None) => Ok(None),
+            Some(Some(v)) if self.exp.holds_hole(&v.text) => Err(Stop::Uncertain(format!(
+                "{name}[{flag}] holds python that is not evaluated"
+            ))),
             Some(Some(v)) if certain(&v) => Ok(Some(v.text)),
             Some(Some(v)) => Err(Stop::Uncertain(why_uncertain(
                 &format!("{name}[{flag}]"),
@@ -402,7 +471,7 @@ impl pyexpr::Env for ExpEnv<'_, '_> {
 
     fn expand(&mut self, text: &str) -> Result<String, Stop> {
         let v = self.exp.expand_text(text, self.src);
-        if certain(&v) {
+        if certain(&v) && !self.exp.holds_hole(&v.text) {
             Ok(v.text)
         } else {
             Err(Stop::Uncertain(why_uncertain("the text of d.expand", &v)))

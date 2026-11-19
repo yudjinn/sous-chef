@@ -153,6 +153,11 @@ pub struct ReplayNotes {
     /// their values carry `unevaluated_python` when the reference's value did.
     #[serde(skip_serializing_if = "BTreeSet::is_empty")]
     pub uncertain_vars: BTreeSet<String>,
+    /// References the replay could not follow, or not exactly, that BitBake follows: what
+    /// the files they would read may change. Every value they may change is flagged
+    /// (`DataStore::flag_causes` names the reference).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ref_effects: Vec<RefEffect>,
     /// Names with `${...}` that `expand_keys` could not expand (python or undefined
     /// variables); they stay under their written name.
     pub incomplete_keys: Vec<String>,
@@ -278,6 +283,72 @@ pub struct UncertainRef {
     pub unresolved: Vec<String>,
 }
 
+/// What a reference the replay could not follow exactly may change: BitBake reads files
+/// there that the replay did not (see [`ReplayNotes::ref_effects`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RefEffect {
+    /// The statement (`None` as for [`RefIssue::loc`]).
+    pub loc: Option<Loc>,
+    pub via: Vec<Loc>,
+    /// `include`, `require`, `include_all`, `inherit`, `inherit_defer`, `INHERIT`,
+    /// `addfragments`, `BBCLASSEXTEND`.
+    pub kind: String,
+    /// The argument as written.
+    pub text: String,
+    /// Why it was not followed exactly (`python in IMGCLASSES`).
+    pub why: String,
+    /// The classes (an inherit) or files (an include) it may read that were not read; empty
+    /// when they are not known.
+    pub not_read: Vec<String>,
+    /// The variables those may change, by base name, with the override conditions of each
+    /// write (an empty list: unconditional); `None`: any variable.
+    pub vars: Option<BTreeMap<String, Vec<Vec<String>>>>,
+}
+
+impl RefEffect {
+    /// The cause line for a value of `name` it may change.
+    pub fn cause(&self, name: &str) -> String {
+        let article = if self
+            .kind
+            .chars()
+            .next()
+            .is_some_and(|c| "aeiouAEIOU".contains(c))
+        {
+            "an"
+        } else {
+            "a"
+        };
+        let at = self
+            .loc
+            .as_ref()
+            .map(|l| format!(" at {l}"))
+            .unwrap_or_default();
+        match &self.vars {
+            None => format!(
+                "{article} {}{at} could not be followed ({}); the files it would read may change any value, {name} included",
+                self.kind, self.why
+            ),
+            Some(_) => {
+                const MAX: usize = 4;
+                let mut list = self
+                    .not_read
+                    .iter()
+                    .take(MAX)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if self.not_read.len() > MAX {
+                    list.push_str(&format!(" (+{} more)", self.not_read.len() - MAX));
+                }
+                format!(
+                    "{article} {}{at} could not be followed exactly ({}); {list}, which it may read and sous-chef did not, would change {name}",
+                    self.kind, self.why
+                )
+            }
+        }
+    }
+}
+
 /// Why a reference was not followed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -322,6 +393,103 @@ struct Taint {
     unresolved: Vec<String>,
     /// Base names the files read under it changed.
     bases: BTreeSet<String>,
+    /// The same writes with the override conditions of each (as written, `append` /
+    /// `prepend` / `remove` included).
+    writes: Vec<(String, Vec<String>)>,
+}
+
+/// How a reference reads its words (see `Replay::follow_partial`).
+enum RefMode<'s> {
+    Inherit {
+        deferred: bool,
+    },
+    Include {
+        st: &'s StatementRow,
+        from: &'s Path,
+        mode: &'s str,
+    },
+}
+
+/// One whitespace-separated word of a reference argument expanded with holes.
+enum Piece {
+    /// Read whatever the python gives.
+    Certain(String),
+    /// One of these word lists (python whose possible values are known exactly).
+    Maybe(Vec<Vec<String>>),
+    /// `<prefix><T><suffix>`, `T` a host value: one path component, no whitespace.
+    Pattern(String, String),
+}
+
+/// A piece of a word expanded with holes.
+enum Seg {
+    Text(String),
+    Hole(usize),
+}
+
+/// What files read on a copy of the store changed (`Replay::probe`).
+#[derive(Debug, Default)]
+struct ProbeResult {
+    /// Base name -> the override conditions of each write.
+    writes: BTreeMap<String, Vec<Vec<String>>>,
+    /// Something in them may change any variable.
+    unbounded: bool,
+}
+
+impl ProbeResult {
+    fn add(&mut self, base: String, overrides: Vec<String>) {
+        let e = self.writes.entry(base).or_default();
+        if !e.contains(&overrides) {
+            e.push(overrides);
+        }
+    }
+
+    fn merge(&mut self, other: ProbeResult) {
+        self.unbounded |= other.unbounded;
+        for (b, conds) in other.writes {
+            for c in conds {
+                self.add(b.clone(), c);
+            }
+        }
+    }
+}
+
+/// Most combinations of hole values one word may take before `follow_partial` gives up.
+const MAX_COMBINATIONS: usize = 64;
+
+/// `os.uname()[0]` or `os.uname()[4]` (optionally `.lower()`): the host's system name or
+/// machine (`BUILD_OS`, `BUILD_ARCH`), which sous-chef never evaluates. Taken to be one
+/// token without whitespace or `/`: Linux reports `Linux` and the kernel's architecture
+/// name (`x86_64`, `aarch64`, `armv7l`). This is a property of the host, not of BitBake
+/// (docs/bitbake-semantics.md, "References that cannot be followed exactly").
+fn host_token(code: &str) -> bool {
+    static RE: LazyLock<Option<Regex>> =
+        LazyLock::new(|| Regex::new(r"^os\.uname\(\)\[(0|4)\](\.lower\(\))?$").ok());
+    RE.as_ref().is_some_and(|re| re.is_match(code.trim()))
+}
+
+/// The text and hole pieces of a word expanded with holes (`expand::hole`), `None` if a
+/// hole marker is malformed.
+fn hole_segments(word: &str, holes: usize) -> Option<Vec<Seg>> {
+    let hole_char = super::expand::HOLE;
+    let mut out = Vec::new();
+    for (k, part) in word.split(hole_char).enumerate() {
+        if k % 2 == 0 {
+            if !part.is_empty() {
+                out.push(Seg::Text(part.to_string()));
+            }
+        } else {
+            let i: usize = part.parse().ok()?;
+            if i >= holes {
+                return None;
+            }
+            out.push(Seg::Hole(i));
+        }
+    }
+    // An odd number of markers leaves the last text unclosed.
+    word.matches(hole_char)
+        .count()
+        .is_multiple_of(2)
+        .then_some(out)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2442,7 +2610,7 @@ impl<'a> Replay<'a> {
             }
             "unset" => {
                 if let Some(n) = &st.name {
-                    self.tainted(n);
+                    self.tainted(n, &[]);
                     self.ds
                         .unset(n, st.flag.as_deref(), st.loc.clone(), via.to_vec());
                     self.after_write(n, &[], st.flag.as_deref(), true);
@@ -2547,7 +2715,10 @@ impl<'a> Replay<'a> {
             legacy_syntax: st.legacy,
         };
         let name = full_name(&var);
-        self.tainted(base);
+        self.tainted(base, &st.overrides);
+        if op == AssignOp::Immediate && !st.legacy {
+            self.immediate_through_effects(base, &st.overrides, st.value.as_deref().unwrap_or(""));
+        }
         let exported = is_exported(st);
         let overrides = var.overrides.clone();
         let flag = var.flag.clone();
@@ -2575,9 +2746,41 @@ impl<'a> Replay<'a> {
         self.after_write(base, &overrides, flag.as_deref(), before != after);
     }
 
+    /// A `:=` stores its value expanded now, so a flag that comes from a reference effect
+    /// (a variable it references may be changed by files the replay did not read) would be
+    /// lost with it: the name is added to those effects' variables instead.
+    fn immediate_through_effects(&mut self, base: &str, overrides: &[String], value: &str) {
+        if !self.ds.notes.ref_effects.iter().any(|e| e.vars.is_some()) {
+            return;
+        }
+        let with = self.ds.expand(value);
+        if super::expand::certain(&with) {
+            return;
+        }
+        let saved = std::mem::take(&mut Arc::make_mut(&mut self.ds.notes).ref_effects);
+        self.ds.ovr_cache = OnceLock::new();
+        let without = self.ds.expand(value);
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        notes.ref_effects = saved;
+        self.ds.ovr_cache = OnceLock::new();
+        if !super::expand::certain(&without) {
+            return;
+        }
+        let b = base_of(base).to_string();
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        for e in notes.ref_effects.iter_mut() {
+            if let Some(m) = e.vars.as_mut() {
+                let conds = m.entry(b.clone()).or_default();
+                if !conds.iter().any(|c| c.as_slice() == overrides) {
+                    conds.push(overrides.to_vec());
+                }
+            }
+        }
+    }
+
     /// Records that the file being read under an uncertain reference changes `base` (a
     /// name with `${...}` is recorded as its expanded base).
-    fn tainted(&mut self, base: &str) {
+    fn tainted(&mut self, base: &str, overrides: &[String]) {
         if self.taint.is_empty() {
             return;
         }
@@ -2587,7 +2790,8 @@ impl<'a> Replay<'a> {
             base_of(base).to_string()
         };
         if let Some(t) = self.taint.last_mut() {
-            t.bases.insert(b);
+            t.bases.insert(b.clone());
+            t.writes.push((b, overrides.to_vec()));
         }
     }
 
@@ -2834,6 +3038,35 @@ impl<'a> Replay<'a> {
         text: &str,
         problem: RefProblem,
     ) {
+        // A reference whose argument holds python or undefined variables: BitBake reads
+        // files here that the replay does not know, and they may set any variable. (A file
+        // that is not found, a cycle, a directive the release lacks or another fatal error
+        // stops BitBake's parse: it gives no value to compare with.)
+        let why = match &problem {
+            RefProblem::Python => Some(self.ref_why(text)),
+            RefProblem::Undefined(names) => Some(format!(
+                "undefined variable{} {}",
+                if names.len() == 1 { "" } else { "s" },
+                names.join(", ")
+            )),
+            _ => None,
+        };
+        if let Some(why) = why
+            && kind != "virtual_provider"
+        {
+            Arc::make_mut(&mut self.ds.notes)
+                .ref_effects
+                .push(RefEffect {
+                    loc: loc.cloned(),
+                    via: via.to_vec(),
+                    kind: kind.to_string(),
+                    text: text.to_string(),
+                    why,
+                    not_read: Vec::new(),
+                    vars: None,
+                });
+            self.ds.ovr_cache = OnceLock::new();
+        }
         Arc::make_mut(&mut self.ds.notes).references.push(RefIssue {
             loc: loc.cloned(),
             via: via.to_vec(),
@@ -2875,6 +3108,7 @@ impl<'a> Replay<'a> {
             python: e.unevaluated_python,
             unresolved: e.unresolved.clone(),
             bases: BTreeSet::new(),
+            writes: Vec::new(),
         });
         Some((e.text, taint))
     }
@@ -2908,6 +3142,7 @@ impl<'a> Replay<'a> {
             // names are unset there too).
             if let Some(outer) = self.taint.last_mut() {
                 outer.bases.extend(t.bases);
+                outer.writes.extend(t.writes);
             }
             return r;
         }
@@ -2925,6 +3160,20 @@ impl<'a> Replay<'a> {
                 }
             }
         }
+        // The value it was followed with may be wrong, and another value would read other
+        // files: what those change is not known.
+        notes.ref_effects.push(RefEffect {
+            loc: t.loc.clone(),
+            via: t.via.clone(),
+            kind: t.kind.clone(),
+            text: t.text.clone(),
+            why: format!(
+                "followed as `{}`, a value that is not certain",
+                t.expanded.trim()
+            ),
+            not_read: Vec::new(),
+            vars: None,
+        });
         notes.uncertain_references.push(UncertainRef {
             loc: t.loc,
             via: t.via,
@@ -2937,9 +3186,348 @@ impl<'a> Replay<'a> {
         // An outer uncertain reference covers what this one changed too.
         if let Some(outer) = self.taint.last_mut() {
             outer.bases.extend(t.bases);
+            outer.writes.extend(t.writes);
         }
         self.ds.ovr_cache = OnceLock::new();
         r
+    }
+
+    /// Why a reference argument is not certain, short: the first variable it references
+    /// whose value is not (`python in IMGCLASSES`), else its own python.
+    fn ref_why(&self, text: &str) -> String {
+        for n in super::expand::var_refs(text) {
+            if let Some(v) = self.ds.value(&n) {
+                if v.unevaluated_python {
+                    return format!("python in {n}");
+                }
+                if !v.unresolved.is_empty() {
+                    return format!("{n} uses undefined {}", v.unresolved.join(", "));
+                }
+            }
+        }
+        "python in its argument".to_string()
+    }
+
+    /// Follows an `inherit` / `inherit_defer` / `include` / `require` whose argument holds
+    /// python the replay cannot evaluate, as far as BitBake's behaviour is known exactly
+    /// (docs/bitbake-semantics.md, "References that cannot be followed exactly"):
+    ///
+    /// - the argument is expanded with a hole for each such `${@...}`
+    ///   (`DataStore::expand_with_holes`): nothing else in it may be uncertain;
+    /// - each hole has a known set of exact values (`pyexpr::candidates`: `['', 'x'][c]`,
+    ///   `a if c else b`, `bb.utils.contains(..., a, b, d)`), or is the host's
+    ///   `os.uname()[i]`, one path component without whitespace (an `include` /
+    ///   `require` word only);
+    /// - BitBake splits the expanded text on whitespace and reads each word in order
+    ///   (`BBHandler.inherit`, `ConfHandler.include`), so a word without a hole is read
+    ///   whatever the python gives, and is followed; a word with holes is one of a known
+    ///   list of word lists (or files matching a pattern), which are read on a copy of the
+    ///   store to learn what they change, then dropped: the reference's effect
+    ///   ([`RefEffect`]) flags those variables.
+    ///
+    /// `false` (nothing done) when any of this does not hold; the caller then records the
+    /// reference as not followed, which flags every value.
+    fn follow_partial(
+        &mut self,
+        text: &str,
+        loc: Option<&Loc>,
+        via: &[Loc],
+        kind: &str,
+        mode: &RefMode<'_>,
+    ) -> Result<bool> {
+        if matches!(
+            mode,
+            RefMode::Include {
+                mode: "include_all",
+                ..
+            }
+        ) {
+            return Ok(false);
+        }
+        let Some((htext, codes)) = self.ds.expand_with_holes(text) else {
+            return Ok(false);
+        };
+        if codes.is_empty() {
+            return Ok(false);
+        }
+        let mut vals: Vec<Option<Vec<String>>> = Vec::with_capacity(codes.len());
+        for c in &codes {
+            if host_token(c) {
+                vals.push(None);
+            } else {
+                match self.ds.python_candidates(c) {
+                    Some(v) => vals.push(Some(v)),
+                    None => return Ok(false),
+                }
+            }
+        }
+        let is_include = matches!(mode, RefMode::Include { .. });
+        let mut pieces: Vec<Piece> = Vec::new();
+        for tok in htext.split_whitespace() {
+            let Some(segs) = hole_segments(tok, codes.len()) else {
+                return Ok(false);
+            };
+            let holes: Vec<usize> = segs
+                .iter()
+                .filter_map(|s| match s {
+                    Seg::Hole(i) => Some(*i),
+                    Seg::Text(_) => None,
+                })
+                .collect();
+            if holes.is_empty() {
+                pieces.push(Piece::Certain(tok.to_string()));
+                continue;
+            }
+            if holes.iter().any(|i| vals[*i].is_none()) {
+                // A host value: one path component, in an include / require word.
+                let (true, [Seg::Text(pre), Seg::Hole(_), Seg::Text(post)]) =
+                    (is_include, segs.as_slice())
+                else {
+                    return Ok(false);
+                };
+                pieces.push(Piece::Pattern(pre.clone(), post.clone()));
+                continue;
+            }
+            // Every combination of the holes' values, as words.
+            let mut combos: Vec<String> = vec![String::new()];
+            for s in &segs {
+                let opts: Vec<String> = match s {
+                    Seg::Text(t) => vec![t.clone()],
+                    Seg::Hole(i) => vals[*i].clone().unwrap_or_default(),
+                };
+                let mut next = Vec::with_capacity(combos.len() * opts.len());
+                for c in &combos {
+                    for o in &opts {
+                        next.push(format!("{c}{o}"));
+                    }
+                }
+                if next.len() > MAX_COMBINATIONS {
+                    return Ok(false);
+                }
+                combos = next;
+            }
+            let mut alts: Vec<Vec<String>> = Vec::new();
+            for c in combos {
+                let words: Vec<String> = c.split_whitespace().map(str::to_string).collect();
+                if !alts.contains(&words) {
+                    alts.push(words);
+                }
+            }
+            match alts.as_slice() {
+                [one] => pieces.extend(one.iter().cloned().map(Piece::Certain)),
+                _ => pieces.push(Piece::Maybe(alts)),
+            }
+        }
+        let why = self.ref_why(text);
+        let mut child_via = via.to_vec();
+        if let Some(l) = loc {
+            child_via.push(l.clone());
+        }
+        for p in pieces {
+            match p {
+                Piece::Certain(w) => self.follow_word(mode, text, loc, via, kind, &w)?,
+                Piece::Maybe(alts) => {
+                    let mut names: Vec<String> = Vec::new();
+                    let mut acc = ProbeResult::default();
+                    for alt in alts.iter().filter(|a| !a.is_empty()) {
+                        for w in alt {
+                            if !names.contains(w) {
+                                names.push(w.clone());
+                            }
+                        }
+                        let r = self.probe(|r| {
+                            for w in alt {
+                                r.follow_word(mode, text, loc, via, kind, w)?;
+                            }
+                            Ok(())
+                        })?;
+                        acc.merge(r);
+                    }
+                    self.push_effect(loc, via, kind, text, &why, names, acc);
+                }
+                Piece::Pattern(pre, post) => {
+                    let from = match mode {
+                        RefMode::Include { from, .. } => *from,
+                        RefMode::Inherit { .. } => continue,
+                    };
+                    let mut names = Vec::new();
+                    let mut acc = ProbeResult::default();
+                    for (rel, abs) in self.pattern_files(&pre, &post, from) {
+                        names.push(rel);
+                        let cv = child_via.clone();
+                        let r = self.probe(|r| {
+                            let kind = FileKind::from_path(&abs).unwrap_or(FileKind::Include);
+                            r.visit(&abs, kind, cv, true)
+                        })?;
+                        acc.merge(r);
+                    }
+                    self.push_effect(loc, via, kind, text, &why, names, acc);
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    /// Follows one word of an inherit or include, as the reference would.
+    fn follow_word(
+        &mut self,
+        mode: &RefMode<'_>,
+        text: &str,
+        loc: Option<&Loc>,
+        via: &[Loc],
+        kind: &str,
+        word: &str,
+    ) -> Result<()> {
+        match mode {
+            RefMode::Inherit { deferred } => {
+                self.inherit_words(text, loc, via, *deferred, kind, word)
+            }
+            RefMode::Include { st, from, mode } => {
+                self.include_words(st, via, from, mode, text, word)
+            }
+        }
+    }
+
+    /// Reads what `f` reads on a copy of the store and returns what it changed (assignments,
+    /// with their override conditions; names its anonymous python writes; the effects of
+    /// references inside it); the store, the files being parsed and the rest of the replay
+    /// state are put back afterwards. Deferred inherits the files add are read too (BitBake
+    /// reads them at finalisation).
+    fn probe(&mut self, f: impl FnOnce(&mut Self) -> Result<()>) -> Result<ProbeResult> {
+        let saved = self.ds.fork();
+        let saved_kas = self.kas_local.clone();
+        let saved_filter = self.provides_filter.clone();
+        let depth = self.stack.len();
+        let anon0 = self.ds.notes.anonymous.len();
+        let eff0 = self.ds.notes.ref_effects.len();
+        let def0 = self.ds.notes.deferred.len();
+        self.taint.push(Taint {
+            loc: None,
+            via: Vec::new(),
+            kind: String::new(),
+            text: String::new(),
+            expanded: String::new(),
+            python: false,
+            unresolved: Vec::new(),
+            bases: BTreeSet::new(),
+            writes: Vec::new(),
+        });
+        let mut r = f(self);
+        while r.is_ok() && self.ds.notes.deferred.len() > def0 {
+            let d = Arc::make_mut(&mut self.ds.notes).deferred.remove(def0);
+            r = self.inherit(&d.text, d.loc.as_ref(), &d.via, true, "inherit_defer");
+        }
+        let t = self.taint.pop();
+        let mut out = ProbeResult::default();
+        if let Some(t) = t {
+            for (b, o) in t.writes {
+                out.add(b, o);
+            }
+        }
+        let notes = &self.ds.notes;
+        for a in notes.anonymous.iter().skip(anon0) {
+            for w in a.writes() {
+                out.add(base_of(w).to_string(), Vec::new());
+            }
+        }
+        for e in notes.ref_effects.iter().skip(eff0) {
+            match &e.vars {
+                None => out.unbounded = true,
+                Some(m) => {
+                    for (b, conds) in m {
+                        for c in conds {
+                            out.add(b.clone(), c.clone());
+                        }
+                    }
+                }
+            }
+        }
+        self.ds = saved;
+        self.kas_local = saved_kas;
+        self.provides_filter = saved_filter;
+        self.stack.truncate(depth);
+        r.map(|_| out)
+    }
+
+    /// Records the effect of a word the replay did not read (`names`: the classes or files).
+    #[allow(clippy::too_many_arguments)]
+    fn push_effect(
+        &mut self,
+        loc: Option<&Loc>,
+        via: &[Loc],
+        kind: &str,
+        text: &str,
+        why: &str,
+        names: Vec<String>,
+        r: ProbeResult,
+    ) {
+        if names.is_empty() {
+            return;
+        }
+        Arc::make_mut(&mut self.ds.notes)
+            .ref_effects
+            .push(RefEffect {
+                loc: loc.cloned(),
+                via: via.to_vec(),
+                kind: kind.to_string(),
+                text: text.to_string(),
+                why: why.to_string(),
+                not_read: names,
+                vars: (!r.unbounded).then_some(r.writes),
+            });
+        self.ds.ovr_cache = OnceLock::new();
+    }
+
+    /// The files `<prefix><T><suffix>` an include / require from `from` may read, `T` one
+    /// path component without whitespace: for each `T`, the first match along the search
+    /// path (`ConfHandler.include_single_file`: the including file's directory, then
+    /// `BBPATH`), as `(relative path, absolute path)`.
+    fn pattern_files(&mut self, prefix: &str, suffix: &str, from: &Path) -> Vec<(String, PathBuf)> {
+        let Ok(re) = Regex::new(&format!(
+            r"^{}([^/\s]*){}$",
+            regex::escape(prefix),
+            regex::escape(suffix)
+        )) else {
+            return Vec::new();
+        };
+        // The relative paths of that shape among the files the replay can read (the last
+        // components of each), then each one resolved as the include would.
+        let parts = format!("{prefix}{suffix}").matches('/').count() + 1;
+        let mut known: Vec<PathBuf> = self.files.by_abs.keys().cloned().collect();
+        if let Some(o) = self.overlay {
+            known.extend(o.paths().map(Path::to_path_buf));
+        }
+        let mut rels: BTreeSet<String> = BTreeSet::new();
+        for f in &known {
+            let comps: Vec<String> = f
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .collect();
+            if Path::new(prefix).is_absolute() {
+                let whole = f.to_string_lossy().to_string();
+                if re.is_match(&whole) {
+                    rels.insert(whole);
+                }
+                continue;
+            }
+            if comps.len() < parts {
+                continue;
+            }
+            let rel = comps[comps.len() - parts..].join("/");
+            if re.is_match(&rel) {
+                rels.insert(rel);
+            }
+        }
+        let ws = self.ws;
+        let mut out = Vec::new();
+        for rel in rels {
+            if let Some(abs) = self.resolver().find_in_bbpath(ws, &rel, from)
+                && self.exists(&abs)
+            {
+                out.push((rel, abs));
+            }
+        }
+        out
     }
 
     /// `BBPATH` as the store has it now (absolute entries, canonical when they exist);
@@ -2997,6 +3585,16 @@ impl<'a> Replay<'a> {
         // OE-core's multiconfig `require` in a multiconfig pass (eval::multiconfig).
         if let Some(words) = super::multiconfig::oe_require_words(&text, &self.ds) {
             return self.include_words(st, via, from, &mode, &text, &words);
+        }
+        if has_python(&self.ds.expand(&text).text) {
+            let m = RefMode::Include {
+                st,
+                from,
+                mode: &mode,
+            };
+            if self.follow_partial(&text, Some(&st.loc), via, &mode, &m)? {
+                return Ok(());
+            }
         }
         let Some((expanded, taint)) = self.expand_ref(&text, Some(&st.loc), via, &mode) else {
             return Ok(());
@@ -3416,6 +4014,11 @@ impl<'a> Replay<'a> {
         deferred: bool,
         kind: &str,
     ) -> Result<()> {
+        if has_python(&self.ds.expand(text).text)
+            && self.follow_partial(text, loc, via, kind, &RefMode::Inherit { deferred })?
+        {
+            return Ok(());
+        }
         let Some((expanded, taint)) = self.expand_ref(text, loc, via, kind) else {
             return Ok(());
         };
