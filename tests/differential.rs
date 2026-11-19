@@ -29,6 +29,14 @@
 //! With `SOUS_CHEF_DIFF_NO_BITBAKE` set, a missing dump fails the test instead of running
 //! the script (for runs that must not start BitBake).
 //!
+//! The workspace is described by `tests/fixtures/differential/<name>.ws` (build directory,
+//! dumps, machine, distro, recipes; the script reads the same file). `differential_against_bitbake`
+//! runs the Wrynose one (paths above); `differential_scarthgap` and `differential_kirkstone`
+//! run the release workspaces of `scripts/release-env.sh`, with dumps under
+//! `$SOUS_CHEF_LIVE/runs/acc-releases/<release>/` and recorded summaries in
+//! `tests/fixtures/outputs/live/differential-<release>/`; they return at once when the
+//! workspace is not there.
+//!
 //! What fails the test: only what the milestone says it must fail on, a **bug** on a tracked
 //! variable (`tracked`) in the sample evaluated with the build's machine and distro. The
 //! expected classes (flagged, known gap) never fail it, and the `@default` probe (machine
@@ -49,34 +57,62 @@ use sous_chef::index::Index;
 use sous_chef::types::FileKind;
 use sous_chef::workspace::Workspace;
 
-/// Keep in sync with `RECIPES` in `scripts/differential.sh`.
-const RECIPES: &[&str] = &[
-    "curl",
-    "sl",
-    "linux-kiss",
-    "u-boot-kiss",
-    "kiss-image",
-    "packagegroup-core-boot",
-    "zlib",
-    "openssl",
-    "busybox",
-    "dropbear",
-    "ncurses",
-    "dbus",
-    "systemd-boot",
-    "util-linux",
-    "gmp-native",
-    "nativesdk-zlib",
-    "quilt-native",
-    "expat",
-    "glib-2.0",
-    "base-files",
-    "python3",
-    "bash",
-    "opencsd",
-    "virtual/kernel",
-    "virtual/bootloader",
-];
+/// A workspace description, `tests/fixtures/differential/<name>.ws` (read by
+/// `scripts/differential.sh` too): the build directory, where the dumps are, the machine and
+/// distro BitBake ran with, and the recipes. Paths in the file are relative to
+/// `$SOUS_CHEF_LIVE`.
+#[derive(Debug, Clone, Default)]
+struct Ws {
+    name: String,
+    build: PathBuf,
+    dumps: PathBuf,
+    recorded: String,
+    machine: String,
+    distro: String,
+    recipes: Vec<String>,
+    probe: Vec<String>,
+}
+
+impl Ws {
+    fn load(live: &Path, name: &str) -> Ws {
+        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/differential")
+            .join(format!("{name}.ws"));
+        let text = fs::read_to_string(&file).expect("reading the workspace description");
+        let mut ws = Ws::default();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
+            let v = v.trim();
+            match k.trim() {
+                "name" => ws.name = v.to_string(),
+                "build" => ws.build = live.join(v),
+                "dumps" => ws.dumps = live.join(v),
+                "recorded" => ws.recorded = v.to_string(),
+                "machine" => ws.machine = v.to_string(),
+                "distro" => ws.distro = v.to_string(),
+                "recipes" => ws.recipes.extend(v.split_whitespace().map(str::to_string)),
+                "probe" => ws.probe.extend(v.split_whitespace().map(str::to_string)),
+                _ => {}
+            }
+        }
+        if ws.name == "wrynose"
+            && let Some(b) = std::env::var_os("SOUS_CHEF_BUILD")
+        {
+            ws.build = PathBuf::from(b);
+        }
+        ws
+    }
+
+    fn primary(&self) -> bool {
+        self.name == "wrynose"
+    }
+}
 
 /// Compared for every recipe (`${PN}` is expanded on each side).
 const VARS: &[&str] = &[
@@ -552,36 +588,35 @@ fn live() -> Option<PathBuf> {
     std::env::var_os("SOUS_CHEF_LIVE").map(PathBuf::from)
 }
 
-fn build_dir(live: &Path) -> PathBuf {
-    std::env::var_os("SOUS_CHEF_BUILD")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| live.join("bitbake-builds/kiss-wrynose-dogbonedark/build"))
+/// Where the index cache and `report.txt` go: `$SOUS_CHEF_DIFF_DIR` (a subdirectory named
+/// after the workspace for the other releases), else the dumps' directory (the dumps are
+/// always read from there).
+fn work_dir(w: &Ws) -> PathBuf {
+    match std::env::var_os("SOUS_CHEF_DIFF_DIR").map(PathBuf::from) {
+        Some(d) if w.primary() => d,
+        Some(d) => d.join(&w.name),
+        None => w.dumps.clone(),
+    }
 }
 
-/// Where the index cache and `report.txt` go: `$SOUS_CHEF_DIFF_DIR`, else
-/// `$SOUS_CHEF_LIVE/runs/differential` (the dumps are always read from there).
-fn work_dir(live: &Path) -> PathBuf {
-    std::env::var_os("SOUS_CHEF_DIFF_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| live.join("runs/differential"))
-}
-
-fn dump_path(live: &Path, recipe: &str) -> PathBuf {
-    live.join("runs/differential/env")
+fn dump_path(w: &Ws, recipe: &str) -> PathBuf {
+    w.dumps
+        .join("env")
         .join(format!("{}.env", recipe.replace('/', "_")))
 }
 
-fn ensure_dumps(live: &Path) {
-    let missing: Vec<&str> = RECIPES
+fn ensure_dumps(live: &Path, w: &Ws) {
+    let missing: Vec<&str> = w
+        .recipes
         .iter()
-        .copied()
+        .map(String::as_str)
         .filter(|r| {
-            fs::metadata(dump_path(live, r))
+            fs::metadata(dump_path(w, r))
                 .map(|m| m.len() == 0)
                 .unwrap_or(true)
         })
         .collect();
-    let ws_missing = !live.join("runs/differential/show-layers.out").exists();
+    let ws_missing = !w.dumps.join("show-layers.out").exists();
     if missing.is_empty() && !ws_missing {
         return;
     }
@@ -592,6 +627,7 @@ fn ensure_dumps(live: &Path) {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/differential.sh");
     let mut cmd = Command::new(script);
     cmd.env("SOUS_CHEF_LIVE", live);
+    cmd.env("SOUS_CHEF_DIFF_WS", &w.name);
     if !ws_missing {
         cmd.args(&missing);
     }
@@ -599,8 +635,8 @@ fn ensure_dumps(live: &Path) {
     assert!(st.success(), "scripts/differential.sh failed");
 }
 
-fn workspace(live: &Path) -> (Workspace, Index) {
-    let b = build_dir(live);
+fn workspace(w: &Ws) -> (Workspace, Index) {
+    let b = w.build.clone();
     let mut cfg = Config {
         build_dir: Some(b.clone()),
         work_dir: b,
@@ -608,7 +644,7 @@ fn workspace(live: &Path) -> (Workspace, Index) {
     };
     cfg.bitbake.enabled = false;
     let ws = Workspace::discover(&cfg).expect("discovering the live workspace");
-    let mut idx = Index::open_in(&work_dir(live).join("cache"), &ws).unwrap();
+    let mut idx = Index::open_in(&work_dir(w).join("cache"), &ws).unwrap();
     idx.refresh(&ws).unwrap();
     (ws, idx)
 }
@@ -632,16 +668,13 @@ fn path_map(build: &Path) -> Vec<(String, String)> {
     out
 }
 
-const MACHINE: &str = "dogbonedark";
-const DISTRO: &str = "kiss";
-
-fn target(recipe: &str, explicit: bool) -> Target {
+fn target(w: &Ws, recipe: &str, explicit: bool) -> Target {
     Target {
         mc: None,
         recipe: Some(recipe.to_string()),
         version: None,
-        machine: explicit.then(|| MACHINE.into()),
-        distro: explicit.then(|| DISTRO.into()),
+        machine: explicit.then(|| w.machine.clone()),
+        distro: explicit.then(|| w.distro.clone()),
     }
 }
 
@@ -719,7 +752,7 @@ fn short(s: &str) -> String {
 }
 
 fn run_recipe(
-    live: &Path,
+    w: &Ws,
     ws: &Workspace,
     idx: &Index,
     pmap: &[(String, String)],
@@ -731,11 +764,11 @@ fn run_recipe(
     } else {
         format!("{recipe}@default")
     };
-    let text = fs::read_to_string(dump_path(live, recipe)).unwrap_or_default();
+    let text = fs::read_to_string(dump_path(w, recipe)).unwrap_or_default();
     let bb = envdump::parse_str(&text);
     let mut note = String::new();
     if !bb.stats.found_header || bb.variables.is_empty() {
-        let err = fs::read_to_string(format!("{}.err", dump_path(live, recipe).display()))
+        let err = fs::read_to_string(format!("{}.err", dump_path(w, recipe).display()))
             .unwrap_or_default();
         return RecipeResult {
             recipe: label,
@@ -745,7 +778,7 @@ fn run_recipe(
         };
     }
     // The static side: a virtual/ name through provider selection, else the name.
-    let mut t = target(recipe, explicit);
+    let mut t = target(w, recipe, explicit);
     if recipe.starts_with("virtual/") {
         let p = Providers::new(idx, ws, t.machine.as_deref(), t.distro.as_deref()).unwrap();
         let set = p.providers(recipe).unwrap();
@@ -850,7 +883,7 @@ fn run_recipe(
 }
 
 /// Layers, priorities and bbappend order against `bitbake-layers`.
-fn workspace_checks(live: &Path, ws: &Workspace, idx: &Index, pmap: &[(String, String)]) -> String {
+fn workspace_checks(w: &Ws, ws: &Workspace, idx: &Index, pmap: &[(String, String)]) -> String {
     let mut out = String::new();
     let canon = |s: &str| -> String {
         let mut s = s.to_string();
@@ -862,8 +895,7 @@ fn workspace_checks(live: &Path, ws: &Workspace, idx: &Index, pmap: &[(String, S
             .unwrap_or(s)
     };
     // show-layers: "name  path  priority" after the "====" line.
-    let text =
-        fs::read_to_string(live.join("runs/differential/show-layers.out")).unwrap_or_default();
+    let text = fs::read_to_string(w.dumps.join("show-layers.out")).unwrap_or_default();
     let mut bb_layers = Vec::new();
     let mut started = false;
     for l in text.lines() {
@@ -918,8 +950,7 @@ fn workspace_checks(live: &Path, ws: &Workspace, idx: &Index, pmap: &[(String, S
         );
     }
     // show-appends: "<recipe>.bb[ (skipped)]:" then indented bbappend paths.
-    let text =
-        fs::read_to_string(live.join("runs/differential/show-appends.out")).unwrap_or_default();
+    let text = fs::read_to_string(w.dumps.join("show-appends.out")).unwrap_or_default();
     let _ = writeln!(
         out,
         "\n## bbappend order (bitbake-layers show-appends vs query::appends_for)"
@@ -1018,7 +1049,7 @@ fn workspace_checks(live: &Path, ws: &Workspace, idx: &Index, pmap: &[(String, S
         if !bbfiles.contains(p) {
             let name = p.file_stem().unwrap().to_string_lossy().to_string();
             let pn = name.split('_').next().unwrap_or(&name).to_string();
-            let ev = eval::evaluate(idx, ws, &target(&pn, true));
+            let ev = eval::evaluate(idx, ws, &target(w, &pn, true));
             let _ = writeln!(
                 out,
                 "indexed but not matched by BBFILES: {} (evaluate(\"{pn}\"): {})",
@@ -1047,27 +1078,72 @@ fn differential_against_bitbake() {
         eprintln!("SOUS_CHEF_LIVE is not set; skipping");
         return;
     };
-    ensure_dumps(&live);
-    let (ws, idx) = workspace(&live);
-    let pmap = path_map(&build_dir(&live));
+    run(&live, &Ws::load(&live, "wrynose"));
+}
+
+/// The release workspaces of `scripts/release-env.sh` (docs/differential.md, "Other
+/// releases"); skipped when the workspace is not there.
+fn release(name: &str) {
+    let Some(live) = live() else {
+        eprintln!("SOUS_CHEF_LIVE is not set; skipping");
+        return;
+    };
+    let w = Ws::load(&live, name);
+    if !w.build.join("conf/bblayers.conf").exists() {
+        eprintln!(
+            "{} does not exist (scripts/release-env.sh); skipping",
+            w.build.display()
+        );
+        return;
+    }
+    run(&live, &w);
+}
+
+#[test]
+#[ignore = "needs the live environment: set SOUS_CHEF_LIVE and run with --ignored"]
+fn differential_scarthgap() {
+    release("scarthgap");
+}
+
+#[test]
+#[ignore = "needs the live environment: set SOUS_CHEF_LIVE and run with --ignored"]
+fn differential_kirkstone() {
+    release("kirkstone");
+}
+
+fn run(live: &Path, w: &Ws) {
+    ensure_dumps(live, w);
+    let (ws, idx) = workspace(w);
+    let pmap = path_map(&w.build);
 
     let mut report = String::new();
     let mut totals: BTreeMap<String, usize> = BTreeMap::new();
     let mut by_var: BTreeMap<String, usize> = BTreeMap::new();
     let mut tracked_bugs = Vec::new();
     let mut results = Vec::new();
-    for r in RECIPES {
-        results.push(run_recipe(&live, &ws, &idx, &pmap, r, true));
+    for r in &w.recipes {
+        results.push(run_recipe(w, &ws, &idx, &pmap, r, true));
     }
     // The same recipes with MACHINE and DISTRO left to the workspace's configuration, as a
     // tool call without `machine` / `distro` arguments evaluates them.
-    for r in ["curl", "sl", "virtual/kernel"] {
-        results.push(run_recipe(&live, &ws, &idx, &pmap, r, false));
+    for r in &w.probe {
+        results.push(run_recipe(w, &ws, &idx, &pmap, r, false));
     }
     let _ = writeln!(
         report,
         "# Differential report: static evaluation vs bitbake -e\n"
     );
+    if !w.primary() {
+        let _ = writeln!(
+            report,
+            "workspace {}: release {} ({}), MACHINE {}, DISTRO {}\n",
+            w.name,
+            ws.release.release,
+            ws.release.source.as_str(),
+            w.machine,
+            w.distro
+        );
+    }
     let _ = writeln!(
         report,
         "recipe\tcompared\tequal\tequal-ws\tflagged\tgap\tbug\tunset-both\tnot-printed\tnote"
@@ -1238,7 +1314,7 @@ fn differential_against_bitbake() {
             }
         }
     }
-    let _ = writeln!(report, "\n{}", workspace_checks(&live, &ws, &idx, &pmap));
+    let _ = writeln!(report, "\n{}", workspace_checks(w, &ws, &idx, &pmap));
 
     // Configuration only, with MACHINE/DISTRO left to the workspace (they are set through
     // OE_FRAGMENTS / addfragments in this build).
@@ -1261,14 +1337,15 @@ fn differential_against_bitbake() {
         cfg.value("DISTRO")
     );
 
-    let out_dir = work_dir(&live);
+    let out_dir = work_dir(w);
     fs::create_dir_all(&out_dir).unwrap();
     fs::write(out_dir.join("report.txt"), &report).unwrap();
     // Recorded summary in the repository: the per-recipe table and totals only.
-    let rec_dir =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outputs/live/differential");
+    let rec_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/outputs/live")
+        .join(&w.recorded);
     fs::create_dir_all(&rec_dir).unwrap();
-    let live_s = fs::canonicalize(&live).unwrap().display().to_string();
+    let live_s = fs::canonicalize(live).unwrap().display().to_string();
     let redact = |s: &str| {
         s.replace(&live_s, "{{LIVE}}")
             .replace(&live.display().to_string(), "{{LIVE}}")
