@@ -339,6 +339,39 @@ targets, where `BUILD_ARCH` is `os.uname()`), `EXTRA_OECONF` 9, `FILES` 8,
 `TRANSLATED_TARGET_ARCH` from the host), `FILESEXTRAPATHS` 4. 148 equal values still carry
 a flag (over-caution, not an error).
 
+## After acc-helpers
+
+Re-run on 2026-11-19 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/acc-helpers/`, release build), after allowlisted class
+functions are evaluated (bitbake-semantics.md, "Class functions evaluated statically"),
+slices joined the python subset, and OE-core's class-extension read filters are reproduced
+("Class-extension read filters"):
+
+| | compared | equal | of which flagged | equal-ws | flagged | flagged, literal differs | known gap | bug |
+|---|---|---|---|---|---|---|---|---|
+| before (`f060e9e`) | 1090 | 950 | 148 | 0 | 74 | 35 | 31 | 0 |
+| after | 1090 | 964 | 157 | 4 | 32 | 37 | 53 | 0 |
+
+- `FILESPATH`: 28 flagged before; now 25 are `gap:layerdir-canonical` (the value is
+  computed by `base_set_filespath` and equals BitBake's once the `layers/` symlink spelling
+  is mapped) and 3 stay flagged (the native and nativesdk targets: `FILESOVERRIDES` holds
+  `TRANSLATED_TARGET_ARCH`, from `os.uname()` there).
+- `DEPENDS`: 28 flagged before (15 flagged, 13 literal differs); now 5 equal, 4 equal-ws
+  (`base-files`, `packagegroup-core-boot`, `gmp-native`, `quilt-native`: whitespace only, and
+  flagged: anonymous python that may write `DEPENDS`, or the variants' `OVERRIDES`), 3 flagged,
+  16 literal differs (`get_autotools_dep` / `get_base_dep` / `gettext_dependencies` evaluated;
+  the words anonymous python adds, `update-alternatives`, `PACKAGECONFIG`, are still missing
+  and flagged).
+- Also exact now: `MAJOR_VERSION` and `SRC_URI` of util-linux (slices), `SRC_URI` of glib-2.0
+  (`gnome_verdir`), `EXTRA_OECONF` of dbus, systemd-boot, glib-2.0, bash (`gettext_oeconf`),
+  `UBOOT_ARCH_DIR` of u-boot-kiss (`map_kernel_arch`, `map_uboot_arch`).
+- Per target, flagged (both kinds): `gmp-native` 10 to 8, `quilt-native` 11 to 10,
+  `nativesdk-zlib` 9 to 9, `python3` 13 to 12. The native and nativesdk variants gain little:
+  their `OVERRIDES` hold `os.uname()` (host), so every override-dependent value (`DEPENDS`
+  through `BASEDEPENDS:class-*`, `DISTRO_FEATURES` before `set_class_filter`, `PTEST_ENABLED`,
+  `PACKAGES`) stays flagged and the read filters, though installed, are not applied to them
+  (an uncertain value is shown unfiltered).
+
 ## After w12-final
 
 Re-run on 2026-11-18 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,

@@ -5,7 +5,7 @@ curl	PR	equal
 curl	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 curl	FILE_LAYERNAME	equal	
 curl	SRC_URI	equal	
-curl	DEPENDS	flagged	unevaluated_python
+curl	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:508 [appendVar]; append update-alternatives.bbclass:78 [ua_extend_depends]
 curl	RDEPENDS:curl	unset	
 curl	PACKAGECONFIG	equal	
 curl	PACKAGES	equal	
@@ -13,16 +13,16 @@ curl	FILES:curl	equal
 curl	OVERRIDES	equal	
 curl	MACHINEOVERRIDES	equal	
 curl	DISTROOVERRIDES	equal	
-curl	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-curl	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-curl	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+curl	S	equal	
+curl	B	equal	
+curl	WORKDIR	equal	
 curl	LICENSE	equal	
 curl	INHERIT	equal	
 curl	PROVIDES	equal	
 curl	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 curl	EXTRA_OECMAKE	unset	
-curl	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-curl	FILESPATH	flagged	unevaluated_python
+curl	CFLAGS	equal	
+curl	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 curl	MACHINE	equal	
 curl	DISTRO	equal	
 curl	TMPDIR	equal	
@@ -46,7 +46,7 @@ sl	PR	equal
 sl	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 sl	FILE_LAYERNAME	equal	
 sl	SRC_URI	equal	
-sl	DEPENDS	flagged	unevaluated_python
+sl	DEPENDS	equal	
 sl	RDEPENDS:sl	unset	
 sl	PACKAGECONFIG	unset	
 sl	PACKAGES	equal	
@@ -63,7 +63,7 @@ sl	PROVIDES	equal
 sl	EXTRA_OECONF	equal	
 sl	EXTRA_OECMAKE	unset	
 sl	CFLAGS	equal	
-sl	FILESPATH	flagged	unevaluated_python
+sl	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 sl	MACHINE	equal	
 sl	DISTRO	equal	
 sl	TMPDIR	equal	
@@ -96,7 +96,7 @@ linux-kiss	PROVIDES	equal
 linux-kiss	EXTRA_OECONF	equal	
 linux-kiss	EXTRA_OECMAKE	unset	
 linux-kiss	CFLAGS	equal	
-linux-kiss	FILESPATH	flagged	unevaluated_python
+linux-kiss	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 linux-kiss	MACHINE	equal	
 linux-kiss	DISTRO	equal	
 linux-kiss	TMPDIR	equal	
@@ -126,7 +126,7 @@ u-boot-kiss	PROVIDES	equal
 u-boot-kiss	EXTRA_OECONF	equal	
 u-boot-kiss	EXTRA_OECMAKE	unset	
 u-boot-kiss	CFLAGS	equal	
-u-boot-kiss	FILESPATH	flagged	unevaluated_python
+u-boot-kiss	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 u-boot-kiss	MACHINE	equal	
 u-boot-kiss	DISTRO	equal	
 u-boot-kiss	TMPDIR	equal	
@@ -147,7 +147,7 @@ u-boot-kiss	SECTION	equal
 u-boot-kiss	SRCREV	equal	
 u-boot-kiss	SUMMARY	equal	
 u-boot-kiss	SYSROOT_DIRS	equal	
-u-boot-kiss	UBOOT_ARCH_DIR	flagged	unevaluated_python
+u-boot-kiss	UBOOT_ARCH_DIR	equal	
 u-boot-kiss	UBOOT_INITIAL_ENV	equal	
 u-boot-kiss	UBOOT_LOCALVERSION	equal	
 kiss-image	PN	equal	
@@ -156,7 +156,7 @@ kiss-image	PR	equal
 kiss-image	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 kiss-image	FILE_LAYERNAME	equal	
 kiss-image	SRC_URI	equal	
-kiss-image	DEPENDS	flagged-literal-differs	unevaluated_python
+kiss-image	DEPENDS	bug	bitbake last op: set ast.py:506; static last applied: meta-kiss:recipes-core/images/kiss-image.bb:1 Set
 kiss-image	RDEPENDS:kiss-image	unset	
 kiss-image	PACKAGECONFIG	unset	
 kiss-image	PACKAGES	equal	
@@ -173,7 +173,7 @@ kiss-image	PROVIDES	equal
 kiss-image	EXTRA_OECONF	equal	
 kiss-image	EXTRA_OECMAKE	unset	
 kiss-image	CFLAGS	equal	
-kiss-image	FILESPATH	flagged	unevaluated_python
+kiss-image	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 kiss-image	MACHINE	equal	
 kiss-image	DISTRO	equal	
 kiss-image	TMPDIR	equal	
@@ -186,7 +186,7 @@ packagegroup-core-boot	PR	equal
 packagegroup-core-boot	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 packagegroup-core-boot	FILE_LAYERNAME	equal	
 packagegroup-core-boot	SRC_URI	equal	
-packagegroup-core-boot	DEPENDS	flagged	unevaluated_python
+packagegroup-core-boot	DEPENDS	equal	
 packagegroup-core-boot	RDEPENDS:packagegroup-core-boot	equal	
 packagegroup-core-boot	PACKAGECONFIG	unset	
 packagegroup-core-boot	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set packagegroup.bbclass:39 [__anon_42]
@@ -203,7 +203,7 @@ packagegroup-core-boot	PROVIDES	equal
 packagegroup-core-boot	EXTRA_OECONF	equal	
 packagegroup-core-boot	EXTRA_OECMAKE	unset	
 packagegroup-core-boot	CFLAGS	equal	
-packagegroup-core-boot	FILESPATH	flagged	unevaluated_python
+packagegroup-core-boot	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 packagegroup-core-boot	MACHINE	equal	
 packagegroup-core-boot	DISTRO	equal	
 packagegroup-core-boot	TMPDIR	equal	
@@ -219,7 +219,7 @@ zlib	PR	equal
 zlib	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 zlib	FILE_LAYERNAME	equal	
 zlib	SRC_URI	equal	
-zlib	DEPENDS	flagged	unevaluated_python
+zlib	DEPENDS	equal	
 zlib	RDEPENDS:zlib	unset	
 zlib	PACKAGECONFIG	unset	
 zlib	PACKAGES	equal	
@@ -227,16 +227,16 @@ zlib	FILES:zlib	equal
 zlib	OVERRIDES	equal	
 zlib	MACHINEOVERRIDES	equal	
 zlib	DISTROOVERRIDES	equal	
-zlib	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-zlib	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-zlib	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+zlib	S	equal	
+zlib	B	equal	
+zlib	WORKDIR	equal	
 zlib	LICENSE	equal	
 zlib	INHERIT	equal	
 zlib	PROVIDES	equal	
 zlib	EXTRA_OECONF	equal	
 zlib	EXTRA_OECMAKE	unset	
-zlib	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-zlib	FILESPATH	flagged	unevaluated_python
+zlib	CFLAGS	equal	
+zlib	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 zlib	MACHINE	equal	
 zlib	DISTRO	equal	
 zlib	TMPDIR	equal	
@@ -257,7 +257,7 @@ openssl	PR	equal
 openssl	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 openssl	FILE_LAYERNAME	equal	
 openssl	SRC_URI	equal	
-openssl	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+openssl	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:78 [ua_extend_depends]
 openssl	RDEPENDS:openssl	unset	
 openssl	PACKAGECONFIG	equal	
 openssl	PACKAGES	equal	
@@ -265,16 +265,16 @@ openssl	FILES:openssl	equal
 openssl	OVERRIDES	equal	
 openssl	MACHINEOVERRIDES	equal	
 openssl	DISTROOVERRIDES	equal	
-openssl	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-openssl	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-openssl	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+openssl	S	equal	
+openssl	B	equal	
+openssl	WORKDIR	equal	
 openssl	LICENSE	equal	
 openssl	INHERIT	equal	
 openssl	PROVIDES	equal	
 openssl	EXTRA_OECONF	equal	
 openssl	EXTRA_OECMAKE	unset	
-openssl	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-openssl	FILESPATH	flagged	unevaluated_python
+openssl	CFLAGS	equal	
+openssl	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 openssl	MACHINE	equal	
 openssl	DISTRO	equal	
 openssl	TMPDIR	equal	
@@ -309,7 +309,7 @@ busybox	PR	equal
 busybox	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 busybox	FILE_LAYERNAME	equal	
 busybox	SRC_URI	equal	
-busybox	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+busybox	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:78 [ua_extend_depends]
 busybox	RDEPENDS:busybox	equal	
 busybox	PACKAGECONFIG	unset	
 busybox	PACKAGES	equal	
@@ -317,16 +317,16 @@ busybox	FILES:busybox	equal
 busybox	OVERRIDES	equal	
 busybox	MACHINEOVERRIDES	equal	
 busybox	DISTROOVERRIDES	equal	
-busybox	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-busybox	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via S > UNPACKDIR > ... > MULTIMACH_TARGET_SYS
-busybox	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+busybox	S	equal	
+busybox	B	equal	
+busybox	WORKDIR	equal	
 busybox	LICENSE	equal	
 busybox	INHERIT	equal	
 busybox	PROVIDES	equal	
 busybox	EXTRA_OECONF	equal	
 busybox	EXTRA_OECMAKE	unset	
-busybox	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-busybox	FILESPATH	flagged	unevaluated_python
+busybox	CFLAGS	equal	
+busybox	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 busybox	MACHINE	equal	
 busybox	DISTRO	equal	
 busybox	TMPDIR	equal	
@@ -336,9 +336,9 @@ busybox	BUSYBOX_SPLIT_SUID	equal
 busybox	CONFFILES:busybox-mdev	equal	
 busybox	CONFFILES:busybox-syslog	equal	
 busybox	DESCRIPTION	equal	
-busybox	EXTRA_CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via CFLAGS > TARGET_CFLAGS > ... > MULTIMACH_TARGET_SYS
+busybox	EXTRA_CFLAGS	equal	
 busybox	EXTRA_LDFLAGS	equal	
-busybox	EXTRA_OEMAKE	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via CC > TOOLCHAIN_OPTIONS > ... > MULTIMACH_TARGET_SYS
+busybox	EXTRA_OEMAKE	equal	
 busybox	FILES:busybox-httpd	equal	
 busybox	FILES:busybox-syslog	equal	
 busybox	FILES:busybox-mdev	equal	
@@ -375,7 +375,7 @@ dropbear	PR	equal
 dropbear	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 dropbear	FILE_LAYERNAME	equal	
 dropbear	SRC_URI	equal	
-dropbear	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+dropbear	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:78 [ua_extend_depends]
 dropbear	RDEPENDS:dropbear	unset	
 dropbear	PACKAGECONFIG	equal	
 dropbear	PACKAGES	equal	
@@ -383,16 +383,16 @@ dropbear	FILES:dropbear	equal
 dropbear	OVERRIDES	equal	
 dropbear	MACHINEOVERRIDES	equal	
 dropbear	DISTROOVERRIDES	equal	
-dropbear	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-dropbear	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-dropbear	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+dropbear	S	equal	
+dropbear	B	equal	
+dropbear	WORKDIR	equal	
 dropbear	LICENSE	equal	
 dropbear	INHERIT	equal	
 dropbear	PROVIDES	equal	
 dropbear	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 dropbear	EXTRA_OECMAKE	unset	
-dropbear	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-dropbear	FILESPATH	flagged	unevaluated_python
+dropbear	CFLAGS	equal	
+dropbear	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 dropbear	MACHINE	equal	
 dropbear	DISTRO	equal	
 dropbear	TMPDIR	equal	
@@ -423,7 +423,7 @@ ncurses	PR	equal
 ncurses	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 ncurses	FILE_LAYERNAME	equal	
 ncurses	SRC_URI	equal	
-ncurses	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+ncurses	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:78 [ua_extend_depends]
 ncurses	RDEPENDS:ncurses	unset	
 ncurses	PACKAGECONFIG	unset	
 ncurses	PACKAGES	equal	
@@ -431,16 +431,16 @@ ncurses	FILES:ncurses	equal
 ncurses	OVERRIDES	equal	
 ncurses	MACHINEOVERRIDES	equal	
 ncurses	DISTROOVERRIDES	equal	
-ncurses	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-ncurses	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-ncurses	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+ncurses	S	equal	
+ncurses	B	equal	
+ncurses	WORKDIR	equal	
 ncurses	LICENSE	equal	
 ncurses	INHERIT	equal	
 ncurses	PROVIDES	equal	
 ncurses	EXTRA_OECONF	equal	
 ncurses	EXTRA_OECMAKE	unset	
-ncurses	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-ncurses	FILESPATH	flagged	unevaluated_python
+ncurses	CFLAGS	equal	
+ncurses	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 ncurses	MACHINE	equal	
 ncurses	DISTRO	equal	
 ncurses	TMPDIR	equal	
@@ -471,7 +471,7 @@ ncurses	SRCREV	equal
 ncurses	SUMMARY	equal	
 ncurses	SYSROOT_DIRS	equal	
 ncurses	UPSTREAM_CHECK_GITTAGREGEX	equal	
-ncurses	_install_cfgs	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via D > WORKDIR > MULTIMACH_TARGET_SYS
+ncurses	_install_cfgs	equal	
 ncurses	_install_opts	equal	
 ncurses	_unifdef_cleanup	equal	
 ncurses	base_libdir	equal	
@@ -489,16 +489,16 @@ dbus	FILES:dbus	equal
 dbus	OVERRIDES	equal	
 dbus	MACHINEOVERRIDES	equal	
 dbus	DISTROOVERRIDES	equal	
-dbus	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-dbus	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-dbus	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+dbus	S	equal	
+dbus	B	equal	
+dbus	WORKDIR	equal	
 dbus	LICENSE	equal	
 dbus	INHERIT	equal	
 dbus	PROVIDES	equal	
-dbus	EXTRA_OECONF	flagged	unevaluated_python
+dbus	EXTRA_OECONF	equal	
 dbus	EXTRA_OECMAKE	unset	
-dbus	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-dbus	FILESPATH	flagged	unevaluated_python
+dbus	CFLAGS	equal	
+dbus	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 dbus	MACHINE	equal	
 dbus	DISTRO	equal	
 dbus	TMPDIR	equal	
@@ -528,7 +528,7 @@ systemd-boot	PR	equal
 systemd-boot	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 systemd-boot	FILE_LAYERNAME	equal	
 systemd-boot	SRC_URI	equal	
-systemd-boot	DEPENDS	flagged	unevaluated_python
+systemd-boot	DEPENDS	equal	
 systemd-boot	RDEPENDS:systemd-boot	equal	
 systemd-boot	PACKAGECONFIG	unset	
 systemd-boot	PACKAGES	equal	
@@ -542,10 +542,10 @@ systemd-boot	WORKDIR	equal
 systemd-boot	LICENSE	equal	
 systemd-boot	INHERIT	equal	
 systemd-boot	PROVIDES	equal	
-systemd-boot	EXTRA_OECONF	flagged	unevaluated_python
+systemd-boot	EXTRA_OECONF	equal	
 systemd-boot	EXTRA_OECMAKE	unset	
 systemd-boot	CFLAGS	equal	
-systemd-boot	FILESPATH	flagged	unevaluated_python
+systemd-boot	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 systemd-boot	MACHINE	equal	
 systemd-boot	DISTRO	equal	
 systemd-boot	TMPDIR	equal	
@@ -556,7 +556,7 @@ systemd-boot	EFI_LD	equal
 systemd-boot	EXTRA_OEMESON	equal	
 systemd-boot	FILESEXTRAPATHS	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 systemd-boot	HOMEPAGE	equal	
-systemd-boot	LDFLAGS	flagged	unevaluated_python
+systemd-boot	LDFLAGS	equal	
 systemd-boot	LIC_FILES_CHKSUM	equal	
 systemd-boot	MESON_CROSS_FILE	equal	
 systemd-boot	MESON_TARGET	equal	
@@ -571,8 +571,8 @@ util-linux	PV	equal
 util-linux	PR	equal	
 util-linux	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 util-linux	FILE_LAYERNAME	equal	
-util-linux	SRC_URI	flagged	unevaluated_python
-util-linux	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+util-linux	SRC_URI	equal	
+util-linux	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:78 [ua_extend_depends]
 util-linux	RDEPENDS:util-linux	equal	
 util-linux	PACKAGECONFIG	equal	
 util-linux	PACKAGES	equal	
@@ -580,16 +580,16 @@ util-linux	FILES:util-linux	equal
 util-linux	OVERRIDES	equal	
 util-linux	MACHINEOVERRIDES	equal	
 util-linux	DISTROOVERRIDES	equal	
-util-linux	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-util-linux	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-util-linux	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+util-linux	S	equal	
+util-linux	B	equal	
+util-linux	WORKDIR	equal	
 util-linux	LICENSE	equal	
 util-linux	INHERIT	equal	
 util-linux	PROVIDES	equal	
-util-linux	EXTRA_OECONF	flagged	unevaluated_python
+util-linux	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 util-linux	EXTRA_OECMAKE	unset	
-util-linux	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-util-linux	FILESPATH	flagged	unevaluated_python
+util-linux	CFLAGS	equal	
+util-linux	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 util-linux	MACHINE	equal	
 util-linux	DISTRO	equal	
 util-linux	TMPDIR	equal	
@@ -604,7 +604,7 @@ util-linux	CONFFILES:util-linux-su	equal
 util-linux	CVE_PRODUCT	equal	
 util-linux	DEFAULT_LICENSES	equal	
 util-linux	DESCRIPTION	equal	
-util-linux	EXTRA_OEMAKE	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via CFLAGS > TARGET_CFLAGS > ... > MULTIMACH_TARGET_SYS
+util-linux	EXTRA_OEMAKE	equal	
 util-linux	FILES:util-linux-doc	equal	
 util-linux	FILES:util-linux-dev	equal	
 util-linux	FILES:util-linux-mount	equal	
@@ -645,7 +645,7 @@ util-linux	LICENSE:util-linux-wall	equal
 util-linux	LICENSE:util-linux-whereis	equal	
 util-linux	LICENSE:util-linux-write	equal	
 util-linux	LIC_FILES_CHKSUM	equal	
-util-linux	MAJOR_VERSION	flagged	unevaluated_python
+util-linux	MAJOR_VERSION	equal	
 util-linux	PACKAGESPLITFUNCS	equal	
 util-linux	PACKAGES_DYNAMIC	equal	
 util-linux	PACKAGE_PREPROCESS_FUNCS	equal	
@@ -672,10 +672,10 @@ gmp-native	PR	equal
 gmp-native	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 gmp-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 gmp-native	SRC_URI	equal	
-gmp-native	DEPENDS	flagged	unevaluated_python
+gmp-native	DEPENDS	equal-ws	flagged: which override variant or conditional :append/:prepend/:remove of BASEDEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/...
 gmp-native	RDEPENDS:gmp-native	unset	
 gmp-native	PACKAGECONFIG	equal	
-gmp-native	PACKAGES	flagged-literal-differs	unevaluated_python
+gmp-native	PACKAGES	equal	
 gmp-native	FILES:gmp-native	flagged	unevaluated_python
 gmp-native	OVERRIDES	flagged-literal-differs	unevaluated_python
 gmp-native	MACHINEOVERRIDES	equal	
@@ -710,7 +710,7 @@ nativesdk-zlib	PR	equal
 nativesdk-zlib	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 nativesdk-zlib	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 nativesdk-zlib	SRC_URI	equal	
-nativesdk-zlib	DEPENDS	flagged-literal-differs	unevaluated_python
+nativesdk-zlib	DEPENDS	flagged-literal-differs	unevaluated_python; also: a BB_RECIPE_VIRTUAL_PROVIDERS word is left in the static DEPENDS (ast.handleVirtRecipeProviders)
 nativesdk-zlib	RDEPENDS:nativesdk-zlib	unset	
 nativesdk-zlib	PACKAGECONFIG	unset	
 nativesdk-zlib	PACKAGES	flagged	unevaluated_python
@@ -748,7 +748,7 @@ quilt-native	PR	equal
 quilt-native	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 quilt-native	FILE_LAYERNAME	equal	
 quilt-native	SRC_URI	equal	flagged: which override variant or conditional :append/:prepend/:remove of SRC_URI applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-quilt-native	DEPENDS	flagged	unevaluated_python
+quilt-native	DEPENDS	equal-ws	flagged: which override variant or conditional :append/:prepend/:remove of DEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:rem...
 quilt-native	RDEPENDS:quilt-native	equal	
 quilt-native	PACKAGECONFIG	unset	
 quilt-native	PACKAGES	flagged	unevaluated_python
@@ -788,7 +788,7 @@ expat	PR	equal
 expat	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 expat	FILE_LAYERNAME	equal	
 expat	SRC_URI	equal	
-expat	DEPENDS	flagged	unevaluated_python
+expat	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append cmake.bbclass:25 [__anon_30]
 expat	RDEPENDS:expat	unset	
 expat	PACKAGECONFIG	unset	
 expat	PACKAGES	equal	
@@ -796,16 +796,16 @@ expat	FILES:expat	equal
 expat	OVERRIDES	equal	
 expat	MACHINEOVERRIDES	equal	
 expat	DISTROOVERRIDES	equal	
-expat	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-expat	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-expat	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+expat	S	equal	
+expat	B	equal	
+expat	WORKDIR	equal	
 expat	LICENSE	equal	
 expat	INHERIT	equal	
 expat	PROVIDES	equal	
 expat	EXTRA_OECONF	equal	
 expat	EXTRA_OECMAKE	equal	
-expat	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-expat	FILESPATH	flagged	unevaluated_python
+expat	CFLAGS	equal	
+expat	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 expat	MACHINE	equal	
 expat	DISTRO	equal	
 expat	TMPDIR	equal	
@@ -825,7 +825,7 @@ glib-2.0	PV	equal
 glib-2.0	PR	equal	
 glib-2.0	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 glib-2.0	FILE_LAYERNAME	equal	
-glib-2.0	SRC_URI	flagged	unevaluated_python
+glib-2.0	SRC_URI	equal	
 glib-2.0	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:508 [appendVar]
 glib-2.0	RDEPENDS:glib-2.0	unset	
 glib-2.0	PACKAGECONFIG	equal	
@@ -834,16 +834,16 @@ glib-2.0	FILES:glib-2.0	equal
 glib-2.0	OVERRIDES	equal	
 glib-2.0	MACHINEOVERRIDES	equal	
 glib-2.0	DISTROOVERRIDES	equal	
-glib-2.0	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-glib-2.0	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-glib-2.0	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+glib-2.0	S	equal	
+glib-2.0	B	equal	
+glib-2.0	WORKDIR	equal	
 glib-2.0	LICENSE	equal	
 glib-2.0	INHERIT	equal	
 glib-2.0	PROVIDES	equal	
-glib-2.0	EXTRA_OECONF	flagged	unevaluated_python
+glib-2.0	EXTRA_OECONF	equal	
 glib-2.0	EXTRA_OECMAKE	unset	
-glib-2.0	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-glib-2.0	FILESPATH	flagged	unevaluated_python
+glib-2.0	CFLAGS	equal	
+glib-2.0	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 glib-2.0	MACHINE	equal	
 glib-2.0	DISTRO	equal	
 glib-2.0	TMPDIR	equal	
@@ -881,7 +881,7 @@ base-files	PR	equal
 base-files	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 base-files	FILE_LAYERNAME	equal	
 base-files	SRC_URI	equal	
-base-files	DEPENDS	flagged	unevaluated_python
+base-files	DEPENDS	equal	
 base-files	RDEPENDS:base-files	unset	
 base-files	PACKAGECONFIG	unset	
 base-files	PACKAGES	equal	
@@ -898,7 +898,7 @@ base-files	PROVIDES	equal
 base-files	EXTRA_OECONF	equal	
 base-files	EXTRA_OECMAKE	unset	
 base-files	CFLAGS	equal	
-base-files	FILESPATH	flagged	unevaluated_python
+base-files	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 base-files	MACHINE	equal	
 base-files	DISTRO	equal	
 base-files	TMPDIR	equal	
@@ -938,29 +938,29 @@ python3	FILES:python3	equal	flagged: anonymous python at meta:recipes-devtools/p
 python3	OVERRIDES	equal	
 python3	MACHINEOVERRIDES	equal	
 python3	DISTROOVERRIDES	equal	
-python3	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-python3	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-python3	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+python3	S	equal	
+python3	B	equal	
+python3	WORKDIR	equal	
 python3	LICENSE	equal	
 python3	INHERIT	equal	
 python3	PROVIDES	equal	
 python3	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 python3	EXTRA_OECMAKE	unset	
-python3	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-python3	FILESPATH	flagged	unevaluated_python
+python3	CFLAGS	equal	
+python3	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 python3	MACHINE	equal	
 python3	DISTRO	equal	
 python3	TMPDIR	equal	
 python3	ALTERNATIVE:python3-dev	equal	
 python3	BBCLASSEXTEND	equal	
 python3	CACHED_CONFIGUREVARS	equal	
-python3	CPPFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via STAGING_INCDIR > STAGING_DIR_HOST > ... > MULTIMACH_TARGET_SYS
-python3	CROSSPYTHONPATH	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via STAGING_LIBDIR_NATIVE > STAGING_DIR_NATIVE > ... > MULTIMACH_TARGET_SYS
+python3	CPPFLAGS	equal	
+python3	CROSSPYTHONPATH	equal	
 python3	CVE_PRODUCT	equal	
 python3	DESCRIPTION	equal	
 python3	DEV_PKG_DEPENDENCY	equal	
 python3	EXTRANATIVEPATH	equal	
-python3	EXTRA_OEMAKE	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via STAGING_LIBDIR > STAGING_DIR_HOST > ... > MULTIMACH_TARGET_SYS
+python3	EXTRA_OEMAKE	equal	
 python3	FILES:python3-pydoc	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:412 [__anon_436]
 python3	FILES:python3-idle	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]
 python3	FILES:python3-tkinter	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]
@@ -1003,7 +1003,7 @@ bash	PR	equal
 bash	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 bash	FILE_LAYERNAME	equal	
 bash	SRC_URI	equal	
-bash	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+bash	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:78 [ua_extend_depends]
 bash	RDEPENDS:bash	equal	
 bash	PACKAGECONFIG	unset	
 bash	PACKAGES	equal	
@@ -1011,23 +1011,23 @@ bash	FILES:bash	equal
 bash	OVERRIDES	equal	
 bash	MACHINEOVERRIDES	equal	
 bash	DISTROOVERRIDES	equal	
-bash	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-bash	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-bash	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+bash	S	equal	
+bash	B	equal	
+bash	WORKDIR	equal	
 bash	LICENSE	equal	
 bash	INHERIT	equal	
 bash	PROVIDES	equal	
-bash	EXTRA_OECONF	flagged	unevaluated_python
+bash	EXTRA_OECONF	equal	
 bash	EXTRA_OECMAKE	unset	
-bash	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-bash	FILESPATH	flagged	unevaluated_python
+bash	CFLAGS	equal	
+bash	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 bash	MACHINE	equal	
 bash	DISTRO	equal	
 bash	TMPDIR	equal	
 bash	ALTERNATIVE:bash	equal	
 bash	ALTERNATIVE_PRIORITY	equal	
 bash	BBCLASSEXTEND	equal	
-bash	BUILD_CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via BUILD_CPPFLAGS > STAGING_INCDIR_NATIVE > ... > MULTIMACH_TARGET_SYS
+bash	BUILD_CFLAGS	equal	
 bash	CACHED_CONFIGUREVARS	equal	
 bash	DEBUG_OPTIMIZATION	equal	
 bash	DESCRIPTION	equal	
@@ -1047,7 +1047,7 @@ opencsd	PR	equal
 opencsd	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 opencsd	FILE_LAYERNAME	equal	
 opencsd	SRC_URI	equal	
-opencsd	DEPENDS	flagged	unevaluated_python
+opencsd	DEPENDS	equal	
 opencsd	RDEPENDS:opencsd	unset	
 opencsd	PACKAGECONFIG	unset	
 opencsd	PACKAGES	equal	
@@ -1064,7 +1064,7 @@ opencsd	PROVIDES	equal
 opencsd	EXTRA_OECONF	equal	
 opencsd	EXTRA_OECMAKE	unset	
 opencsd	CFLAGS	equal	
-opencsd	FILESPATH	flagged	unevaluated_python
+opencsd	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 opencsd	MACHINE	equal	
 opencsd	DISTRO	equal	
 opencsd	TMPDIR	equal	
@@ -1098,7 +1098,7 @@ virtual/kernel	PROVIDES	equal
 virtual/kernel	EXTRA_OECONF	equal	
 virtual/kernel	EXTRA_OECMAKE	unset	
 virtual/kernel	CFLAGS	equal	
-virtual/kernel	FILESPATH	flagged	unevaluated_python
+virtual/kernel	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 virtual/kernel	MACHINE	equal	
 virtual/kernel	DISTRO	equal	
 virtual/kernel	TMPDIR	equal	
@@ -1128,7 +1128,7 @@ virtual/bootloader	PROVIDES	equal
 virtual/bootloader	EXTRA_OECONF	equal	
 virtual/bootloader	EXTRA_OECMAKE	unset	
 virtual/bootloader	CFLAGS	equal	
-virtual/bootloader	FILESPATH	flagged	unevaluated_python
+virtual/bootloader	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 virtual/bootloader	MACHINE	equal	
 virtual/bootloader	DISTRO	equal	
 virtual/bootloader	TMPDIR	equal	
@@ -1149,7 +1149,7 @@ virtual/bootloader	SECTION	equal
 virtual/bootloader	SRCREV	equal	
 virtual/bootloader	SUMMARY	equal	
 virtual/bootloader	SYSROOT_DIRS	equal	
-virtual/bootloader	UBOOT_ARCH_DIR	flagged	unevaluated_python
+virtual/bootloader	UBOOT_ARCH_DIR	equal	
 virtual/bootloader	UBOOT_INITIAL_ENV	equal	
 virtual/bootloader	UBOOT_LOCALVERSION	equal	
 curl@default	PN	equal	
@@ -1158,7 +1158,7 @@ curl@default	PR	equal
 curl@default	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 curl@default	FILE_LAYERNAME	equal	
 curl@default	SRC_URI	equal	
-curl@default	DEPENDS	flagged	unevaluated_python
+curl@default	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:508 [appendVar]; append update-alternatives.bbclass:78 [ua_extend_depends]
 curl@default	RDEPENDS:curl	unset	
 curl@default	PACKAGECONFIG	equal	
 curl@default	PACKAGES	equal	
@@ -1166,16 +1166,16 @@ curl@default	FILES:curl	equal
 curl@default	OVERRIDES	equal	
 curl@default	MACHINEOVERRIDES	equal	
 curl@default	DISTROOVERRIDES	equal	
-curl@default	S	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS
-curl@default	B	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via WORKDIR > MULTIMACH_TARGET_SYS
-curl@default	WORKDIR	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via MULTIMACH_TARGET_SYS
+curl@default	S	equal	
+curl@default	B	equal	
+curl@default	WORKDIR	equal	
 curl@default	LICENSE	equal	
 curl@default	INHERIT	equal	
 curl@default	PROVIDES	equal	
 curl@default	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 curl@default	EXTRA_OECMAKE	unset	
-curl@default	CFLAGS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:454-737 may write PACKAGE_ARCH, used via TARGET_CFLAGS > DEBUG_PREFIX_MAP > ... > MULTIMACH_TARGET_SYS
-curl@default	FILESPATH	flagged	unevaluated_python
+curl@default	CFLAGS	equal	
+curl@default	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 curl@default	MACHINE	equal	
 curl@default	DISTRO	equal	
 curl@default	TMPDIR	equal	
@@ -1199,7 +1199,7 @@ sl@default	PR	equal
 sl@default	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 sl@default	FILE_LAYERNAME	equal	
 sl@default	SRC_URI	equal	
-sl@default	DEPENDS	flagged	unevaluated_python
+sl@default	DEPENDS	equal	
 sl@default	RDEPENDS:sl	unset	
 sl@default	PACKAGECONFIG	unset	
 sl@default	PACKAGES	equal	
@@ -1216,7 +1216,7 @@ sl@default	PROVIDES	equal
 sl@default	EXTRA_OECONF	equal	
 sl@default	EXTRA_OECMAKE	unset	
 sl@default	CFLAGS	equal	
-sl@default	FILESPATH	flagged	unevaluated_python
+sl@default	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 sl@default	MACHINE	equal	
 sl@default	DISTRO	equal	
 sl@default	TMPDIR	equal	
@@ -1249,7 +1249,7 @@ virtual/kernel@default	PROVIDES	equal
 virtual/kernel@default	EXTRA_OECONF	equal	
 virtual/kernel@default	EXTRA_OECMAKE	unset	
 virtual/kernel@default	CFLAGS	equal	
-virtual/kernel@default	FILESPATH	flagged	unevaluated_python
+virtual/kernel@default	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 virtual/kernel@default	MACHINE	equal	
 virtual/kernel@default	DISTRO	equal	
 virtual/kernel@default	TMPDIR	equal	

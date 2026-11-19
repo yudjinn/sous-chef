@@ -5,6 +5,7 @@
 //! `expand.rs`.
 
 mod anon;
+pub mod classfn;
 pub mod datastore;
 pub mod expand;
 mod license;

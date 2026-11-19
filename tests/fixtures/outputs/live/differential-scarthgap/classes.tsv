@@ -5,7 +5,7 @@ curl	PR	equal
 curl	FILE	equal	
 curl	FILE_LAYERNAME	equal	
 curl	SRC_URI	equal	
-curl	DEPENDS	flagged	unevaluated_python
+curl	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:478 [appendVar]; append update-alternatives.bbclass:96 [ua_extend_depends]
 curl	RDEPENDS:curl	unset	
 curl	PACKAGECONFIG	equal	
 curl	PACKAGES	equal	
@@ -21,8 +21,8 @@ curl	INHERIT	equal
 curl	PROVIDES	equal	
 curl	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 curl	EXTRA_OECMAKE	unset	
-curl	CFLAGS	flagged	unevaluated_python
-curl	FILESPATH	flagged	unevaluated_python
+curl	CFLAGS	equal	
+curl	FILESPATH	equal	
 curl	MACHINE	equal	
 curl	DISTRO	equal	
 curl	TMPDIR	equal	
@@ -46,7 +46,7 @@ zlib	PR	equal
 zlib	FILE	equal	
 zlib	FILE_LAYERNAME	equal	
 zlib	SRC_URI	equal	
-zlib	DEPENDS	flagged	unevaluated_python
+zlib	DEPENDS	equal	
 zlib	RDEPENDS:zlib	unset	
 zlib	PACKAGECONFIG	unset	
 zlib	PACKAGES	equal	
@@ -62,8 +62,8 @@ zlib	INHERIT	equal
 zlib	PROVIDES	equal	
 zlib	EXTRA_OECONF	equal	
 zlib	EXTRA_OECMAKE	unset	
-zlib	CFLAGS	flagged	unevaluated_python
-zlib	FILESPATH	flagged	unevaluated_python
+zlib	CFLAGS	equal	
+zlib	FILESPATH	equal	
 zlib	MACHINE	equal	
 zlib	DISTRO	equal	
 zlib	TMPDIR	equal	
@@ -83,7 +83,7 @@ openssl	PR	equal
 openssl	FILE	equal	
 openssl	FILE_LAYERNAME	equal	
 openssl	SRC_URI	equal	
-openssl	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:96 [ua_extend_depends]
+openssl	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:96 [ua_extend_depends]
 openssl	RDEPENDS:openssl	unset	
 openssl	PACKAGECONFIG	equal	
 openssl	PACKAGES	equal	
@@ -99,8 +99,8 @@ openssl	INHERIT	equal
 openssl	PROVIDES	equal	
 openssl	EXTRA_OECONF	equal	
 openssl	EXTRA_OECMAKE	unset	
-openssl	CFLAGS	flagged	unevaluated_python
-openssl	FILESPATH	flagged	unevaluated_python
+openssl	CFLAGS	equal	
+openssl	FILESPATH	equal	
 openssl	MACHINE	equal	
 openssl	DISTRO	equal	
 openssl	TMPDIR	equal	
@@ -134,7 +134,7 @@ ncurses	PR	equal
 ncurses	FILE	equal	
 ncurses	FILE_LAYERNAME	equal	
 ncurses	SRC_URI	equal	
-ncurses	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:96 [ua_extend_depends]
+ncurses	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:96 [ua_extend_depends]
 ncurses	RDEPENDS:ncurses	unset	
 ncurses	PACKAGECONFIG	unset	
 ncurses	PACKAGES	equal	
@@ -150,8 +150,8 @@ ncurses	INHERIT	equal
 ncurses	PROVIDES	equal	
 ncurses	EXTRA_OECONF	equal	
 ncurses	EXTRA_OECMAKE	unset	
-ncurses	CFLAGS	flagged	unevaluated_python
-ncurses	FILESPATH	flagged	unevaluated_python
+ncurses	CFLAGS	equal	
+ncurses	FILESPATH	equal	
 ncurses	MACHINE	equal	
 ncurses	DISTRO	equal	
 ncurses	TMPDIR	equal	
@@ -165,7 +165,7 @@ ncurses	CPPFLAGS	equal
 ncurses	DESCRIPTION	equal	
 ncurses	ENABLE_WIDEC	equal	
 ncurses	EXCONFIG_ARGS	equal	
-ncurses	EXTRASITECONFIG	flagged	unevaluated_python
+ncurses	EXTRASITECONFIG	equal	
 ncurses	EXTRA_AUTORECONF	equal	
 ncurses	EX_TERMCAP	equal	
 ncurses	EX_TERMINFO	equal	
@@ -194,7 +194,7 @@ bash	PR	equal
 bash	FILE	equal	
 bash	FILE_LAYERNAME	equal	
 bash	SRC_URI	equal	
-bash	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:96 [ua_extend_depends]
+bash	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:96 [ua_extend_depends]
 bash	RDEPENDS:bash	equal	
 bash	PACKAGECONFIG	unset	
 bash	PACKAGES	equal	
@@ -208,10 +208,10 @@ bash	WORKDIR	equal
 bash	LICENSE	equal	
 bash	INHERIT	equal	
 bash	PROVIDES	equal	
-bash	EXTRA_OECONF	flagged	unevaluated_python
+bash	EXTRA_OECONF	equal	
 bash	EXTRA_OECMAKE	unset	
-bash	CFLAGS	flagged	unevaluated_python
-bash	FILESPATH	flagged	unevaluated_python
+bash	CFLAGS	equal	
+bash	FILESPATH	equal	
 bash	MACHINE	equal	
 bash	DISTRO	equal	
 bash	TMPDIR	equal	
@@ -238,8 +238,8 @@ util-linux	PV	equal
 util-linux	PR	equal	
 util-linux	FILE	equal	
 util-linux	FILE_LAYERNAME	equal	
-util-linux	SRC_URI	flagged	unevaluated_python
-util-linux	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:96 [ua_extend_depends]
+util-linux	SRC_URI	equal	
+util-linux	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:96 [ua_extend_depends]
 util-linux	RDEPENDS:util-linux	equal	
 util-linux	PACKAGECONFIG	equal	
 util-linux	PACKAGES	equal	
@@ -253,10 +253,10 @@ util-linux	WORKDIR	equal
 util-linux	LICENSE	equal	
 util-linux	INHERIT	equal	
 util-linux	PROVIDES	equal	
-util-linux	EXTRA_OECONF	flagged	unevaluated_python
+util-linux	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 util-linux	EXTRA_OECMAKE	unset	
-util-linux	CFLAGS	flagged	unevaluated_python
-util-linux	FILESPATH	flagged	unevaluated_python
+util-linux	CFLAGS	equal	
+util-linux	FILESPATH	equal	
 util-linux	MACHINE	equal	
 util-linux	DISTRO	equal	
 util-linux	TMPDIR	equal	
@@ -269,7 +269,7 @@ util-linux	ALTERNATIVE_PRIORITY	equal
 util-linux	BBCLASSEXTEND	equal	
 util-linux	CONFFILES:util-linux-su	equal	
 util-linux	DESCRIPTION	equal	
-util-linux	EXTRA_OEMAKE	flagged	unevaluated_python
+util-linux	EXTRA_OEMAKE	equal	
 util-linux	FILES:util-linux-doc	equal	
 util-linux	FILES:util-linux-dev	equal	
 util-linux	FILES:util-linux-mount	equal	
@@ -285,7 +285,7 @@ util-linux	LICENSE:util-linux-libfdisk	equal
 util-linux	LICENSE:util-linux-libmount	equal	
 util-linux	LICENSE:util-linux-libsmartcols	equal	
 util-linux	LIC_FILES_CHKSUM	equal	
-util-linux	MAJOR_VERSION	flagged	unevaluated_python
+util-linux	MAJOR_VERSION	equal	
 util-linux	PACKAGESPLITFUNCS	equal	
 util-linux	PACKAGES_DYNAMIC	equal	
 util-linux	PACKAGE_PREPROCESS_FUNCS	equal	
@@ -326,10 +326,10 @@ glib-2.0	WORKDIR	equal
 glib-2.0	LICENSE	equal	
 glib-2.0	INHERIT	equal	
 glib-2.0	PROVIDES	equal	
-glib-2.0	EXTRA_OECONF	flagged	unevaluated_python
+glib-2.0	EXTRA_OECONF	equal	
 glib-2.0	EXTRA_OECMAKE	unset	
-glib-2.0	CFLAGS	flagged	unevaluated_python
-glib-2.0	FILESPATH	flagged	unevaluated_python
+glib-2.0	CFLAGS	equal	
+glib-2.0	FILESPATH	equal	
 glib-2.0	MACHINE	equal	
 glib-2.0	DISTRO	equal	
 glib-2.0	TMPDIR	equal	
@@ -379,10 +379,10 @@ dbus	WORKDIR	equal
 dbus	LICENSE	equal	
 dbus	INHERIT	equal	
 dbus	PROVIDES	equal	
-dbus	EXTRA_OECONF	flagged	unevaluated_python
+dbus	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 dbus	EXTRA_OECMAKE	unset	
-dbus	CFLAGS	flagged	unevaluated_python
-dbus	FILESPATH	flagged	unevaluated_python
+dbus	CFLAGS	equal	
+dbus	FILESPATH	equal	
 dbus	MACHINE	equal	
 dbus	DISTRO	equal	
 dbus	TMPDIR	equal	
@@ -415,7 +415,7 @@ expat	PR	equal
 expat	FILE	equal	
 expat	FILE_LAYERNAME	equal	
 expat	SRC_URI	equal	
-expat	DEPENDS	flagged	unevaluated_python
+expat	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append cmake.bbclass:25 [__anon_30]
 expat	RDEPENDS:expat	unset	
 expat	PACKAGECONFIG	unset	
 expat	PACKAGES	equal	
@@ -431,8 +431,8 @@ expat	INHERIT	equal
 expat	PROVIDES	equal	
 expat	EXTRA_OECONF	equal	
 expat	EXTRA_OECMAKE	equal	
-expat	CFLAGS	flagged	unevaluated_python
-expat	FILESPATH	flagged	unevaluated_python
+expat	CFLAGS	equal	
+expat	FILESPATH	equal	
 expat	MACHINE	equal	
 expat	DISTRO	equal	
 expat	TMPDIR	equal	
@@ -457,7 +457,7 @@ python3	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: 
 python3	RDEPENDS:python3	unset	
 python3	PACKAGECONFIG	equal	
 python3	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set python3_3.12.16.bb:416 [__anon_422]
-python3	FILES:python3	equal	
+python3	FILES:python3	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.12.16.bb:346-422 may write FILES:python3
 python3	OVERRIDES	equal	
 python3	MACHINEOVERRIDES	equal	
 python3	DISTROOVERRIDES	equal	
@@ -469,8 +469,8 @@ python3	INHERIT	equal
 python3	PROVIDES	equal	
 python3	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 python3	EXTRA_OECMAKE	unset	
-python3	CFLAGS	flagged	unevaluated_python
-python3	FILESPATH	flagged	unevaluated_python
+python3	CFLAGS	equal	
+python3	FILESPATH	equal	
 python3	MACHINE	equal	
 python3	DISTRO	equal	
 python3	TMPDIR	equal	
@@ -486,9 +486,9 @@ python3	EXTRANATIVEPATH	equal
 python3	EXTRA_OEMAKE	equal	
 python3	FILES:python3-pydoc	flagged-literal-differs	unevaluated_python; bitbake python ops: set python3_3.12.16.bb:392 [__anon_422]; append python3_3.12.16.bb:394 [__anon_422]; append python3_3.12.16.bb:394 [__anon_422]; append python3_3.12.16.bb:394 [__anon_422]; append python3_3.12.16.bb:3...
 python3	FILES:python3-idle	flagged-literal-differs	unevaluated_python; bitbake python ops: set python3_3.12.16.bb:392 [__anon_422]; append python3_3.12.16.bb:394 [__anon_422]; append python3_3.12.16.bb:394 [__anon_422]
-python3	FILES	equal	
-python3	FILES:python3-misc	equal	
-python3	FILES:python3-man	equal	
+python3	FILES	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.12.16.bb:346-422 may write FILES
+python3	FILES:python3-misc	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.12.16.bb:346-422 may write FILES:python3-misc
+python3	FILES:python3-man	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.12.16.bb:346-422 may write FILES:python3-man
 python3	HOMEPAGE	equal	
 python3	INCLUDE_PYCS	equal	
 python3	INSANE_SKIP:python3-dev	equal	
@@ -501,21 +501,21 @@ python3	PYTHON_MAJMIN	equal
 python3	RDEPENDS	unset	
 python3	RDEPENDS:python3-ctypes	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.12.16.bb:405 [__anon_422]; append python3_3.12.16.bb:405 [__anon_422]; append python3_3.12.16.bb:405 [__anon_422]; append python3_3.12.16.bb:405 [__anon_422]
 python3	RDEPENDS:python3-idle	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.12.16.bb:405 [__anon_422]
-python3	RDEPENDS:python3-misc	equal	
+python3	RDEPENDS:python3-misc	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.12.16.bb:346-422 may write RDEPENDS:python3-misc
 python3	RDEPENDS:python3-modules	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.12.16.bb:405 [__anon_422]; append python3_3.12.16.bb:405 [__anon_422]; append python3_3.12.16.bb:405 [__anon_422]; append python3_3.12.16.bb:405 [__anon_422]; append python3_3.12.16.b...
-python3	RDEPENDS:python3-ptest	equal	
+python3	RDEPENDS:python3-ptest	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.12.16.bb:346-422 may write RDEPENDS:python3-ptest
 python3	RDEPENDS:python3-pydoc	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.12.16.bb:405 [__anon_422]
 python3	RDEPENDS:python3-tests	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.12.16.bb:405 [__anon_422]; append python3_3.12.16.bb:405 [__anon_422]
 python3	RDEPENDS:python3-tkinter	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.12.16.bb:405 [__anon_422]
-python3	RPROVIDES:python3-modules	equal	
-python3	RPROVIDES:python3-venv	equal	
+python3	RPROVIDES:python3-modules	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.12.16.bb:346-422 may write RPROVIDES:python3-modules
+python3	RPROVIDES:python3-venv	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.12.16.bb:346-422 may write RPROVIDES:python3-venv
 python3	RRECOMMENDS:python3-core	unset	
-python3	RRECOMMENDS:python3-crypt	equal	
+python3	RRECOMMENDS:python3-crypt	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.12.16.bb:346-422 may write RRECOMMENDS:python3-crypt
 python3	SECTION	equal	
 python3	SKIPPED_TESTS	equal	
 python3	SSTATE_HASHEQUIV_FILEMAP	flagged	unevaluated_python
 python3	SSTATE_SCAN_FILES	equal	
-python3	SUMMARY	equal	
+python3	SUMMARY	equal	flagged: anonymous python at meta:recipes-devtools/python/python3_3.12.16.bb:346-422 may write SUMMARY
 python3	SYSROOT_DIRS	equal	
 python3	SYSROOT_PREPROCESS_FUNCS	equal	
 python3	UPSTREAM_CHECK_REGEX	equal	
@@ -525,7 +525,7 @@ python3-jinja2	PR	equal
 python3-jinja2	FILE	equal	
 python3-jinja2	FILE_LAYERNAME	equal	
 python3-jinja2	SRC_URI	flagged	unevaluated_python
-python3-jinja2	DEPENDS	flagged	unevaluated_python
+python3-jinja2	DEPENDS	equal	
 python3-jinja2	RDEPENDS:python3-jinja2	equal	
 python3-jinja2	PACKAGECONFIG	unset	
 python3-jinja2	PACKAGES	equal	
@@ -541,8 +541,8 @@ python3-jinja2	INHERIT	equal
 python3-jinja2	PROVIDES	equal	
 python3-jinja2	EXTRA_OECONF	equal	
 python3-jinja2	EXTRA_OECMAKE	unset	
-python3-jinja2	CFLAGS	flagged	unevaluated_python
-python3-jinja2	FILESPATH	flagged	unevaluated_python
+python3-jinja2	CFLAGS	equal	
+python3-jinja2	FILESPATH	equal	
 python3-jinja2	MACHINE	equal	
 python3-jinja2	DISTRO	equal	
 python3-jinja2	TMPDIR	equal	
@@ -560,7 +560,7 @@ python3-packaging	PR	equal
 python3-packaging	FILE	equal	
 python3-packaging	FILE_LAYERNAME	equal	
 python3-packaging	SRC_URI	flagged	unevaluated_python
-python3-packaging	DEPENDS	flagged	unevaluated_python
+python3-packaging	DEPENDS	equal	
 python3-packaging	RDEPENDS:python3-packaging	equal	
 python3-packaging	PACKAGECONFIG	unset	
 python3-packaging	PACKAGES	equal	
@@ -577,7 +577,7 @@ python3-packaging	PROVIDES	equal
 python3-packaging	EXTRA_OECONF	equal	
 python3-packaging	EXTRA_OECMAKE	unset	
 python3-packaging	CFLAGS	flagged	unevaluated_python
-python3-packaging	FILESPATH	flagged	unevaluated_python
+python3-packaging	FILESPATH	equal	
 python3-packaging	MACHINE	equal	
 python3-packaging	DISTRO	equal	
 python3-packaging	TMPDIR	equal	
@@ -591,15 +591,15 @@ linux-yocto	PR	equal
 linux-yocto	FILE	equal	
 linux-yocto	FILE_LAYERNAME	equal	
 linux-yocto	SRC_URI	equal	
-linux-yocto	DEPENDS	flagged	unevaluated_python
+linux-yocto	DEPENDS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:410-703 may write DEPENDS; anonymous python at meta:classes-recipe/kernel-uimage.bbclass:9-27 may write DEPENDS
 linux-yocto	RDEPENDS:linux-yocto	unset	
 linux-yocto	PACKAGECONFIG	unset	
 linux-yocto	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:106 [__anon_159]; append kernel-devicetree.bbclass:10 [__anon_13]
-linux-yocto	FILES:linux-yocto	equal	
+linux-yocto	FILES:linux-yocto	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write FILES:linux-yocto
 linux-yocto	OVERRIDES	equal	
 linux-yocto	MACHINEOVERRIDES	equal	
 linux-yocto	DISTROOVERRIDES	equal	
-linux-yocto	S	equal	
+linux-yocto	S	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_DIR
 linux-yocto	B	equal	
 linux-yocto	WORKDIR	equal	
 linux-yocto	LICENSE	equal	
@@ -608,18 +608,18 @@ linux-yocto	PROVIDES	equal
 linux-yocto	EXTRA_OECONF	equal	
 linux-yocto	EXTRA_OECMAKE	unset	
 linux-yocto	CFLAGS	flagged	unevaluated_python
-linux-yocto	FILESPATH	flagged	unevaluated_python
+linux-yocto	FILESPATH	equal	
 linux-yocto	MACHINE	equal	
 linux-yocto	DISTRO	equal	
 linux-yocto	TMPDIR	equal	
 linux-yocto	BBCLASSEXTEND	equal	
 linux-yocto	COMPATIBLE_MACHINE	equal	
-linux-yocto	EXTRA_OEMAKE	equal	
+linux-yocto	EXTRA_OEMAKE	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_DIR, used via KERNEL_CC > DEBUG_PREFIX_MAP > S; anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_BUILDDIR,...
 linux-yocto	HOMEPAGE	equal	
 linux-yocto	INSANE_SKIP	unset	
 linux-yocto	KBRANCH	equal	
 linux-yocto	KCONF_BSP_AUDIT_LEVEL	equal	
-linux-yocto	KERNEL_CC	equal	
+linux-yocto	KERNEL_CC	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_DIR, used via DEBUG_PREFIX_MAP > S; anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_BUILDDIR
 linux-yocto	KERNEL_DEBUG	equal	
 linux-yocto	KERNEL_DEVICETREE	unset	
 linux-yocto	KERNEL_EXTRA_FEATURES	equal	
@@ -658,8 +658,8 @@ u-boot	INHERIT	equal
 u-boot	PROVIDES	equal	
 u-boot	EXTRA_OECONF	equal	
 u-boot	EXTRA_OECMAKE	unset	
-u-boot	CFLAGS	flagged	unevaluated_python
-u-boot	FILESPATH	flagged	unevaluated_python
+u-boot	CFLAGS	equal	
+u-boot	FILESPATH	equal	
 u-boot	MACHINE	equal	
 u-boot	DISTRO	equal	
 u-boot	TMPDIR	equal	
@@ -680,7 +680,7 @@ u-boot	SECTION	equal
 u-boot	SRCREV	equal	
 u-boot	SUMMARY	equal	
 u-boot	SYSROOT_DIRS	equal	
-u-boot	UBOOT_ARCH_DIR	flagged	unevaluated_python
+u-boot	UBOOT_ARCH_DIR	equal	
 u-boot	UBOOT_INITIAL_ENV	equal	
 u-boot	UBOOT_LOCALVERSION	equal	
 core-image-minimal	PN	equal	
@@ -705,8 +705,8 @@ core-image-minimal	INHERIT	equal
 core-image-minimal	PROVIDES	equal	
 core-image-minimal	EXTRA_OECONF	equal	
 core-image-minimal	EXTRA_OECMAKE	unset	
-core-image-minimal	CFLAGS	flagged	unevaluated_python
-core-image-minimal	FILESPATH	flagged	unevaluated_python
+core-image-minimal	CFLAGS	equal	
+core-image-minimal	FILESPATH	equal	
 core-image-minimal	MACHINE	equal	
 core-image-minimal	DISTRO	equal	
 core-image-minimal	TMPDIR	equal	
@@ -721,7 +721,7 @@ packagegroup-core-boot	PR	equal
 packagegroup-core-boot	FILE	equal	
 packagegroup-core-boot	FILE_LAYERNAME	equal	
 packagegroup-core-boot	SRC_URI	equal	
-packagegroup-core-boot	DEPENDS	flagged	unevaluated_python
+packagegroup-core-boot	DEPENDS	equal	
 packagegroup-core-boot	RDEPENDS:packagegroup-core-boot	equal	
 packagegroup-core-boot	PACKAGECONFIG	unset	
 packagegroup-core-boot	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set packagegroup.bbclass:39 [__anon_42]
@@ -737,8 +737,8 @@ packagegroup-core-boot	INHERIT	equal
 packagegroup-core-boot	PROVIDES	equal	
 packagegroup-core-boot	EXTRA_OECONF	equal	
 packagegroup-core-boot	EXTRA_OECMAKE	unset	
-packagegroup-core-boot	CFLAGS	flagged	unevaluated_python
-packagegroup-core-boot	FILESPATH	flagged	unevaluated_python
+packagegroup-core-boot	CFLAGS	equal	
+packagegroup-core-boot	FILESPATH	equal	
 packagegroup-core-boot	MACHINE	equal	
 packagegroup-core-boot	DISTRO	equal	
 packagegroup-core-boot	TMPDIR	equal	
@@ -756,15 +756,15 @@ virtual/kernel	PR	equal
 virtual/kernel	FILE	equal	
 virtual/kernel	FILE_LAYERNAME	equal	
 virtual/kernel	SRC_URI	equal	
-virtual/kernel	DEPENDS	flagged	unevaluated_python
+virtual/kernel	DEPENDS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:410-703 may write DEPENDS; anonymous python at meta:classes-recipe/kernel-uimage.bbclass:9-27 may write DEPENDS
 virtual/kernel	RDEPENDS:linux-yocto	unset	
 virtual/kernel	PACKAGECONFIG	unset	
 virtual/kernel	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:106 [__anon_159]; append kernel-devicetree.bbclass:10 [__anon_13]
-virtual/kernel	FILES:linux-yocto	equal	
+virtual/kernel	FILES:linux-yocto	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write FILES:linux-yocto
 virtual/kernel	OVERRIDES	equal	
 virtual/kernel	MACHINEOVERRIDES	equal	
 virtual/kernel	DISTROOVERRIDES	equal	
-virtual/kernel	S	equal	
+virtual/kernel	S	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_DIR
 virtual/kernel	B	equal	
 virtual/kernel	WORKDIR	equal	
 virtual/kernel	LICENSE	equal	
@@ -773,18 +773,18 @@ virtual/kernel	PROVIDES	equal
 virtual/kernel	EXTRA_OECONF	equal	
 virtual/kernel	EXTRA_OECMAKE	unset	
 virtual/kernel	CFLAGS	flagged	unevaluated_python
-virtual/kernel	FILESPATH	flagged	unevaluated_python
+virtual/kernel	FILESPATH	equal	
 virtual/kernel	MACHINE	equal	
 virtual/kernel	DISTRO	equal	
 virtual/kernel	TMPDIR	equal	
 virtual/kernel	BBCLASSEXTEND	equal	
 virtual/kernel	COMPATIBLE_MACHINE	equal	
-virtual/kernel	EXTRA_OEMAKE	equal	
+virtual/kernel	EXTRA_OEMAKE	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_DIR, used via KERNEL_CC > DEBUG_PREFIX_MAP > S; anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_BUILDDIR,...
 virtual/kernel	HOMEPAGE	equal	
 virtual/kernel	INSANE_SKIP	unset	
 virtual/kernel	KBRANCH	equal	
 virtual/kernel	KCONF_BSP_AUDIT_LEVEL	equal	
-virtual/kernel	KERNEL_CC	equal	
+virtual/kernel	KERNEL_CC	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_DIR, used via DEBUG_PREFIX_MAP > S; anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_BUILDDIR
 virtual/kernel	KERNEL_DEBUG	equal	
 virtual/kernel	KERNEL_DEVICETREE	unset	
 virtual/kernel	KERNEL_EXTRA_FEATURES	equal	
@@ -807,7 +807,7 @@ busybox	PR	equal
 busybox	FILE	equal	
 busybox	FILE_LAYERNAME	equal	
 busybox	SRC_URI	equal	
-busybox	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:96 [ua_extend_depends]
+busybox	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:96 [ua_extend_depends]
 busybox	RDEPENDS:busybox	equal	
 busybox	PACKAGECONFIG	unset	
 busybox	PACKAGES	equal	
@@ -823,8 +823,8 @@ busybox	INHERIT	equal
 busybox	PROVIDES	equal	
 busybox	EXTRA_OECONF	equal	
 busybox	EXTRA_OECMAKE	unset	
-busybox	CFLAGS	flagged	unevaluated_python
-busybox	FILESPATH	flagged	unevaluated_python
+busybox	CFLAGS	equal	
+busybox	FILESPATH	equal	
 busybox	MACHINE	equal	
 busybox	DISTRO	equal	
 busybox	TMPDIR	equal	
@@ -836,9 +836,9 @@ busybox	CONFFILES:busybox-syslog	equal
 busybox	DESCRIPTION	equal	
 busybox	DO_IPv4	equal	
 busybox	DO_IPv6	equal	
-busybox	EXTRA_CFLAGS	flagged	unevaluated_python
+busybox	EXTRA_CFLAGS	equal	
 busybox	EXTRA_LDFLAGS	equal	
-busybox	EXTRA_OEMAKE	flagged	unevaluated_python
+busybox	EXTRA_OEMAKE	equal	
 busybox	FILES:busybox-httpd	equal	
 busybox	FILES:busybox-syslog	equal	
 busybox	FILES:busybox-mdev	equal	
@@ -875,7 +875,7 @@ base-files	PR	equal
 base-files	FILE	equal	
 base-files	FILE_LAYERNAME	equal	
 base-files	SRC_URI	equal	
-base-files	DEPENDS	flagged	unevaluated_python
+base-files	DEPENDS	equal	
 base-files	RDEPENDS:base-files	unset	
 base-files	PACKAGECONFIG	unset	
 base-files	PACKAGES	equal	
@@ -891,8 +891,8 @@ base-files	INHERIT	equal
 base-files	PROVIDES	equal	
 base-files	EXTRA_OECONF	equal	
 base-files	EXTRA_OECMAKE	unset	
-base-files	CFLAGS	flagged	unevaluated_python
-base-files	FILESPATH	flagged	unevaluated_python
+base-files	CFLAGS	equal	
+base-files	FILESPATH	equal	
 base-files	MACHINE	equal	
 base-files	DISTRO	equal	
 base-files	TMPDIR	equal	
@@ -924,11 +924,11 @@ psplash	PR	equal
 psplash	FILE	equal	
 psplash	FILE_LAYERNAME	equal	
 psplash	SRC_URI	equal	
-psplash	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:96 [ua_extend_depends]
+psplash	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:96 [ua_extend_depends]
 psplash	RDEPENDS:psplash	gap:python-at-parse	append psplash_git.bb:61 [__anon_62]
 psplash	PACKAGECONFIG	equal	
 psplash	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: prepend psplash_git.bb:50 [__anon_62]
-psplash	FILES:psplash	equal	
+psplash	FILES:psplash	equal	flagged: anonymous python at meta:recipes-core/psplash/psplash_git.bb:21-62 may write FILES:psplash
 psplash	OVERRIDES	equal	
 psplash	MACHINEOVERRIDES	equal	
 psplash	DISTROOVERRIDES	equal	
@@ -940,8 +940,8 @@ psplash	INHERIT	equal
 psplash	PROVIDES	equal	
 psplash	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 psplash	EXTRA_OECMAKE	unset	
-psplash	CFLAGS	flagged	unevaluated_python
-psplash	FILESPATH	flagged	unevaluated_python
+psplash	CFLAGS	equal	
+psplash	FILESPATH	equal	
 psplash	MACHINE	equal	
 psplash	DISTRO	equal	
 psplash	TMPDIR	equal	
@@ -964,8 +964,8 @@ quilt-native	PV	equal
 quilt-native	PR	equal	
 quilt-native	FILE	equal	
 quilt-native	FILE_LAYERNAME	equal	
-quilt-native	SRC_URI	equal	
-quilt-native	DEPENDS	flagged	unevaluated_python
+quilt-native	SRC_URI	equal	flagged: which override variant or conditional :append/:prepend/:remove of SRC_URI applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	DEPENDS	equal	flagged: which override variant or conditional :append/:prepend/:remove of DEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:rem...
 quilt-native	RDEPENDS:quilt-native	equal	
 quilt-native	PACKAGECONFIG	unset	
 quilt-native	PACKAGES	flagged	unevaluated_python
@@ -979,7 +979,7 @@ quilt-native	WORKDIR	flagged	unevaluated_python
 quilt-native	LICENSE	equal	
 quilt-native	INHERIT	equal	
 quilt-native	PROVIDES	equal	
-quilt-native	EXTRA_OECONF	equal	
+quilt-native	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of USRBINPATH applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:...
 quilt-native	EXTRA_OECMAKE	unset	
 quilt-native	CFLAGS	flagged	unevaluated_python
 quilt-native	FILESPATH	flagged	unevaluated_python
@@ -988,25 +988,25 @@ quilt-native	DISTRO	equal
 quilt-native	TMPDIR	equal	
 quilt-native	CACHED_CONFIGUREVARS	equal	
 quilt-native	CLEANBROKEN	equal	
-quilt-native	DESCRIPTION	equal	
+quilt-native	DESCRIPTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 quilt-native	EXTRA_AUTORECONF	equal	
-quilt-native	FILES	equal	
+quilt-native	FILES	equal	flagged: which override variant or conditional :append/:prepend/:remove of FILES applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 quilt-native	FILES:quilt-native-doc	flagged	unevaluated_python
 quilt-native	HOMEPAGE	equal	
 quilt-native	INHIBIT_AUTOTOOLS_DEPS	equal	
 quilt-native	LIC_FILES_CHKSUM	equal	
 quilt-native	PACKAGE_WRITE_DEPS	equal	
 quilt-native	PATCHTOOL	equal	
-quilt-native	RDEPENDS:quilt-native-ptest	equal	
-quilt-native	SECTION	equal	
-quilt-native	SUMMARY	equal	
+quilt-native	RDEPENDS:quilt-native-ptest	equal	flagged: which override variant or conditional :append/:prepend/:remove of RDEPENDS:quilt-native-ptest applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	SECTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	SUMMARY	equal	flagged: which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 gmp-native	PN	equal	
 gmp-native	PV	equal	
 gmp-native	PR	equal	
 gmp-native	FILE	equal	
 gmp-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 gmp-native	SRC_URI	equal	
-gmp-native	DEPENDS	flagged	unevaluated_python
+gmp-native	DEPENDS	equal-ws	flagged: anonymous python at meta:classes-global/base.bbclass:410-703 may write DEPENDS; which override variant or conditional :append/:prepend/:remove of BASEDEPENDS applies depends on OVERRIDES entries that are not known statically (`${@o...
 gmp-native	RDEPENDS:gmp-native	unset	
 gmp-native	PACKAGECONFIG	equal	
 gmp-native	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set native.bbclass:166 [map_dependencies]
@@ -1029,15 +1029,15 @@ gmp-native	DISTRO	equal
 gmp-native	TMPDIR	equal	
 gmp-native	ARM_INSTRUCTION_SET	unset	
 gmp-native	BBCLASSEXTEND	equal	
-gmp-native	DESCRIPTION	equal	
-gmp-native	FILES	equal	
+gmp-native	DESCRIPTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+gmp-native	FILES	equal	flagged: which override variant or conditional :append/:prepend/:remove of FILES applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 gmp-native	HOMEPAGE	equal	
 gmp-native	LIC_FILES_CHKSUM	equal	
 gmp-native	MIPS_INSTRUCTION_SET	equal	
 gmp-native	REVISION	equal	
-gmp-native	SECTION	equal	
+gmp-native	SECTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 gmp-native	SSTATE_SCAN_FILES	equal	
-gmp-native	SUMMARY	equal	
+gmp-native	SUMMARY	equal	flagged: which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 gmp-native	acpaths	equal	
 nativesdk-zlib	PN	equal	
 nativesdk-zlib	PV	equal	
@@ -1056,10 +1056,10 @@ nativesdk-zlib	DISTROOVERRIDES	equal
 nativesdk-zlib	S	flagged	unevaluated_python
 nativesdk-zlib	B	flagged	unevaluated_python
 nativesdk-zlib	WORKDIR	flagged	unevaluated_python
-nativesdk-zlib	LICENSE	equal	
+nativesdk-zlib	LICENSE	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:100-117 may write LICENSE
 nativesdk-zlib	INHERIT	equal	
 nativesdk-zlib	PROVIDES	equal-ws	
-nativesdk-zlib	EXTRA_OECONF	equal	
+nativesdk-zlib	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of DISABLE_STATIC applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 nativesdk-zlib	EXTRA_OECMAKE	unset	
 nativesdk-zlib	CFLAGS	flagged	unevaluated_python
 nativesdk-zlib	FILESPATH	flagged	unevaluated_python
@@ -1068,13 +1068,13 @@ nativesdk-zlib	DISTRO	equal
 nativesdk-zlib	TMPDIR	equal	
 nativesdk-zlib	BBCLASSEXTEND	equal	
 nativesdk-zlib	CVE_PRODUCT	equal	
-nativesdk-zlib	DESCRIPTION	equal	
+nativesdk-zlib	DESCRIPTION	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:100-117 may write DESCRIPTION; which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statical...
 nativesdk-zlib	HOMEPAGE	equal	
 nativesdk-zlib	LIC_FILES_CHKSUM	equal	
 nativesdk-zlib	PREMIRRORS	equal	
-nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	
-nativesdk-zlib	SECTION	equal	
-nativesdk-zlib	SUMMARY	equal	
+nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:100-117 may write RDEPENDS:nativesdk-zlib-ptest; which override variant or conditional :append/:prepend/:remove of RDEPENDS:nativesdk-zlib-ptest applies depends on OVERRIDES...
+nativesdk-zlib	SECTION	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:100-117 may write SECTION; which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@...
+nativesdk-zlib	SUMMARY	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:100-117 may write SUMMARY; which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@...
 nativesdk-zlib	UPSTREAM_CHECK_URI	equal	
 htop	PN	equal	
 htop	PV	equal	
@@ -1098,8 +1098,8 @@ htop	INHERIT	equal
 htop	PROVIDES	equal	
 htop	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 htop	EXTRA_OECMAKE	unset	
-htop	CFLAGS	flagged	unevaluated_python
-htop	FILESPATH	flagged	unevaluated_python
+htop	CFLAGS	equal	
+htop	FILESPATH	equal	
 htop	MACHINE	equal	
 htop	DISTRO	equal	
 htop	TMPDIR	equal	
@@ -1114,7 +1114,7 @@ nano	PR	equal
 nano	FILE	equal	
 nano	FILE_LAYERNAME	equal	
 nano	SRC_URI	equal	
-nano	DEPENDS	flagged	unevaluated_python
+nano	DEPENDS	equal	
 nano	RDEPENDS:nano	equal	
 nano	PACKAGECONFIG	unset	
 nano	PACKAGES	equal	
@@ -1128,10 +1128,10 @@ nano	WORKDIR	equal
 nano	LICENSE	equal	
 nano	INHERIT	equal	
 nano	PROVIDES	equal	
-nano	EXTRA_OECONF	flagged	unevaluated_python
+nano	EXTRA_OECONF	equal	
 nano	EXTRA_OECMAKE	unset	
-nano	CFLAGS	flagged	unevaluated_python
-nano	FILESPATH	flagged	unevaluated_python
+nano	CFLAGS	equal	
+nano	FILESPATH	equal	
 nano	MACHINE	equal	
 nano	DISTRO	equal	
 nano	TMPDIR	equal	
@@ -1148,7 +1148,7 @@ jq	PR	equal
 jq	FILE	equal	
 jq	FILE_LAYERNAME	equal	
 jq	SRC_URI	equal	
-jq	DEPENDS	flagged	unevaluated_python
+jq	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:478 [appendVar]
 jq	RDEPENDS:jq	unset	
 jq	PACKAGECONFIG	equal	
 jq	PACKAGES	equal	
@@ -1164,8 +1164,8 @@ jq	INHERIT	equal
 jq	PROVIDES	equal	
 jq	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 jq	EXTRA_OECMAKE	unset	
-jq	CFLAGS	flagged	unevaluated_python
-jq	FILESPATH	flagged	unevaluated_python
+jq	CFLAGS	equal	
+jq	FILESPATH	equal	
 jq	MACHINE	equal	
 jq	DISTRO	equal	
 jq	TMPDIR	equal	
@@ -1184,7 +1184,7 @@ fmt	PR	equal
 fmt	FILE	equal	
 fmt	FILE_LAYERNAME	equal	
 fmt	SRC_URI	equal	
-fmt	DEPENDS	flagged	unevaluated_python
+fmt	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append cmake.bbclass:25 [__anon_30]
 fmt	RDEPENDS:fmt	unset	
 fmt	PACKAGECONFIG	unset	
 fmt	PACKAGES	equal	
@@ -1200,8 +1200,8 @@ fmt	INHERIT	equal
 fmt	PROVIDES	equal	
 fmt	EXTRA_OECONF	equal	
 fmt	EXTRA_OECMAKE	equal	
-fmt	CFLAGS	flagged	unevaluated_python
-fmt	FILESPATH	flagged	unevaluated_python
+fmt	CFLAGS	equal	
+fmt	FILESPATH	equal	
 fmt	MACHINE	equal	
 fmt	DISTRO	equal	
 fmt	TMPDIR	equal	
@@ -1233,8 +1233,8 @@ protobuf	INHERIT	equal
 protobuf	PROVIDES	equal	
 protobuf	EXTRA_OECONF	equal	
 protobuf	EXTRA_OECMAKE	flagged-literal-differs	unevaluated_python
-protobuf	CFLAGS	flagged	unevaluated_python
-protobuf	FILESPATH	flagged	unevaluated_python
+protobuf	CFLAGS	equal	
+protobuf	FILESPATH	equal	
 protobuf	MACHINE	equal	
 protobuf	DISTRO	equal	
 protobuf	TMPDIR	equal	
@@ -1262,7 +1262,7 @@ curl@default	PR	equal
 curl@default	FILE	equal	
 curl@default	FILE_LAYERNAME	equal	
 curl@default	SRC_URI	equal	
-curl@default	DEPENDS	flagged	unevaluated_python
+curl@default	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:478 [appendVar]; append update-alternatives.bbclass:96 [ua_extend_depends]
 curl@default	RDEPENDS:curl	unset	
 curl@default	PACKAGECONFIG	equal	
 curl@default	PACKAGES	equal	
@@ -1278,8 +1278,8 @@ curl@default	INHERIT	equal
 curl@default	PROVIDES	equal	
 curl@default	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
 curl@default	EXTRA_OECMAKE	unset	
-curl@default	CFLAGS	flagged	unevaluated_python
-curl@default	FILESPATH	flagged	unevaluated_python
+curl@default	CFLAGS	equal	
+curl@default	FILESPATH	equal	
 curl@default	MACHINE	equal	
 curl@default	DISTRO	equal	
 curl@default	TMPDIR	equal	
@@ -1303,15 +1303,15 @@ virtual/kernel@default	PR	equal
 virtual/kernel@default	FILE	equal	
 virtual/kernel@default	FILE_LAYERNAME	equal	
 virtual/kernel@default	SRC_URI	equal	
-virtual/kernel@default	DEPENDS	flagged	unevaluated_python
+virtual/kernel@default	DEPENDS	equal	flagged: anonymous python at meta:classes-global/base.bbclass:410-703 may write DEPENDS; anonymous python at meta:classes-recipe/kernel-uimage.bbclass:9-27 may write DEPENDS
 virtual/kernel@default	RDEPENDS:linux-yocto	unset	
 virtual/kernel@default	PACKAGECONFIG	unset	
 virtual/kernel@default	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:106 [__anon_159]; append kernel-devicetree.bbclass:10 [__anon_13]
-virtual/kernel@default	FILES:linux-yocto	equal	
+virtual/kernel@default	FILES:linux-yocto	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write FILES:linux-yocto
 virtual/kernel@default	OVERRIDES	equal	
 virtual/kernel@default	MACHINEOVERRIDES	equal	
 virtual/kernel@default	DISTROOVERRIDES	equal	
-virtual/kernel@default	S	equal	
+virtual/kernel@default	S	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_DIR
 virtual/kernel@default	B	equal	
 virtual/kernel@default	WORKDIR	equal	
 virtual/kernel@default	LICENSE	equal	
@@ -1320,18 +1320,18 @@ virtual/kernel@default	PROVIDES	equal
 virtual/kernel@default	EXTRA_OECONF	equal	
 virtual/kernel@default	EXTRA_OECMAKE	unset	
 virtual/kernel@default	CFLAGS	flagged	unevaluated_python
-virtual/kernel@default	FILESPATH	flagged	unevaluated_python
+virtual/kernel@default	FILESPATH	equal	
 virtual/kernel@default	MACHINE	equal	
 virtual/kernel@default	DISTRO	equal	
 virtual/kernel@default	TMPDIR	equal	
 virtual/kernel@default	BBCLASSEXTEND	equal	
 virtual/kernel@default	COMPATIBLE_MACHINE	equal	
-virtual/kernel@default	EXTRA_OEMAKE	equal	
+virtual/kernel@default	EXTRA_OEMAKE	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_DIR, used via KERNEL_CC > DEBUG_PREFIX_MAP > S; anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_BUILDDIR,...
 virtual/kernel@default	HOMEPAGE	equal	
 virtual/kernel@default	INSANE_SKIP	unset	
 virtual/kernel@default	KBRANCH	equal	
 virtual/kernel@default	KCONF_BSP_AUDIT_LEVEL	equal	
-virtual/kernel@default	KERNEL_CC	equal	
+virtual/kernel@default	KERNEL_CC	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_DIR, used via DEBUG_PREFIX_MAP > S; anonymous python at meta:classes-recipe/kernel.bbclass:52-159 may write STAGING_KERNEL_BUILDDIR
 virtual/kernel@default	KERNEL_DEBUG	equal	
 virtual/kernel@default	KERNEL_DEVICETREE	unset	
 virtual/kernel@default	KERNEL_EXTRA_FEATURES	equal	

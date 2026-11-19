@@ -308,19 +308,25 @@ the value exactly as before:
   the escapes `\\ \' \" \n \t` (no prefix, no triple quote, no implicit concatenation);
   decimal integers; `True` / `False` / `None`; list displays `[a, b]`; the name `d` (only
   as an argument, or as `d.getVar` / `d.getVarFlag` / `d.expand`); calls of the allowlisted
-  helpers below and of `len` and `bool` (positional only, as in python), with positional and keyword arguments bound as python binds
+  helpers below and of `len`, `bool` and `int` (positional only, as in python; `int` of an
+  integer, a boolean, or a string that is an optional sign and ASCII digits only: python's
+  surrounding whitespace, `_` and non-ASCII digits are not reproduced, a base argument is
+  rejected), with positional and keyword arguments bound as python binds
   them to the helper's signature; `a + b` (strings, lists); `a % b` with the conversions
   `%s`, `%d` (of an integer) and `%%` only, `b` a single value or a tuple (needed by OE-core's
   arm tune python, see "Corpus" below); `a if c else b`; `and` / `or` (returning an
   operand, as python does) / `not`; one `==`, `!=`, `in` or `not in` per comparison (no
-  chain); `-` before an integer literal; `x[i]` on a list by an integer (negative counted
-  from the end) or a boolean (`['', 'x:'][cond]`); the string methods `split()` /
+  chain), and `<`, `<=`, `>`, `>=` between integers or booleans only (kirkstone / scarthgap
+  `EXTENDPE`: `['','${PE}_'][int(d.getVar('PE') or 0) > 0]`); `-` before an integer literal; `x[i]` on a list by an integer (negative counted
+  from the end) or a boolean (`['', 'x:'][cond]`); a slice `x[a:b]` (no step) of a list or a
+  string, its bounds integers, booleans or `None`, with python's clamping (`util-linux.inc`'s
+  `'.'.join(d.getVar('PV').split('.')[0:2])`); the string methods `split()` /
   `split(sep)`, `strip()` / `strip(chars)`, `replace(old, new)`, `startswith(s)`,
   `endswith(s)`, `lower()` / `upper()` (ASCII text only), `sep.join(list or str)`.
   Rejected, whatever else the expression holds: any other name (`os`, `bb.parse`,
-  `oe.types`, class-defined functions, a bare variable name), attribute or method,
-  `lambda`, comprehensions, generators, slices, `%` with anything else, f-strings, byte
-  strings, `is`, `<` and the other comparisons, arithmetic;
+  `oe.types`, class-defined functions other than the allowlisted ones (below, checked by their text), a bare variable name), attribute or method,
+  `lambda`, comprehensions, generators, a slice with a step, `%` with anything else, f-strings, byte
+  strings, `is`, an order comparison of anything but integers, arithmetic;
 - every value it reads is **certain**: `d.getVar('X')` of a value that holds python left
   unevaluated, an undefined `${VAR}`, an uncertain override decision, a variable anonymous
   python or a handler sets, or one a file reached through an uncertain reference sets,
@@ -366,9 +372,55 @@ Wrynose `33a6bd6cc8` unless said:
 | `oe.utils.prune_suffix(var, suffixes, d)` | `prune_suffix` | each non-empty suffix in order, cut when `var` ends with it; then `MLPREFIX` cut from the front when set and `var` starts with it. |
 | `oe.utils.all_distro_features(d, features, truevalue="1", falsevalue="")` / `any_distro_features(...)` | `all_distro_features` / `any_distro_features` | `bb.utils.contains` / `contains_any` on `DISTRO_FEATURES`. |
 | `oe.utils.filter_default_features(varname, d)`, `oe.utils.set_difference(variable1, variable2, d)` | `filter_default_features`, `set_difference` (Wrynose only: neither function is on `origin/scarthgap` or `origin/kirkstone`) | `set_difference(varname + "_DEFAULTS", varname + "_OPTED_OUT")`: first value falsy: `""`; second falsy: the first value as it is; `*` among the second's words: `""`; else `" ".join(sorted(set(v1.split()) - set(v2.split())))`. Not on the requested allowlist; added because OE-core Wrynose's `bitbake.conf` appends it to `DISTRO_FEATURES` and `MACHINE_FEATURES`, which the skip checks read. A call on an older release, where the function does not exist, fails in BitBake; sous-chef does not check the release here. |
+| `oe.utils.class_filter_features(defaults, features_var, filter_var, d)` | `class_filter_features` (Wrynose only: not on `origin/scarthgap` or `origin/kirkstone`) | `set(d.getVar(features_var).split())` (unset raises) united with `bb.utils.filter_string(defaults, d.getVar(filter_var))` (`''` for empty `defaults`; else the sorted words of `defaults` in the filter value, whose `set(None)` raises), joined sorted. Written by `set_class_filter` ("Class-extension read filters"). |
 | `d.getVar(name)`, `d.getVar(name, True)`, `d.getVar(name, expand=...)` | `data_smart.py` `getVar` | the finalised, expanded value (overrides, appends, removes), `None` when unset; `expand` false is not evaluated (the unexpanded value is not reproduced), nor are `noweakdefault` / `parsing`. |
 | `d.getVarFlag(name, flag)` | `getVarFlag` | the expanded flag (a `??=` flag default when unset), `None`; `expand` false and flags starting with `_` are not evaluated. |
 | `d.expand(text)` | `expand` | the text expanded against the datastore (no owner, so no self-reference check). |
+
+#### Class functions evaluated statically (acc-helpers)
+
+BitBake runs a top-level `def` when it parses it (`ast.PythonMethodNode.eval`:
+`bb.methodpool.insert_method` executes the text into the one global python context
+`bb.utils._context`; the text is also stored as the variable, flags `func`, `python`), so a
+call resolves to the definition of that name executed **last**, and a layer can redefine a
+class function (OE-core's own `gcr` and `libgudev` recipes redefine `gnome_verdir`; meta-gnome
+recipes too). `bb.data.inherits_class(klass, d)` (BitBake 2.18 `lib/bb/data.py`, the same in
+2.0 and 2.8): any path in `__inherit_cache` ending with `/<klass>.bbclass`;
+`oe.utils.inherits(d, *classes)` is `any(inherits_class(c, d) ...)` (the same on kirkstone,
+scarthgap, Wrynose).
+
+sous-chef (`src/eval/classfn.rs`, called from `pyexpr.rs`): for each allowlisted name the
+replay records the last `def` of it the parse executed (`ReplayNotes::class_defs`) and
+whether its text, read back from the file (trailing blank lines and `\r` aside), is the
+verified one; a call is evaluated only then, with the semantics below and the reads in
+python's order (so a read that is not certain stops only where python needs it). Any other
+definition, or none, leaves the expression unevaluated and the note names the reason ("...
+is defined at <loc> with a text other than the verified one", "... is not defined in this
+parse"). `inherits_class` is answered from the replay's `__inherit_cache` only when no
+reference that could inherit a class (an `inherit`, `inherit_defer`, `INHERIT` word, or an
+`include` / `require` outside a `.conf`) was left unfollowed for python or undefined
+variables, or followed with an uncertain value; otherwise the call stops as uncertain. The
+value a function returns is substituted and expanded again in the next pass, as in
+BitBake (`get_base_dep` returns the text `${BASE_DEFAULT_DEPS}`).
+
+| Function | Source (OE-core) | Releases with the verified text | Semantics reproduced; why pure |
+|---|---|---|---|
+| `base_set_filespath(path, d)` | `classes-global/utils.bbclass` (`classes/` on kirkstone) | kirkstone, scarthgap, Wrynose | `path` must be a list of strings (a string would be iterated by character in python; not reproduced). `FILESEXTRAPATHS` (unset: `""`) with `__default:` removed, split on `:` and put before `path` when not empty; `(":" + FILESOVERRIDES).split(":")` reversed; for each override, each non-empty path element, `os.path.join(p, o)` (posix: `o` when absolute, else `p` + `/` unless `p` ends with `/`, + `o`); joined with `:`. Reads two variables, string operations only. |
+| `get_autotools_dep(d)` | `classes-recipe/autotools.bbclass` | kirkstone, scarthgap, Wrynose | `INHIBIT_AUTOTOOLS_DEPS` truthy: `''`; `PN` (unset: python raises); `autoconf-native` / `automake-native`: `''`; else `autoconf-native automake-native `, then unless `PN` is `libtool` / `libtool-native` or ends with `libtool-cross`: `libtool-native `, and `libtool-cross ` unless it inherits `native`, `nativesdk` or `cross` or `INHIBIT_DEFAULT_DEPS` is truthy (in that order, short-circuit). Reads variables and `__inherit_cache` only. |
+| `get_base_dep(d)` | `classes-global/base.bbclass` | kirkstone, scarthgap, Wrynose | `d.getVar('INHIBIT_DEFAULT_DEPS', False)` (unexpanded) truthy: `""`, else the text `${BASE_DEFAULT_DEPS}`. Decided from the expanded value: unset means the unexpanded one is unset, non-empty means it is non-empty (expansion and `:remove` act only on a value that is there); an empty expanded value is not evaluated. |
+| `gettext_dependencies(d)` | `classes-recipe/gettext.bbclass` | kirkstone, scarthgap, Wrynose | `INHIBIT_DEFAULT_DEPS` truthy and not `inherits(d, 'cross-canadian')`: `""`; `USE_NLS == 'no'`: `gettext-minimal-native`; else `gettext-native`. |
+| `gettext_oeconf(d)` | `classes-recipe/gettext.bbclass` | kirkstone, scarthgap, Wrynose | `USE_NLS == 'no'`: `--disable-nls`; `INHIBIT_DEFAULT_DEPS` truthy and not cross-canadian: `--disable-nls`; else `--enable-nls`. |
+| `gnome_verdir(v)` | `classes-recipe/gnomebase.bbclass` | kirkstone, scarthgap, Wrynose | `".".join(v.split(".")[:-1]) or v` on a string. The recipes' own redefinitions (`gcr`: `[:2]`; `libgudev`: `return v`) are other texts: not evaluated. |
+| `map_kernel_arch(a, d)` | `classes-recipe/kernel-arch.bbclass` | scarthgap, Wrynose (kirkstone's has no `loongarch` line: other text, not evaluated) | `valid_archs` read first (unset raises); the `re.match` patterns in order, reproduced as string tests (anchored at the start, `$` at the end; an `a` holding a newline is not evaluated): `(i.86\|athlon\|x86.64)$` `x86`, `arceb$` `arc`, `armeb$` `arm`, the four `aarch64` forms `arm64`, `loongarch(32\|64\|)$` `loongarch`, `mips(isa\|)(32\|64\|)(r6\|)(el\|)$` `mips`, prefix `mcf` `m68k`, `riscv(32\|64\|)(eb\|)$` `riscv`, prefix `ppc` / `powerpc` `powerpc`, `sh(3\|4)$` `sh`, prefix `bfin` `blackfin`, prefix `microblazeeb` / `microblazeel` `microblaze`, a word of `valid_archs` itself; else `a` when `TARGET_OS` does not start with `linux`, and otherwise the function calls `bb.error` and returns `None`: not evaluated. |
+| `map_uboot_arch(a, d)` | `classes-recipe/kernel-arch.bbclass` | kirkstone, scarthgap, Wrynose | prefix `ppc` / `powerpc`: `ppc`; `i.86$`: `x86`; else `a`. |
+
+Checked: every expected value in `pyexpr.rs`'s tests (`class_functions`,
+`kernel_arch_mappings`) is what the verified definition returns when python 3 executes it
+with a datastore stub; `tests/eval_classfn.rs` runs them through the replay with the
+definitions copied into `tests/fixtures/classfn/realdefs.bbclass`. Rejected: busybox's
+`features_to_busybox_conf` / `_del` (recipe code, `busybox.inc`; pure, but built on a nested
+helper mutating lists: not added), `gnome_verdir`'s recipe variants, functions reading the
+host or files (as listed below).
 
 Not evaluated: `oe.utils.set_intersect` (it returns `" ".join(val1 & val2)`, a set of
 several strings in python's hash order: COMBINED_FEATURES stays flagged), and every other
@@ -378,8 +430,9 @@ function. Those that read the host or the filesystem must never be evaluated sta
 `PATH` on disk), `oe.utils.read_file(...)`, `get_perl_version(d)` and the other functions
 that open files of the sysroot or the kernel build directory, `bb.fetch.get_checksum_file_list`,
 `oe.utils.get_host_gcc_version`. Functions a class defines with `def`
-(`meson_array`, `systemd_filter_services`, `get_base_dep`, `all_multilib_tune_values`, ...)
-are metadata code and are not interpreted. `bb.parse.vars_from_file` (`PN`, `PV` from the
+(`meson_array`, `systemd_filter_services`, `all_multilib_tune_values`, ...) are metadata
+code and are not interpreted, apart from the allowlisted class functions above, checked by
+their text. `bb.parse.vars_from_file` (`PN`, `PV` from the
 file name) is computed by the replay itself ("Replay").
 
 **Corpus** (the `${@...}` of OE-core, meta-arm and meta-kiss* in the live workspace, lines
@@ -1417,7 +1470,8 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
     `DEPENDS`, `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RREPLACES`, `PACKAGES`,
     `PACKAGES_DYNAMIC`, `PROVIDES` (`native_filter`) and renames `<VAR>:${PN}-x` package
     variables. Flagged, never computed; except (w11) the `PROVIDES` filter, computed on a
-    static value (see "Providers and versions").
+    static value (see "Providers and versions"), and (acc-helpers) the read filters and
+    `set_class_filter` below ("Class-extension read filters").
   - `nativesdk.bbclass`: plain assignments, replayed; `nativesdk_virtclass_handler` (the
     rename above, reproduced; `DISTRO_FEATURES` flagged); anonymous python (when `PN` starts
     with `nativesdk-`): `oe.classextend.ClassExtender` filters on `DEPENDS`,
@@ -1426,7 +1480,9 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
     `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RREPLACES`, `RCONFLICTS`, `PKG`),
     `LIBCEXTENSION` / `ABIEXTENSION`. Anonymous python is not run (it is opaque: it hands
     `d` to `ClassExtender`), so those values may differ and the tools warn; except (w12)
-    the `PROVIDES` filter, computed on a static value (see "Providers and versions").
+    the `PROVIDES` filter, computed on a static value (see "Providers and versions"), and
+    (acc-helpers) the `DEPENDS` / `PACKAGE_WRITE_DEPS` filters and the handler's
+    `set_class_filter` ("Class-extension read filters").
   - `multilib.bbclass`: `multilib_virtclass_handler` (`RecipePreFinalise`, when
     `BBEXTENDCURR == "multilib"`): skips (`SkipRecipe`) a recipe that provides
     `virtual/kernel`, inherits `module-base` or `kernel-fit-image`, or whose `BPN` is in
@@ -1444,6 +1500,59 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
     `INITSCRIPT_PACKAGES`, `USERADD_PACKAGES`, `SYSTEMD_PACKAGES`, `UPDATERCPN` and the
     `ALTERNATIVE_PRIORITY*` reset; flagged, except (w12) the `PROVIDES` filter (see
     "Providers and versions").
+
+#### Class-extension read filters (acc-helpers)
+
+BitBake 2.18 `data_smart.py`: `setVarFilter(var, expr)` stores `expr` under `var`;
+`getVarFlag(var, "_content", expand=True)` applies the filter of `var.split(":")[0]` to the
+expanded value after `:remove`, only when the value is not empty (`bb.filter.apply_filters`,
+an `eval` of the expression with `val` bound, cached by `(val, expr)`). So the filter acts on
+every read: `d.getVar`, `${VAR}` references (the expansion reads through `getVarFlag`),
+`bitbake -e`, the cache. The filter of `DEPENDS` is set before `handleVirtRecipeProviders`
+(`ast.finalize`: `RecipePreFinalise` handlers, `expandKeys`, anonymous python, then
+`handleVirtRecipeProviders`), which does `setVar("DEPENDS", " ".join(getVar("DEPENDS")
+.split()))` unconditionally, so the stored value is the filtered one and the next read
+filters it **again**: `suffix_filter_deps` sorts again after its renames (`nativesdk-zlib`:
+stored `chrpath-replacement-native virtual/nativesdk-compilerlibs gcc-crosssdk-x86_64-oesdk-linux
+virtual/nativesdk-libc`, printed `chrpath-replacement-native gcc-crosssdk-x86_64-oesdk-linux
+virtual/nativesdk-compilerlibs virtual/nativesdk-libc`, seen in the live dump), and
+`native_filter` of `binutils-cross-arm` gives `binutils-native-arm`, then
+`binutils-native-arm-native`.
+
+The OE-core Wrynose functions (`lib/oe/classextend.py`): `native_filter(val, pn, bpn,
+regex=False, selfref=True)` (each word of `bb.utils.explode_deps(val)`: with `regex` a
+`^...$` word gets `-native$` with `pn` replaced by `bpn` unless it ends with `-native$`; the
+word `pn` stays, or is dropped with `selfref=False`; `-cross-` becomes `-native-`; a word
+not ending with `-native` becomes `word.replace(pn, bpn) + "-native"`); `suffix_filter(val,
+extname, prefixes)` (`add_suffix` on each word); `suffix_filter_deps` (`add_suffix` on each
+name of `bb.utils.explode_dep_versions2(val)`, which **sorts** by name (default `sort=True`
+since BitBake 1.38, commit `39d6a30a2`), keeps version constraints, raises
+`VersionStringException` for `(` without an operator; a later name mapping to the same word
+replaces its constraints in place; joined by `join_deps(..., False)`).
+
+sous-chef (`eval::variant::VarFilter`, `ReplayNotes::filters`, `DataStore::var_filter`,
+applied by `overrides.rs` finalisation through `DataStore::apply_read_filter`): a filter is
+applied to a value that is certain; one that would raise flags the value; an uncertain value
+is shown unfiltered (it is flagged already). Installed only when the workspace's code is
+OE-core Wrynose's text, compared whole (`classfn::same_text`, constants in
+`src/eval/classfn.rs`); kirkstone and scarthgap handlers `setVar` the mapped values instead
+and are flagged as before:
+
+| Code (Wrynose `33a6bd6cc8`) | Reproduced | Still flagged |
+|---|---|---|
+| `native.bbclass` `native_virtclass_handler` (`RecipePreFinalise`, `PN` ending `-native`) | `set_class_filter` on `DISTRO_FEATURES` (below); with `"native" in BBCLASSEXTEND` and `BPN` known: `native_filter(val, pn, bpn, selfref=False)` on `DEPENDS`, `native_filter(val, pn, bpn)` on `PACKAGES`, `regex=True` on `PACKAGES_DYNAMIC`; `PROVIDES` as before (w11) | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RREPLACES` (also renamed per package by `map_dependencies`, not reproduced) |
+| `nativesdk.bbclass` `nativesdk_virtclass_handler` | `set_class_filter` on `DISTRO_FEATURES`; `MLPREFIX`, `PN` as before | - |
+| `nativesdk.bbclass` anonymous python (`PN` starting `nativesdk-`) | `suffix_filter_deps(val, 'nativesdk', [])` on `DEPENDS`, `suffix_filter(val, 'nativesdk', [])` on `PACKAGE_WRITE_DEPS`, `PROVIDES` as before (w12) | `rename_package_variables` (`PACKAGES`, `PACKAGES_DYNAMIC`, per-package renames), `map_packagevars`, `LIBCEXTENSION`, `ABIEXTENSION` |
+
+`oe.utils.set_class_filter(var, features_var, filter_var, d)` (Wrynose `lib/oe/utils.py`):
+`defaults = d.getVar(var)`; each word holding `}` is cut out (`defaults.replace(word, "")`,
+with a `bb.warn`); `d.setVar(var, '${@oe.utils.class_filter_features("<defaults>",
+"<features_var>", "<filter_var>", d)}')`. Reproduced as that `setVar` (an
+`OpKind::EventHandler` rewrite) when the value is certain and holds no `"`, `\` or line
+break; `class_filter_features` is on the inline python allowlist ("Inline python evaluated
+statically"). On the live workspace `DISTRO_FEATURES` of the native and nativesdk variants is
+not certain at that point (their `OVERRIDES` hold `os.uname()` through `BUILD_OS` /
+`TARGET_ARCH`), so it stays flagged there.
 
 sous-chef (w10, `eval::variant`, `replay::recipe_pass` with `Replay::extend_variant`,
 `Replay::finalize`, `Replay::class_extend_handlers`): a target naming a variant (by name,
@@ -1995,8 +2104,10 @@ and OE-core Wrynose `33a6bd6c` (`classes-global/base.bbclass`, `package.bbclass`
   variables) when `PN` ends with `-native` and `"native"` is a substring of
   `BBCLASSEXTEND`; every read of `DEPENDS`, the cache's included, gets the filtered words,
   so `python3-native`'s `expat` is `expat-native` (seen: `python3-native.do_prepare_recipe_sysroot
-  -> expat-native.do_populate_sysroot`). The evaluator does not compute this filter; `deps`
-  applies it to the words it lists.
+  -> expat-native.do_populate_sysroot`). Since acc-helpers the evaluator computes this
+  filter when the handler is OE-core's text ("Class-extension read filters"); `deps` lists the
+  evaluated `DEPENDS` and maps word by word, through the same filter, the words of an
+  uncertain `DEPENDS` and of the `PACKAGECONFIG` build fields.
 
 ## Build output
 

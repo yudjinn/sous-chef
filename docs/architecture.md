@@ -1507,6 +1507,43 @@ code under `src/`.
   `bitbake::cve::CveRules::for_release` replaces reading `lib/oe/cve_check.py`, which is now
   only a cross-check (`CveRules::from_lib`, `differences`).
 
+### As implemented in acc-helpers
+
+**Class functions (`eval/classfn.rs`, new).** `ClassFn` (`BaseSetFilespath`,
+`GetAutotoolsDep`, `GetBaseDep`, `GettextDependencies`, `GettextOeconf`, `GnomeVerdir`,
+`MapKernelArch`, `MapUbootArch`; `from_name`, `name`, `verified`), `classfn::ALL`,
+`classfn::verify(name, text) -> Option<ClassFn>`, `ClassDef { loc, verified }`,
+`DataStore::class_fn_defined(f) -> Result<(), String>`,
+`DataStore::inherits_class_certain(klass) -> Option<bool>`. The replay's `pydef` statement
+reads the body of an allowlisted name back from the file and records it in
+`ReplayNotes::class_defs` (the last `def` wins, as in BitBake's global method pool).
+`pyexpr::Func::Class(ClassFn)`: a bare call `name(...)` of an allowlisted name parses;
+`pyexpr::Env` gained `class_fn(f)` and `inherits_class(klass)` (default: not known), and
+`expand::Source` the same two (`overrides::Eval` answers from the datastore). The verified
+texts are constants in `classfn.rs`, each with its source; bitbake-semantics.md, "Class
+functions evaluated statically", has the table (file, releases, semantics, why pure). Also
+new in the subset: slices `x[a:b]` of lists and strings, and
+`oe.utils.class_filter_features` (`Func::OeClassFilterFeatures`).
+
+**Class-extension read filters (`eval/variant.rs`).** `VarFilter { Native { pn, bpn, regex,
+selfref }, Suffix { extname, prefixes }, SuffixDeps { extname, prefixes } }` (`apply`,
+`map_word`, `describe`), `variant::native_filter_full`, `explode_dep_versions2`, `join_deps`;
+`ReplayNotes::filters` (base name to filter and location), `DataStore::var_filter(name)`;
+`Eval::finalise` applies it to a certain value (`DataStore::apply_read_filter`), so every
+consumer (`value`, `${VAR}` references, python's `d.getVar`, the tools) reads what BitBake's
+`setVarFilter` makes it read. Installed by `Replay::class_extend_handlers`
+(`native_virtclass_handler`: `DEPENDS`, `PACKAGES`, `PACKAGES_DYNAMIC`; both handlers'
+`set_class_filter` on `DISTRO_FEATURES`, `Replay::set_class_filter`) and
+`Replay::nativesdk_anonymous_filter` (`DEPENDS`, `PACKAGE_WRITE_DEPS`), only when the
+handler / anonymous python is OE-core Wrynose's text (`classfn::same_text` with
+`classfn::NATIVE_VIRTCLASS_HANDLER`, `NATIVESDK_VIRTCLASS_HANDLER`, `NATIVESDK_ANONYMOUS`);
+`ReplayNotes::nativesdk_anon_verified` (new). `virtual_recipe_providers` stores `DEPENDS`
+again whenever a filter is on it, as `handleVirtRecipeProviders` does. The `PROVIDES`
+filters keep their w11/w12 path (`ProvidesFilter`). `deps` (`mcp/tools/deps.rs`) dropped its
+own `NativeDepends`: it lists the evaluated `DEPENDS` and maps the words of an uncertain one
+and of the `PACKAGECONFIG` build fields with `VarFilter::map_word` of the recorded filter.
+bitbake-semantics.md, "Class-extension read filters".
+
 ## Errors
 
 `error::Error` (thiserror) with variants `Io(io::Error)`, `Sqlite(rusqlite::Error)`,

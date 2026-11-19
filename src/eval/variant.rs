@@ -27,6 +27,10 @@
 
 use serde::Serialize;
 
+use super::datastore::base_of;
+use super::expand::certain;
+use super::{DataStore, Value};
+
 /// One `BBCLASSEXTEND` word a variant comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct ClassExtend {
@@ -151,6 +155,261 @@ pub fn native_filter(val: &str, pn: &str, bpn: Option<&str>) -> Option<Result<St
         }
     }
     Some(Ok(out.join(" ")))
+}
+
+/// `oe.classextend.native_filter(val, pn, bpn, regex, selfref)` in full (OE-core Wrynose
+/// `meta/lib/oe/classextend.py`) on a non-empty value: each word of `explode_deps(val)`: with
+/// `regex`, a `^...$` word gets `-native$` (its `pn` replaced by `bpn`) unless it ends with
+/// `-native$`; the word `pn` stays (dropped when not `selfref`); a word with `-cross-` gets
+/// `-cross` replaced by `-native`; one not ending in `-native` becomes `word.replace(pn,
+/// bpn) + "-native"`; the rest stay; joined with one space.
+pub fn native_filter_full(val: &str, pn: &str, bpn: &str, regex: bool, selfref: bool) -> String {
+    let mut out = Vec::new();
+    for dep in explode_deps(val) {
+        if regex && dep.starts_with('^') && dep.ends_with('$') {
+            if dep.ends_with("-native$") {
+                out.push(dep.to_string());
+            } else {
+                out.push(format!("{}-native$", dep[..dep.len() - 1].replace(pn, bpn)));
+            }
+        } else if dep == pn {
+            if selfref {
+                out.push(dep.to_string());
+            }
+        } else if dep.contains("-cross-") {
+            out.push(dep.replace("-cross", "-native"));
+        } else if !dep.ends_with("-native") {
+            out.push(format!("{}-native", dep.replace(pn, bpn)));
+        } else {
+            out.push(dep.to_string());
+        }
+    }
+    out.join(" ")
+}
+
+/// `bb.utils.explode_dep_versions2(s)` (BitBake 2.18.0 `lib/bb/utils.py`, `sort=True`, the
+/// default since BitBake 1.38): the names in sorted order (python's string order, which is
+/// Rust's byte order of UTF-8), each with its version constraints (`">= 1.0"`), a repeated
+/// name keeping the constraints it had unless it has none. `Err` where python raises
+/// (`VersionStringException`: a `(` not followed by a comparison operator).
+pub fn explode_dep_versions2(s: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+    let mut r: Vec<(String, Vec<String>)> = Vec::new();
+    let text = s.replace(',', "");
+    let mut lastdep: Option<String> = None;
+    let mut lastcmp = String::new();
+    let mut lastver = String::new();
+    let mut incmp = false;
+    let mut inversion = false;
+    for word in text.split_whitespace() {
+        let mut i = word.to_string();
+        if i.starts_with('(') {
+            incmp = true;
+            i = i[1..].trim().to_string();
+            if i.is_empty() {
+                continue;
+            }
+        }
+        if incmp {
+            incmp = false;
+            inversion = true;
+            let two = ["<=", "=<", "<<", "==", "!=", ">=", "=>", ">>"];
+            if two.iter().any(|p| i.starts_with(p)) {
+                lastcmp = i[..2].to_string();
+                i = i[2..].to_string();
+            } else if i.starts_with(['<', '>', '=']) {
+                lastcmp = i[..1].to_string();
+                i = i[1..].to_string();
+            } else {
+                return Err(format!(
+                    "invalid version specification \"({i}\" (a VersionStringException)"
+                ));
+            }
+            if i.is_empty() {
+                continue;
+            }
+        }
+        if inversion {
+            if let Some(stripped) = i.strip_suffix(')') {
+                i = stripped.to_string();
+                inversion = false;
+                if !lastver.is_empty() && !i.is_empty() {
+                    lastver.push(' ');
+                }
+            }
+            if !i.is_empty() {
+                lastver.push_str(&i);
+                // `r[lastdep]`: python's `None` key when no name came first; not reproduced.
+                let Some(dep) = &lastdep else {
+                    return Err("a version constraint before any name".into());
+                };
+                let entry = format!("{lastcmp} {lastver}");
+                match r.iter_mut().find(|(n, _)| n == dep) {
+                    Some((_, v)) => v.push(entry),
+                    None => r.push((dep.clone(), vec![entry])),
+                }
+            }
+            continue;
+        }
+        lastver.clear();
+        lastcmp.clear();
+        match r.iter_mut().find(|(n, _)| *n == i) {
+            Some((_, v)) if !v.is_empty() => {}
+            Some((_, v)) => v.clear(),
+            None => r.push((i.clone(), Vec::new())),
+        }
+        lastdep = Some(i);
+    }
+    r.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(r)
+}
+
+/// `bb.utils.join_deps(deps, commasep=False)`: `name` or `name (constraint)` per constraint,
+/// joined with one space.
+pub fn join_deps(deps: &[(String, Vec<String>)]) -> String {
+    let mut out = Vec::new();
+    for (dep, vers) in deps {
+        if vers.is_empty() {
+            out.push(dep.clone());
+        } else {
+            for v in vers {
+                out.push(format!("{dep} ({v})"));
+            }
+        }
+    }
+    out.join(" ")
+}
+
+/// A read filter OE-core's class-extension code installs with `d.setVarFilter` (BitBake
+/// 2.18.0 `data_smart.setVarFilter`; `getVarFlag` applies the filter of the name's base,
+/// `var.split(":")[0]`, to the expanded `_content` of every read whose value is not empty).
+/// The expressions are the ones OE-core Wrynose writes (`classes-recipe/native.bbclass`
+/// `native_virtclass_handler`, `lib/oe/classextend.py` `ClassExtender.set_filter`), with
+/// the arguments they were given.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum VarFilter {
+    /// `native_filter(val, '<pn>', '<bpn>'[, regex=True][, selfref=False])`.
+    Native {
+        pn: String,
+        bpn: String,
+        regex: bool,
+        selfref: bool,
+    },
+    /// `suffix_filter(val, '<extname>', [<prefixes>])`.
+    Suffix {
+        extname: String,
+        prefixes: Vec<String>,
+    },
+    /// `suffix_filter_deps(val, '<extname>', [<prefixes>])`.
+    SuffixDeps {
+        extname: String,
+        prefixes: Vec<String>,
+    },
+}
+
+impl VarFilter {
+    /// The filter applied to a non-empty expanded value; `Err` where python would raise.
+    pub fn apply(&self, val: &str) -> Result<String, String> {
+        match self {
+            VarFilter::Native {
+                pn,
+                bpn,
+                regex,
+                selfref,
+            } => Ok(native_filter_full(val, pn, bpn, *regex, *selfref)),
+            VarFilter::Suffix { extname, prefixes } => {
+                let p: Vec<&str> = prefixes.iter().map(String::as_str).collect();
+                Ok(val
+                    .split_whitespace()
+                    .map(|w| add_suffix(w, extname, &p))
+                    .collect::<Vec<_>>()
+                    .join(" "))
+            }
+            VarFilter::SuffixDeps { extname, prefixes } => {
+                let p: Vec<&str> = prefixes.iter().map(String::as_str).collect();
+                // `newdeps[add_suffix(dep)] = deps[dep]` into an OrderedDict: a later name
+                // mapping to the same word replaces its constraints in place.
+                let mut out: Vec<(String, Vec<String>)> = Vec::new();
+                for (dep, vers) in explode_dep_versions2(val)? {
+                    let n = add_suffix(&dep, extname, &p);
+                    match out.iter_mut().find(|(x, _)| *x == n) {
+                        Some((_, v)) => *v = vers,
+                        None => out.push((n, vers)),
+                    }
+                }
+                Ok(join_deps(&out))
+            }
+        }
+    }
+
+    /// What one dependency word reads as through the filter (`None`: dropped), for a list
+    /// of words such as `deps` shows: the word-by-word part of [`VarFilter::apply`] (no
+    /// sorting, no version constraints).
+    pub fn map_word(&self, word: &str) -> Option<String> {
+        let t = match self {
+            VarFilter::SuffixDeps { extname, prefixes }
+            | VarFilter::Suffix { extname, prefixes } => {
+                let p: Vec<&str> = prefixes.iter().map(String::as_str).collect();
+                add_suffix(word, extname, &p)
+            }
+            VarFilter::Native { .. } => self.apply(word).unwrap_or_default(),
+        };
+        (!t.is_empty()).then_some(t)
+    }
+
+    /// The expression as OE-core writes it, for notes.
+    pub fn describe(&self) -> String {
+        let list = |p: &[String]| {
+            format!(
+                "[{}]",
+                p.iter()
+                    .map(|x| format!("'{x}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        match self {
+            VarFilter::Native {
+                pn,
+                bpn,
+                regex,
+                selfref,
+            } => format!(
+                "native_filter(val, '{pn}', '{bpn}'{}{})",
+                if *regex { ", regex=True" } else { "" },
+                if *selfref { "" } else { ", selfref=False" }
+            ),
+            VarFilter::Suffix { extname, prefixes } => {
+                format!("suffix_filter(val, '{extname}', {})", list(prefixes))
+            }
+            VarFilter::SuffixDeps { extname, prefixes } => {
+                format!("suffix_filter_deps(val, '{extname}', {})", list(prefixes))
+            }
+        }
+    }
+}
+
+impl DataStore {
+    /// The read filter class-extension code installed on `name`'s base, if any.
+    pub fn var_filter(&self, name: &str) -> Option<&VarFilter> {
+        self.notes.filters.get(base_of(name)).map(|(f, _)| f)
+    }
+
+    /// BitBake's read filter (`getVarFlag`: `bb.filter.apply_filters` on a non-empty
+    /// expanded `_content`) applied to the finalised value `v` of `name`: computed when `v`
+    /// is certain; when the filter would raise, `v` is flagged instead. An uncertain value
+    /// is left as it is (it is flagged already).
+    pub(crate) fn apply_read_filter(&self, name: &str, v: &mut Value) {
+        if v.text.is_empty() || !certain(v) {
+            return;
+        }
+        let Some(f) = self.var_filter(name) else {
+            return;
+        };
+        match f.apply(&v.text) {
+            Ok(t) => v.text = t,
+            Err(_) => v.unevaluated_python = true,
+        }
+    }
 }
 
 /// `oe.classextend.add_suffix(val, extname, prefixes)` (OE-core Wrynose
@@ -352,6 +611,112 @@ mod tests {
         assert_eq!((e.word.as_str(), r), ("multilib:lib32", "/abs/x.bb"));
         assert!(split_virtual("core:x.bb").is_none());
         assert!(split_virtual("virtual:native:").is_none());
+    }
+
+    /// The read filters against OE-core Wrynose `lib/oe/classextend.py` with BitBake 2.18's
+    /// `bb.utils`, run by python 3 (`native_filter`, `suffix_filter_deps`, `suffix_filter`).
+    #[test]
+    fn read_filters_like_classextend() {
+        let native = |pn: &str, bpn: &str, regex, selfref| VarFilter::Native {
+            pn: pn.into(),
+            bpn: bpn.into(),
+            regex,
+            selfref,
+        };
+        let sdk_deps = VarFilter::SuffixDeps {
+            extname: "nativesdk".into(),
+            prefixes: Vec::new(),
+        };
+        let sdk = VarFilter::Suffix {
+            extname: "nativesdk".into(),
+            prefixes: Vec::new(),
+        };
+        let gmp = native("gmp-native", "gmp", false, false);
+        let quilt = native("quilt-native", "quilt", false, false);
+        let tool = native("tool-native", "tool", false, false);
+        let pkgs = native("gmp-native", "gmp", false, true);
+        let dynamic = native("gmp-native", "gmp", true, true);
+        let cases: &[(&VarFilter, &str, Option<&str>)] = &[
+            (
+                &gmp,
+                "autoconf-native automake-native libtool-native    texinfo-dummy-native",
+                Some("autoconf-native automake-native libtool-native texinfo-dummy-native"),
+            ),
+            (&quilt, "   ", Some("")),
+            (
+                &tool,
+                "zlib pkgconf-native binutils-cross-arm tool-native tool-native-dev (>= 1.0) gmp-native-x",
+                Some(
+                    "zlib-native pkgconf-native binutils-native-arm tool-dev-native gmp-native-x-native",
+                ),
+            ),
+            (
+                &pkgs,
+                "libgmpxx gmp-native-src gmp-native-dbg gmp-native",
+                Some("libgmpxx-native gmp-src-native gmp-dbg-native gmp-native"),
+            ),
+            (
+                &dynamic,
+                "^gmp-native-locale-.*$ ^x-native$ gmp-native-y",
+                Some("^gmp-locale-.*-native$ ^x-native$ gmp-y-native"),
+            ),
+            (
+                &sdk_deps,
+                "virtual/cross-cc virtual/compilerlibs virtual/libc  chrpath-replacement-native",
+                Some(
+                    "chrpath-replacement-native virtual/nativesdk-compilerlibs virtual/nativesdk-cross-cc virtual/nativesdk-libc",
+                ),
+            ),
+            (
+                &sdk_deps,
+                "chrpath-replacement-native virtual/nativesdk-compilerlibs gcc-crosssdk-x86_64-oesdk-linux virtual/nativesdk-libc",
+                Some(
+                    "chrpath-replacement-native gcc-crosssdk-x86_64-oesdk-linux virtual/nativesdk-compilerlibs virtual/nativesdk-libc",
+                ),
+            ),
+            (
+                &sdk_deps,
+                "b (>= 1.0) a, c (< 2) (> 1) b nativesdk-b kernel-x",
+                Some("nativesdk-a nativesdk-b nativesdk-c (< 2) nativesdk-c (> 2 1) kernel-x"),
+            ),
+            (
+                &sdk_deps,
+                "zz (>=1.0 foo) yy (= 2)",
+                Some("nativesdk-yy (= 2) nativesdk-zz (>= 1.0) nativesdk-zz (>= 1.0 foo)"),
+            ),
+            // VersionStringException in python.
+            (&sdk_deps, "a (1.0)", None),
+            (
+                &sdk,
+                "ptest-runner virtual/foo rtld-x /bin/sh ${FOO} libz-nativesdk",
+                Some(
+                    "nativesdk-ptest-runner virtual/nativesdk-foo rtld-x /bin/sh ${FOO} nativesdk-libz",
+                ),
+            ),
+        ];
+        for (f, val, want) in cases {
+            assert_eq!(
+                f.apply(val).ok().as_deref(),
+                *want,
+                "{} on {val:?}",
+                f.describe()
+            );
+        }
+        assert_eq!(
+            native("gmp-native", "gmp", true, false).describe(),
+            "native_filter(val, 'gmp-native', 'gmp', regex=True, selfref=False)"
+        );
+        assert_eq!(
+            sdk_deps.describe(),
+            "suffix_filter_deps(val, 'nativesdk', [])"
+        );
+        // Word by word, as deps lists them.
+        assert_eq!(tool.map_word("zlib").as_deref(), Some("zlib-native"));
+        assert_eq!(tool.map_word("tool-native"), None);
+        assert_eq!(
+            sdk_deps.map_word("virtual/libc").as_deref(),
+            Some("virtual/nativesdk-libc")
+        );
     }
 
     #[test]

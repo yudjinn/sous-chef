@@ -747,11 +747,14 @@ the flags of the selected options, with a note.
   dependencies of the selected `PACKAGECONFIG` options, then (since y3) the recipes the
   `depends` flags of the recipe's tasks name (`do_patch[depends] (do_populate_sysroot)`,
   one row per recipe with the tasks counted; a name already in `DEPENDS` is not repeated;
-  what anonymous python adds is named in a note). In a native variant (`PN` ending in
-  `-native`, `native` in `BBCLASSEXTEND`) the `DEPENDS` words are shown as BitBake reads
-  them through `native.bbclass`'s `native_filter` (`expat` as `expat-native`, source
-  `DEPENDS (native_filter)`, the recipe's own name left out). `depth` follows the selected
-  providers.
+  what anonymous python adds is named in a note). In a class-extended variant whose class
+  filters `DEPENDS` (the evaluator records OE-core's `native_filter` for a native variant,
+  `suffix_filter_deps` for nativesdk, when the class is OE-core's text) the words are shown
+  as BitBake reads them (`expat` as `expat-native`, the recipe's own name left out): the
+  evaluated `DEPENDS` is already filtered when certain; the words of an uncertain one and of
+  the `PACKAGECONFIG` build fields are mapped one by one (source `DEPENDS (native_filter)`,
+  `PACKAGECONFIG[x] (native_filter)`); a note names the filter. `depth` follows the
+  selected providers.
 - `runtime`: rows `package dep relation source loc`: the plain `RDEPENDS` and
   `RRECOMMENDS` (package `(every package)`: BitBake adds them to each), then per package of
   `PACKAGES` the words of `RDEPENDS:<package>` (relation `depends`) and
