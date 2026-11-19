@@ -1,0 +1,84 @@
+# The CI path docs/ci.md documents for users, run on this repository's own fixture
+# workspace (tests/fixtures/ws, which has known findings): annotations, SARIF checked
+# against the SARIF 2.1.0 schema and uploaded to code scanning under the category
+# `sous-chef-fixture`, and a baseline round trip. Not on pull requests: the upload adds
+# an analysis to the repository's Security tab (docs/ci.md, "This repository's demo job").
+name: lint demo
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: lint-demo-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The SARIF 2.1.0 schema from the OASIS repository, at a fixed commit, with its hash.
+  SARIF_SCHEMA_URL: https://raw.githubusercontent.com/oasis-tcs/sarif-spec/a560296ca8c921f3bdb8d4a8db57ab83dae968a7/sarif-2.1/schema/sarif-schema-2.1.0.json
+  SARIF_SCHEMA_SHA256: c3b4bb2d6093897483348925aaa73af03b3e3f4bd4ca38cef26dcb4212a2682e
+
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Toolchain
+        run: rustup install
+      - uses: Swatinem/rust-cache@v2.9.3
+      - name: Build sous-chef
+        run: |
+          cargo build --release --locked
+          echo "$GITHUB_WORKSPACE/target/release" >> "$GITHUB_PATH"
+
+      # Exit 1 means findings at or above --fail-on, which the fixture is meant to have;
+      # exit 2 means lint could not run, and fails the step.
+      - name: Lint (annotations; findings expected)
+        working-directory: tests/fixtures/ws
+        run: |
+          code=0
+          sous-chef lint --format github --fail-on info > "$RUNNER_TEMP/annotations.txt" || code=$?
+          cat "$RUNNER_TEMP/annotations.txt"
+          echo "sous-chef lint exited $code"
+          test "$code" -le 1
+          grep -q '^::warning file=tests/fixtures/ws/' "$RUNNER_TEMP/annotations.txt"
+
+      - name: Lint (SARIF)
+        working-directory: tests/fixtures/ws
+        run: |
+          code=0
+          sous-chef lint --format sarif --fail-on info > "$RUNNER_TEMP/fixture.sarif" || code=$?
+          echo "sous-chef lint exited $code"
+          test "$code" -le 1
+
+      - name: Check the SARIF against the 2.1.0 schema and GitHub's limits
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/sarif-schema-2.1.0.json" "$SARIF_SCHEMA_URL"
+          echo "$SARIF_SCHEMA_SHA256  $RUNNER_TEMP/sarif-schema-2.1.0.json" | sha256sum -c
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet jsonschema
+          "$RUNNER_TEMP/venv/bin/python" -I scripts/check-sarif.py \
+            "$RUNNER_TEMP/sarif-schema-2.1.0.json" "$RUNNER_TEMP/fixture.sarif" "$GITHUB_WORKSPACE"
+
+      - uses: github/codeql-action/upload-sarif@v4.39.3
+        with:
+          sarif_file: ${{ runner.temp }}/fixture.sarif
+          category: sous-chef-fixture
+
+      # --write-baseline then --baseline on the same tree: nothing is new, even at --fail-on info.
+      - name: Baseline round trip
+        working-directory: tests/fixtures/ws
+        run: |
+          sous-chef lint --write-baseline "$RUNNER_TEMP/baseline.json"
+          jq -e '.findings | length > 0' "$RUNNER_TEMP/baseline.json"
+          sous-chef lint --baseline "$RUNNER_TEMP/baseline.json" --fail-on info --format json \
+            > "$RUNNER_TEMP/new.json"
+          jq -e '.findings.rows == [] and .errors + .warnings + .infos == 0' "$RUNNER_TEMP/new.json"

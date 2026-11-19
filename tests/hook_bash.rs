@@ -287,13 +287,19 @@ fn the_hook_maps_a_real_failing_frame_to_its_metadata_line() {
         .unwrap_or_else(|| panic!("{stdout}"));
     // The metadata file is outside this workspace, so the row gives its path (cut to the
     // snippet width); on the live workspace it is `meta:classes-recipe/autotools.bbclass:96`.
-    assert!(
-        function.starts_with(&format!(
-            "oe_runconf at {}/build/../openembedded-core/meta/classes-recipe/autotools.bbclass:96; called from",
-            root.display()
-        )),
-        "{stdout}"
+    let expected = format!(
+        "oe_runconf at {}/build/../openembedded-core/meta/classes-recipe/autotools.bbclass:96; called from",
+        root.display()
     );
+    let keep = sous_chef::render::SNIPPET_MAX_CHARS - 3;
+    if expected.chars().count() <= keep {
+        assert!(function.starts_with(&expected), "{stdout}");
+    } else {
+        // A long temporary directory (TMPDIR) pushes `:96` past the cut: the row is then
+        // exactly the cut prefix, and the line number cannot be seen in this output.
+        let cut: String = expected.chars().take(keep).collect();
+        assert_eq!(function, format!("{cut}..."), "{stdout}");
+    }
     assert!(!stdout.contains("run file line"), "{stdout}");
 }
 

@@ -155,13 +155,31 @@ network connection itself (a BitBake build it starts may fetch, as any build doe
 
 ### Install
 
-**The binary.** Needs a recent stable Rust toolchain (the crate uses edition 2024). SQLite
-is bundled.
+**The binary.** Needs Rust 1.89 or newer (edition 2024; the repository pins the toolchain
+it is tested with in `rust-toolchain.toml`). SQLite is bundled.
 
 ```sh
-cargo install --path .        # installs sous-chef into ~/.cargo/bin
+cargo install --path .        # from a clone: installs sous-chef into ~/.cargo/bin
+cargo install --locked --git https://github.com/yudjinn/sous-chef sous-chef   # without a clone
 sous-chef --version
 ```
+
+**From a release (available after the first release; there is none yet).** Each release
+will have a tarball per target, `sous-chef-<tag>-<target>.tar.gz`, for
+`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` (glibc 2.35 or newer) and
+`x86_64-apple-darwin` and `aarch64-apple-darwin`, and a `SHA256SUMS` file:
+
+```sh
+tag=v0.1.0 target=x86_64-unknown-linux-gnu
+base=https://github.com/yudjinn/sous-chef/releases/download/$tag
+curl -fLO "$base/sous-chef-$tag-$target.tar.gz" -fLO "$base/SHA256SUMS"
+sha256sum --ignore-missing -c SHA256SUMS         # macOS: shasum -a 256 --ignore-missing -c
+tar -xzf "sous-chef-$tag-$target.tar.gz"
+install "sous-chef-$tag-$target/sous-chef" ~/.local/bin/
+```
+
+The release workflow is [`.github/workflows/release.yml`](.github/workflows/release.yml).
+The plugin (below) still comes from a clone of the repository.
 
 The plugin and the MCP configurations below run `sous-chef` by name, so `~/.cargo/bin`
 (or wherever the binary is) must be on the `PATH` Claude Code sees.

@@ -153,8 +153,8 @@ fn deferred_toolchain_inherit_is_followed_when_overrides_hold_python() {
     assert!(u.python);
     // TCOVERRIDE is no longer an unresolved name of OVERRIDES, and its entry is there.
     let ov = ds.overrides_value().unwrap();
-    assert!(!ov.unresolved.contains(&"TCOVERRIDE".to_string()), "{ov:?}");
-    assert!(ds.overrides().contains(&"toolchain-gcc".to_string()));
+    assert!(!ov.unresolved.iter().any(|i| i == "TCOVERRIDE"), "{ov:?}");
+    assert!(ds.overrides().iter().any(|i| i == "toolchain-gcc"));
     // A value that consults no override is not touched.
     let s = ds.value("TMPDIR").unwrap();
     assert!(!s.unevaluated_python && s.unresolved.is_empty(), "{s:?}");
@@ -373,7 +373,7 @@ async fn packageconfig_lists_options_only() {
     let f = tools("wrynose", python_lists);
     let out = deps_out(&f, "hello", deps::Kind::Packageconfig).await;
     let opts: Vec<String> = rows(&out).into_iter().map(|r| r[0].clone()).collect();
-    assert!(opts.contains(&"greeting".to_string()), "{out}");
+    assert!(opts.iter().any(|i| i == "greeting"), "{out}");
     assert!(
         !opts.iter().any(|o| o == "doc" || o == "vardepvalue"),
         "{out}"
@@ -426,9 +426,9 @@ async fn dead_leaves_out_variables_read_by_name_and_inactive_overrides() {
     let dead: Vec<String> = rows(&out).into_iter().map(|r| r[0].clone()).collect();
     // A typo is dead; a variable read by name is not; a machine override that is only
     // inactive for this machine is not.
-    assert!(dead.contains(&"nosuchboard".to_string()), "{out}");
+    assert!(dead.iter().any(|i| i == "nosuchboard"), "{out}");
     assert!(!dead.iter().any(|d| d.starts_with("tune-")), "{out}");
-    assert!(!dead.contains(&"boardx".to_string()), "{out}");
+    assert!(!dead.iter().any(|i| i == "boardx"), "{out}");
     assert!(out.contains("variables read by name"), "{out}");
     assert!(
         out.contains("inactive for this machine and distro, not dead"),

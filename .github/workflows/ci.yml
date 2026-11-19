@@ -4,6 +4,15 @@ on:
   push:
     branches: [main, dev]
   pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch or pull request cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,12 +21,15 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      # The crate is developed on nightly (edition 2024, cargo manifest lints).
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@v7.0.1
+      # The toolchain (an exact stable release, with rustfmt and clippy) is pinned in
+      # rust-toolchain.toml; rustup is preinstalled on GitHub's runners.
+      - name: Toolchain
+        run: |
+          rustup install
+          rustc -V
+          cargo clippy -V
+      - uses: Swatinem/rust-cache@v2.9.3
       - name: Format
         run: cargo fmt --check
       - name: Clippy

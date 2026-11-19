@@ -232,7 +232,7 @@ fn overrides_built_from_an_evaluated_expression() {
     let ds = eval(&fx, "ovr");
     let o = ds.overrides();
     for e in ["armv7a", "ti33x", "qemux86", "pn-ovr"] {
-        assert!(o.contains(&e.to_string()), "{e} not in {o:?}");
+        assert!(o.iter().any(|i| i == e), "{e} not in {o:?}");
     }
     assert!(
         ds.override_entries()

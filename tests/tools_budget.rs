@@ -4,6 +4,8 @@
 //! context on every turn, so the total is pinned below a budget. Print the table with
 //! `cargo test --test tools_budget -- --nocapture`.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::path::Path;
 
 /// The bytes of one tool definition as the server sends it in `tools/list`.

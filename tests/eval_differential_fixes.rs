@@ -894,7 +894,8 @@ fn a_recipe_outside_bbfiles_is_indexed_but_not_a_recipe() {
     assert!(
         !query::recipe_names_like(&fx.idx, "exam", 10)
             .unwrap()
-            .contains(&"example".to_string())
+            .iter()
+            .any(|i| i == "example")
     );
     let e = eval::evaluate_with(
         &ConfigCache::new(),

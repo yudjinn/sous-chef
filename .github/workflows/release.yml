@@ -1,0 +1,97 @@
+# Release binaries: on a tag v*, build sous-chef for Linux (x86_64, aarch64) and macOS
+# (x86_64, aarch64), and attach one tarball per target and SHA256SUMS to a GitHub release
+# named after the tag. Nothing else (no crates.io, no plugin publishing).
+# workflow_dispatch builds and uploads the tarballs as run artifacts without a release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux binaries are built on Ubuntu 22.04, so they need glibc 2.35 or newer.
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+          # One Apple silicon runner builds both macOS targets (Xcode links either).
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: x86_64-apple-darwin
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Toolchain
+        run: |
+          rustup install
+          rustup target add "$TARGET"
+        env:
+          TARGET: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked --target "$TARGET"
+        env:
+          TARGET: ${{ matrix.target }}
+      - name: Package
+        id: package
+        run: |
+          name="sous-chef-${GITHUB_REF_NAME}-${TARGET}"
+          mkdir -p "dist/$name"
+          cp "target/$TARGET/release/sous-chef" LICENSE README.md "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+          cat "dist/$name.tar.gz.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+        env:
+          TARGET: ${{ matrix.target }}
+      - name: Smoke test
+        # The x86_64 macOS binary is built on an arm64 runner and is not run here.
+        if: matrix.target != 'x86_64-apple-darwin'
+        run: |
+          "dist/$NAME/sous-chef" --version
+          file "dist/$NAME/sous-chef"
+        env:
+          NAME: ${{ steps.package.outputs.name }}
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          cat ./*.tar.gz.sha256 > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Create the release
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "sous-chef $GITHUB_REF_NAME" --generate-notes \
+            dist/*.tar.gz dist/SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}

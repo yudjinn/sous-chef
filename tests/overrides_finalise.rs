@@ -449,7 +449,7 @@ fn overrides_depending_on_overrides() {
     // First pass (no overrides): "m:base"; second pass (m, base active): "m:soc:base".
     // They differ, so this is the unstable case BitBake rejects.
     let v = ds.value("VAR").unwrap();
-    assert!(v.unresolved.contains(&"OVERRIDES".to_string()), "{v:?}");
+    assert!(v.unresolved.iter().any(|i| i == "OVERRIDES"), "{v:?}");
 
     let ds = store(
         "${MACHINEOVERRIDES}:base",
