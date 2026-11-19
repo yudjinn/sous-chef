@@ -308,12 +308,14 @@ the value exactly as before:
   arm tune python, see "Corpus" below); `a if c else b`; `and` / `or` (returning an
   operand, as python does) / `not`; one `==`, `!=`, `in` or `not in` per comparison (no
   chain); `-` before an integer literal; `x[i]` on a list by an integer (negative counted
-  from the end) or a boolean (`['', 'x:'][cond]`); the string methods `split()` /
+  from the end) or a boolean (`['', 'x:'][cond]`); a slice `x[a:b]` (no step) of a list or a
+  string, its bounds integers, booleans or `None`, with python's clamping (`util-linux.inc`'s
+  `'.'.join(d.getVar('PV').split('.')[0:2])`); the string methods `split()` /
   `split(sep)`, `strip()` / `strip(chars)`, `replace(old, new)`, `startswith(s)`,
   `endswith(s)`, `lower()` / `upper()` (ASCII text only), `sep.join(list or str)`.
   Rejected, whatever else the expression holds: any other name (`os`, `bb.parse`,
   `oe.types`, class-defined functions, a bare variable name), attribute or method,
-  `lambda`, comprehensions, generators, slices, `%` with anything else, f-strings, byte
+  `lambda`, comprehensions, generators, a slice with a step, `%` with anything else, f-strings, byte
   strings, `is`, `<` and the other comparisons, arithmetic;
 - every value it reads is **certain**: `d.getVar('X')` of a value that holds python left
   unevaluated, an undefined `${VAR}`, an uncertain override decision, a variable anonymous

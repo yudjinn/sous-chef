@@ -17,7 +17,8 @@
 //! - `a + b` (strings, lists), `a if c else b`, `and` / `or` / `not`, one `==` / `!=` / `in`
 //!   / `not in` per comparison, `-` before an integer literal, `fmt % args` with `%s`, `%d`
 //!   and `%%` only;
-//! - a subscript `x[i]` of a list by an integer or a boolean (`['', 'x'][cond]`);
+//! - a subscript `x[i]` of a list by an integer or a boolean (`['', 'x'][cond]`), and a
+//!   slice `x[a:b]` (no step) of a list or a string, bounds integers, booleans or `None`;
 //! - the string methods `split()` / `split(sep)`, `strip()` / `strip(chars)`,
 //!   `replace(old, new)`, `startswith(s)`, `endswith(s)`, `lower()`, `upper()` (ASCII text
 //!   only), `sep.join(list)`.
@@ -300,6 +301,7 @@ fn tokenize(code: &str) -> Result<Vec<Tok>, Stop> {
                 '-' => "-",
                 '%' => "%",
                 '=' => "=",
+                ':' => ":",
                 _ => return Err(unsupported(format!("`{ch}`"))),
             },
         };
@@ -544,6 +546,8 @@ enum Node {
         args: Vec<Node>,
     },
     Index(Box<Node>, Box<Node>),
+    /// `x[start:stop]` (no step); a missing bound is `None`.
+    Slice(Box<Node>, Option<Box<Node>>, Option<Box<Node>>),
     /// `fmt % args`.
     Format(Box<Node>, Box<Node>),
     /// A tuple: only the right operand of `%`.
@@ -596,6 +600,12 @@ impl Node {
             Node::Cmp(_, a, b) => {
                 a.funcs(out);
                 b.funcs(out);
+            }
+            Node::Slice(a, lo, hi) => {
+                a.funcs(out);
+                for b in [lo, hi].into_iter().flatten() {
+                    b.funcs(out);
+                }
             }
             Node::Not(a) => a.funcs(out),
             Node::IfElse { body, cond, orelse } => {
@@ -1000,9 +1010,31 @@ impl Parser {
                 };
             } else if self.is_op("[") {
                 self.pos += 1;
-                let i = self.expr()?;
+                let lo = if self.is_op(":") {
+                    None
+                } else {
+                    Some(self.expr()?)
+                };
+                if self.is_op(":") {
+                    // `x[a:b]`; a step (`x[a:b:c]`) is not in the subset.
+                    self.pos += 1;
+                    let hi = if self.is_op("]") {
+                        None
+                    } else {
+                        Some(Box::new(self.expr()?))
+                    };
+                    if !self.is_op("]") {
+                        return Err(unsupported("a slice with a step, or a tuple index"));
+                    }
+                    self.pos += 1;
+                    n = Node::Slice(Box::new(n), lo.map(Box::new), hi);
+                    continue;
+                }
+                let Some(i) = lo else {
+                    return Err(unsupported("an empty subscript"));
+                };
                 if !self.is_op("]") {
-                    return Err(unsupported("a slice or a tuple index"));
+                    return Err(unsupported("a tuple index"));
                 }
                 self.pos += 1;
                 n = Node::Index(Box::new(n), Box::new(i));
@@ -1121,6 +1153,36 @@ fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
             }
             Ok(items[k as usize].clone())
         }
+        Node::Slice(base, lo, hi) => {
+            let base = eval_node(base, env)?;
+            let mut bound = |b: &Option<Box<Node>>| -> Result<Option<i128>, Stop> {
+                match b {
+                    None => Ok(None),
+                    Some(n) => match eval_node(n, env)? {
+                        PyVal::None => Ok(None),
+                        PyVal::Int(i) => Ok(Some(i)),
+                        PyVal::Bool(b) => Ok(Some(i128::from(b))),
+                        other => Err(unsupported(format!(
+                            "a slice bound of {} (a TypeError)",
+                            other.type_name()
+                        ))),
+                    },
+                }
+            };
+            let (lo, hi) = (bound(lo)?, bound(hi)?);
+            match base {
+                PyVal::List(items) => {
+                    let (a, b) = slice_range(items.len(), lo, hi);
+                    Ok(PyVal::List(items[a..b].to_vec()))
+                }
+                PyVal::Str(s) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let (a, b) = slice_range(chars.len(), lo, hi);
+                    Ok(PyVal::Str(chars[a..b].iter().collect()))
+                }
+                other => Err(unsupported(format!("a slice of {}", other.type_name()))),
+            }
+        }
         Node::Method { recv, method, args } => {
             let recv = eval_node(recv, env)?;
             let args: Vec<PyVal> = args
@@ -1142,6 +1204,20 @@ fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
             call(*func, bound, env)
         }
     }
+}
+
+/// The index range python's `seq[lo:hi]` (step 1) takes from a sequence of `len` items: a
+/// missing bound is the start / the end, a negative one counts from the end, and both are
+/// clamped to `0..=len` (CPython `PySlice_AdjustIndices`); an empty range when `lo >= hi`.
+fn slice_range(len: usize, lo: Option<i128>, hi: Option<i128>) -> (usize, usize) {
+    let n = len as i128;
+    let adjust = |b: i128| {
+        let b = if b < 0 { b + n } else { b };
+        b.clamp(0, n) as usize
+    };
+    let a = lo.map_or(0, adjust);
+    let b = hi.map_or(len, adjust);
+    (a, b.max(a))
 }
 
 /// `fmt % args` (python's printf-style formatting) for the conversions `%s` (`str()`), `%d`
@@ -1946,6 +2022,30 @@ mod tests {
         assert_eq!(ok("bb.utils.contains('X', 'a', 'y', 'n', d,)", v), "y");
     }
 
+    /// Slices with step 1, as `util-linux.inc` (`'.'.join(d.getVar('PV').split('.')[0:2])`)
+    /// and `systemd-boot` (`" ".join(d.getVar('LD').split()[1:])`) write them; the expected
+    /// values are python 3's.
+    #[test]
+    fn slices() {
+        let v = &[("PV", "2.41.3"), ("LD", "arm-linux-ld --sysroot=/x -m elf")];
+        assert_eq!(ok("'.'.join(d.getVar('PV').split('.')[0:2])", v), "2.41");
+        assert_eq!(
+            ok(" \" \".join(d.getVar('LD').split()[1:])", v),
+            "--sysroot=/x -m elf"
+        );
+        assert_eq!(ok("'abcdef'[-2:]", v), "ef");
+        assert_eq!(ok("'abcdef'[:-10]", v), "");
+        assert_eq!(ok("'abcdef'[4:2]", v), "");
+        assert_eq!(ok("'abc'[True:]", v), "bc");
+        assert_eq!(ok("'abc'[None:2]", v), "ab");
+        assert_eq!(ok("'-'.join(['a', 'b', 'c'][-100:100])", v), "a-b-c");
+        assert_eq!(ok("'.'.join('6'.split('.')[:-1]) or '6'", v), "6");
+        assert_eq!(ok("'.'.join(d.getVar('PV').split('.')[:])", v), "2.41.3");
+        // str() of a list is not reproduced, slicing or not.
+        not_evaluated("d.getVar('PV').split('.')[0:2]", v);
+        not_evaluated("d.getVar('UNSET')[0:2]", v);
+    }
+
     #[test]
     fn rejects_everything_else() {
         let v = &[("X", "a b c")];
@@ -1999,8 +2099,14 @@ mod tests {
             "('a', 'b')",
             "()",
             "{'a': 1}",
-            "d.getVar('X')[0:2]",
             "'abc'[0]",
+            "'abc'[::2]",
+            "'abc'[0:2:1]",
+            "'abc'[:]['x']",
+            "'abc'[0, 1]",
+            "'abc'[]",
+            "'abc'['a':]",
+            "d.getVar('X')[0:1.5]",
             "d.getVar('X').split(',', 1)",
             "d.getVar('X').rsplit()",
             "d.getVar('X').format()",
