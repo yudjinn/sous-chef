@@ -113,6 +113,25 @@ CONF_VERSION = \"2\"
 # distribution check (this host is not a tested distribution of either release).
 BB_NO_NETWORK = \"1\"
 SANITY_TESTED_DISTROS = \"\""
+    # BitBake 2.0 fails to parse on python 3.14 (its hash equivalence server is started with
+    # multiprocessing, whose default start method there pickles a local function). Point
+    # python-bin/python3 at an existing 3.12 or older (system or uv); install nothing.
+    if [[ "$rel" == kirkstone && ! -e "$R/python-bin/python3" ]]; then
+        py=""
+        for c in /usr/bin/python3.12 /usr/bin/python3.11 /usr/bin/python3.10 \
+                "$HOME"/.local/share/uv/python/cpython-3.12*/bin/python3.12 \
+                "$HOME"/.local/share/uv/python/cpython-3.11*/bin/python3.11 \
+                "$HOME"/.local/share/uv/python/cpython-3.10*/bin/python3.10; do
+            if [[ -x "$c" ]]; then py="$c"; break; fi
+        done
+        if [[ -n "$py" ]]; then
+            mkdir -p "$R/python-bin"
+            ln -s "$py" "$R/python-bin/python3"
+            log "$rel: python-bin/python3 -> $py"
+        else
+            log "$rel: WARNING: no python 3.10 to 3.12 found; BitBake 2.0 will not parse on python 3.14"
+        fi
+    fi
     printf '%s\n' "$rel:" \
         "  openembedded-core $(git -C "$R/openembedded-core" rev-parse HEAD)" \
         "  bitbake           $(git -C "$R/bitbake" rev-parse HEAD) ($(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$R/bitbake/lib/bb/__init__.py"))" \

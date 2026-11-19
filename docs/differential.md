@@ -47,6 +47,182 @@ cargo test --release --test differential -- --ignored --nocapture
   script; `SOUS_CHEF_DIFF_DIR=<dir>` puts the index cache and `report.txt` there instead of
   `$SOUS_CHEF_LIVE/runs/differential` (the dumps are still read from there), so a run with
   another schema version does not rebuild a cache someone else uses.
+- **Workspaces** (since acc-releases): `tests/fixtures/differential/<name>.ws` describes
+  one (build directory, how its environment is set up, a `PATH` prefix for BitBake, where
+  the dumps go, machine, distro, recipes, the `@default` probe); the script and the test
+  both read it. `wrynose.ws` holds what used to be constants (the run above is unchanged);
+  `scarthgap.ws` and `kirkstone.ws` are the release workspaces of `scripts/release-env.sh`
+  (live-environment.md, "Release workspaces"). `SOUS_CHEF_DIFF_WS=<name>
+  scripts/differential.sh` runs the BitBake side of one; the ignored tests
+  `differential_scarthgap` and `differential_kirkstone` compare (they return at once when
+  the workspace is not there), with the dumps in `$SOUS_CHEF_LIVE/runs/acc-releases/<name>/`,
+  the cache and report in `$SOUS_CHEF_DIFF_DIR/<name>/`, and the recorded outputs in
+  `tests/fixtures/outputs/live/differential-<name>/`:
+
+  ```sh
+  scripts/release-env.sh                                  # the two workspaces (once)
+  SOUS_CHEF_DIFF_WS=scarthgap scripts/differential.sh     # BitBake side
+  SOUS_CHEF_DIFF_WS=kirkstone scripts/differential.sh
+  SOUS_CHEF_DIFF_NO_BITBAKE=1 SOUS_CHEF_DIFF_DIR=... cargo test --release --test differential -- --ignored
+  ```
+
+## Other releases: Scarthgap and Kirkstone (acc-releases)
+
+Measured on 2026-11-19 on the release workspaces of `scripts/release-env.sh`: OE-core,
+BitBake, meta-yocto (`poky`) and meta-openembedded's `meta-oe`, MACHINE `qemux86-64`, DISTRO
+`poky`, 4 layers (core, yocto, yoctobsp, openembedded-layer). Branch heads of the local
+clones, no network fetch:
+
+| | Scarthgap (5.0) | Kirkstone (4.0) |
+|---|---|---|
+| BitBake | 2.8.1, `6b443060ee96a62efb94723c97f22b51c9b20507` (branch `2.8`) | 2.0.0, `a9f09b9e2f187f07a6f6dfd1caa3fd2f3d564a8a` (branch `2.0`) |
+| OE-core | `fc4316861becc9f0d41857b49f6438929ab4c291` | `9687b9409d3a1e121f0f04de856055764d0a392e` |
+| meta-yocto | `34e15a437a792db6778fe1bf62617b307c7f9945` | `34e3c9a19b8b955116109a2e9528966db3fced37` (tag `yocto-4.0.35`) |
+| meta-openembedded | `2db6aece32c7f8ebf6015b468e1b4e21de072e3b` | `ce8539c941f6fcbecaca4d16640ac105c0595589` |
+| python | host 3.14.9 | 3.12.13 (uv, already in the user's home; BitBake 2.0 on 3.14 fails: the hash equivalence server's `multiprocessing` start pickles a local function, `_pickle.PicklingError`, under 3.14's default `forkserver`) |
+| parse | "Parsing of 1872 .bb files complete ... 3222 targets, 91 skipped, 0 masked, 0 errors" (first `bitbake -e zlib`; that output was not kept) | no error; the parse summary was not kept; the static side collects 1745 recipe files |
+| `bitbake -e` per recipe | 3.5 to 12.6 s | 3.3 to 16.6 s |
+
+The BitBake branch per release comes from OE-core's `meta/conf/sanity.conf`
+(`BB_MIN_VERSION` 2.8.1 on scarthgap, 1.53.1 on kirkstone). **Host knobs**, in the build's
+`local.conf`: `BB_NO_NETWORK = "1"` and `SANITY_TESTED_DISTROS = ""`. Neither changes a
+compared variable (`BB_NO_NETWORK` is read by the fetcher; `SANITY_TESTED_DISTROS` only by
+the host-distribution warning). uninative was left on (poky enables it; on this glibc it
+disables itself) and nothing was downloaded. For Kirkstone `PATH` starts with a directory
+whose `python3` is the 3.12 interpreter; BitBake's `HOSTTOOLS` symlink for `python3` then
+points at it, which no compared value contains. Commands run: `bitbake-layers show-layers`,
+`bitbake-layers show-appends`, `bitbake -e <target>` (28 per release), nothing else.
+
+**Targets (28 per release).** autotools / plain make: `curl`, `zlib`, `openssl`, `ncurses`,
+`bash`, `util-linux`, `dbus`; meson: `glib-2.0`; cmake: `expat`; python: `python3`,
+`python3-jinja2` (setuptools), `python3-packaging` (pep517, flit); kernel `linux-yocto` and
+the provider `virtual/kernel`; bootloader `u-boot`; image `core-image-minimal`;
+`packagegroup-core-boot`; bbappends from meta-yocto: `busybox`, `psplash`, `base-files`
+(Scarthgap only; Kirkstone's meta-poky has none for it); `quilt-native` (a `-native` file),
+`gmp-native`, `nativesdk-zlib` (`BBCLASSEXTEND`); meta-oe: `htop`, `nano`, `jq`, `fmt`
+(cmake), `protobuf`. `@default` probe: `curl`, `virtual/kernel` (MACHINE and DISTRO from
+`local.conf`; equal to the explicit rows on both releases).
+
+### Totals
+
+| | compared | equal (+ws) | flagged (literal differs) | known gap | **bug** | equal but flagged |
+|---|---|---|---|---|---|---|
+| Wrynose, for comparison (x7-cleanup) | 1090 | 950 | 109 (35) | 31 | **0** | 148 |
+| Scarthgap, first run | 1186 | 1029 (+1) | 150 (38) | 4 | **2** | 132 |
+| Scarthgap, after the fixes | 1186 | 1032 (+1) | 150 (38) | 3 | **0** | 132 |
+| Kirkstone, first run | 1173 | 877 (+1) | 263 (35) | 1 | **31** | 47 |
+| Kirkstone, after the fixes | 1145 | 906 (+1) | 237 (35) | 1 | **0** | 47 |
+
+(Kirkstone compares 28 values fewer after the fixes: `FILE_LAYERNAME` is unset on both
+sides now and not counted.) Workspace level: layers, collections and priorities agree on
+both releases (BitBake 2.0's `show-layers` prints the layer directory's basename, `meta`,
+`meta-poky`, ..., not the collection: `bblayers/query.py` `get_layer_name`; the test accepts
+either); bbappend order agrees for every recipe `show-appends` lists (8 on Scarthgap, 7 on
+Kirkstone); configuration without a machine: `qemux86-64` / `poky` on both. Files in the
+history: same set for 1015 of 1017 names (Scarthgap) and 980 of 983 (Kirkstone); the others
+are `core-image-minimal` values from classes behind `${IMGCLASSES}` / `${SDK_CLASSES}`, as on
+Wrynose.
+
+### Bugs found, and their causes
+
+1. **Kirkstone: `FILE_LAYERNAME` (28 values, every target).** BitBake 2.0 sets no
+   `FILE_LAYERNAME`: `cookerdata.py` `_parse_recipe` sets only `__BBMULTICONFIG` there; the
+   variable was added by BitBake `7090a14b0` "cooker: Add FILE_LAYERNAME variable" (on
+   branches `2.6` and later, not `2.4`). sous-chef gave `core`, unflagged. Fixed:
+   `Feature::FileLayerName` (Nanbield on); the replay sets it only on such a release.
+2. **Both: `features_backfill` (packagegroup-core-boot `SYSVINIT_SCRIPTS` and
+   `RDEPENDS:packagegroup-core-boot`).** OE-core's `base.bbclass` anonymous python starts
+   with `oe.utils.features_backfill("DISTRO_FEATURES", d)` and `("MACHINE_FEATURES", d)`,
+   which append (`d.appendVar`) every word of `<VAR>_BACKFILL` in neither `<VAR>` nor
+   `<VAR>_BACKFILL_CONSIDERED` (`lib/oe/utils.py`, the same on kirkstone and scarthgap);
+   BitBake's history shows `append utils.py:133 [features_backfill] " rtc qemu-usermode"`.
+   The static `MACHINE_FEATURES` lacked `rtc`, unflagged, so `bb.utils.contains(
+   'MACHINE_FEATURES', 'rtc', ...)` dropped `busybox-hwclock`. Wrynose replaces the backfill
+   with `<VAR>_DEFAULTS` and `oe.utils.filter_default_features` in `bitbake.conf` (OE-core
+   `159148f4de`, `3194d6868d`; `whinlatter` still calls `features_backfill`). Fixed:
+   `Feature::FeaturesBackfill` (Kirkstone to Whinlatter); the replay applies each call it
+   finds in a recorded anonymous function, as a `:append` (`OpKind::EventHandler`), and flags
+   the variable when an input is not static.
+3. **Kirkstone: python3 `PACKAGECONFIG`.** `PACKAGECONFIG:class-target ??= "readline gdbm
+   ..."`: BitBake's `setVarFlag(var, "_defaultval")` registers a name with `:` as an
+   override variant (`_setvar_update_overrides`), and `getVarFlag` of the variant falls back
+   to its `_defaultval` (`data_smart.py`, the same on branches `2.0`, `2.8`, `2.18`). The
+   static store kept the weak default but never registered the variant, so `PACKAGECONFIG`
+   was unset, unflagged. Not release-specific (no Wrynose recipe in the sample uses the
+   form); fixed in `DataStore::apply_content`.
+
+Tests: `tests/eval_releases.rs` (each fix on a copy of the fixture workspace, per release).
+After the fixes the Wrynose run is unchanged (same `classes.tsv`).
+
+**Flagged, now equal (Kirkstone, 26 values): `PR`.** OE-core `bitbake.conf` on kirkstone,
+langdale and mickledore has `PR = "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[2]
+or 'r0'}"` (nanbield on: `PR = "r0"`). The replay computes it from the file name like `PN`
+and `PV`, for that exact text only.
+
+### Flagged and gap classes against Wrynose
+
+Flagged values by variable (target rows): Wrynose `FILESPATH` 25, `DEPENDS` 25,
+`EXTRA_OECONF` 9, `FILES` 8, `PACKAGES` 7, `RDEPENDS` 5, `WORKDIR` / `S` / `B` / `CFLAGS` /
+`OVERRIDES` 3; Scarthgap `FILESPATH` 28, `DEPENDS` 28, **`CFLAGS` 28**, `EXTRA_OECONF` 11,
+`PACKAGES` 8, `RDEPENDS` 6, `FILES` 6, `SRC_URI` 4, `S` / `B` 4, `WORKDIR` / `OVERRIDES` 3;
+Kirkstone the same plus **`WORKDIR` / `B` 28, `S` 26**, `PV` 4.
+
+- **`CFLAGS` in every recipe (Scarthgap, Kirkstone).** `SELECTED_OPTIMIZATION =
+  "${@d.getVar(oe.utils.vartrue('DEBUG_BUILD', 'DEBUG_OPTIMIZATION', 'FULL_OPTIMIZATION',
+  d))}"` is the same text on all three releases, but before Wrynose `FULL_OPTIMIZATION` is
+  `-O2 -pipe ${DEBUG_FLAGS}` and `DEBUG_FLAGS` holds `${DEBUG_PREFIX_MAP}` (paths under
+  `${WORKDIR}`); the evaluator's note is "`FULL_OPTIMIZATION` is not certain (anonymous python
+  may change it, ...)", while `var` reports `FULL_OPTIMIZATION`, `DEBUG_FLAGS`,
+  `DEBUG_PREFIX_MAP`, `S`, `B`, `WORKDIR` without a flag. Which name makes the `d.getVar`
+  argument uncertain was not traced. Wrynose's `FULL_OPTIMIZATION` is `-O2
+  ${DEBUG_LEVELFLAG}`. Recorded for the python / flag work, not changed here.
+- **`WORKDIR`, `S`, `B` in every recipe (Kirkstone).** `PrInWorkdir`: the work directory is
+  `${EXTENDPE}${PV}-${PR}`, and `EXTENDPE = "${@['','${PE}_'][int(d.getVar('PE') or 0) >
+  0]}"` is not evaluated (`int()` is outside the python subset; no note names it). The same
+  `EXTENDPE` exists on every release but only Kirkstone to Mickledore put it in `WORKDIR`.
+  Recorded for the python allowlist, not changed here.
+- **`PV` of four `+git${SRCPV}` recipes (Kirkstone)**: `unresolved: SRCPV`; BitBake's value
+  is `...+gitAUTOINC+<rev>`, from the fetcher.
+- `DEPENDS`, `FILESPATH`, `OVERRIDES` of the native variants, `PACKAGES`, `FILES`,
+  `RDEPENDS`: the same causes as on Wrynose (anonymous python, `base_set_filespath`, the
+  host's `os.uname()`).
+- **Known gaps.** `layerdir-canonical` does not occur (the release workspaces list layers by
+  their real paths); `variant-layername` occurs twice on Scarthgap (`gmp-native`,
+  `nativesdk-zlib`) and not on Kirkstone (no `FILE_LAYERNAME` at all);
+  `python-at-parse` once on each (`RDEPENDS:psplash`, appended by `psplash_git.bb`'s
+  anonymous python). Nothing like Kirkstone's `classes/` layout or `_append`-style
+  assignments showed in a compared value: every recipe of the sample uses `:` syntax and the
+  class search follows `Feature::SplitClassDirs`.
+
+### Lint on these layers
+
+`sous-chef lint --all` (85 s and 87 s): Scarthgap 1545 findings (369 error, 428 warning, 748
+info), Kirkstone 1463 (366 error, 461 warning, 636 info). Release-dependent rules:
+`hygiene/release-removed` and `hygiene/release-syntax` 0 on both (each layer claims its own
+release); `org/class-location` 58 on Scarthgap (OE-core's `classes/`), 0 on Kirkstone
+(`Feature::SplitClassDirs`); `override/legacy-syntax` 1 on Kirkstone. With `--as-release
+kirkstone --only-release` on the Scarthgap layers, `hygiene/release-syntax` gives 194 errors
+(`classes-recipe/` 152, `classes-global/` 21, `inherit_defer` 21), all confirmed against
+BitBake 2.0: `inherit` builds `classes/<name>.bbclass` only, and `__inherit_regexp__ =
+inherit\s+(.+)` does not match `inherit_defer`, so the line reaches `ConfHandler.feeder` as an
+unparsed line.
+
+Spot checks, ten per release, against the source: **false positives**: all 369 / 365
+`hygiene/parse-error` errors (4 / 3 files: `lircd.conf`, `lirc_options.conf`,
+`thingsboard-gateway/logs.conf`, `10-adbd-configfs.conf`, data files of meta-oe recipes under
+`dynamic-layers/`; `index::scan::mark_data` takes the recipe directories only from collected
+recipes, and these recipes are `dynamic`, so their data files are linted as configuration),
+and on Kirkstone the advice of `hygiene/git-pv` (19: "set `PV = "<version>+git"`", but
+Kirkstone's `package.bbclass` adds no source revision to `PKGV`; fixed: the rule suggests
+`+git${SRCPV}` for a layer checked against a release with `KeptUntilMickledore`). True:
+`override/legacy-syntax` (meta-oe kirkstone `duktape_2.7.0.bb:40` `RDEPENDS_${PN}-ptest +=`:
+BitBake 2.0 fatals only on `_append` / `_prepend` / `_remove`, so this is a separate,
+unused variable), `override/shadowed` (`SECTION` before `inherit pypi`),
+`override/plus-equals-with-override`, `override/remove-in-recipe`, `hygiene/continuation`
+(BBHandler `rstrip()`s before the `\` test), `org/include-must-exist`,
+`hygiene/missing-metadata` (no `SUMMARY`, only `DESCRIPTION`), `org/recipe-path`. Accurate
+but intentional: `hygiene/autorev` on meta-poky's `poky-floating-revisions.inc` (30 of
+Kirkstone's 32), `org/class-location` on OE-core's dual-use classes (`archiver`, ...).
 
 ## After the w5 fixes (branch `w5-fix-eval`)
 
@@ -296,7 +472,8 @@ Open, as documented gaps rather than bugs: `BBCLASSEXTEND` variants (`gmp-native
 `BBLAYERS` text; anonymous python and python in `OVERRIDES` (behind most flags). (The task
 `depends` flags and the whitespace of an unchanged `DEPENDS` in the virtual-provider
 rewrite, open here at first, were done in w8: "After w8-eval".) Not measured: other
-machines, distros and releases; functions and flags.
+machines, distros and releases (Scarthgap and Kirkstone measured since acc-releases, "Other
+releases"); functions and flags.
 
 **The test fails only on what the milestone names:** a value classified **bug** on a tracked
 variable (`SRC_URI`, `DEPENDS`, `RDEPENDS:*`, `FILES:*`, `PACKAGECONFIG`, `EXTRA_OECONF`,
@@ -584,5 +761,6 @@ variants and the later rounds ("After x1-python"), are 1090 values compared, 950
   flagged values (not 22) have a literal part that differs.
 
 Limits of this measurement: one machine, one distro, 23 evaluable targets, one release
-(Wrynose); functions and variable flags were not compared; the classification follows
+(Wrynose; Scarthgap and Kirkstone since acc-releases, one machine and distro each, under
+"Other releases"); functions and variable flags were not compared; the classification follows
 references one level at a time and takes the first differing one as the cause.

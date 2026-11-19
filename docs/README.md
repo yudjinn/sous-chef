@@ -16,7 +16,7 @@ the contracts, the measurements and the project's history.
 | [bitbake-semantics.md](bitbake-semantics.md) | The BitBake behaviour we must reproduce | Parser, workspace, evaluator, lint |
 | [mcp-tools.md](mcp-tools.md) | Every MCP tool: arguments and output | Anyone implementing a tool |
 | [lint-rules.md](lint-rules.md) | Rule catalogue with ids | Lint tasks |
-| [live-environment.md](live-environment.md) | The real Wrynose workspace (yocto-kiss, kas and bitbake-setup) sous-chef is checked against, and how to use it | Anyone running the live tests |
+| [live-environment.md](live-environment.md) | The real Wrynose workspace (yocto-kiss, kas and bitbake-setup) sous-chef is checked against, the Scarthgap and Kirkstone parse-only workspaces, and how to use them | Anyone running the live tests |
 | [live-verification.md](live-verification.md) | sous-chef side by side with BitBake on that workspace: what was confirmed, the bugs found, their status | Anyone judging how far to trust a result |
 | [differential.md](differential.md) | How often static evaluation equals `bitbake -e`, and every difference | Evaluator work |
 | [performance.md](performance.md) | Index, refresh, tool and hook timings on that workspace | Anyone changing the index or the hooks |
