@@ -31,8 +31,12 @@
 //! condition is decided); every other value the condition read was certain, so not written
 //! by any anonymous python. The condition was then false, and the write did not happen.
 //!
-//! As everywhere in the evaluator, a function that writes through names that cannot be
-//! read (`AnonPython::opaque`) is warned about but does not flag other values; that
+//! The proof covers literal writes, so a name is **not** taken out while a function that
+//! may run (not proved to return at once) writes a value through a computed name that may
+//! be it (`AnonPython::computed_writes`: `d.setVar(v, ...)` with `v` of unknown value; a
+//! name built from a literal prefix, `"do_image_%s" % t`, only reaches names with that
+//! prefix; acc-unfollowed). As everywhere in the evaluator, a function that hands `d` to
+//! other code (`AnonPython::opaque`) is warned about but does not flag other values; that
 //! contract is unchanged here.
 
 use std::path::Path;
@@ -763,6 +767,21 @@ pub(crate) fn resolve(ds: &mut DataStore, is_dir: &dyn Fn(&Path) -> bool) {
                 }
             }
             if !all {
+                continue;
+            }
+            // A write through a computed name that may be this one, in a function not
+            // proved to return at once, keeps it possible (acc-unfollowed): the proof covers
+            // the literal writes only.
+            let computed = ds.notes.anonymous.iter().any(|a| {
+                a.computed_writes.iter().any(|p| {
+                    p.as_ref()
+                        .is_none_or(|p| e.starts_with(p.as_str()) || p.starts_with(e.as_str()))
+                }) && !a
+                    .early_returns
+                    .iter()
+                    .any(|c| early_return_taken(&trial, c).is_some())
+            });
+            if computed {
                 continue;
             }
             Arc::make_mut(&mut trial.notes)

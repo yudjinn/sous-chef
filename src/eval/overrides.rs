@@ -244,6 +244,18 @@ fn key_could_be(key: &str, name: &str) -> bool {
     name.len() >= pre.len() + post.len() && name.starts_with(pre) && name.ends_with(post)
 }
 
+/// `key`, a name `expandKeys` could not expand, may be renamed onto `name` or onto an
+/// override, `:append`, `:prepend` or `:remove` of it (`VAR:${@...}` may become
+/// `VAR:append`): its literal text could be `name`, or its base is `name`'s base and an
+/// override part holds `${`.
+fn key_may_rename_onto(key: &str, name: &str) -> bool {
+    if key_could_be(key, name) {
+        return true;
+    }
+    let kb = base_of(key);
+    !kb.contains("${") && kb == base_of(name) && key[kb.len()..].contains("${")
+}
+
 impl Eval<'_> {
     /// The finalised value of `name`; `name` must already be entered on `exp`.
     fn finalise(&self, name: &str, exp: &mut Expander, trace: &mut Trace) -> Option<Value> {
@@ -273,6 +285,17 @@ impl Eval<'_> {
             .ref_effects
             .iter()
             .any(|e| self.effect_reaches(e, name))
+        {
+            v.unevaluated_python = true;
+        }
+        // A name `expandKeys` could not expand may be this one, or an override or
+        // `:append` of it: BitBake renames it onto this variable.
+        if self
+            .ds
+            .notes
+            .renamable_keys
+            .iter()
+            .any(|k| key_may_rename_onto(k, name))
         {
             v.unevaluated_python = true;
         }
@@ -404,6 +427,18 @@ impl Eval<'_> {
             if (e.vars.is_some() || path.len() <= 1) && self.effect_reaches(e, name) {
                 push(out, used(e.cause(name)));
             }
+        }
+        for k in notes
+            .renamable_keys
+            .iter()
+            .filter(|k| key_may_rename_onto(k, name))
+        {
+            push(
+                out,
+                used(format!(
+                    "the variable named `{k}` could not have its name expanded; BitBake renames it, possibly onto {name}"
+                )),
+            );
         }
         let unknown_entries = (trace.inactive_seen || trace.multi_active) && self.ovr.uncertain();
         if trace.consulted && (self.ovr.unstable || unknown_entries) {
@@ -916,6 +951,23 @@ impl DataStore {
             return None;
         }
         Some((v.text, holes))
+    }
+
+    /// Whether the name `key` (with `${...}`) may expand to another text in BitBake: its
+    /// expansion holds python, or names a variable that is unset here but may be set
+    /// (`Source::unset_doubt`).
+    pub(crate) fn key_may_expand(&self, key: &str) -> bool {
+        let ovr = self.override_state();
+        let ev = Eval {
+            ds: self,
+            ovr: &ovr,
+        };
+        let mut exp = Expander::new();
+        let v = exp.expand(key, &ev);
+        v.unevaluated_python
+            || v.unresolved
+                .iter()
+                .any(|u| ev.unset_doubt(u, &mut exp).is_some())
     }
 
     /// [`Expander::python_candidates`] against the store: the exact values `${@code}` may

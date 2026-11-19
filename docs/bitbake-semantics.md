@@ -587,7 +587,16 @@ the static value (no earlier write), and every other value its condition read wa
 hence written by no anonymous python; the condition was then false. Names an event handler
 or a filter put in `python_vars` (`ReplayNotes::fixed_python_vars`) are never taken out.
 As before, a function that writes through names that cannot be read (`opaque`) gets a
-warning in the tools but does not flag other values.
+warning in the tools but does not flag other values. Since acc-unfollowed the proof is not
+used for a name a **computed-name value write** may reach: `d.setVar` / `appendVar` /
+`prependVar` / `delVar` / `renameVar` / `setVarFilter` whose first argument is not a string
+literal, in a function not proved to return at once, keeps every name possible, unless the
+argument is a local whose every assignment starts with a string literal (`task =
+"do_image_%s" % t`: only names starting `do_image_`) or the first parameter of a local
+`def` whose every call passes a literal (`base.bbclass`'s `appendVar(varname, ...)`).
+Flag writes (`setVarFlag(task, ...)`) change no value. On the three differentials the
+computed-name value writes are `image.bbclass`'s `d.setVar(task, ...)` (`do_image_*`) and
+`base.bbclass`'s wrapper; nothing anon.rs takes out is reached, and no count changed.
 
 ### References that cannot be followed exactly
 
@@ -657,6 +666,19 @@ in all three, for acc-unfollowed (`kiss-image` `DEPENDS` was wrong and unflagged
   `T`, the first file of that shape along the search path, or nothing: every such file the
   replay can read is read on a copy, as above (OE-core's `conf/machine-sdk/*.conf`: plain
   `SDK_ARCH`, `SDK_CC_ARCH`, `SDK_MACHINE_FEATURES`, `ABIEXTENSION:class-nativesdk`).
+
+- **A file the index does not hold**: the replay reads statements from the index, so an
+  `include` / `require` / `inherit` of a file that exists on disk (inside the workspace)
+  but is not indexed (a `.cfg`, any kind the index does not take) was a silent no-op for
+  `include`. It now flags every value ("... is not in the index").
+- **Names `expandKeys` cannot expand** (`ast.finalize` → `bb.data.expandKeys`: every key
+  with `${` is expanded and renamed when the expansion differs, `renameVar` onto the new
+  name): a key whose expansion holds python, or names a variable something may still set,
+  may be renamed onto any name its literal text allows, or onto an override or `:append`
+  of its base (`VAR:${X}` may become `VAR:append`); those values are flagged
+  (`ReplayNotes::renamable_keys`). A key that is incomplete only because a name is
+  certainly unset is not renamed by BitBake either (`d.expand` leaves `${X}`, the key does
+  not change): `RDEPENDS:${KERNEL_PACKAGE_NAME}-base` outside kernel recipes flags nothing.
 
 Measured after the narrowing (docs/differential.md): no value changed class on Wrynose
 or Scarthgap; on Kirkstone `core-image-minimal` `PACKAGES` is now "equal, but flagged"

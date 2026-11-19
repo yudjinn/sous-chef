@@ -161,6 +161,12 @@ pub struct ReplayNotes {
     /// Names with `${...}` that `expand_keys` could not expand (python or undefined
     /// variables); they stay under their written name.
     pub incomplete_keys: Vec<String>,
+    /// The [`ReplayNotes::incomplete_keys`] BitBake may rename after all: their expansion
+    /// holds python, or a name something may still set. (A name that is certainly unset
+    /// stays `${X}` in BitBake's `d.expand` too, and `expandKeys` renames only a key whose
+    /// expansion differs.) A value they may be renamed onto is flagged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub renamable_keys: Vec<String>,
     /// Paths probed for an `include` / `require` / `include_all` that held no file (absolute,
     /// normalised): a file created there would have been read. See [`super::Overlay`].
     #[serde(skip)]
@@ -238,6 +244,12 @@ pub struct AnonPython {
     /// The conditions of its leading `if <cond>: return` statements.
     #[serde(skip)]
     pub(crate) early_returns: Vec<String>,
+    /// Its value writes through a computed name (`d.setVar(task, ...)`): for each, the
+    /// literal prefix every name it can write starts with, `None` when not known
+    /// ([`computed_value_writes`]). A name one of them may write is never taken out of
+    /// `python_vars` by `eval::anon`.
+    #[serde(skip)]
+    pub(crate) computed_writes: Vec<Option<String>>,
 }
 
 impl AnonPython {
@@ -2967,6 +2979,10 @@ impl<'a> Replay<'a> {
             returns_early: None,
             entries,
             early_returns: conds.early_returns,
+            computed_writes: body
+                .as_deref()
+                .map(computed_value_writes)
+                .unwrap_or_else(|| vec![None]),
         });
         self.ds.ovr_cache = OnceLock::new();
     }
@@ -3643,6 +3659,14 @@ impl<'a> Replay<'a> {
                     .collect()
             };
             self.record_probed(&mode, &word, from, &targets);
+            if targets.is_empty() && mode != "include_all" {
+                // A file BitBake would read that the index does not have.
+                let disk = Resolver::with_bbpath(self.bbpath()).find_in_bbpath(ws, &word, from);
+                if let Some(p) = disk {
+                    self.unindexed(Some(&st.loc), via, &mode, &text, &p);
+                    continue;
+                }
+            }
             if targets.is_empty() && mode == "require" {
                 self.issue(
                     Some(&st.loc),
@@ -3661,6 +3685,23 @@ impl<'a> Replay<'a> {
             }
         }
         Ok(())
+    }
+
+    /// A file BitBake reads here exists on disk but is not in the index, so the replay has
+    /// no statements for it: it may change any value.
+    fn unindexed(&mut self, loc: Option<&Loc>, via: &[Loc], kind: &str, text: &str, p: &Path) {
+        Arc::make_mut(&mut self.ds.notes)
+            .ref_effects
+            .push(RefEffect {
+                loc: loc.cloned(),
+                via: via.to_vec(),
+                kind: kind.to_string(),
+                text: text.to_string(),
+                why: format!("{} is not in the index", p.display()),
+                not_read: vec![p.display().to_string()],
+                vars: None,
+            });
+        self.ds.ovr_cache = OnceLock::new();
     }
 
     /// Records the candidate paths an include of `word` looked at and found empty, in the
@@ -4057,6 +4098,10 @@ impl<'a> Replay<'a> {
             let ws = self.ws;
             let global = self.global;
             let Some(f) = self.resolver().find_class(ws, word, global) else {
+                if let Some(p) = Resolver::with_bbpath(self.bbpath()).find_class(ws, word, global) {
+                    self.unindexed(loc, via, kind, text, &p);
+                    continue;
+                }
                 self.issue(loc, via, kind, text, RefProblem::NotFound(word.to_string()));
                 continue;
             };
@@ -4179,7 +4224,14 @@ impl Replay<'_> {
         self.run_deferred()?;
         self.class_extend_handlers(recipe);
         let incomplete = self.ds.expand_keys();
-        Arc::make_mut(&mut self.ds.notes).incomplete_keys = incomplete;
+        let renamable: Vec<String> = incomplete
+            .iter()
+            .filter(|k| self.ds.key_may_expand(k))
+            .cloned()
+            .collect();
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        notes.incomplete_keys = incomplete;
+        notes.renamable_keys = renamable;
         self.multilib_postkeyexp(recipe);
         // (BitBake runs anonymous python here, which the replay does not, except for the
         // features backfill of base.bbclass and the PROVIDES filter nativesdk.bbclass's
@@ -5410,6 +5462,106 @@ fn wrapper_writes(body: &str) -> Vec<String> {
     out
 }
 
+/// The value writes of an anonymous function body whose name is computed: `d.setVar`,
+/// `appendVar`, `prependVar`, `delVar`, `renameVar` or `setVarFilter` with a first
+/// argument that is not a string literal (a literal followed by `+` / `%` is recorded by
+/// [`python_writes`] under the literal). Flag writes change no value and are left out. For
+/// each, the literal prefix of every name it can write: the argument is an identifier
+/// whose every assignment in the body (and there is one at least, and no `for` / `as` /
+/// parameter binds it) starts with a string literal, cut at its first `%` or `{`
+/// (`task = "do_image_%s" % t...`: `do_image_`); `None` otherwise. The first parameter
+/// of a local `def` whose every call passes a string literal there (OE-core
+/// `base.bbclass`'s `appendVar(varname, appends)`, whose calls [`wrapper_writes`] records)
+/// writes no other name and is left out.
+fn computed_value_writes(body: &str) -> Vec<Option<String>> {
+    static WRITE: LazyLock<Option<Regex>> = LazyLock::new(|| {
+        Regex::new(
+            r#"\bd\.(?:setVar|appendVar|prependVar|delVar|renameVar|setVarFilter)\s*\(\s*([^'"\s,)][^,)]*)"#,
+        )
+        .ok()
+    });
+    static IDENT: LazyLock<Option<Regex>> =
+        LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").ok());
+    let (Some(write), Some(ident)) = (WRITE.as_ref(), IDENT.as_ref()) else {
+        return vec![None];
+    };
+    let mut out = Vec::new();
+    for c in write.captures_iter(body) {
+        let arg = c.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+        if !ident.is_match(arg) {
+            out.push(None);
+            continue;
+        }
+        if literal_wrapper_param(body, arg) {
+            continue;
+        }
+        out.push(assigned_prefix(body, arg));
+    }
+    out
+}
+
+/// `name` is the first parameter of a local `def` in `body` and every call of that
+/// function passes a string literal first.
+fn literal_wrapper_param(body: &str, name: &str) -> bool {
+    let Ok(def) = Regex::new(&format!(
+        r"(?m)^\s*def\s+(\w+)\s*\(\s*{}\s*[,)]",
+        regex::escape(name)
+    )) else {
+        return false;
+    };
+    let Some(f) = def.captures(body).and_then(|c| c.get(1)) else {
+        return false;
+    };
+    let f = f.as_str();
+    let (Ok(call), Ok(literal)) = (
+        Regex::new(&format!(r"(?:^|[^\w.]){}\s*\(", regex::escape(f))),
+        Regex::new(&format!(
+            r#"(?:^|[^\w.]){}\s*\(\s*(?:'[^'\\]*'|"[^"\\]*")\s*,"#,
+            regex::escape(f)
+        )),
+    ) else {
+        return false;
+    };
+    // The `def` line itself is one match of `call`.
+    call.find_iter(body).count() == literal.find_iter(body).count() + 1
+}
+
+/// The literal prefix every value of the local `name` starts with (see
+/// [`computed_value_writes`]).
+fn assigned_prefix(body: &str, name: &str) -> Option<String> {
+    let n = regex::escape(name);
+    let other = Regex::new(&format!(
+        r"\bfor\s+(?:[\w, ]*\b)?{n}\b|\bas\s+{n}\b|\bdef\s+\w+\s*\([^)]*\b{n}\b|\b{n}\s*(?:\+|-|\*|/|%|\|)="
+    ))
+    .ok()?;
+    if other.is_match(body) {
+        return None;
+    }
+    let assign = Regex::new(&format!(r"(?m)^\s*{n}\s*=([^=].*)$")).ok()?;
+    let mut prefix: Option<String> = None;
+    let mut any = false;
+    for c in assign.captures_iter(body) {
+        any = true;
+        let rhs = c.get(1)?.as_str().trim();
+        let q = rhs.chars().next().filter(|q| *q == '\'' || *q == '"')?;
+        let lit: String = rhs[1..].chars().take_while(|c| *c != q).collect();
+        let p: String = lit.chars().take_while(|c| *c != '%' && *c != '{').collect();
+        prefix = Some(match prefix {
+            None => p,
+            Some(old) => old
+                .chars()
+                .zip(p.chars())
+                .take_while(|(a, b)| a == b)
+                .map(|(a, _)| a)
+                .collect(),
+        });
+    }
+    if !any {
+        return None;
+    }
+    prefix.filter(|p| !p.is_empty())
+}
+
 fn python_writes(body: &str) -> (Vec<String>, bool) {
     static WRITE: LazyLock<Option<Regex>> = LazyLock::new(|| {
         Regex::new(
@@ -5496,6 +5648,32 @@ mod tests {
     fn re_escape_like_python() {
         assert_eq!(re_escape("/a/meta-x.y"), "/a/meta\\-x\\.y");
         assert_eq!(re_escape("a_b/c"), "a_b/c");
+    }
+
+    #[test]
+    fn computed_value_writes_and_their_prefixes() {
+        // OE-core image.bbclass: the task name is built from a literal.
+        let image = "python () {\n    for t in types:\n        task = \"do_image_%s\" % t.replace(\"-\", \"_\")\n        d.setVar(task, cmds)\n        d.setVarFlag(task, 'func', '1')\n}";
+        assert_eq!(computed_value_writes(image), vec![Some("do_image_".into())]);
+        // base.bbclass's local wrapper: every call passes a literal.
+        let wrapper = "python () {\n    def appendVar(varname, appends):\n        if appends:\n            d.appendVar(varname, \" \" + \" \".join(appends))\n    appendVar('DEPENDS', deps)\n    appendVar('RDEPENDS:${PN}', rdeps)\n}";
+        assert!(computed_value_writes(wrapper).is_empty());
+        // A call with a computed first argument: any name.
+        let wrapper2 = format!("{wrapper}\nappendVar(name, x)\n");
+        assert_eq!(computed_value_writes(&wrapper2), vec![None]);
+        // A loop variable, an attribute, a call: any name.
+        assert_eq!(
+            computed_value_writes("for v in vs:\n    d.setVar(v, '1')\n"),
+            vec![None]
+        );
+        assert_eq!(
+            computed_value_writes("d.delVar(self.name)\nd.renameVar(f(x), y)\n"),
+            vec![None, None]
+        );
+        // Flag writes and literal names are not computed value writes.
+        assert!(
+            computed_value_writes("d.setVarFlag(task, 'x', '1')\nd.setVar('A', '1')\n").is_empty()
+        );
     }
 
     #[test]

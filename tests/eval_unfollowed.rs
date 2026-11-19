@@ -217,3 +217,89 @@ fn an_include_whose_alternatives_name_no_file_changes_nothing() {
     );
     assert_eq!(certain(&ds, "KEEP"), "k");
 }
+
+/// A variable whose name `expandKeys` cannot expand (`${SEL}` holds python) is renamed
+/// by BitBake, possibly onto `MYV:append`: `MYV` may differ. Before acc-unfollowed only a
+/// python read of an unset name took this into account.
+#[test]
+fn a_name_that_cannot_be_expanded_flags_the_variable_it_may_become() {
+    let ds = evaluate(
+        |r| {
+            recipe(
+                r,
+                "keys",
+                "MYV = \"a\"\nOTHER = \"o\"\nSEL = \"${@oe.utils.read_file('which')}\"\nMYV:${SEL} = \" b\"\n",
+            );
+        },
+        "keys",
+    );
+    let v = flagged_by(&ds, "MYV", "the variable named `MYV:${SEL}`");
+    assert_eq!(v, "a");
+    assert_eq!(certain(&ds, "OTHER"), "o");
+}
+
+/// `eval::anon` takes a name out of `python_vars` when every literal write to it is proved
+/// not to happen; a write through a computed name (`d.setVar(name, ...)`) in another
+/// function that may run can still reach it, so it stays flagged. A computed name built
+/// from a literal prefix (`"do_x_%s" % t`) cannot, and does not block the proof.
+#[test]
+fn a_computed_name_write_keeps_a_disproved_literal_write_possible() {
+    const LITERAL: &str = "python () {\n    if d.getVar('GATE') != '1':\n        return\n    d.setVar('MYW', 'changed')\n}\n";
+    let ds = evaluate(
+        |r| {
+            recipe(
+                r,
+                "cw",
+                &format!(
+                    "MYW = \"orig\"\nGATE = \"0\"\n{LITERAL}python () {{\n    for v in (d.getVar('NAMES') or '').split():\n        d.setVar(v, '1')\n}}\n"
+                ),
+            );
+        },
+        "cw",
+    );
+    let v = ds.value("MYW").unwrap();
+    assert!(v.unevaluated_python, "{v:?}");
+    assert!(
+        ds.replay().no_writes.is_empty(),
+        "{:?}",
+        ds.replay().no_writes
+    );
+}
+
+#[test]
+fn a_prefixed_computed_name_write_does_not_block_the_proof() {
+    const BODY: &str = "MYW = \"orig\"\nGATE = \"0\"\npython () {\n    if d.getVar('GATE') != '1':\n        return\n    d.setVar('MYW', 'changed')\n}\npython () {\n    for t in (d.getVar('TYPES') or '').split():\n        task = \"do_x_%s\" % t\n        d.setVar(task, 'cmds')\n}\n";
+    let ds = evaluate(|r| recipe(r, "cwp", BODY), "cwp");
+    assert_eq!(certain(&ds, "MYW"), "orig");
+}
+
+/// A file BitBake reads that the index does not hold (here a `.cfg`, a kind the index does
+/// not take): the replay has no statements for it, so it may change any value. Before
+/// acc-unfollowed the `include` was a silent no-op.
+#[test]
+fn an_include_of_a_file_the_index_does_not_hold_flags_every_value() {
+    let ds = evaluate(
+        |r| {
+            write(
+                r,
+                "meta-mine/recipes-app/cfg/extra.cfg",
+                "MYVAR = \"from-cfg\"\n",
+            );
+            recipe(r, "cfg", "MYVAR = \"a\"\ninclude extra.cfg\n");
+        },
+        "cfg",
+    );
+    let v = flagged_by(
+        &ds,
+        "MYVAR",
+        "an include at meta-mine:recipes-app/cfg/cfg_1.0.bb:3 could not be followed (",
+    );
+    assert_eq!(v, "a");
+    assert!(
+        ds.flag_causes("MYVAR")
+            .iter()
+            .any(|c| c.contains("extra.cfg is not in the index")),
+        "{:?}",
+        ds.flag_causes("MYVAR")
+    );
+}
