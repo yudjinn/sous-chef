@@ -116,6 +116,7 @@ max_age_days = 7
             bitbake: sous_chef::config::BitbakeConfig {
                 enabled: false,
                 allow_destructive: true,
+                pass_env: Vec::new(),
             },
             lint: sous_chef::config::LintConfig {
                 disable: vec!["style/variable-order".into(), "hygiene".into()],
@@ -405,4 +406,59 @@ fn handles_values_out_of_range_and_unknown_keys_are_errors() {
     .unwrap();
     let msg = config_err(Config::load(&cli(tmp.path().to_path_buf())));
     assert!(msg.contains("max_total_mb"), "{msg}");
+}
+
+/// z1-env: `[bitbake] pass_env` lists names of `STRIPPED_ENV` that BitBake commands inherit
+/// after all; any other name is an error saying it already passes.
+#[test]
+fn pass_env_takes_only_stripped_names() {
+    use sous_chef::bitbake::env::STRIPPED_ENV;
+    let origin = PathBuf::from("/x/sous-chef.toml");
+    assert!(
+        Config::from_toml("", &origin)
+            .unwrap()
+            .bitbake
+            .pass_env
+            .is_empty()
+    );
+    let cfg = Config::from_toml("[bitbake]\npass_env = [\"TMPDIR\"]\n", &origin).unwrap();
+    assert_eq!(cfg.bitbake.pass_env, ["TMPDIR"]);
+    assert!(cfg.bitbake.enabled);
+    for name in STRIPPED_ENV {
+        let text = format!("[bitbake]\npass_env = [\"{name}\"]\n");
+        assert!(Config::from_toml(&text, &origin).is_ok(), "{name}");
+    }
+
+    // A name that is not stripped (BitBake's own, or a typo) is refused, with the reason.
+    for bad in ["MACHINE", "DL_DIR", "TMP", "tmpdir", "TMPDIR "] {
+        let text = format!("[bitbake]\npass_env = [\"{bad}\"]\n");
+        let msg = config_err(Config::from_toml(&text, &origin));
+        assert!(
+            msg.contains("/x/sous-chef.toml")
+                && msg.contains(&format!("bitbake.pass_env names {bad:?}"))
+                && msg.contains("it already passes")
+                && msg.contains("list only TMPDIR"),
+            "{msg}"
+        );
+    }
+    // Two bad names: both reported, on one line.
+    let msg = config_err(Config::from_toml(
+        "[bitbake]\npass_env = [\"MACHINE\", \"TMPDIR\", \"DISTRO\"]\n",
+        &origin,
+    ));
+    assert!(
+        msg.contains("\"MACHINE\"") && msg.contains("\"DISTRO\"") && !msg.contains("\"TMPDIR\""),
+        "{msg}"
+    );
+    // Not a list of strings, or a misspelt key: TOML / unknown-field errors with the line.
+    let msg = config_err(Config::from_toml(
+        "[bitbake]\npass_env = \"TMPDIR\"\n",
+        &origin,
+    ));
+    assert!(msg.contains(":2:"), "{msg}");
+    let msg = config_err(Config::from_toml(
+        "[bitbake]\npassenv = [\"TMPDIR\"]\n",
+        &origin,
+    ));
+    assert!(msg.contains("passenv") && msg.contains(":2:"), "{msg}");
 }

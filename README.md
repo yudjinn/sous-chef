@@ -457,6 +457,7 @@ kas = ["kas/base.yml", "kas/board.yml"]  # a kas project's files, in kas's order
 [bitbake]
 enabled = true                        # false: never run BitBake
 allow_destructive = false             # allow cleansstate, cleanall, devtool reset, devtool finish
+pass_env = []                         # TMPDIR: pass it to BitBake after all (by default every BitBake command is started without it)
 
 [lint]
 disable = ["style/variable-order"]    # rule ids or groups; default: none
@@ -478,9 +479,15 @@ max_age_days = 14                     # drop handles older than this (1 to 3650)
 ```
 
 The flags `--build-dir` and `--layer` replace `build_dir` and `layers`. A `[handles]` value
-out of range is a configuration error; a server whose configuration does not load still
+out of range, or a `pass_env` name other than `TMPDIR`, is a configuration error; a server whose configuration does not load still
 starts, and every tool and `status` report the error. Details: "Configuration" in
 [docs/architecture.md](docs/architecture.md).
+
+BitBake commands inherit the environment sous-chef was started in, except `TMPDIR`: for
+BitBake that is the build output directory, and kas (or a passthrough list) would hand
+sous-chef's temporary directory to it, moving the whole build there. `MACHINE`, `DISTRO`,
+`DL_DIR`, `SSTATE_DIR` and the rest of BitBake's passthrough variables reach it as usual.
+`status` says when a `TMPDIR` was set and withheld.
 
 ### Tools
 

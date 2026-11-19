@@ -19,6 +19,12 @@
 //!   digits, `_ . + - /`), each in single quotes, which every POSIX shell, bash and zsh take
 //!   literally ([`kas_command_string`]).
 //!
+//! The command inherits the server's environment minus [`STRIPPED_ENV`] (`TMPDIR`), in
+//! every mode, initialised mode included: neither `oe-init-build-env`, bitbake-setup's
+//! `init-build-env` nor `kas shell` sets `TMPDIR` in the shell they leave, so a `TMPDIR`
+//! in the server's environment came from whatever started the server, while a `kas shell`
+//! still lists it in `BB_ENV_PASSTHROUGH_ADDITIONS` and BitBake would take it.
+//!
 //! Only allowlisted programs run, and every argument is validated. Each command runs in its
 //! own process group, so a timeout or cancellation ([`Supervised`]) signals the whole tree
 //! (bash, bitbake and whatever they started), not just the direct child, and waits (up to
@@ -79,18 +85,23 @@ pub const SETUP_WRAPPER: &str = r#"__sous_chef_argv=("$@"); set --; source "${__
 /// such an include ([`BbEnv::probe`]).
 pub const KAS_SHELL_ARGS: [&str; 2] = ["shell", "--keep-config-unchanged"];
 
-/// Variables of the server's environment that kas mode does not hand to kas. kas copies
-/// `SSTATE_DIR`, `SSTATE_MIRRORS`, `BB_HASHSERVE_DB_DIR`, `BB_HASHSERVE`,
-/// `BB_HASHSERVE_UPSTREAM`, `DL_DIR` and `TMPDIR` from its own environment into the build
-/// environment and adds them to `BB_ENV_PASSTHROUGH_ADDITIONS` (kas 5.5 `libkas.py`
-/// `get_build_environ`), so BitBake takes them as its own. `TMPDIR` is also the POSIX
-/// temporary directory, which a server is often started with for itself (Claude Code's
-/// sandbox, the live checks' `TMPDIR` under `runs/`): passed on, it moves BitBake's whole
-/// `TMPDIR` (work directories, stamps, sysroots, deploy) out of the build directory. Seen
-/// live (y3-leftovers): a kas-mode `bitbake -c cleanall curl` and `bitbake curl` ran in
-/// the server's `TMPDIR` and restored 721 MB from the shared-state cache there. The other
-/// six are BitBake's own names and are left as they are.
-pub const KAS_DROPPED_ENV: [&str; 1] = ["TMPDIR"];
+/// Variables of the server's environment that no command of [`BbEnv::command`] inherits,
+/// in any mode: names BitBake can take from its caller's environment as its own variables
+/// that also have a common meaning unrelated to the build, so the server's environment
+/// may carry them for a reason that has nothing to do with BitBake
+/// (docs/bitbake-semantics.md, "The environment BitBake takes from its caller").
+///
+/// `TMPDIR` is the POSIX temporary directory, which a server is often started with for
+/// itself (a sandbox, the live checks' `TMPDIR` under `runs/`). For BitBake it is the build
+/// output directory, and an imported value beats OE-core's `TMPDIR ?= "${TOPDIR}/tmp"`:
+/// work directories, stamps, sysroots and deploy move out of the build directory. kas
+/// copies it into the build environment and adds it to `BB_ENV_PASSTHROUGH_ADDITIONS`
+/// (kas 5.5 `libkas.py` `get_build_environ`), a `kas shell` (initialised mode) lists it in
+/// the additions, and a caller's own additions can name it in the other modes. Seen live
+/// (y3-leftovers): a kas-mode `bitbake -c cleanall curl` and `bitbake curl` ran in the
+/// server's `TMPDIR`. BitBake's own workflow variables (`MACHINE`, `DISTRO`, `DL_DIR`,
+/// `SSTATE_DIR`, ...) are not here and pass.
+pub const STRIPPED_ENV: [&str; 1] = ["TMPDIR"];
 
 /// How a kas-mode command is started: `<program> shell --keep-config-unchanged
 /// <files joined by :> -c '<command>'` in `work_dir`.
@@ -128,6 +139,8 @@ pub struct BbEnv {
     pub init_script: Option<PathBuf>,
     /// Set in kas mode: commands run through `kas shell`; `init_script` is `None` then.
     pub kas: Option<KasRun>,
+    /// Names of [`STRIPPED_ENV`] the commands inherit after all (`[bitbake] pass_env`).
+    pub pass_env: Vec<String>,
 }
 
 /// The parts of the process environment detection looks at. Tests build one directly
@@ -160,20 +173,39 @@ pub struct EnvState {
     pub env: Option<BbEnv>,
     /// Why no environment was found (one line), when `env` is `None`.
     pub problem: Option<String>,
+    /// The names of [`STRIPPED_ENV`] set in this process and not in `[bitbake] pass_env`:
+    /// BitBake commands are started without them ([`withheld_env`]).
+    pub withheld: Vec<&'static str>,
 }
 
 /// Detects the environment from the configuration, the workspace and this process.
 pub fn environment_state(cfg: &Config, ws: &Workspace) -> EnvState {
+    let withheld = withheld_env(&cfg.bitbake.pass_env);
     match BbEnv::probe(cfg, ws, &HostEnv::from_process()) {
         Ok(env) => EnvState {
             env: Some(env),
             problem: None,
+            withheld,
         },
         Err(problem) => EnvState {
             env: None,
             problem: Some(problem),
+            withheld,
         },
     }
+}
+
+/// The names of [`STRIPPED_ENV`] that are set in this process's environment (even empty)
+/// and not listed in `pass_env`, in list order: what [`BbEnv::command`] removes and so has
+/// an effect.
+pub fn withheld_env(pass_env: &[String]) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for name in STRIPPED_ENV {
+        if std::env::var_os(name).is_some() && !pass_env.iter().any(|p| p == name) {
+            out.push(name);
+        }
+    }
+    out
 }
 
 impl BbEnv {
@@ -235,6 +267,7 @@ impl BbEnv {
                 build_dir,
                 init_script: Some(absolute(script)),
                 kas: None,
+                pass_env: cfg.bitbake.pass_env.clone(),
             });
         }
 
@@ -251,6 +284,7 @@ impl BbEnv {
                     build_dir,
                     init_script: None,
                     kas: None,
+                    pass_env: cfg.bitbake.pass_env.clone(),
                 });
             }
         }
@@ -273,6 +307,7 @@ impl BbEnv {
                             files: k.files.clone(),
                             work_dir: k.work_dir.clone(),
                         }),
+                        pass_env: cfg.bitbake.pass_env.clone(),
                     });
                 }
                 Some(_) => {
@@ -303,6 +338,7 @@ impl BbEnv {
                 build_dir,
                 init_script: Some(setup),
                 kas: None,
+                pass_env: cfg.bitbake.pass_env.clone(),
             });
         }
         let mut candidates: Vec<PathBuf> = Vec::new();
@@ -320,6 +356,7 @@ impl BbEnv {
                 build_dir,
                 init_script: Some(script),
                 kas: None,
+                pass_env: cfg.bitbake.pass_env.clone(),
             }),
             None => Err(match kas_problem {
                 Some(p) => format!(
@@ -382,9 +419,6 @@ impl BbEnv {
                 let files = kas_files_arg(&k.files)?;
                 let mut c = Command::new(&k.program);
                 c.args(KAS_SHELL_ARGS).arg(files).arg("-c").arg(script);
-                for v in KAS_DROPPED_ENV {
-                    c.env_remove(v);
-                }
                 dir = k.work_dir.clone();
                 c
             }
@@ -415,6 +449,13 @@ impl BbEnv {
                 c
             }
         };
+        // On the first process (kas, bash or the program itself): what it does not have,
+        // the init script, kas, the shell kas starts and BitBake cannot inherit.
+        for name in STRIPPED_ENV {
+            if !self.pass_env.iter().any(|p| p == name) {
+                cmd.env_remove(name);
+            }
+        }
         cmd.current_dir(&dir)
             .stdin(Stdio::null())
             .kill_on_drop(true);

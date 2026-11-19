@@ -161,6 +161,11 @@ pub struct BitbakeStatus {
     pub env_mode: Option<String>,
     /// Why no environment was found.
     pub env_problem: Option<String>,
+    /// Variables of the server's environment that BitBake commands are started without
+    /// (`bitbake::env::STRIPPED_ENV`, set and not in `[bitbake] pass_env`); omitted when
+    /// none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub env_withheld: Vec<String>,
 }
 
 pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
@@ -199,6 +204,7 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
 
     let state = environment_state(&ctx.config, &ctx.workspace);
     report.bitbake.env_problem = state.problem;
+    report.bitbake.env_withheld = state.withheld.iter().map(|n| n.to_string()).collect();
     if let Some(env) = state.env {
         report.bitbake.environment = true;
         report.bitbake.env_mode = Some(env.mode().to_string());
@@ -317,6 +323,20 @@ fn megabytes(bytes: u64) -> String {
 }
 
 /// The running job as one line: `job:3 build core-image-minimal running 42s`.
+/// The `bitbake_env` row: the variables BitBake commands are started without, when there
+/// are any and BitBake is enabled. One line.
+fn withheld_line(b: &BitbakeStatus) -> Option<String> {
+    if !b.enabled || b.env_withheld.is_empty() {
+        return None;
+    }
+    let names = b.env_withheld.join(", ");
+    let quoted: Vec<String> = b.env_withheld.iter().map(|n| format!("{n:?}")).collect();
+    Some(format!(
+        "{names} set in sous-chef's environment, withheld from BitBake (where TMPDIR is the build output); [bitbake] pass_env = [{}] passes it",
+        quoted.join(", ")
+    ))
+}
+
 pub fn job_line(j: &crate::bitbake::JobInfo) -> String {
     let mut parts = vec![j.id.clone(), j.op.clone()];
     parts.extend(j.target.clone());
@@ -589,6 +609,9 @@ fn table(r: &Report) -> Table {
         },
     };
     rows.push(("bitbake", bitbake));
+    if let Some(line) = withheld_line(&r.bitbake) {
+        rows.push(("bitbake_env", line));
+    }
     rows.push(("job", r.job.clone().unwrap_or_else(none)));
     let h = &r.handles;
     let held = match (&h.error, h.count, h.bytes) {
@@ -736,6 +759,36 @@ mod tests {
             assert!(v.get(key).is_some(), "{key}");
         }
         assert!(v["release"].is_null());
+    }
+
+    /// z1-env: a stripped variable set in the server's environment gets one row, and a JSON
+    /// field, only when it applies.
+    #[test]
+    fn withheld_variables_get_a_row_only_when_there_are_some() {
+        let mut r = base(&Config::default());
+        r.state = "ready".into();
+        let text = format!("{:?}", table(&r));
+        assert!(!text.contains("bitbake_env"), "{text}");
+        let json = serde_json::to_value(&r).unwrap();
+        assert!(json["bitbake"].get("env_withheld").is_none(), "{json}");
+
+        r.bitbake.env_withheld = vec!["TMPDIR".into()];
+        let text = format!("{:?}", table(&r));
+        assert!(
+            text.contains(
+                "TMPDIR set in sous-chef's environment, withheld from BitBake (where TMPDIR is the build output); [bitbake] pass_env = [\\\"TMPDIR\\\"] passes it"
+            ),
+            "{text}"
+        );
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(
+            json["bitbake"]["env_withheld"],
+            serde_json::json!(["TMPDIR"])
+        );
+
+        // BitBake disabled: nothing is started, so nothing is said.
+        r.bitbake.enabled = false;
+        assert!(!format!("{:?}", table(&r)).contains("bitbake_env"));
     }
 
     #[test]

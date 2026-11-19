@@ -10,7 +10,12 @@
 #   FAKEBB_ON_INT_OUTPUT  with FAKEBB_ON_INT: file printed after the second SIGINT, in
 #                       place of the fake's own interrupt lines (recorded real output)
 #   FAKEBB_EXIT         exit status (default 0)
+#   FAKEBB_ENV_OUT      file that receives the fake's whole environment (`env`), so a test
+#                       can see what reached BitBake without printing it
 echo "fakebb: $(basename "$0")"
+if [ -n "${FAKEBB_ENV_OUT-}" ]; then
+    env > "$FAKEBB_ENV_OUT"
+fi
 echo "cwd: $PWD"
 echo "BUILDDIR: ${BUILDDIR-}"
 echo "argc: $#"

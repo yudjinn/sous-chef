@@ -675,7 +675,8 @@ Finish { Exited, TimedOut, Cancelled }`), `environment_state(cfg, ws) -> EnvStat
 user-supplied target themselves**, because `command()` cannot tell a target from a flag.
 `validate_name` rejects `:`; authoritative `var` never passes a variable name to a
 command (it looks the name up in the parsed dump), so `FILES:${PN}` needs no relaxation.
-Unix only. The fake BitBake for tests is `tests/fixtures/fakebb/` (`FAKEBB_*` variables).
+Unix only. The fake BitBake for tests is `tests/fixtures/fakebb/` (`FAKEBB_*` variables;
+`FAKEBB_ENV_OUT` since z1-env: the file that receives its whole environment).
 
 `slice` (T5.2): one selector per call; the cap is 8 KB or `budget_tokens * 4` when smaller;
 `failure_blocks` takes its blocks from `bitbake::logs::detect`.
@@ -1015,7 +1016,12 @@ bitbake-setup's
 **`kas_command_string` is the one place that builds shell text: only allowlisted programs
 and arguments that passed `validate_arg`, each single-quoted.** `WRAPPER` and
 `SETUP_WRAPPER` save the argv in an array before sourcing, so a script ending in `set --`
-does not lose the program (live bug B7).
+does not lose the program (live bug B7). Since z1-env every command, in all four modes, is
+started without the names of `STRIPPED_ENV` (`TMPDIR`), removed from the first process
+(kas, the `bash` wrapper or the program), unless `[bitbake] pass_env` lists them
+(`BbEnv.pass_env`, set by `probe` from the configuration); `withheld_env(pass_env)` and
+`EnvState.withheld` name those set in the server's environment, for `status`
+(bitbake-semantics.md, "The environment BitBake takes from its caller").
 
 Scaffold (T6.4, T6.5, `scaffold::{inc_split, placement}`): `IncSplitGen` (`OPTIONS`
 `recipe`, `versions`) and `PlacementGen` (`OPTIONS` `recipe`, `variable`, `task`,
@@ -1518,6 +1524,7 @@ kas = ["kas/base.yaml", "kas/board.yaml"] # optional; a kas project's files, in 
 [bitbake]
 enabled = true
 allow_destructive = false                 # cleansstate, cleanall, devtool reset, devtool finish
+pass_env = ["TMPDIR"]                     # names of STRIPPED_ENV BitBake commands inherit after all; default []
 
 [lint]
 disable = ["style/variable-order"]
@@ -1539,7 +1546,7 @@ max_age_days = 14                         # handles last stored longer ago are d
 ```
 
 In code (`src/config.rs`): `Config { build_dir, layers, writable_layers, init_script,
-release, kas, bitbake: BitbakeConfig { enabled, allow_destructive }, lint: LintConfig {
+release, kas, bitbake: BitbakeConfig { enabled, allow_destructive, pass_env }, lint: LintConfig {
 disable, severity }, output: OutputConfig { budget_tokens }, hooks: HooksConfig { grep_read,
 bash, edit }, handles: HandlesConfig { max_total_mb, max_age_days }, work_dir, config_dir }`
 (`work_dir` and `config_dir`, the directory of the file read, w12, are not read from the
@@ -1549,7 +1556,10 @@ file),
 `HooksConfig::enabled(key)`, `HandlesConfig::{retention, check}` (a `[handles]` value out
 of its range, `HANDLES_MAX_TOTAL_MB` / `HANDLES_MAX_AGE_DAYS`, is an `Error::Config` from
 `Config::from_toml`, so the server serves degraded with the reason; the defaults are
-`handles::Retention::default()`). `CliOverrides { build_dir, config, layers, work_dir }` carries
+`handles::Retention::default()`). `BitbakeConfig::check` (z1-env): a `pass_env` name that is not in
+`bitbake::env::STRIPPED_ENV` is an `Error::Config` from `Config::from_toml` too
+(`bitbake.pass_env names "MACHINE", which sous-chef never removes from BitBake's
+environment: it already passes; list only TMPDIR`), so a typo is caught. `CliOverrides { build_dir, config, layers, work_dir }` carries
 the global flags `--build-dir`, `--config`, `--layer` (repeatable).
 
 With no config and no `--build-dir`, discovery walks up from the working directory looking
