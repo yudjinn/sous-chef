@@ -428,7 +428,12 @@ async fn release_diff_text_and_json() {
         fix.file.as_deref(),
         Some("meta-mine:recipes-core/hello/hello/fix.patch:1")
     );
-    assert!(d.appends[1].touches.contains(&"do_install".to_string()));
+    assert!(
+        d.appends[1]
+            .touches
+            .iter()
+            .any(|i: &String| i == "do_install")
+    );
     // The widget append's patch sits on a changed SRCREV.
     assert!(
         d.appends[2]
@@ -494,7 +499,12 @@ async fn release_diff_text_and_json() {
     // Classes: autotools changed, inherited by hello and by meta-mine's app.
     assert_eq!(d.classes.len(), 1);
     assert_eq!(d.classes[0].path, "classes/autotools.bbclass");
-    assert!(d.classes[0].inherited_by.contains(&"hello".to_string()));
+    assert!(
+        d.classes[0]
+            .inherited_by
+            .iter()
+            .any(|i: &String| i == "hello")
+    );
     assert_eq!(
         d.classes[0].own_users,
         ["meta-mine:recipes-app/app/app_1.0.bb:5"]

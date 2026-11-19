@@ -1,0 +1,7 @@
+# One toolchain for local builds and CI (.github/workflows/*.yml read this file), so a new
+# clippy or rustfmt release cannot fail CI without a change here. Nothing in the crate needs
+# nightly; rust-version in Cargo.toml is the oldest compiler it builds with.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

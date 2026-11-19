@@ -7,6 +7,8 @@
 //! target; a class in `classes-recipe/` is recipe-only and one in `classes-global/`
 //! global-only.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 mod common;
 
 use std::fs;

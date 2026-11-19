@@ -510,7 +510,7 @@ fn missing_package_is_not_reported_for_recipes_without_packages() {
     let env = no_packages_env(false);
     let got = missing_package_in_images(&env);
     assert!(!got.iter().any(|g| g.starts_with("good-")), "{got:?}");
-    assert!(got.contains(&"shared.inc:2".to_string()), "{got:?}");
+    assert!(got.iter().any(|i| i == "shared.inc:2"), "{got:?}");
 }
 
 #[test]

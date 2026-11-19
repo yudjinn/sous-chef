@@ -2,6 +2,8 @@
 //! datastore discovery uses (so includes and overrides count), and a malformed word is
 //! BitBake's fatal error (`cookerdata.py` `parseConfigurationFiles`).
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 mod common;
 
 use std::fs;

@@ -3,6 +3,8 @@
 //! Every input is a recorded, path-scrubbed copy under `tests/fixtures/outputs/live/y1-build/`
 //! (see its README entry); nothing here needs BitBake or the live directory.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};

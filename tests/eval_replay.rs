@@ -321,7 +321,7 @@ fn overrides_and_values_per_machine() {
     // An app recipe in meta-mine gets layer-mine.
     let a = eval(&fx, &target(Some("app"), None));
     assert_eq!(a.value("FILE_LAYERNAME").unwrap().text, "mine");
-    assert!(a.overrides().contains(&"layer-mine".to_string()));
+    assert!(a.overrides().iter().any(|i| i == "layer-mine"));
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn configuration_only() {
     assert_eq!(ds.value("DISTRO").unwrap().text, "testdistro");
     // No recipe: PN is unknown, and the static result says so.
     let ov = ds.value("OVERRIDES").unwrap();
-    assert!(ov.unresolved.contains(&"PN".to_string()), "{ov:?}");
+    assert!(ov.unresolved.iter().any(|i| i == "PN"), "{ov:?}");
 }
 
 #[test]

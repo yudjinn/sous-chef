@@ -1,5 +1,7 @@
 //! T2.1: index schema, pragmas, cache path, reopen and version-mismatch rebuild.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -321,7 +323,7 @@ fn version_mismatch_rebuilds() {
         .query_row("SELECT count(*) FROM layers", [], |r| r.get(0))
         .unwrap();
     assert_eq!(n, 0, "old rows survived the rebuild");
-    assert!(!objects(c, "table").contains(&"stale".to_string()));
+    assert!(!objects(c, "table").iter().any(|i| i == "stale"));
     for t in schema::TABLES {
         assert!(objects(c, "table").contains(&t.to_string()), "missing {t}");
     }
@@ -338,7 +340,11 @@ fn foreign_database_and_garbage_file_are_rebuilt() {
         .execute_batch("CREATE TABLE layers(only_column)")
         .unwrap();
     let idx = Index::open_at(&p1).unwrap();
-    assert!(columns(idx.conn(), "layers").contains(&"priority".to_string()));
+    assert!(
+        columns(idx.conn(), "layers")
+            .iter()
+            .any(|i| i == "priority")
+    );
 
     // Not a database at all.
     let p2 = tmp.path().join("b/index.sqlite");

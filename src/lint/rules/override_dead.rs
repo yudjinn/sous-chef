@@ -261,11 +261,11 @@ mod tests {
     #[test]
     fn tokens_include_python() {
         let t = tokens("${@bb.utils.contains('TUNE_FEATURES', 'armv7a', 'armv7a:', '', d)}");
-        assert!(t.contains(&"armv7a".to_string()), "{t:?}");
-        assert!(!t.contains(&"TUNE_FEATURES".to_string()));
+        assert!(t.iter().any(|i| i == "armv7a"), "{t:?}");
+        assert!(!t.iter().any(|i| i == "TUNE_FEATURES"));
         // The python code is not read as override names.
         for code in ["bb", "utils", "contains", "d"] {
-            assert!(!t.contains(&code.to_string()), "{t:?}");
+            assert!(!t.iter().any(|i| i == code), "{t:?}");
         }
         let t = tokens("${@'x' if d.getVar('A') else 'y'}:pn-${PN}:linux${@'gnu'}eabi");
         assert_eq!(t, ["x", "y", "pn-", "linux", "gnu", "eabi"], "{t:?}");

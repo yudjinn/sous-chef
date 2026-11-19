@@ -166,7 +166,7 @@ async fn grep_with_context_groups_matches() {
         },
     )
     .await;
-    assert!(!line_numbers(&out).contains(&"--".to_string()), "{out}");
+    assert!(!line_numbers(&out).iter().any(|i| i == "--"), "{out}");
 
     let out = run(
         &f,
@@ -322,9 +322,9 @@ async fn failures_selects_error_lines() {
         // The detector (bitbake::logs) returns each error with its context lines, so the
         // two errors and the lines around them come back; the leading NOTE does not.
         let numbers = line_numbers(&out);
-        assert!(numbers.contains(&"2".to_string()), "{out}");
-        assert!(numbers.contains(&"5".to_string()), "{out}");
-        assert!(!numbers.contains(&"1".to_string()), "{out}");
+        assert!(numbers.iter().any(|i| i == "2"), "{out}");
+        assert!(numbers.iter().any(|i| i == "5"), "{out}");
+        assert!(!numbers.iter().any(|i| i == "1"), "{out}");
         assert!(texts(&out).iter().any(|t| t.starts_with("ERROR: Task (")));
     }
     let clean = f.put(HandleKind::Log, "NOTE: all good\n");

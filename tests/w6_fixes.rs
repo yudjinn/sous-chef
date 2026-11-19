@@ -325,9 +325,12 @@ fn bbfiles_dynamic_is_folded_into_the_collection() {
         .map(|f| f.path.display().to_string())
         .collect();
     assert!(
-        appends.contains(&"dynamic-layers/core/recipes-core/hello/hello_%.bbappend".to_string())
+        appends
+            .iter()
+            .any(|a| a == "dynamic-layers/core/recipes-core/hello/hello_%.bbappend")
             && appends
-                .contains(&"dynamic-layers/no-tpm2/recipes-core/hello/hello_%.bbappend".into()),
+                .iter()
+                .any(|a| a == "dynamic-layers/no-tpm2/recipes-core/hello/hello_%.bbappend"),
         "{appends:?}"
     );
     for dir in ["tpm2", "no-core"] {
