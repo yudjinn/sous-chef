@@ -264,6 +264,65 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After acc-unfollowed
+
+Re-run on 2026-11-19 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/acc-unfollowed/`, release build). After merging
+acc-overflag, acc-releases and acc-helpers the Wrynose run had **1 bug**: `kiss-image`
+`DEPENDS` (BitBake: `depmodwrapper-cross cross-localedef-native syslinux-native wic-native
+... systemd-boot`; static: `depmodwrapper-cross cross-localedef-native`, unflagged).
+`image.bbclass:25` is `inherit_defer ${IMGCLASSES}`, and one word of `IMGCLASSES` is
+`${@['', 'populate_sdk_ext']['linux' in d.getVar("SDK_OS")]}` (`SDK_OS` is `os.uname()`):
+the whole inherit was dropped, so `rootfs_ipk`, `image_types` and `image_types_wic` (whose
+`DEPENDS += "${@ '${WKS_FILE_DEPENDS}' if d.getVar('USING_WIC') else '' }"` is the missing
+part) were never read, and an unfollowed reference only gave a note. It had been flagged
+before for an unrelated reason that acc-overflag rightly took away.
+
+What changed (bitbake-semantics.md, "References that cannot be followed exactly",
+"Multiconfig"): an unfollowed reference flags every value it may change, with a cause; the
+default configuration sets `BB_CURRENT_MC` as BitBake does, which resolves `bitbake.conf`'s
+multiconfig `require` exactly; a reference whose python has known exact results, or is the
+host's `os.uname()` in an include word, is followed for the words certain whatever the
+python gives, and the rest is read on a copy to learn what it changes.
+
+| | compared | equal (+ws) | of which flagged | flagged | flagged, literal differs | known gap | bug |
+|---|---|---|---|---|---|---|---|
+| Wrynose, before (`4f1bc1a`) | 1090 | 967 (+2) | 34 | 31 | 30 | 59 | **1** |
+| Wrynose, every unfollowed reference flags everything (nothing narrowed) | 1019 | 656 | 656 | 302 | 61 | 0 | 0 |
+| Wrynose, after | 1090 | 967 (+2) | 34 | 32 | 30 | 59 | **0** |
+| Scarthgap, before | 1186 | 1098 (+2) | 40 | 39 | 38 | 9 | 0 |
+| Scarthgap, nothing narrowed | 1116 | 736 | 736 | 346 | 33 | 1 | 0 |
+| Scarthgap, after | 1186 | 1098 (+2) | 40 | 39 | 38 | 9 | **0** |
+| Kirkstone, before | 1145 | 1037 (+2) | 35 | 64 | 35 | 7 | 0 |
+| Kirkstone, nothing narrowed | 1078 | 699 | 699 | 341 | 37 | 1 | 0 |
+| Kirkstone, after | 1145 | 1037 (+2) | **36** | 64 | 35 | 7 | **0** |
+
+- **Nothing narrowed**: every target has `include conf/machine-sdk/${SDKMACHINE}.conf`
+  (`SDKMACHINE ??= "${BUILD_ARCH}"`, `os.uname()`), so every value of every target was
+  flagged; `gmp-native` and `nativesdk-zlib` could not be evaluated at all (their base
+  recipe's `PN` was flagged), hence the lower "compared".
+- **After**: the multiconfig `require` is resolved (nothing on Wrynose, the empty
+  `default.conf` on Kirkstone / Scarthgap); the `machine-sdk` include reads one of
+  OE-core's `conf/machine-sdk/*.conf` or none, which set `SDK_ARCH`, `SDK_CC_ARCH`,
+  `SDK_MACHINE_FEATURES` and `ABIEXTENSION:class-nativesdk`: flagged where they reach a
+  value, no compared value changed class. The `IMGCLASSES` inherit is followed for
+  `rootfs_ipk image_types license_image create-spdx-image-3.0 image_types_wic
+  rootfs-postcommands image-postinst-intercepts overlayfs-etc`; `populate_sdk_ext` is read on
+  a copy only (what it changes is flagged; `B:task-populate-sdk-ext` is a variant whose
+  override is not active and flags nothing). `kiss-image` `DEPENDS` now holds the
+  `image_types_wic` words and is flagged by their own python
+  (`bb.utils.contains_any("BUILD_ARCH", ...)` in `WKS_FILE_DEPENDS`: the host again):
+  bug to flagged. Unflagged by the follow-up: nothing (no value that was flagged only for
+  the missing classes was among the compared ones).
+- **Kirkstone, 35 to 36 equal but flagged**: `core-image-minimal` `PACKAGES`. Kirkstone's
+  `IMGCLASSES` word is `['populate_sdk_base', 'populate_sdk_ext'][...]` and
+  `populate_sdk_base` sets `PACKAGES = ""`; the value was right by luck before (the class
+  was not read at all). Every other count is unchanged.
+- "Unfollowed references" per target: 2 before (3 for the images and `nativesdk-zlib`), 0
+  now (1 for `nativesdk-zlib`: the fatal `PREFERRED_PROVIDER_virtual/cross-cc` of
+  `BB_RECIPE_VIRTUAL_PROVIDERS`, a BitBake error, not a reference); "partly followed" is 1
+  per target (the `machine-sdk` include), 2 for the images.
+
 ## After acc-overflag
 
 Re-run on 2026-11-19 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,

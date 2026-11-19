@@ -19,6 +19,8 @@
 //! semantics are reproduced in `pyexpr.rs`; docs/bitbake-semantics.md ("Class functions
 //! evaluated statically") has the table with sources and releases.
 
+use std::path::Path;
+
 use serde::Serialize;
 
 use super::DataStore;
@@ -163,7 +165,22 @@ impl DataStore {
             .uncertain_references
             .iter()
             .any(|r| may_inherit(&r.kind, r.loc.as_ref()));
-        if unfollowed || uncertain {
+        // A class an inherit followed only partly may add (`inherit_defer ${IMGCLASSES}`
+        // with `populate_sdk_ext` behind python), or an include followed partly that may
+        // read a file holding an inherit.
+        let partial = notes.ref_effects.iter().any(|e| {
+            e.vars.is_some()
+                && match e.kind.as_str() {
+                    "include" | "require" | "include_all" => {
+                        may_inherit(&e.kind, e.loc.as_ref())
+                            && e.not_read
+                                .iter()
+                                .any(|f| FileKind::from_path(Path::new(f)) != Some(FileKind::Conf))
+                    }
+                    _ => e.not_read.iter().any(|c| c == klass),
+                }
+        });
+        if unfollowed || uncertain || partial {
             return None;
         }
         let needle = format!("/{klass}.bbclass");

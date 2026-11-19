@@ -28,7 +28,9 @@
 //! is replayed from the start with `BB_CURRENT_MC` set (`replay::config_pass`), the replay
 //! follows the `require` where `bitbake.conf` has it (the Wrynose python form is recognised by
 //! [`oe_require_words`], the older form expands by itself), and the cache is keyed by the
-//! name. The default configuration is replayed exactly as before (no `BB_CURRENT_MC`).
+//! name. The default configuration gets BitBake's name for it (`BB_CURRENT_MC` `""`, or
+//! `default` before BitBake 2.12, [`crate::release::Feature::DefaultMcNamedDefault`]), so the
+//! same `require` resolves exactly there too.
 //! [`list`] says which configurations the workspace has; [`mcdepends`] reads the
 //! cross-configuration task dependencies of an evaluated recipe.
 
@@ -451,9 +453,9 @@ const OE_REQUIRE: &str =
 
 /// For the argument of an `include` / `require`: when it is OE-core's multiconfig `require`
 /// in its python form ([`OE_REQUIRE`], whitespace ignored) and `BB_CURRENT_MC` has a static
-/// value (a multiconfig pass), the words it expands to (`conf/multiconfig/<name>.conf`, or
-/// nothing for an empty name). `None` otherwise: the default configuration does not set
-/// `BB_CURRENT_MC`, and its replay is left as it was. The Kirkstone / Scarthgap form
+/// value, the words it expands to (`conf/multiconfig/<name>.conf`, or nothing for an empty
+/// name: the default configuration from BitBake 2.12 on). `None` otherwise. The Kirkstone /
+/// Scarthgap form
 /// (`conf/multiconfig/${BB_CURRENT_MC}.conf`) needs no help: it expands with the variable.
 pub fn oe_require_words(text: &str, ds: &DataStore) -> Option<String> {
     let squash = |s: &str| s.split_whitespace().collect::<String>();
@@ -512,12 +514,10 @@ pub struct McDepend {
 /// The `mcdepends` entries of every task of an evaluated recipe (`__BBTASKS`; BitBake
 /// 2.18.0 `build.py` `add_tasks` reads the expanded flag of each task, `taskdata.py`
 /// `add_mcdepends` splits it on whitespace and requires five `:` fields). `applies` is
-/// decided against `BB_CURRENT_MC` of `ds` (empty for the default configuration).
+/// decided against the name of the configuration `ds` was evaluated in (empty for the
+/// default one, as in BitBake's task ids, even where its `BB_CURRENT_MC` is `default`).
 pub fn mcdepends(ds: &DataStore) -> Vec<McDepend> {
-    let current = ds
-        .value("BB_CURRENT_MC")
-        .map(|v| v.text)
-        .unwrap_or_default();
+    let current = ds.notes.config_name.clone();
     let mut out = Vec::new();
     let mut tasks: Vec<String> = ds.tasks().to_vec();
     tasks.dedup();

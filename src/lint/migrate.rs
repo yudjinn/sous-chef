@@ -155,6 +155,8 @@ pub fn instruction(feature: Feature, target: bool) -> String {
         (Feature::FileLayerName, false) => "BitBake does not set FILE_LAYERNAME there: a `layer-<name>` override does not apply".into(),
         (Feature::FeaturesBackfill, true) => "base.bbclass backfills DISTRO_FEATURES and MACHINE_FEATURES from <VAR>_BACKFILL there (opt out with <VAR>_BACKFILL_CONSIDERED)".into(),
         (Feature::FeaturesBackfill, false) => format!("from {gone} on the defaults come from DISTRO_FEATURES_DEFAULTS / MACHINE_FEATURES_DEFAULTS (opt out with <VAR>_OPTED_OUT); there is no backfill (6.0 guide)"),
+        (Feature::DefaultMcNamedDefault, true) => "BitBake names the default configuration `default` there (BB_CURRENT_MC), so conf/multiconfig/default.conf is required".into(),
+        (Feature::DefaultMcNamedDefault, false) => format!("from {gone} on BB_CURRENT_MC is empty for the default configuration (OE-core's bitbake.conf requires no multiconfig file then)"),
         (_, true) => "still present there".into(),
         (kept, false) => format!(
             "removed or renamed in {gone} (the {} migration guide): change each use as shown",

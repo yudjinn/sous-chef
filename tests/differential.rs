@@ -817,10 +817,11 @@ fn run_recipe(
     let n = ds.replay();
     let _ = write!(
         note,
-        "anonymous python {} ({} opaque); unfollowed references {}",
+        "anonymous python {} ({} opaque); unfollowed references {}; partly followed {}",
         n.anonymous.len(),
         n.anonymous.iter().filter(|a| a.opaque).count(),
-        n.references.len()
+        n.references.len(),
+        n.ref_effects.iter().filter(|e| e.vars.is_some()).count()
     );
 
     let mut names: Vec<String> = VARS.iter().map(|s| s.to_string()).collect();
@@ -879,6 +880,37 @@ fn run_recipe(
             )
         })
         .collect();
+    details.extend(n.uncertain_references.iter().map(|r| {
+        format!(
+            "uncertain reference {} {:?} at {} followed as {:?} (python {}, unresolved {:?})",
+            r.kind,
+            r.text,
+            r.loc
+                .as_ref()
+                .map(|l| l.to_string())
+                .unwrap_or_else(|| "-".into()),
+            r.expanded,
+            r.python,
+            r.unresolved
+        )
+    }));
+    details.extend(n.ref_effects.iter().map(|e| {
+        format!(
+            "reference effect {} {:?} at {}: {}; not read {:?}; changes {}",
+            e.kind,
+            e.text,
+            e.loc
+                .as_ref()
+                .map(|l| l.to_string())
+                .unwrap_or_else(|| "-".into()),
+            e.why,
+            e.not_read,
+            match &e.vars {
+                None => "any variable".to_string(),
+                Some(m) => m.keys().cloned().collect::<Vec<_>>().join(" "),
+            }
+        )
+    }));
     details.extend(n.anonymous.iter().map(|a| {
         format!(
             "anonymous python {} opaque={} sets={:?}",

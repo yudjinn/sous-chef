@@ -155,9 +155,18 @@ fn deferred_toolchain_inherit_is_followed_when_overrides_hold_python() {
     let ov = ds.overrides_value().unwrap();
     assert!(!ov.unresolved.iter().any(|i| i == "TCOVERRIDE"), "{ov:?}");
     assert!(ds.overrides().iter().any(|i| i == "toolchain-gcc"));
-    // A value that consults no override is not touched.
+    // Another value of TOOLCHAIN (`clang`) would read another class, which may change any
+    // value: even one that consults no override is flagged, with the reference named
+    // (acc-unfollowed; before, TMPDIR was left certain).
     let s = ds.value("TMPDIR").unwrap();
-    assert!(!s.unevaluated_python && s.unresolved.is_empty(), "{s:?}");
+    assert!(s.unevaluated_python, "{s:?}");
+    assert!(
+        ds.flag_causes("TMPDIR").iter().any(|c| c
+            .starts_with("an inherit_defer at meta-core:classes/base.bbclass:")
+            && c.contains("followed as `toolchain/gcc`, a value that is not certain")),
+        "{:?}",
+        ds.flag_causes("TMPDIR")
+    );
 }
 
 #[test]

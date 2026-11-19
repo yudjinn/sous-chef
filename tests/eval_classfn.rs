@@ -178,13 +178,17 @@ fn inherits_class_is_read_from_the_inherit_cache() {
             "unsure",
             &format!("inherit realdefs\ninherit ${{MAYBE_NATIVE}}\n{USES}"),
         );
+        // An inherit followed only partly (acc-unfollowed): the python gives '' or
+        // 'native' depending on the host, so native may be inherited; the stand-in class
+        // changes no variable, so nothing else is flagged.
+        let partly = "HOSTOS = \"${@os.uname()[0].lower()}\"\n\
+                      inherit ${@['', 'native']['linux' in d.getVar('HOSTOS')]}\n";
+        recipe(r, "partly", &format!("inherit realdefs\n{partly}{USES}"));
         // INHIBIT_AUTOTOOLS_DEPS decides first: no inherits_class call.
         recipe(
             r,
             "inhibit",
-            &format!(
-                "inherit realdefs\ninherit ${{MAYBE_NATIVE}}\nINHIBIT_AUTOTOOLS_DEPS = \"1\"\n{USES}"
-            ),
+            &format!("inherit realdefs\n{partly}INHIBIT_AUTOTOOLS_DEPS = \"1\"\n{USES}"),
         );
     });
     let ds = eval(&fx, "nat");
@@ -194,7 +198,20 @@ fn inherits_class_is_read_from_the_inherit_cache() {
     );
     let ds = eval(&fx, "unsure");
     flagged(&ds, "AUTO");
-    // gettext_dependencies asks only when INHIBIT_DEFAULT_DEPS is set.
+    // gettext_dependencies asks only when INHIBIT_DEFAULT_DEPS is set, so its value is
+    // computed; but the inherit that was not followed may read any class (BitBake reads
+    // one: `MAYBE_NATIVE` must be set where sous-chef cannot see it, or the parse fails),
+    // which may change any value (acc-unfollowed).
+    assert_eq!(flagged(&ds, "GD"), "gettext-native");
+    assert!(
+        ds.flag_causes("GD")
+            .iter()
+            .any(|c| c.starts_with("an inherit at meta-mine:recipes-app/unsure/unsure_1.0.bb:3 could not be followed (undefined variable MAYBE_NATIVE)")),
+        "{:?}",
+        ds.flag_causes("GD")
+    );
+    let ds = eval(&fx, "partly");
+    flagged(&ds, "AUTO");
     assert_eq!(certain(&ds, "GD"), "gettext-native");
     let ds = eval(&fx, "inhibit");
     assert_eq!(certain(&ds, "AUTO"), "");

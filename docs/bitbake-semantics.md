@@ -587,7 +587,116 @@ the static value (no earlier write), and every other value its condition read wa
 hence written by no anonymous python; the condition was then false. Names an event handler
 or a filter put in `python_vars` (`ReplayNotes::fixed_python_vars`) are never taken out.
 As before, a function that writes through names that cannot be read (`opaque`) gets a
-warning in the tools but does not flag other values.
+warning in the tools but does not flag other values. Since acc-unfollowed the proof is not
+used for a name a **computed-name value write** may reach: `d.setVar` / `appendVar` /
+`prependVar` / `delVar` / `renameVar` / `setVarFilter` whose first argument is not a string
+literal, in a function not proved to return at once, keeps every name possible, unless the
+argument is a local whose every assignment starts with a string literal (`task =
+"do_image_%s" % t`: only names starting `do_image_`) or the first parameter of a local
+`def` whose every call passes a literal (`base.bbclass`'s `appendVar(varname, ...)`).
+Flag writes (`setVarFlag(task, ...)`) change no value. On the three differentials the
+computed-name value writes are `image.bbclass`'s `d.setVar(task, ...)` (`do_image_*`) and
+`base.bbclass`'s wrapper; nothing anon.rs takes out is reached, and no count changed.
+
+### References that cannot be followed exactly
+
+Checked in BitBake 2.18.0 (yocto-kiss), 2.8 (Scarthgap) and 2.0 (Kirkstone), the same code
+in all three, for acc-unfollowed (`kiss-image` `DEPENDS` was wrong and unflagged because
+`inherit_defer ${IMGCLASSES}` was dropped):
+
+- **`include` / `require`** (`ast.IncludeNode.eval` → `ConfHandler.include`): the argument
+  is expanded (`data.expand`, python run) and **split on whitespace**; each word is
+  included in order (`include_single_file`: the including file's directory, then `BBPATH`,
+  `bb.utils.which`). An empty argument includes nothing, for `require` too (zero words).
+  A word that names no file: `include` does nothing (`logger.debug2("CONF file '%s' not
+  found")`), `require` raises `ParseError("Could not include required file ...")`.
+- **`inherit`** (`BBHandler.inherit`): `d.expand(files).split()`, each word in order: a
+  word in `BB_DEFER_BBCLASSES` is deferred, else `classes-<type>/<w>.bbclass` then
+  `classes/<w>.bbclass` along `BBPATH`; not found is `ParseError("Could not inherit file
+  ...")`; a class in `__inherit_cache` is not read again. **`inherit_defer`**
+  (`InheritDeferredNode`) stores the text; `ast.finalize` expands and inherits it after the
+  recipe and its bbappends.
+- So a reference the replay cannot expand reads files BitBake does read (unless BitBake
+  fails), and they may set any variable, before or after (`:append`, `:remove`, an override
+  variant, a `?=` that then wins, anonymous python). A reference that is not found, closes a
+  cycle, uses a directive the release lacks, or another fatal error stops BitBake's parse:
+  there is no value to compare, and the reference stays a note.
+
+**sous-chef** (`Replay::follow_partial`, `ReplayNotes::ref_effects`,
+`DataStore::flag_causes`):
+
+- A reference whose argument holds python or undefined variables and is not covered below:
+  **every value is flagged**, with the cause `an inherit at <loc> could not be followed
+  (<why>); the files it would read may change any value, <name> included`. So is every
+  value after a reference followed with an uncertain value (`inherit_defer
+  toolchain/${TOOLCHAIN}` while `OVERRIDES` holds python): another value reads other files.
+  Measured on the three differentials with nothing narrowed (the two `bitbake.conf`
+  references below unresolved): every compared value flagged (Wrynose: 656 equal values all
+  flagged, `gmp-native` and `nativesdk-zlib` not evaluated because `PN` itself is flagged).
+- `bitbake.conf`'s multiconfig `require` resolves exactly once `BB_CURRENT_MC` is set as
+  BitBake sets it ("Multiconfig"): nothing on Wrynose, the empty
+  `conf/multiconfig/default.conf` on Kirkstone / Scarthgap.
+- **Partly followed** (the narrowing, all of it provable): the argument is expanded with a
+  hole for each `${@...}` that cannot be evaluated although only its own code stands in the
+  way (no uncertain substitution built it, it reads no value holding a hole;
+  `DataStore::expand_with_holes`), and nothing else in the text may be uncertain. Each hole
+  must have a known set of exact values (`pyexpr::candidates`): a list literal subscripted
+  by anything gives one of its elements (`['', 'populate_sdk_ext']['linux' in
+  d.getVar("SDK_OS")]`), `a if c else b`, `bb.utils.contains` / `contains_any` /
+  `oe.utils.conditional` with five positional arguments and `oe.utils.ifelse` with three
+  give one of their two value arguments (BitBake `lib/bb/utils.py`, OE-core
+  `lib/oe/utils.py`: no other return), python raising fails the expansion. A word without a
+  hole is read whatever the python gives, and is followed in order; a word with holes is one
+  of a known list of word lists, each read on a copy of the store (`Replay::probe`, with the
+  deferred inherits it adds), then dropped. The variables those files assign (with the
+  override conditions of each write), the names their anonymous python writes and the
+  effects of references inside them are recorded; a value is flagged when its base is one of
+  them and the write may apply (every element of its override condition is in a known
+  `OVERRIDES`, or `OVERRIDES` is uncertain). The cause: `an inherit_defer at <loc> could not
+  be followed exactly (python in IMGCLASSES); populate_sdk_ext, which it may read and
+  sous-chef did not, would change <name>`. A `:=` that expands a value so flagged is added
+  to the effect (its stored text would lose the flag). `bb.data.inherits_class` of a class
+  that may be read is not certain.
+- **The host's `os.uname()`**: `include conf/machine-sdk/${SDKMACHINE}.conf` with
+  `SDKMACHINE ??= "${BUILD_ARCH}"`, `BUILD_ARCH := "${@os.uname()[4]}"`. sous-chef never
+  evaluates `os.uname()`; it takes `os.uname()[0]` and `[4]` (with `.lower()`) to be one
+  path component without whitespace (on Linux: `Linux`, and the kernel's architecture name:
+  `x86_64`, `aarch64`, `armv7l`). **This is the one assumption about the host, not about
+  BitBake.** With it, an `include` / `require` word `<prefix><T><suffix>` reads, for each
+  `T`, the first file of that shape along the search path, or nothing: every such file the
+  replay can read is read on a copy, as above (OE-core's `conf/machine-sdk/*.conf`: plain
+  `SDK_ARCH`, `SDK_CC_ARCH`, `SDK_MACHINE_FEATURES`, `ABIEXTENSION:class-nativesdk`).
+
+- **A file the index does not hold**: the replay reads statements from the index, so an
+  `include` / `require` / `inherit` of a file that exists on disk (inside the workspace)
+  but is not indexed (a `.cfg`, any kind the index does not take) was a silent no-op for
+  `include`. It now flags every value ("... is not in the index").
+- **Names `expandKeys` cannot expand** (`ast.finalize` → `bb.data.expandKeys`: every key
+  with `${` is expanded and renamed when the expansion differs, `renameVar` onto the new
+  name): a key whose expansion holds python, or names a variable something may still set,
+  may be renamed onto any name its literal text allows, or onto an override or `:append`
+  of its base (`VAR:${X}` may become `VAR:append`); those values are flagged
+  (`ReplayNotes::renamable_keys`). A key that is incomplete only because a name is
+  certainly unset is not renamed by BitBake either (`d.expand` leaves `${X}`, the key does
+  not change): `RDEPENDS:${KERNEL_PACKAGE_NAME}-base` outside kernel recipes flags nothing.
+
+- **Event handlers run during the parse** (`addhandler`; `ast.finalize` fires
+  `RecipePreFinalise`, `RecipePreDeferredInherits`, `RecipePostKeyExpansion` and
+  `RecipeParsed` on the recipe's datastore; `bb.event.fire` calls a handler without
+  `eventmask` for every event): the replay emulates `base_eventhandler`'s
+  `RecipePreDeferredInherits` branch and the class-extension handlers ("Class-extended
+  variants"); any other such handler (OE-core's `find_intercepts`,
+  `allarch_package_arch_handler`, `devupstream_virtclass_handler`,
+  `mcextend_virtclass_handler`, a layer's own) now has the names it writes by literal
+  flagged, like anonymous python (`Replay::other_parse_handlers`). Handlers for
+  `ConfigParsed` (`base_eventhandler` sets `NATIVELSBSTRING`, `ORIGNATIVELSBSTRING`,
+  `BB_VERSION` there) are still neither run nor flagged.
+
+Measured after the narrowing (docs/differential.md): no value changed class on Wrynose
+or Scarthgap; on Kirkstone `core-image-minimal` `PACKAGES` is now "equal, but flagged"
+(`populate_sdk_base` / `populate_sdk_ext` behind the python of `IMGCLASSES`); `kiss-image`
+`DEPENDS` is followed into `image_types_wic` and flagged for its own python
+(`bb.utils.contains_any("BUILD_ARCH", ...)`, the host again).
 
 ### Legacy syntax
 
@@ -1684,10 +1793,15 @@ directory: kas writes none.
   saying nothing of it was read. `machine` / `distro` arguments are pinned on top, as in the
   default configuration. The cache key includes the name, so each configuration is a
   configuration pass of its own. A target note names the configuration and the file.
-- The default configuration is replayed as before: **`BB_CURRENT_MC` is not set** there
-  (BitBake sets `""`, or `default` before 2.12), so the Wrynose `require` is a python
-  reference that is not followed and the Kirkstone / Scarthgap one an undefined reference
-  (OE-core's empty `default.conf` is not read).
+- The default configuration sets `BB_CURRENT_MC` as BitBake does (acc-unfollowed; before,
+  it was left unset and both forms of the `require` were unfollowed references): `""` from
+  BitBake 2.12 on, `default` before (`Feature::DefaultMcNamedDefault`). So the Wrynose
+  python `require` requires nothing (`include`/`require` split the expanded text on
+  whitespace and include each word, `ConfHandler.include`: an empty text includes nothing,
+  for `require` too), and the Kirkstone / Scarthgap one reads OE-core's empty
+  `conf/multiconfig/default.conf`. Both are resolved exactly. `mcdepends` still decides
+  `applies` against `""` for the default configuration: BitBake's task ids name it `""`
+  (`runqueue.py` `add_mc_dependencies`, `if mc == frommc`) whatever its `BB_CURRENT_MC`.
 - The workspace's configurations (`multiconfig::list`, shown by `status`): `BBMULTICONFIG`
   of the default configuration, split as BitBake does (uncertain when python, an
   unresolved name or an uncertain include may change it), each name with the first
@@ -2960,6 +3074,7 @@ and must not be used to report an error. No row is marked *verify* at present.
 | `CvePatchContentLines` | patch contents are read line by line (every id on a line starting with `CVE:`; a file-name id needs four or more digits after the year); before, `CVE:( CVE-\d{4}-\d+)+` anywhere | 5.2 walnascar | (current) | `def parse_cves_from_patch_contents` on `walnascar`, `whinlatter`, `wrynose`, not on `styhead` (`87c6da6816` "cve-check: Rework patch parsing", contained in `walnascar` and later) |
 | `FileLayerName` | BitBake sets `FILE_LAYERNAME` for a recipe before parsing it | 4.3 nanbield (BitBake 2.6) | (current) | BitBake `cookerdata.py` `_parse_recipe`: `bb_data.setVar("FILE_LAYERNAME", layername)` on branch `2.8`, absent on `2.0`; added by `7090a14b0` (contained in branches `2.6` and later, not `2.4`); `bitbake -e` on Kirkstone prints no `FILE_LAYERNAME` (acc-releases) |
 | `FeaturesBackfill` | OE-core's `base.bbclass` anonymous python calls `oe.utils.features_backfill` for `DISTRO_FEATURES` and `MACHINE_FEATURES`: every word of `<VAR>_BACKFILL` in neither `<VAR>` nor `<VAR>_BACKFILL_CONSIDERED` is appended (`d.appendVar`, i.e. `<VAR>:append`) | 4.0 kirkstone (floor) | 5.3 whinlatter | `base.bbclass` anonymous python on `kirkstone` (`classes/`), `scarthgap` and `whinlatter` (`classes-global/`), not on `wrynose`, which has `<VAR>_DEFAULTS` and `oe.utils.filter_default_features` in `bitbake.conf` (OE-core `159148f4de`, `3194d6868d`); `lib/oe/utils.py` `features_backfill` the same on kirkstone and scarthgap; `bitbake -e packagegroup-core-boot` on both: `append utils.py:133 [features_backfill] " rtc qemu-usermode"` (acc-releases) |
+| `DefaultMcNamedDefault` | The default configuration is named `default`: `parseConfigurationFiles(prefiles, postfiles, mc = "default")` sets `BB_CURRENT_MC = "default"`, so OE-core's `require conf/multiconfig/${BB_CURRENT_MC}.conf` reads its empty `meta/conf/multiconfig/default.conf`; later `BB_CURRENT_MC = ""` | 4.0 kirkstone (floor) | 5.1 styhead (BitBake 2.10) | BitBake `cookerdata.py` `parseConfigurationFiles(..., mc = "default")` on `kirkstone` (2.0) and `scarthgap` (2.8), `mc = ""` on Wrynose's 2.18; dropped by `0fa0d8d76` ("cooker/cache: Drop mc 'default' string value", first released in 2.12 / Walnascar); OE-core `bitbake.conf:817` (kirkstone) and `:828` (scarthgap) require the file, `:824` on Wrynose has the python form that requires nothing for `""` (acc-unfollowed) |
 | `AssignmentWhitespaceWarning` | BitBake warns about an assignment without whitespace on both sides of the operator ("has a lack of whitespace around the assignment") | 5.3 whinlatter (BitBake 2.16) | (current) | guide 5.3, "Space around equal assignment"; BitBake `24772dd2a` "parse/ConfHandler: Add warning for deprecated whitespace usage" in `ConfHandler.feeder` (the `whitespace` / `whitespace2` groups of `__config_regexp__`), on branch `2.16`, not `2.12` |
 
 Renames older than the floor (no `Feature`: every supported release rejects them):

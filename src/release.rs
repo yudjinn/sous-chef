@@ -268,10 +268,16 @@ pub enum Feature {
     /// `<VAR>_DEFAULTS` and `oe.utils.filter_default_features` in `bitbake.conf`
     /// (OE-core `159148f4de`, `3194d6868d`).
     FeaturesBackfill,
+    /// BitBake names the default configuration `default`:
+    /// `parseConfigurationFiles(prefiles, postfiles, mc = "default")` sets `BB_CURRENT_MC`
+    /// to it, so OE-core's `require conf/multiconfig/${BB_CURRENT_MC}.conf` reads its empty
+    /// `conf/multiconfig/default.conf`. From BitBake 2.12 (`0fa0d8d76`, "cooker/cache: Drop
+    /// mc 'default' string value") the name is `""`.
+    DefaultMcNamedDefault,
 }
 
 impl Feature {
-    pub const ALL: [Feature; 26] = [
+    pub const ALL: [Feature; 27] = [
         Feature::SplitClassDirs,
         Feature::InheritDefer,
         Feature::IncludeAll,
@@ -298,6 +304,7 @@ impl Feature {
         Feature::CvePatchContentLines,
         Feature::FileLayerName,
         Feature::FeaturesBackfill,
+        Feature::DefaultMcNamedDefault,
     ];
 
     /// The first supported release that has the feature.
@@ -327,7 +334,8 @@ impl Feature {
             | Feature::KeptUntilStyhead
             | Feature::KeptUntilWalnascar
             | Feature::KeptUntilWhinlatter
-            | Feature::FeaturesBackfill => Release::FLOOR,
+            | Feature::FeaturesBackfill
+            | Feature::DefaultMcNamedDefault => Release::FLOOR,
         }
     }
 
@@ -344,6 +352,7 @@ impl Feature {
             Feature::KeptUntilStyhead => Some(Release::Styhead),
             Feature::KeptUntilWalnascar => Some(Release::Walnascar),
             Feature::KeptUntilWhinlatter | Feature::FeaturesBackfill => Some(Release::Whinlatter),
+            Feature::DefaultMcNamedDefault => Some(Release::Styhead),
             _ => None,
         }
     }
@@ -379,7 +388,8 @@ impl Feature {
             | Feature::CveStatusCpe
             | Feature::CvePatchContentLines
             | Feature::FileLayerName
-            | Feature::FeaturesBackfill => true,
+            | Feature::FeaturesBackfill
+            | Feature::DefaultMcNamedDefault => true,
         }
     }
 
@@ -794,6 +804,7 @@ mod tests {
             (CvePatchContentLines, false, false, true),
             (FileLayerName, false, true, true),
             (FeaturesBackfill, true, true, false),
+            (DefaultMcNamedDefault, true, true, false),
         ];
         assert_eq!(table.len(), Feature::ALL.len());
         for (f, k, s, w) in table {
@@ -830,6 +841,8 @@ mod tests {
         assert!(Release::Nanbield.has(FileLayerName));
         assert!(Release::Whinlatter.has(FeaturesBackfill));
         assert!(!Release::Wrynose.has(FeaturesBackfill));
+        assert!(Release::Styhead.has(DefaultMcNamedDefault));
+        assert!(!Release::Walnascar.has(DefaultMcNamedDefault));
         assert!(!Release::Mickledore.has(CveStatus));
         assert!(Release::Nanbield.has(CveStatus));
         assert!(!Release::Scarthgap.has(CveStatusCpe));

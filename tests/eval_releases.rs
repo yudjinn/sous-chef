@@ -153,3 +153,53 @@ fn pr_from_the_file_name_as_kirkstone_bitbake_conf_computes_it() {
         assert!(!v.unevaluated_python, "{recipe}: {v:?}");
     }
 }
+
+/// BitBake names the default configuration `default` before 2.12 (`parseConfigurationFiles(
+/// ..., mc = "default")` on 2.0 and 2.8) and `""` from 2.12 on; OE-core's `bitbake.conf`
+/// requires `conf/multiconfig/${BB_CURRENT_MC}.conf` (Kirkstone, Scarthgap) or the python
+/// form that requires nothing for `""` (Wrynose). Both resolve exactly: the empty
+/// `default.conf` is read, or nothing is; the reference is not left unfollowed.
+#[test]
+fn the_default_configuration_name_resolves_the_multiconfig_require() {
+    const OLD: &str = "require conf/multiconfig/${BB_CURRENT_MC}.conf\n";
+    const NEW: &str = "require ${@\"conf/multiconfig/${BB_CURRENT_MC}.conf\" if \"${BB_CURRENT_MC}\" != \"\" else \"\"}\n";
+    for (rel, line, want_mc, reads) in [
+        ("kirkstone", OLD, "default", true),
+        ("scarthgap", OLD, "default", true),
+        ("wrynose", NEW, "", false),
+    ] {
+        let (_tmp, _root, _cfg, ws) = temp_ws_release(rel, |root| {
+            let bb = root.join("meta-core/conf/bitbake.conf");
+            let text = fs::read_to_string(&bb).unwrap().replace(
+                "include conf/local.conf\n",
+                &format!("include conf/local.conf\n{line}"),
+            );
+            fs::write(&bb, text).unwrap();
+            fs::create_dir_all(root.join("meta-core/conf/multiconfig")).unwrap();
+            fs::write(
+                root.join("meta-core/conf/multiconfig/default.conf"),
+                "# empty, as OE-core's\n",
+            )
+            .unwrap();
+        });
+        let ds = evaluate(&ws, "libfoo");
+        assert_eq!(
+            text(&ds, "BB_CURRENT_MC").as_deref(),
+            Some(want_mc),
+            "{rel}"
+        );
+        assert!(
+            !ds.replay()
+                .references
+                .iter()
+                .any(|r| r.text.contains("multiconfig")),
+            "{rel}: {:?}",
+            ds.replay().references
+        );
+        let read = ds
+            .files()
+            .iter()
+            .any(|v| v.loc.path.ends_with("conf/multiconfig/default.conf"));
+        assert_eq!(read, reads, "{rel}");
+    }
+}
