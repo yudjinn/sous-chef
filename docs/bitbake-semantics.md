@@ -2404,6 +2404,21 @@ above: kas always hands it on, the other modes only when `BB_ENV_PASSTHROUGH_ADD
 (the caller's, a bitbake-setup configuration's, a `kas shell`'s) names it or with
 `BB_PRESERVE_ENV`.
 
+**Live check** (z1-env, 2026-11-19, the yocto-kiss kas build directory, BitBake 2.18.0, kas
+5.5): `sous-chef serve` started with `TMPDIR=runs/z1-env/tmp-<mode>` in kas mode,
+init-script mode (`init_script` = OE-core's `oe-init-build-env`, and
+`BB_ENV_PASSTHROUGH_ADDITIONS=TMPDIR` in the server's environment, so BitBake would have
+taken it) and initialised mode (started from a shell that had
+`BB_ENV_PASSTHROUGH_ADDITIONS=TMPDIR`, as a `kas shell` has, then sourced
+`oe-init-build-env`). In each, `status` showed the `bitbake_env` row; `bitbake op=task
+target=curl task=configure args=["force"]` (`bitbake -c configure -f curl`) succeeded and
+wrote `build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/log.do_configure.*`
+and the stamp in `build/tmp/stamps/`; `bitbake-getvar -r curl --value TMPDIR`, run through
+`BbEnv::output` from a process with the same environment, printed `.../yocto-kiss/build/tmp`;
+the `TMPDIR` directories stayed empty. The bitbake-setup mode was not run live (its build
+directory is another one); the tests run all four modes with the fake BitBake
+(`tests/bitbake_pass_env.rs`).
+
 ## Build environments
 
 How a shell gets a working BitBake environment, for the `bitbake` tool's runner
