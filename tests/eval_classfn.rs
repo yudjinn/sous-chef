@@ -201,6 +201,23 @@ fn inherits_class_is_read_from_the_inherit_cache() {
     let _ = &fx.root;
 }
 
+/// `handleVirtRecipeProviders` stores DEPENDS with its words joined by single spaces: a
+/// `DEPENDS:prepend = "${BASEDEPENDS} "` whose python gives "" ends as "" (OE-core's
+/// base-files and packagegroups, `INHIBIT_DEFAULT_DEPS = "1"`).
+#[test]
+fn depends_of_only_spaces_is_stored_empty() {
+    let fx = modified(|r| {
+        recipe(
+            r,
+            "inh",
+            "inherit realdefs\nINHIBIT_DEFAULT_DEPS = \"1\"\n\
+             BASEDEPENDS = \"${@get_base_dep(d)}\"\nDEPENDS:prepend = \"${BASEDEPENDS} \"\n",
+        )
+    });
+    let ds = eval(&fx, "inh");
+    assert_eq!(certain(&ds, "DEPENDS"), "");
+}
+
 // ---------------------------------------------------------------------------------------
 // Class extension: the read filters of OE-core Wrynose's native.bbclass and
 // nativesdk.bbclass, reproduced only for OE-core's own text

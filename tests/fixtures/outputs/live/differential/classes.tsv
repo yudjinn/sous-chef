@@ -147,7 +147,7 @@ u-boot-kiss	SECTION	equal
 u-boot-kiss	SRCREV	equal	
 u-boot-kiss	SUMMARY	equal	
 u-boot-kiss	SYSROOT_DIRS	equal	
-u-boot-kiss	UBOOT_ARCH_DIR	flagged	unevaluated_python
+u-boot-kiss	UBOOT_ARCH_DIR	equal	
 u-boot-kiss	UBOOT_INITIAL_ENV	equal	
 u-boot-kiss	UBOOT_LOCALVERSION	equal	
 kiss-image	PN	equal	
@@ -1149,7 +1149,7 @@ virtual/bootloader	SECTION	equal
 virtual/bootloader	SRCREV	equal	
 virtual/bootloader	SUMMARY	equal	
 virtual/bootloader	SYSROOT_DIRS	equal	
-virtual/bootloader	UBOOT_ARCH_DIR	flagged	unevaluated_python
+virtual/bootloader	UBOOT_ARCH_DIR	equal	
 virtual/bootloader	UBOOT_INITIAL_ENV	equal	
 virtual/bootloader	UBOOT_LOCALVERSION	equal	
 curl@default	PN	equal	
