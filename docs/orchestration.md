@@ -783,7 +783,26 @@ unfollowed include or inherit (`inherit_defer ${IMGCLASSES}`, python the subset 
 evaluate) produced a note but no flag; the value had been flagged for an unrelated reason
 that acc-overflag correctly removed. Lesson for later merges: a change that removes flags
 can expose a missing flag elsewhere, so the merged tree's differential, not each branch's,
-is the one that counts. In progress: `acc-unfollowed` (flag what an unfollowed reference
-could change; follow `IMGCLASSES`; audit for the same shape), `lint-dynamic-data`
-(`hygiene/parse-error` false positives on meta-oe `dynamic-layers` data files: 369 on
-Scarthgap, 365 on Kirkstone).
+is the one that counts.
+
+- **acc-unfollowed**: an unfollowed or partly followed include / inherit flags what it could
+  change (with the reference named); `bitbake.conf`'s multiconfig `require` resolved
+  exactly; `inherit_defer ${IMGCLASSES}` and `conf/machine-sdk/${SDKMACHINE}.conf`
+  followed for their certain words, the uncertain ones read on a copy so only what they
+  write is flagged (host assumption: `os.uname()` fields are one word each). Audit fixed
+  four more shapes of the same hole (unindexed includes, keys `expandKeys` cannot expand,
+  computed-name writes against the anon proofs, parse-time event handlers).
+- **lint-dynamic-data**: files in the recipe directories of uncollected `BBFILES_DYNAMIC`
+  recipes are data; `hygiene/parse-error` runs on those recipes themselves. Scarthgap
+  parse-error 369 to 0, Kirkstone 365 to 0, nothing else changed.
+
+State at `worktree-w2-integration` after both: 1,316 tests pass; all live suites pass.
+Differential, equal / equal but flagged / flagged (literal differs) / bug: Wrynose 969 /
+34 / 32 (30) / 0; Scarthgap 1,100 / 40 / 39 (38) / 0; Kirkstone 1,039 / 36 / 64 (35) / 0.
+`lint --all`: Wrynose 649 (0 E), Scarthgap 1,176 (0 E), Kirkstone 1,098 (1 E, true).
+
+Left open: opaque anonymous python still only warns (about 11 of 14 functions per recipe;
+flagging them would flag nearly everything); `ConfigParsed` handlers neither run nor
+flagged; the `lint --fix` dry run shows the first round only; sigs' dependency-hash chain
+and multiconfig unverified against a real build; tests not run on macOS (only the release
+build is).
