@@ -173,20 +173,39 @@ pub struct EnvState {
     pub env: Option<BbEnv>,
     /// Why no environment was found (one line), when `env` is `None`.
     pub problem: Option<String>,
+    /// The names of [`STRIPPED_ENV`] set in this process and not in `[bitbake] pass_env`:
+    /// BitBake commands are started without them ([`withheld_env`]).
+    pub withheld: Vec<&'static str>,
 }
 
 /// Detects the environment from the configuration, the workspace and this process.
 pub fn environment_state(cfg: &Config, ws: &Workspace) -> EnvState {
+    let withheld = withheld_env(&cfg.bitbake.pass_env);
     match BbEnv::probe(cfg, ws, &HostEnv::from_process()) {
         Ok(env) => EnvState {
             env: Some(env),
             problem: None,
+            withheld,
         },
         Err(problem) => EnvState {
             env: None,
             problem: Some(problem),
+            withheld,
         },
     }
+}
+
+/// The names of [`STRIPPED_ENV`] that are set in this process's environment (even empty)
+/// and not listed in `pass_env`, in list order: what [`BbEnv::command`] removes and so has
+/// an effect.
+pub fn withheld_env(pass_env: &[String]) -> Vec<&'static str> {
+    let mut out = Vec::new();
+    for name in STRIPPED_ENV {
+        if std::env::var_os(name).is_some() && !pass_env.iter().any(|p| p == name) {
+            out.push(name);
+        }
+    }
+    out
 }
 
 impl BbEnv {

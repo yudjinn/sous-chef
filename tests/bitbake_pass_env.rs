@@ -254,6 +254,28 @@ fn init_script_mode(pass_env: &str, passed: &[&str]) {
     assert!(s.mode().contains("(init-script)"), "{}", s.mode());
     let got = s.bitbake_env(&out);
     check("init-script", &got, tmp.path(), passed);
+    // `status` says which names were withheld, text and JSON, only when some were.
+    let withheld: Vec<&str> = STRIPPED_ENV
+        .into_iter()
+        .filter(|n| !passed.contains(n))
+        .collect();
+    let text = s.call("status", json!({}));
+    let row = text.lines().find(|l| l.starts_with("bitbake_env\t"));
+    let json: Value = serde_json::from_str(&s.call("status", json!({"format": "json"}))).unwrap();
+    if withheld.is_empty() {
+        assert!(row.is_none(), "{text}");
+        assert!(json["bitbake"].get("env_withheld").is_none(), "{json}");
+    } else {
+        let row = row.unwrap_or_else(|| panic!("no bitbake_env row: {text}"));
+        assert!(
+            row.starts_with(&format!(
+                "bitbake_env\t{} set in sous-chef's environment",
+                withheld.join(", ")
+            )),
+            "{row}"
+        );
+        assert_eq!(json["bitbake"]["env_withheld"], json!(withheld), "{json}");
+    }
     s.finish();
 }
 

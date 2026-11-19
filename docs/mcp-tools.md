@@ -1248,15 +1248,22 @@ mode, or `bitbake-setup` when the file is named `init-build-env`); an environmen
 was started in (`BUILDDIR` or `BBPATH` set and `bitbake` on `PATH`: `initialised`, the
 program is run directly); a kas project with `kas` on `PATH` and an existing kas build
 directory (`kas`: every command is `kas shell --keep-config-unchanged <files> -c '<command>'`
-in kas's work directory, so kas does not rewrite `conf/` first, with `TMPDIR` removed from
-kas's environment, because kas would hand it to BitBake as BitBake's `TMPDIR`
-(bitbake-semantics.md, "Running BitBake"; seen live in y3); not used when a kas file
+in kas's work directory, so kas does not rewrite `conf/` first; not used when a kas file
 has a `{repo, file}` include, because `-k` still fetches and checks out those repositories:
 the modes below are tried instead); a build directory holding
 bitbake-setup's `init-build-env` (`bitbake-setup`); an `oe-init-build-env` in a layer root,
 a layer root's parent or the build directory's parent (`init-script`). The init script is
 sourced and the program run by a wrapper that takes every name as argv; in `kas` mode the
 command string is made only of validated words, each single-quoted.
+
+Every command inherits the environment the server was started in, without `TMPDIR`, in
+all four modes: for BitBake `TMPDIR` is the build output directory, and kas (always), a
+`kas shell`'s passthrough list (initialised mode) or the caller's own
+`BB_ENV_PASSTHROUGH_ADDITIONS` would hand the server's temporary directory to BitBake,
+moving the whole build there (seen live in y3; bitbake-semantics.md, "The environment
+BitBake takes from its caller"). `[bitbake] pass_env = ["TMPDIR"]` passes it after all.
+BitBake's own variables (`MACHINE`, `DISTRO`, `DL_DIR`, `SSTATE_DIR`, the proxies, ...)
+pass as usual.
 
 Every operation except `status` and `cancel` starts a background job and returns at once
 with `job:<n>`. One job of any kind runs at a time, because BitBake allows one client per
@@ -1388,7 +1395,12 @@ bitbake environment were found, and the running job if any (`job`, e.g.
 `job:1 task hello running 1s`), and the handle store (`handles`: how many handles it holds,
 their total size, and the retention limits it applied at start, `[handles] max_total_mb` and
 `max_age_days` in `sous-chef.toml`, e.g. `12 stored, 3.4 MB; limits 500.0 MB, 14 days`; JSON
-`handles {count, bytes, max_total_bytes, max_age_days, error}`). Layers are named by their directory (`meta`,
+`handles {count, bytes, max_total_bytes, max_age_days, error}`). When `TMPDIR` is set in
+the server's environment and not in `[bitbake] pass_env` (and BitBake is enabled), a
+`bitbake_env` row says so (`TMPDIR set in sous-chef's environment, withheld from BitBake
+(where TMPDIR is the build output); [bitbake] pass_env = ["TMPDIR"] passes it`; JSON
+`bitbake.env_withheld`, omitted otherwise), so a `TMPDIR` set on purpose is not silently
+ignored. Layers are named by their directory (`meta`,
 `meta-arm-toolchain`) in every tool and pointer; BitBake 2.18's `bitbake-layers
 show-layers` prints the collection name instead (`core`, `arm-toolchain`).
 

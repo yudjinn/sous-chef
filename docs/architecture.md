@@ -675,7 +675,8 @@ Finish { Exited, TimedOut, Cancelled }`), `environment_state(cfg, ws) -> EnvStat
 user-supplied target themselves**, because `command()` cannot tell a target from a flag.
 `validate_name` rejects `:`; authoritative `var` never passes a variable name to a
 command (it looks the name up in the parsed dump), so `FILES:${PN}` needs no relaxation.
-Unix only. The fake BitBake for tests is `tests/fixtures/fakebb/` (`FAKEBB_*` variables).
+Unix only. The fake BitBake for tests is `tests/fixtures/fakebb/` (`FAKEBB_*` variables;
+`FAKEBB_ENV_OUT` since z1-env: the file that receives its whole environment).
 
 `slice` (T5.2): one selector per call; the cap is 8 KB or `budget_tokens * 4` when smaller;
 `failure_blocks` takes its blocks from `bitbake::logs::detect`.
@@ -1015,7 +1016,12 @@ bitbake-setup's
 **`kas_command_string` is the one place that builds shell text: only allowlisted programs
 and arguments that passed `validate_arg`, each single-quoted.** `WRAPPER` and
 `SETUP_WRAPPER` save the argv in an array before sourcing, so a script ending in `set --`
-does not lose the program (live bug B7).
+does not lose the program (live bug B7). Since z1-env every command, in all four modes, is
+started without the names of `STRIPPED_ENV` (`TMPDIR`), removed from the first process
+(kas, the `bash` wrapper or the program), unless `[bitbake] pass_env` lists them
+(`BbEnv.pass_env`, set by `probe` from the configuration); `withheld_env(pass_env)` and
+`EnvState.withheld` name those set in the server's environment, for `status`
+(bitbake-semantics.md, "The environment BitBake takes from its caller").
 
 Scaffold (T6.4, T6.5, `scaffold::{inc_split, placement}`): `IncSplitGen` (`OPTIONS`
 `recipe`, `versions`) and `PlacementGen` (`OPTIONS` `recipe`, `variable`, `task`,
