@@ -47,6 +47,13 @@ number is not part of it, so inserting a line above a finding does not make it a
 changing the statement does. SARIF carries it as `partialFingerprints.primaryLocationLineHash`
 (the key GitHub code scanning uses) and `sousChefFinding/v1`.
 
+`github/codeql-action/upload-sarif` computes its own `primaryLocationLineHash` from the
+file's text and, because sous-chef's differs, logs one warning per result ("Calculated
+fingerprint of … but found existing inconsistent fingerprint value …"; the first ones also
+show as annotations of the upload step). It keeps sous-chef's value (it never overwrites a
+fingerprint the file has), so alerts follow sous-chef's fingerprint, the same one the
+baseline uses. The warnings are expected; seen on the demo job's first upload.
+
 ## Exit codes
 
 | Code | Meaning |
