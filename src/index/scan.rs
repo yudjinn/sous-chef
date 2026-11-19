@@ -67,8 +67,9 @@
 //! and `.bbclass` that is not BitBake metadata: not in the layer's `conf/` tree, not a class
 //! in a `classes*/` directory, the target of no edge (resolved, or unresolved with a path
 //! pattern it fits), and under a directory a recipe takes files from (`files/`, `<pn>/`,
-//! `<pn>-<pv>/`) or under `files/`, `lib/`, `scripts/`, `wic/` (docs/bitbake-semantics.md,
-//! "Data files"). Its statements stay in the index (`item` shows it); search and the file
+//! `<pn>-<pv>/`, next to any `.bb` / `.bbappend`, collected or not) or under `files/`,
+//! `lib/`, `scripts/`, `wic/`, or that does not parse where no reference could reach it
+//! (docs/bitbake-semantics.md, "Data files"). Its statements stay in the index (`item` shows it); search and the file
 //! listings of `query` leave it out. `meta.edges` records the version of this step
 //! (`schema::EDGES_VERSION`): an index from before it gets its edges and marks recomputed on
 //! the next refresh.
@@ -1820,9 +1821,16 @@ const DATA_DIRS: &[&str] = &["files", "lib", "scripts", "wic"];
 /// `conf/` tree, or is a class under a `classes*/` directory, or is the target of a resolved
 /// edge, or could be the target of an unresolved one (its path ends with the edge's text,
 /// each `${...}` standing for any text within a path component; a text that is all
-/// `${...}` matches nothing). Otherwise it is data only when it sits under a directory a
-/// recipe takes files from (`files/`, `<pn>/`, `<pn>-<pv>/` next to a `.bb` or `.bbappend`
-/// of that name) or under [`DATA_DIRS`]; anything else stays metadata.
+/// `${...}` matches nothing). Otherwise it is data when it sits under a directory a recipe
+/// takes files from (`files/`, `<pn>/`, `<pn>-<pv>/` next to a `.bb` or `.bbappend` of that
+/// name, whether BitBake collects that recipe or not: `FILESPATH` is the recipe's, and an
+/// uncollected recipe reads nothing) or under [`DATA_DIRS`], or when it does not parse
+/// (a `.conf`: a line the configuration parser rejects; an `.inc` / `.bbclass`: an unparsed
+/// line) and is neither at a layer root nor in or below the directory of a file with a
+/// reference that has no literal text (`include ${@...}`, `require ${VAR}`: BitBake's
+/// `include_single_file` searches a relative name there first, then along `BBPATH`).
+/// Anything else stays metadata: an unreferenced `.inc` beside recipes is usually reached by
+/// such a reference (`perf-perl.inc` from `perf.bb`).
 fn mark_data(tx: &Transaction<'_>) -> Result<()> {
     struct F {
         id: i64,
@@ -1851,7 +1859,9 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
         let rows = st.query_map([], |r| r.get(0))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
-    // Unresolved references: (pattern, layer and directory of the including file).
+    // Unresolved references: (pattern, layer and directory of the including file); the
+    // directories of the files with a reference that has no literal text.
+    let mut dynamic_dirs: HashSet<(i64, String)> = HashSet::new();
     let patterns: Vec<(Vec<String>, i64, String)> = {
         let mut st = tx.prepare_cached(
             "SELECT DISTINCT e.target_text, f.layer_id, f.path FROM edges e \
@@ -1866,21 +1876,37 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
             ))
         })?;
         let texts: Vec<(String, i64, String)> = rows.collect::<rusqlite::Result<_>>()?;
-        texts
-            .into_iter()
-            .filter_map(|(t, layer, src)| {
-                let dir = src.rsplit_once('/').map(|(d, _)| d.to_string());
-                ref_pattern(&t).map(|p| (p, layer, dir.unwrap_or_default()))
-            })
-            .collect()
+        let mut out = Vec::new();
+        for (t, layer, src) in texts {
+            let dir = src
+                .rsplit_once('/')
+                .map(|(d, _)| d.to_string())
+                .unwrap_or_default();
+            match ref_pattern(&t) {
+                Some(p) => out.push((p, layer, dir)),
+                // `require ${@...}`, `require ${VAR}`: a bare name it expands to is found
+                // next to the including file (`perf.bb`, `include ${@... 'perf-perl.inc'
+                // ...}`), so that directory may hold its target.
+                None => {
+                    dynamic_dirs.insert((layer, dir));
+                }
+            }
+        }
+        out
     };
-    // Directories a recipe takes files from: (layer, dir of the .bb) -> {pn, pn-pv}.
+    // Directories a recipe takes files from: (layer, dir of the .bb) -> {pn, pn-pv}. From
+    // every `.bb` / `.bbappend`, collected or not: next to a recipe BitBake does not collect
+    // (a `dynamic-layers/` one whose collection is absent, a masked one), its `<pn>/` is
+    // still that recipe's files and nothing BitBake reads as metadata.
+    let recipe_files: Vec<(i64, String)> = {
+        let mut st =
+            tx.prepare_cached("SELECT layer_id, path FROM files WHERE kind IN ('bb', 'bbappend')")?;
+        let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
     let mut recipe_dirs: HashMap<(i64, String), HashSet<String>> = HashMap::new();
-    for f in files
-        .iter()
-        .filter(|f| f.kind == "bb" || f.kind == "bbappend")
-    {
-        let p = Path::new(&f.path);
+    for (layer, path) in &recipe_files {
+        let p = Path::new(path);
         let dir = p
             .parent()
             .map(|d| d.to_string_lossy().into_owned())
@@ -1891,7 +1917,7 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
             .unwrap_or_default();
         let mut parts = stem.split('_');
         let pn = parts.next().unwrap_or("").to_string();
-        let names = recipe_dirs.entry((f.layer, dir)).or_default();
+        let names = recipe_dirs.entry((*layer, dir)).or_default();
         if let Some(pv) = parts
             .next()
             .filter(|pv| !pv.is_empty() && !pv.contains('%'))
@@ -1913,6 +1939,13 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
              'pydef', 'inherit', 'addtask', 'deltask', 'addhandler', 'export_functions', \
              'addpylib')",
         )?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    // Files with a line BitBake's recipe parser (`BBHandler`) rejects too.
+    let unknown: HashSet<i64> = {
+        let mut st =
+            tx.prepare_cached("SELECT DISTINCT file_id FROM statements WHERE kind = 'unknown'")?;
         let rows = st.query_map([], |r| r.get(0))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
@@ -1951,7 +1984,22 @@ fn mark_data(tx: &Transaction<'_>) -> Result<()> {
                 .get(&(f.layer, parent))
                 .is_some_and(|names| names.contains(dirs[i]) || dirs[i] == "files")
         });
-        if conf_data || in_recipe_dir || dirs.iter().any(|d| DATA_DIRS.contains(d)) {
+        // Anywhere else, a file no reference can reach (not at a layer root, where a bare
+        // name is searched along BBPATH, nor in or below the directory of a file with a
+        // reference that has no literal text) that does not parse is data: a `.conf` with a line the configuration
+        // parser rejects, an `.inc` or `.bbclass` with a line the recipe parser rejects.
+        // `include_single_file` searches a relative name in the including file's directory
+        // first, so anything below it may be such a reference's target.
+        let near_dynamic =
+            (0..=dirs.len()).any(|i| dynamic_dirs.contains(&(f.layer, dirs[..i].join("/"))));
+        let stray_data = !dirs.is_empty()
+            && !near_dynamic
+            && if f.kind == "conf" {
+                unparsable.contains(&f.id)
+            } else {
+                unknown.contains(&f.id)
+            };
+        if conf_data || stray_data || in_recipe_dir || dirs.iter().any(|d| DATA_DIRS.contains(d)) {
             up.execute(params![super::schema::NOT_COLLECTED_DATA, f.id])?;
         }
     }
