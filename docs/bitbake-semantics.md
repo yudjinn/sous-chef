@@ -302,12 +302,16 @@ the value exactly as before:
   the escapes `\\ \' \" \n \t` (no prefix, no triple quote, no implicit concatenation);
   decimal integers; `True` / `False` / `None`; list displays `[a, b]`; the name `d` (only
   as an argument, or as `d.getVar` / `d.getVarFlag` / `d.expand`); calls of the allowlisted
-  helpers below and of `len` and `bool` (positional only, as in python), with positional and keyword arguments bound as python binds
+  helpers below and of `len`, `bool` and `int` (positional only, as in python; `int` of an
+  integer, a boolean, or a string that is an optional sign and ASCII digits only: python's
+  surrounding whitespace, `_` and non-ASCII digits are not reproduced, a base argument is
+  rejected), with positional and keyword arguments bound as python binds
   them to the helper's signature; `a + b` (strings, lists); `a % b` with the conversions
   `%s`, `%d` (of an integer) and `%%` only, `b` a single value or a tuple (needed by OE-core's
   arm tune python, see "Corpus" below); `a if c else b`; `and` / `or` (returning an
   operand, as python does) / `not`; one `==`, `!=`, `in` or `not in` per comparison (no
-  chain); `-` before an integer literal; `x[i]` on a list by an integer (negative counted
+  chain), and `<`, `<=`, `>`, `>=` between integers or booleans only (kirkstone / scarthgap
+  `EXTENDPE`: `['','${PE}_'][int(d.getVar('PE') or 0) > 0]`); `-` before an integer literal; `x[i]` on a list by an integer (negative counted
   from the end) or a boolean (`['', 'x:'][cond]`); a slice `x[a:b]` (no step) of a list or a
   string, its bounds integers, booleans or `None`, with python's clamping (`util-linux.inc`'s
   `'.'.join(d.getVar('PV').split('.')[0:2])`); the string methods `split()` /
@@ -316,7 +320,7 @@ the value exactly as before:
   Rejected, whatever else the expression holds: any other name (`os`, `bb.parse`,
   `oe.types`, class-defined functions other than the allowlisted ones (below, checked by their text), a bare variable name), attribute or method,
   `lambda`, comprehensions, generators, a slice with a step, `%` with anything else, f-strings, byte
-  strings, `is`, `<` and the other comparisons, arithmetic;
+  strings, `is`, an order comparison of anything but integers, arithmetic;
 - every value it reads is **certain**: `d.getVar('X')` of a value that holds python left
   unevaluated, an undefined `${VAR}`, an uncertain override decision, a variable anonymous
   python or a handler sets, or one a file reached through an uncertain reference sets,

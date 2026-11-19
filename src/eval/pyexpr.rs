@@ -13,7 +13,9 @@
 //! - the name `d` (the datastore, only as an argument or for `d.getVar` / `d.getVarFlag` /
 //!   `d.expand`);
 //! - calls to the allowlisted helpers ([`Func`]), with positional and keyword arguments as
-//!   their python signatures accept them, and to `len` and `bool` (positional only);
+//!   their python signatures accept them, and to `len`, `bool` and `int` (positional only;
+//!   `int` of an integer, a boolean or a plain decimal string);
+//! - `<`, `<=`, `>`, `>=` between integers (booleans included), one per comparison;
 //! - `a + b` (strings, lists), `a if c else b`, `and` / `or` / `not`, one `==` / `!=` / `in`
 //!   / `not in` per comparison, `-` before an integer literal, `fmt % args` with `%s`, `%d`
 //!   and `%%` only;
@@ -304,6 +306,8 @@ fn tokenize(code: &str) -> Result<Vec<Tok>, Stop> {
         let op: &'static str = match two.as_str() {
             "==" => "==",
             "!=" => "!=",
+            "<=" => "<=",
+            ">=" => ">=",
             _ => match ch {
                 '(' => "(",
                 ')' => ")",
@@ -316,6 +320,8 @@ fn tokenize(code: &str) -> Result<Vec<Tok>, Stop> {
                 '%' => "%",
                 '=' => "=",
                 ':' => ":",
+                '<' => "<",
+                '>' => ">",
                 _ => return Err(unsupported(format!("`{ch}`"))),
             },
         };
@@ -355,6 +361,8 @@ pub enum Func {
     DExpand,
     Len,
     Bool,
+    /// `int(x)` of an integer, a boolean or a decimal string.
+    Int,
     /// A function a class defines with `def` ([`super::classfn`]).
     Class(ClassFn),
 }
@@ -461,6 +469,7 @@ impl Func {
             // Positional-only in python: an empty name never matches a keyword.
             Func::Len => &[("", None)],
             Func::Bool => &[("", Some(D::False))],
+            Func::Int => &[("", None)],
             Func::Class(ClassFn::BaseSetFilespath) => &[("path", None), ("d", None)],
             Func::Class(ClassFn::GnomeVerdir) => &[("v", None)],
             Func::Class(ClassFn::MapKernelArch | ClassFn::MapUbootArch) => {
@@ -500,6 +509,7 @@ impl Func {
             Func::DExpand => "d.expand",
             Func::Len => "len",
             Func::Bool => "bool",
+            Func::Int => "int",
             Func::Class(f) => f.name(),
         }
     }
@@ -562,6 +572,10 @@ enum CmpOp {
     Ne,
     In,
     NotIn,
+    Lt,
+    Le,
+    Gt,
+    Ge,
 }
 
 /// A parsed expression of the subset.
@@ -794,6 +808,10 @@ impl Parser {
             Some(Tok::Op("==")) => CmpOp::Eq,
             Some(Tok::Op("!=")) => CmpOp::Ne,
             Some(Tok::Name(n)) if n == "in" => CmpOp::In,
+            Some(Tok::Op("<")) => CmpOp::Lt,
+            Some(Tok::Op("<=")) => CmpOp::Le,
+            Some(Tok::Op(">")) => CmpOp::Gt,
+            Some(Tok::Op(">=")) => CmpOp::Ge,
             Some(Tok::Name(n))
                 if n == "not" && matches!(self.peek_at(1), Some(Tok::Name(m)) if m == "in") =>
             {
@@ -985,6 +1003,7 @@ impl Parser {
                     "None" => Ok(Node::Lit(PyVal::None)),
                     "len" if self.is_op("(") => self.call(Func::Len),
                     "bool" if self.is_op("(") => self.call(Func::Bool),
+                    "int" if self.is_op("(") => self.call(Func::Int),
                     "d" => {
                         if self.is_op(".") {
                             self.pos += 1;
@@ -1146,6 +1165,15 @@ fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
                 CmpOp::Ne => !py_eq(&a, &b)?,
                 CmpOp::In => py_in(&a, &b)?,
                 CmpOp::NotIn => !py_in(&a, &b)?,
+                CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge => {
+                    let o = int_order(&a, &b)?;
+                    match op {
+                        CmpOp::Lt => o.is_lt(),
+                        CmpOp::Le => o.is_le(),
+                        CmpOp::Gt => o.is_gt(),
+                        _ => o.is_ge(),
+                    }
+                }
             };
             Ok(PyVal::Bool(r))
         }
@@ -1399,6 +1427,20 @@ fn py_eq(a: &PyVal, b: &PyVal) -> Result<bool, Stop> {
         }
         _ => false,
     })
+}
+
+/// The order of two integers (booleans count as 0 and 1) for `<`, `<=`, `>`, `>=`; other
+/// operand types are not reproduced.
+fn int_order(a: &PyVal, b: &PyVal) -> Result<Ordering, Stop> {
+    let n = |v: &PyVal| match v {
+        PyVal::Int(i) => Ok(*i),
+        PyVal::Bool(b) => Ok(i128::from(*b)),
+        other => Err(unsupported(format!(
+            "an order comparison of {}",
+            other.type_name()
+        ))),
+    };
+    Ok(n(a)?.cmp(&n(b)?))
 }
 
 /// Python `a in b`.
@@ -1754,6 +1796,25 @@ fn call(func: Func, a: Vec<PyVal>, env: &mut dyn Env) -> Result<PyVal, Stop> {
             Ok(PyVal::Str(env.expand(s)?))
         }
         Func::Bool => Ok(PyVal::Bool(a[0].truthy()?)),
+        Func::Int => match &a[0] {
+            PyVal::Int(i) => Ok(PyVal::Int(*i)),
+            PyVal::Bool(b) => Ok(PyVal::Int(i128::from(*b))),
+            // Python also takes surrounding whitespace, `_` between digits and non-ASCII
+            // digits; only the plain form is reproduced.
+            PyVal::Str(t) => {
+                let digits = t.strip_prefix(['+', '-']).unwrap_or(t);
+                if digits.is_empty()
+                    || digits.len() > 30
+                    || !digits.bytes().all(|b| b.is_ascii_digit())
+                {
+                    return Err(unsupported("int() of that text"));
+                }
+                t.parse::<i128>()
+                    .map(PyVal::Int)
+                    .map_err(|_| unsupported("int() of that text"))
+            }
+            other => Err(unsupported(format!("int() of {}", other.type_name()))),
+        },
         Func::Class(f) => {
             env.class_fn(f)?;
             class_call(f, &a, env)
@@ -2616,6 +2677,43 @@ mod tests {
             );
         }
         assert!(run("map_uboot_arch('i\\n86', d)", &mut classes(&[], &[])).is_err());
+    }
+
+    /// `int()` and the order comparisons of integers, as OE-core kirkstone / scarthgap
+    /// `bitbake.conf` write `EXTENDPE` (`['','${PE}_'][int(d.getVar('PE') or 0) > 0]`); the
+    /// expected values are python 3's.
+    #[test]
+    fn int_and_order_comparisons() {
+        let v = &[
+            ("PE", "2"),
+            ("Z", "0"),
+            ("N", "-3"),
+            ("W", " 1"),
+            ("U", "1_0"),
+        ];
+        assert_eq!(ok("['','2_'][int(d.getVar('PE') or 0) > 0]", v), "2_");
+        assert_eq!(ok("['','x_'][int(d.getVar('UNSET') or 0) > 0]", v), "");
+        assert_eq!(ok("['','x_'][int(d.getVar('Z') or 0) > 0]", v), "");
+        assert_eq!(ok("int(d.getVar('N')) < 0", v), "True");
+        assert_eq!(ok("int('+7') >= 7", v), "True");
+        assert_eq!(ok("int('007') <= 6", v), "False");
+        assert_eq!(ok("True > 0", v), "True");
+        assert_eq!(ok("int(True)", v), "1");
+        // Accepted by python, not reproduced: surrounding whitespace, `_`; raises: None,
+        // other text. Strings are not ordered here, nor chains.
+        for code in [
+            "int(d.getVar('W'))",
+            "int(d.getVar('U'))",
+            "int(d.getVar('UNSET'))",
+            "int('x')",
+            "int('')",
+            "int('1', 16)",
+            "'a' < 'b'",
+            "1 < 2 < 3",
+            "None > 0",
+        ] {
+            not_evaluated(code, v);
+        }
     }
 
     /// Slices with step 1, as `util-linux.inc` (`'.'.join(d.getVar('PV').split('.')[0:2])`)
