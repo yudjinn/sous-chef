@@ -1128,6 +1128,13 @@ anyway). Fixed: kas mode removes `TMPDIR` from kas's environment (`KAS_DROPPED_E
 mode is not affected (OE-core's passthrough list has no `TMPDIR`; y1 built in `build/tmp`
 with the same `TMPDIR` set).
 
+*Superseded by z1-env:* `KAS_DROPPED_ENV` became `STRIPPED_ENV`, applied in every runner
+mode (init-script, bitbake-setup, kas, initialised), because the init-script and initialised
+modes import `TMPDIR` too when a passthrough list names it (a kas shell's does), with
+`[bitbake] pass_env` to pass it on purpose and a `status` row when it is withheld. The rule,
+the collision table and the live check of three modes are in docs/bitbake-semantics.md,
+"The environment BitBake takes from its caller".
+
 **Cancel through `kas shell`, after the fix** (`tools/calls-kas-cancel.json`, `ps` every
 second in `logs/ps-kas-cancel2.txt`): `op=clean args=["cleanall"]` succeeded in 6 s;
 `op=build` started at once (its client printed `NOTE: Reconnecting to bitbake server...`:
