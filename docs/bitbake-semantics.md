@@ -424,6 +424,112 @@ for one with an override part): with python evaluated, `EXTRA_OECONF` (which app
 `${PACKAGECONFIG_CONFARGS}`) was otherwise unflagged and short of the options BitBake
 adds.
 
+### When a value is flagged
+
+Checked in BitBake 2.18.0 (`lib/bb/data_smart.py`, `lib/bb/parse/ast.py`) for the
+over-flagging round (`acc-overflag`). A value carries `unevaluated_python` or `unresolved`
+only for something that can still change it; what follows **cannot**, and does not flag
+(tests: `tests/eval_anon_writes.rs`, `python_that_cannot_reach_the_value_does_not_flag_it`):
+
+- **python in an assignment a later `=` replaces**: `DataNode.eval` stores the new text
+  with `setVar(key, val, parsing=True)`, which replaces `_content`; `${@...}` is run only
+  when a value is expanded (`expandWithRefs`), so the replaced text is never run. The
+  exception is `:=`, expanded at once (`e.expand(groupd["value"], ...)`): its python runs
+  even when replaced later; a side effect of inline python (a `d.setVar` inside `${@...}`)
+  is not modelled anywhere (see "What the static evaluator cannot do").
+- **a `?=` that does not apply** (`getFunc` is `getVar(key, False, noweakdefault=True,
+  parsing=True)`; the value is used only when that is `None`), and **a `??=` default**
+  under a set value (stored as `_defaultval`, read only when there is no `_content`).
+- **an override variant or conditional `:append` / `:prepend` / `:remove` whose override
+  is not active**, when `OVERRIDES` is known (`getVarFlag` keeps only active variants).
+  When `OVERRIDES` has entries that are not known statically, any decision on an inactive
+  variant may be wrong: flagged, with the cause "which override variant ... depends on
+  OVERRIDES entries that are not known statically (`<entry>`)". On yocto-kiss this is
+  every native and nativesdk target (`BUILD_ARCH` is `os.uname()`).
+- **python in a flag only** (`X[doc] = "${@...}"`): flags are not `_content`.
+
+What does flag: python left in the text (own or of a referenced value); a `:remove` whose
+text holds python (it can remove any word); an undefined variable; a referenced value that
+is flagged; a name anonymous python writes (below).
+
+`DataStore::flag_causes(name)` names each cause at the variable that carries it, with the
+references that lead there (`anonymous python at meta:classes-global/base.bbclass:454-737
+may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS`); `var` prints
+the first three as `note: uncertain: ...` lines (a write by name of the variable itself has
+its own warning and is not repeated).
+
+### Anonymous python writes that cannot happen
+
+`ast.MethodNode.eval` turns `python () { <body> }` into `def __anon_<line>_<file>(d):` +
+the body (`bb.methodpool.insert_method`) and appends the name to `__BBANONFUNCS`;
+`ast.finalize` runs them after `expandKeys` and the `RecipePostKeyExpansion` handlers,
+before `RecipeTaskPreProcess` and `handleVirtRecipeProviders`, as
+`runAnonFuncs`: `funcname(d)` for each, in order. So a `return` ends that function only,
+and a write under a condition that is false does not happen. `eval::anon` (since
+`acc-overflag`) decides such conditions after finalisation and takes a name out of
+`python_vars` when **every** write to it, from every function, is proved not to happen
+(listed in `ReplayNotes::no_writes`, with the reason per function; `var` says
+`note: anonymous python at <loc> does not write <name> here: <reason>`):
+
+- **An early return**: the function's first statements (after comments, blank lines and
+  `import` lines) are `if <cond>:` / `return` (or `if <cond>: return`), `<cond>` in the
+  subset of "Inline python evaluated statically" and true here. The function writes
+  nothing, whatever names it writes or how (`AnonPython::returns_early`). OE-core
+  `multilib_script.bbclass`: `if not d.getVar("MULTILIB_VARIANTS"): return`, then
+  `d.appendVar("FILES:" + pkg, ...)` (which flags every `FILES:*`).
+- **Writes under `if` / `elif`**: every literal `d.<write>('NAME', ...)` call of the name
+  starts its own line and sits inside an `if <cond>:` or `elif <cond>:` (the statements
+  found by indentation above it), and for each call one of those conditions is false
+  here (`if bb.utils.contains('DISTRO_FEATURES', 'x', True, False, d):`). An `elif` body
+  runs only when its own condition is true. Not used: `else`, a call on the line of its
+  `if`, a call in a nested `def`, a line above it with less indentation that is not a
+  block header (a continued statement), a body with a tab or a triple-quoted string, or
+  one that rebinds `d`, `bb` or `oe`.
+- **OE-core `base.bbclass`, recognised line for line** (indentation included; any other
+  text keeps the writes possible). Wrynose `33a6bd6c` line numbers:
+  - *PACKAGECONFIG* (471-549; the same lines in Scarthgap and Kirkstone except the
+    wrapper's `DEPENDS` / `RRECOMMENDS` test, not used here): the local
+    `appendVar(varname, appends)` returns at once on an empty list; the lists are built
+    from `d.getVarFlags("PACKAGECONFIG")`, which (`data_smart.getVarFlags`, `expand=False`,
+    `internalflags=False`) returns every flag but names starting with `_` or `:`, a
+    `_defaultval_flag_X` as `X` when `X` has no value, unexpanded. Per flag,
+    `items = flagval.split(",")`; a flag in `PACKAGECONFIG` adds item 0 to
+    `PACKAGECONFIG_CONFARGS`, 2 to `DEPENDS`, 3 to `RDEPENDS:${PN}`, 4 to
+    `RRECOMMENDS:${PN}` when not empty; a flag not in it adds item 1 to
+    `PACKAGECONFIG_CONFARGS`. When no flag gives a list an item, that name is not written.
+    Note that **every** flag counts, `doc` too: a `PACKAGECONFIG[doc]` with a comma adds its
+    text after the comma to `PACKAGECONFIG_CONFARGS` in BitBake. Only when nothing python or
+    an uncertain file may have set a flag; a flag `export` / `unexport` (an integer in
+    BitBake, `flagval.split` fails) keeps it possible.
+  - *hg fetcher* (623-642): `d.appendVar("EXTRANATIVEPATH", ' python3-native ')` for a
+    `SRC_URI` entry with `uri.scheme == "hg"`; `bb.fetch2.URI.__init__` takes the scheme
+    from `urllib.parse.urlparse` (lower-cased) of the text before `;`. No entry containing
+    `hg:` in any case: not written.
+  - *multimachine* (694-736, identical in Scarthgap and Kirkstone):
+    `d.setVar('PACKAGE_ARCH', "${MACHINE_ARCH}")` only after
+    `if (pkg_arch == mach_arch): return`, and only when (a) a `file://` entry of `SRC_URI`
+    is found in a `FILESPATH` entry whose `os.path.basename` is `MACHINE` and which
+    `os.path.isdir`, unless `SRC_URI_OVERRIDES_PACKAGE_ARCH` is `'0'`, or (b) some
+    `PACKAGE_ARCH_<pkg>` for a word of `PACKAGES` is non-empty and equals `MACHINE_ARCH`.
+    Not written when `PACKAGE_ARCH` already equals `MACHINE_ARCH` (both certain), or when
+    (a) is impossible (`SRC_URI_OVERRIDES_PACKAGE_ARCH` is `0`, or `SRC_URI` has no
+    `file://` word, or `FILESPATH` is certain and none of its absolute entries named after
+    `MACHINE` is a directory, an overlay file counting) and (b) is (no variable named
+    `PACKAGE_ARCH_*` anywhere, or none equal to `MACHINE_ARCH`). The opaque calls of the
+    function (`set_packagetriplet(d)`, `oe.license.*`, the fetcher) write no variable this
+    reads (`set_packagetriplet`: `PKGTRIPLETS`, `PKGMLTRIPLETS`; `lib/oe/license.py` has no
+    write).
+
+Every condition is decided from **certain** values only (no python, no undefined variable,
+no uncertain override decision, not in `python_vars`, an unset variable nothing may set):
+`DataStore::python_value`. While one name's writes are decided it is taken out of
+`python_vars`, which is sound: if some write to it happened, the first one would have read
+the static value (no earlier write), and every other value its condition read was certain,
+hence written by no anonymous python; the condition was then false. Names an event handler
+or a filter put in `python_vars` (`ReplayNotes::fixed_python_vars`) are never taken out.
+As before, a function that writes through names that cannot be read (`opaque`) gets a
+warning in the tools but does not flag other values.
+
 ### Legacy syntax
 
 Before Yocto 3.4 ("honister") overrides were written with `_`: `VAR_append`, `VAR_foo`,
@@ -2934,8 +3040,12 @@ in the live environment:
 
 - `${@python expression}` in values, apart from the pure helpers of "Inline python
   evaluated statically" (x1) reading certain values
-- anonymous python functions and event handlers
+- anonymous python functions and event handlers (since `acc-overflag` a write whose
+  condition is false on static values is known not to happen: "Anonymous python writes
+  that cannot happen")
 - `d.setVar` / `d.appendVar` inside classes (e.g. `PACKAGECONFIG` processing in `base.bbclass`)
+- side effects of inline python (`${@d.setVar(...)}`; BitBake runs a `:=` value's python
+  at once, even when a later `=` replaces it)
 - `inherit` / `require` whose argument depends on any of the above
 - **class-extended variants** (`BBCLASSEXTEND`): evaluated since w10 (see "Class-extended
   variants" under "Parse order"). What stays out: the filters and package-variable renames

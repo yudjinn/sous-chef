@@ -378,7 +378,17 @@ shown, `+N more`; `; OVERRIDES, which decides its override variants, needed N mo
 `OVERRIDES` did too), and, for the first expression left unevaluated because of what it
 reads, `note: python not evaluated: `...`: X holds python that is not evaluated` (the
 reason names the variable; `(+N more)`). Python outside the subset gives no such line, only
-the python note. `overrides` gives the same lines for `OVERRIDES` (`note: OVERRIDES:
+the python note. (acc-overflag, `var` only) A flagged value gets up to three
+`note: uncertain: <cause>` lines (`DataStore::flag_causes`, then `note: uncertain: +N more causes`), each naming the
+cause at the variable that carries it: `anonymous python at <loc> may write PACKAGE_ARCH,
+used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS`, `X holds python that is not
+evaluated: `...``, `which override variant ... of X applies depends on OVERRIDES entries
+that are not known statically (`...`)`, an uncertain reference, an unapplied statement, an
+undefined variable (a by-name write of the variable itself has the warning above instead).
+An anonymous write proved not to happen on this recipe gives `note: anonymous python at
+<loc> does not write X here: <reason>` and no warning; a function proved to return at once
+gets no opaque warning (these two in every tool that shows the anonymous-python warnings).
+`overrides` gives the python lines for `OVERRIDES` (`note: OVERRIDES:
 python ...`), `deps` for `DEPENDS` (`build`), `PACKAGES` (`runtime`) and `PACKAGECONFIG`
 (`packageconfig`).
 

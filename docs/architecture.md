@@ -746,7 +746,17 @@ never fail the evaluation: `DataStore::replay() -> &ReplayNotes` has `recipe`, `
 `layer_name` (`FILE_LAYERNAME`), `anonymous: Vec<AnonPython { loc, via, name, sets, opaque
 }>`, `python_vars`, `references: Vec<RefIssue { loc, via, kind, text, problem: RefProblem
 }>` (`Python`, `Undefined`, `NotFound`, `Cycle`) and `incomplete_keys`. A variable in
-`python_vars` has `unevaluated_python` set on its value. **Tools should warn when
+`python_vars` has `unevaluated_python` set on its value. Since `acc-overflag`
+(`eval::anon`, bitbake-semantics.md "Anonymous python writes that cannot happen") a name
+whose every anonymous-python write is proved not to happen on the recipe is taken out of
+`python_vars` at finalisation and listed in `no_writes: Vec<NoWrite { name, why: Vec<(Loc,
+String)> }>`; `AnonPython::returns_early` says why a function writes nothing, and
+`AnonPython::writes()` lists the `python_vars` entries it contributes.
+`DataStore::flag_causes(name)` gives one short line per cause of a value's flag (anonymous
+python by function, python left in a text, an override decision on unknown `OVERRIDES`
+entries, an uncertain reference, a statement not applied, an undefined variable), at the
+variable that carries it with the references that lead there; `var` prints at most three
+(`var::uncertain_notes`, `note: uncertain: ...`). **Tools should warn when
 `anonymous` is not empty, and especially for an entry with `opaque: true` (it changes
 variables through a computed name or hands `d` to other code); this is binding on wave 4's
 `var`, `overrides` and `deps`.** Functions are stored like variables, with flags `func`,
