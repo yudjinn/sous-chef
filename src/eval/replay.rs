@@ -180,6 +180,9 @@ pub struct ReplayNotes {
     /// [`DataStore::tasks`]).
     #[serde(skip)]
     pub(crate) tasks: Vec<String>,
+    /// `addhandler` names, with the statement, in parse order.
+    #[serde(skip)]
+    pub(crate) handlers: Vec<(String, Loc)>,
     /// The `BBCLASSEXTEND` word of a class-extended variant (see [`super::variant`]);
     /// `None` for the base recipe and the configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2707,7 +2710,13 @@ impl<'a> Replay<'a> {
                     notes.tasks.retain(|x| *x != t);
                 }
             }
-            // addhandler: handler bookkeeping, not values.
+            "addhandler" => {
+                let names = st.name.clone().unwrap_or_default();
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                for h in names.split_whitespace() {
+                    notes.handlers.push((h.to_string(), st.loc.clone()));
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -4223,6 +4232,7 @@ impl Replay<'_> {
         }
         self.run_deferred()?;
         self.class_extend_handlers(recipe);
+        self.other_parse_handlers();
         let incomplete = self.ds.expand_keys();
         let renamable: Vec<String> = incomplete
             .iter()
@@ -4931,6 +4941,73 @@ impl Replay<'_> {
             }
         }
         self.ds.ovr_cache = OnceLock::new();
+    }
+
+    /// Event handlers registered with `addhandler` that BitBake runs while it parses the
+    /// recipe (`RecipePreFinalise`, `RecipePreDeferredInherits`, `RecipePostKeyExpansion`,
+    /// `RecipeParsed`: `ast.finalize` fires them on the recipe's datastore; a handler
+    /// without `eventmask` gets every event) and that the replay does not emulate: the
+    /// variables they change by name are flagged, like anonymous python's
+    /// (acc-unfollowed; before, such a handler changed values silently).
+    fn other_parse_handlers(&mut self) {
+        const EMULATED: &[&str] = &[
+            "base_eventhandler",
+            "native_virtclass_handler",
+            "nativesdk_virtclass_handler",
+            "multilib_virtclass_handler",
+            "multilib_virtclass_handler_postkeyexp",
+        ];
+        const PARSE_EVENTS: &[&str] = &[
+            "bb.event.RecipePreFinalise",
+            "bb.event.RecipePreDeferredInherits",
+            "bb.event.RecipePostKeyExpansion",
+            "bb.event.RecipeParsed",
+        ];
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        let handlers = self.ds.notes.handlers.clone();
+        for (h, _) in handlers {
+            if EMULATED.contains(&h.as_str()) || !seen.insert(h.clone()) {
+                continue;
+            }
+            let runs = match self.ds.flag(&h, "eventmask") {
+                None => true,
+                Some(m) => {
+                    m.unevaluated_python
+                        || !m.unresolved.is_empty()
+                        || m.text.split_whitespace().any(|w| PARSE_EVENTS.contains(&w))
+                }
+            };
+            if !runs {
+                continue;
+            }
+            let Some(pieces) = self.ds.function(&h) else {
+                continue;
+            };
+            for p in pieces {
+                let Some(body) = self.body_text(&p.loc) else {
+                    continue;
+                };
+                let (sets, _) = python_writes(&body);
+                let vars: Vec<String> = sets
+                    .iter()
+                    .map(|s| base_of(&self.ds.expand(s).text).to_string())
+                    .collect();
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                for v in vars {
+                    notes.python_vars.insert(v.clone());
+                    notes.fixed_python_vars.insert(v.clone());
+                    let line = format!(
+                        "note: {h} (an event handler at {}, run while the recipe is parsed) may change {v}; it is not run, so the value shown is the one before it",
+                        p.loc
+                    );
+                    let e = notes.var_notes.entry(v).or_default();
+                    if !e.contains(&line) {
+                        e.push(line);
+                    }
+                }
+                self.ds.ovr_cache = OnceLock::new();
+            }
+        }
     }
 
     /// The `RecipePreFinalise` handlers of OE-core's class-extension classes (Wrynose

@@ -273,6 +273,28 @@ fn a_prefixed_computed_name_write_does_not_block_the_proof() {
     assert_eq!(certain(&ds, "MYW"), "orig");
 }
 
+/// An event handler BitBake runs while it parses the recipe (`RecipePreFinalise`) and the
+/// replay does not emulate: what it writes by name is flagged, like anonymous python. One
+/// for an event outside parsing (`BuildStarted`) is not run at parse time and flags nothing.
+#[test]
+fn a_parse_time_event_handler_flags_what_it_writes() {
+    let ds = evaluate(
+        |r| {
+            write(
+                r,
+                "meta-mine/classes/hand.bbclass",
+                "python hand_h () {\n    d.setVar('HV', 'changed')\n}\nhand_h[eventmask] = \"bb.event.RecipePreFinalise\"\naddhandler hand_h\n\
+                 python late_h () {\n    d.setVar('LV', 'changed')\n}\nlate_h[eventmask] = \"bb.event.BuildStarted\"\naddhandler late_h\n",
+            );
+            recipe(r, "hand", "HV = \"a\"\nLV = \"b\"\ninherit hand\n");
+        },
+        "hand",
+    );
+    let v = flagged_by(&ds, "HV", "python that is not run (an event handler");
+    assert_eq!(v, "a");
+    assert_eq!(certain(&ds, "LV"), "b");
+}
+
 /// A file BitBake reads that the index does not hold (here a `.cfg`, a kind the index does
 /// not take): the replay has no statements for it, so it may change any value. Before
 /// acc-unfollowed the `include` was a silent no-op.

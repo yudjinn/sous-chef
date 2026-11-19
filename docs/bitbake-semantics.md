@@ -680,6 +680,18 @@ in all three, for acc-unfollowed (`kiss-image` `DEPENDS` was wrong and unflagged
   certainly unset is not renamed by BitBake either (`d.expand` leaves `${X}`, the key does
   not change): `RDEPENDS:${KERNEL_PACKAGE_NAME}-base` outside kernel recipes flags nothing.
 
+- **Event handlers run during the parse** (`addhandler`; `ast.finalize` fires
+  `RecipePreFinalise`, `RecipePreDeferredInherits`, `RecipePostKeyExpansion` and
+  `RecipeParsed` on the recipe's datastore; `bb.event.fire` calls a handler without
+  `eventmask` for every event): the replay emulates `base_eventhandler`'s
+  `RecipePreDeferredInherits` branch and the class-extension handlers ("Class-extended
+  variants"); any other such handler (OE-core's `find_intercepts`,
+  `allarch_package_arch_handler`, `devupstream_virtclass_handler`,
+  `mcextend_virtclass_handler`, a layer's own) now has the names it writes by literal
+  flagged, like anonymous python (`Replay::other_parse_handlers`). Handlers for
+  `ConfigParsed` (`base_eventhandler` sets `NATIVELSBSTRING`, `ORIGNATIVELSBSTRING`,
+  `BB_VERSION` there) are still neither run nor flagged.
+
 Measured after the narrowing (docs/differential.md): no value changed class on Wrynose
 or Scarthgap; on Kirkstone `core-image-minimal` `PACKAGES` is now "equal, but flagged"
 (`populate_sdk_base` / `populate_sdk_ext` behind the python of `IMGCLASSES`); `kiss-image`
