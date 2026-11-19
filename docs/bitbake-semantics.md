@@ -2309,6 +2309,84 @@ Checked 2026-11-17 against bitbake `master` (`lib/bb/main.py`, `lib/bb/cooker.py
   fails with "Unable to connect to bitbake server, or start one" (that failure was not
   observed). The tool still runs one job at a time.
 
+### The environment BitBake takes from its caller
+
+Read 2026-11-19 (z1-env) in BitBake 2.18.0 (`lib/bb/utils.py` `preserved_envvars`,
+`preserved_envvars_exported`, `approved_variables`, `filter_environment`,
+`clean_environment`; `lib/bb/data.py` `inheritFromOS`; `lib/bb/main.py`;
+`lib/bb/cookerdata.py`; `lib/bb/cooker.py` `updateConfigOpts`), compared with `git show`
+on the `2.0` (Kirkstone) and `2.8` (Scarthgap) branches; OE-core Wrynose
+`scripts/oe-buildenv-internal` (and `kirkstone`, `scarthgap`), `meta/conf/bitbake.conf`;
+bitbake-setup 2.19.0 `__main__.py` (`_prepend_passthrough_to_init_build_env`) and the live
+setup's `init-build-env`; kas 5.5 `libkas.py` `get_build_environ`, `context.py`
+`setup_initial_environ`, `libcmds.py` `SetupHome`, `plugins/shell.py`.
+
+- **What BitBake keeps.** The client calls `bb.utils.clean_environment()` before it starts
+  or contacts the server (`main.py` `setup_bitbake`). Unless `BB_PRESERVE_ENV` is set, it
+  deletes from `os.environ` every variable not in `approved_variables()`: the words of
+  `BB_ENV_PASSTHROUGH` (plus that name) when it is set, else `preserved_envvars()`
+  (`BBPATH`, `BB_PRESERVE_ENV`, `BB_ENV_PASSTHROUGH_ADDITIONS` and the exported
+  `BB_TASKHASH`, `HOME`, `LOGNAME`, `PATH`, `PWD`, `SHELL`, `USER`, `LC_ALL`, `BBSERVER`),
+  then the words of `BB_ENV_PASSTHROUGH_ADDITIONS` (plus that name). With
+  `BB_PRESERVE_ENV`, every variable is approved.
+- **What becomes a BitBake variable.** `cookerdata.py` (`CookerDataBuilder.__init__`) keeps
+  the whole original environment as `BB_ORIGENV` and calls `inheritFromOS(basedata,
+  savedenv, approved_variables())`: each approved variable present in the environment is
+  set in the datastore (`op = 'from env'`, before any configuration file is parsed), the
+  `preserved_envvars_exported` ones also flagged `export`. A configuration `?=` (`TMPDIR ?=
+  "${TOPDIR}/tmp"`, `bitbake.conf:405`; `DL_DIR ?=`, `SSTATE_DIR ?=`) does not replace a
+  value that is already set, so an imported value wins over those defaults; a plain `=`
+  replaces it. The server takes the client's environment again on each connection
+  (`cooker.py` `updateConfigOpts`, the same `approved_variables()` filter). `BB_ORIGENV` is
+  read only for named variables (`PATH` in `base.bbclass` `setup_hosttools_dir`, the
+  fetcher's `FETCH_EXPORT_VARS`, `DISPLAY` in `testimage.bbclass`, the terminal class).
+- **Versions.** 2.18.0 and 2.8 have the same lists and functions; 2.0 (Kirkstone) also has
+  `BB_ENV_PASSTHROUGH` itself in `preserved_envvars()`. `inheritFromOS`,
+  `approved_variables` and `filter_environment` are otherwise identical on all three.
+- **What each mode adds to `BB_ENV_PASSTHROUGH_ADDITIONS`.** `oe-init-build-env`
+  (init-script mode, and bitbake-setup mode, whose `init-build-env` sources it): the
+  caller's own `BB_ENV_PASSTHROUGH_ADDITIONS` plus `BB_ENV_PASSTHROUGH_ADDITIONS_OE` =
+  `MACHINE DISTRO TCMODE TCLIBC HTTP_PROXY http_proxy HTTPS_PROXY https_proxy FTP_PROXY
+  ftp_proxy FTPS_PROXY ftps_proxy ALL_PROXY all_proxy NO_PROXY no_proxy SSH_AGENT_PID
+  SSH_AUTH_SOCK BB_SRCREV_POLICY SDKMACHINE BB_NUMBER_THREADS BB_NO_NETWORK PARALLEL_MAKE
+  GIT_PROXY_COMMAND SOCKS5_PASSWD SOCKS5_USER SCREENDIR STAMPS_DIR BBPATH_EXTRA
+  BB_SETSCENE_ENFORCE BB_LOGCONFIG` (the same list on Kirkstone, Scarthgap and Wrynose); it
+  also sets `BUILDDIR` and `BBPATH` from its argument and prepends BitBake's `lib` to
+  `PYTHONPATH`. bitbake-setup's `init-build-env` adds the configuration's
+  `bb-env-passthrough-additions` (none in the live setup; the manual's example has `DL_DIR
+  SSTATE_DIR`). kas builds the environment from scratch (it sources `oe-init-build-env`
+  with only `PATH` set, keeps its output, then copies a short list from its own
+  environment): it appends `SSTATE_DIR SSTATE_MIRRORS BB_HASHSERVE_DB_DIR BB_HASHSERVE
+  BB_HASHSERVE_UPSTREAM DL_DIR TMPDIR` and the kas files' `env` keys to the additions and
+  copies those, `SSH_AUTH_SOCK`, `SHELL`, `TERM`, `GIT_PROXY_COMMAND`, `NO_PROXY`,
+  `http_proxy`, `https_proxy`, `ftp_proxy`, `no_proxy`, `BB_NUMBER_THREADS` and
+  `PARALLEL_MAKE` from its own environment when set; `HOME` is its own temporary
+  directory (`SetupHome`). In **initialised** mode the shell sous-chef was started from set
+  the additions: a `kas shell` lists `TMPDIR` in them even when `TMPDIR` is not set
+  (`tests/fixtures/outputs/live/kas-shell-env.txt`), so a `TMPDIR` set later, by whatever
+  started sous-chef, is taken.
+
+**Collisions**: variables BitBake can take from sous-chef's environment that also have a
+common meaning unrelated to the build. Only names that both reach BitBake and mean
+something else outside it are stripped (`STRIPPED_ENV`, `src/bitbake/env.rs`).
+
+| Name | Reaches BitBake as a variable | Unrelated meaning | Harm | Stripped |
+|---|---|---|---|---|
+| `TMPDIR` | kas: always (kas copies it and adds it to the additions); initialised from a `kas shell`: always (the shell's additions list it); init-script, bitbake-setup, initialised otherwise: when `BB_ENV_PASSTHROUGH_ADDITIONS` / `BB_ENV_PASSTHROUGH` in sous-chef's environment, or a bitbake-setup configuration, names it, or with `BB_PRESERVE_ENV` | POSIX temporary directory, set for a process's scratch files (a sandbox, a CI runner, the live checks) | beats `TMPDIR ?= "${TOPDIR}/tmp"`: work directories, stamps, sysroots, deploy move there (seen live, y3-leftovers) | **yes** |
+| `TMP`, `TEMP` | never in kas; otherwise only with `BB_PRESERVE_ENV` (on no list) | temporary directory | none: no OE variable of that name | no |
+| `BUILDDIR` | never imported (on no list); init-script and bitbake-setup set it from the build directory, kas from scratch | build directory of other build systems (Makefiles, Debian) | none in BitBake; in initialised mode it is how sous-chef detects the build shell | no |
+| `BBPATH` | every mode (preserved), but `oe-init-build-env` sets it (init-script, bitbake-setup) and kas builds it | none | in initialised mode the user's build shell set it on purpose | no |
+| `CC`, `CXX`, `CFLAGS`, `CPPFLAGS`, `LDFLAGS` | only with `BB_PRESERVE_ENV` | host compiler settings | none: OE assigns them with `=` (`gcc.bbclass` `CC = ...`, `bitbake.conf` `export CFLAGS = "${TARGET_CFLAGS}"`) | no |
+| `LD_LIBRARY_PATH` | only with `BB_PRESERVE_ENV`; deleted by `clean_environment` before the cooker starts | dynamic loader path | acts on bash, kas and BitBake's Python before the cleaning exactly as in the user's shell; same meaning, no BitBake meaning | no |
+| `PYTHONPATH` | only with `BB_PRESERVE_ENV`; `oe-init-build-env` prepends BitBake's `lib`, kas builds it from scratch | Python module path | as `LD_LIBRARY_PATH`: same meaning for BitBake's Python as for any other | no |
+| `HOME` | init-script, bitbake-setup, initialised (preserved, exported); kas: replaced by kas's own | the user's home | same meaning | no |
+| `PATH`, `PWD`, `SHELL`, `USER`, `LOGNAME`, `LC_ALL` | every mode except where kas sets its own (preserved) | same meaning | none | no |
+| proxies, `SSH_AUTH_SOCK`, `SSH_AGENT_PID`, `GIT_PROXY_COMMAND`, `SOCKS5_*`, `SCREENDIR` | init-script, bitbake-setup, initialised from those (OE additions); kas copies some | same meaning: passed so that fetches and terminals work | none | no |
+| `MACHINE`, `DISTRO`, `TCMODE`, `TCLIBC`, `SDKMACHINE`, `BB_NUMBER_THREADS`, `PARALLEL_MAKE`, `BB_NO_NETWORK`, `BB_SRCREV_POLICY`, `STAMPS_DIR`, `BBPATH_EXTRA`, `BB_SETSCENE_ENFORCE`, `BB_LOGCONFIG`, `BBSERVER` | OE additions / preserved | BitBake's own | BitBake's documented workflow | no |
+| `DL_DIR`, `SSTATE_DIR`, `SSTATE_MIRRORS`, `BB_HASHSERVE*` | kas (copied, added); others when the additions name them | BitBake's own | BitBake's documented workflow (shared download and sstate directories) | no |
+| `BB_ENV_PASSTHROUGH`, `BB_ENV_PASSTHROUGH_ADDITIONS`, `BB_PRESERVE_ENV` | every mode except kas (which builds its own) | BitBake's own | the user's control over this very filter | no |
+| a kas file's `env` keys | kas (copied, added) | whatever the project chose | the project's own choice | no |
+
 ## Build environments
 
 How a shell gets a working BitBake environment, for the `bitbake` tool's runner
