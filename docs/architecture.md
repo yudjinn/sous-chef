@@ -318,7 +318,7 @@ The index is derived: any schema change bumps `user_version` and rebuilds from s
 the release the edges were resolved for (every edge is recomputed when it changes, as with a
 new `release` in `sous-chef.toml`, by `Index::refresh` and by `Index::refresh_file`;
 `query::indexed_release` reads it), and `edges`, the version of the edge step
-(`schema::EDGES_VERSION`, `inc-context-1` since w9; an index with another value gets its edges and file
+(`schema::EDGES_VERSION`, `recipe-dirs-1` since lint-dynamic-data, `inc-context-1` in w9; an index with another value gets its edges and file
 marks recomputed on the next refresh, without a schema change;
 `query::indexed_edges_version`).
 
@@ -1245,7 +1245,7 @@ is (base configuration only) and the release (`Feature::AddPyLib`, BitBake 2.4 o
 as a directive. `search`'s `kind` filter knows it (`search::KINDS`, public since w8: every
 kind the scanner stores, tested against a file with each).
 
-Index (w6, w7, w9; schema version 4, `EDGES_VERSION` `inc-context-1`):
+Index (w6, w7, w9, lint-dynamic-data; schema version 4, `EDGES_VERSION` `recipe-dirs-1`):
 
 - `files.not_collected`: `bbfiles` (no `BBFILES` glob matches the `.bb` / `.bbappend`),
   `dynamic` (only an inactive `BBFILES_DYNAMIC` glob does), `bbmask` (a static `BBMASK`,

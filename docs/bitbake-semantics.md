@@ -1138,7 +1138,8 @@ an unparsed line, a function, `inherit`, `addtask`, `deltask`, `addhandler` or
 see); otherwise it is **data** when it is under a
 directory a recipe takes files from (`files/`, `<pn>/` or `<pn>-<pv>/` next to a `.bb` /
 `.bbappend` of that name, `FILESPATH`'s defaults) or under `files/`, `lib/`, `scripts/` or
-`wic/`; anything else stays metadata. A data file is indexed and marked
+`wic/`, or when it does not parse where no reference could reach it (below); anything else
+stays metadata. A data file is indexed and marked
 (`files.not_collected = 'data'`): `item` shows it with a note, `search` (every mode) and the
 file listings (`all_files`, `files_by_kind`, `files_in_layer`; lint's file list) leave it out
 unless `FileSet::ALL` is asked for, and the replay still reads it if an evaluation reaches it.
@@ -1146,6 +1147,52 @@ The marks are recomputed with the edges, and with one file's edges on `refresh_f
 `conf/ccache.conf` (ccache's `key = value` syntax, unparsed lines for BitBake, referenced only
 through `CCACHE_CONFIGPATH`) is data since w6: `hygiene/parse-error` with `--all` on the
 live workspace went from 3 to 0 (422 before the data-file rule).
+
+Since lint-dynamic-data (checked in BitBake 2.18.0, `cooker.py` `collect_bbfiles`,
+`find_bbfiles`; `cookerdata.py` `parseConfigurationFiles` lines 435-450;
+`parse/parse_py/ConfHandler.py` `include_single_file`; OE-core `base.bbclass` line 75):
+
+- **A recipe's files directories are data whether BitBake collects the recipe or not.**
+  `collect_bbfiles` globs only the words of `BBFILES` and keeps only names ending in `.bb`
+  and `.bbappend` (anything else: "skipping %s: unknown file extension"); a
+  `BBFILES_DYNAMIC` entry `<collection>:<glob>` (or `!<collection>:<glob>`) is appended to
+  `BBFILES` only when its collection is in `BBFILE_COLLECTIONS` (absent, for `!`). So a
+  recipe under `dynamic-layers/<x>/` whose collection is absent is not parsed at all, and
+  nothing reads the files beside it as metadata: they are what its `FILESPATH`
+  (`${FILE_DIRNAME}/${BP}`, `${FILE_DIRNAME}/${BPN}`, `${FILE_DIRNAME}/files`, with
+  `FILESOVERRIDES` subdirectories) would fetch with `file://` if it were. Until
+  lint-dynamic-data `mark_data` took the recipe directories only from collected recipes,
+  so `meta-oe/dynamic-layers/meta-python/recipes-connectivity/lirc/lirc/lircd.conf` and
+  three other such files were linted as configuration: 369 `hygiene/parse-error` errors on
+  Scarthgap, 365 on Kirkstone, all false.
+- **`include` / `require` of a relative name** is searched in the including file's
+  directory first, then along `BBPATH` (`include_single_file`: `bbpath = dname + ":" +
+  BBPATH`, `bb.utils.which`), so a relative path with directories (`include sub/x.inc`) is
+  found below the includer too. sous-chef cannot expand a reference with no literal text
+  (`include ${@bb.utils.contains('PACKAGECONFIG', 'perl', 'perf-perl.inc', '', d)}` in
+  OE-core's `perf.bb`, `require ${QEMU_TFA_REQUIRE}` in meta-arm), so a file in or below
+  such a file's directory is never taken for data because it does not parse. The
+  `.conf` / `.inc` / `.bbclass` files the index leaves as metadata with no reference, no
+  metadata place and no data directory, measured before this rule: 2 on Scarthgap, 2 on
+  Kirkstone, 11 on Wrynose, all `.inc`, all parsing cleanly. 12 are reached by such a
+  reference in their own directory (`perf-perl.inc`; meta-arm's `*-secureboot.inc`,
+  `systemd-efi.inc`, `arm-ffa-transport.inc` through `require ${FFA_TRANSPORT_INCLUDE}`,
+  `libts-udev.inc`, `u-boot-uefi-http-boot.inc`, the two
+  `trusted-firmware-a-qemuarm*-secureboot.inc` through `require ${QEMU_TFA_REQUIRE}`);
+  meta-oe's `recipes-kernel/linux/linux.inc` (Scarthgap, Kirkstone) is for other layers to
+  `require recipes-kernel/linux/linux.inc` along `BBPATH`, and meta-arm's
+  `u-boot-uefi-capsule-update.inc` is named by nothing (`u-boot-uefi-secureboot.inc`
+  requires `u-boot-capsule-update.inc`).
+- **A file no reference can reach that does not parse is data**: outside `conf/` (which
+  has its own rule, above), a `.conf` with a line `ConfHandler.feeder` rejects, or an
+  `.inc` / `.bbclass` with an unparsed line, that is not at a layer root (a bare name is
+  searched along `BBPATH`) and not in or below the directory of a file with a reference
+  sous-chef cannot expand. It is a file of another tool, not BitBake metadata, and is not
+  linted. A file there that parses stays metadata (an `.inc` not yet required, which
+  `org/inc-unused` reports). Not covered: a file reached only by a reference with no
+  literal text that resolves along `BBPATH` into another directory, or only from a layer
+  outside the workspace (meta-oe's `linux.inc`), is taken for data when it has an unparsed
+  line (a missed error, never a false one).
 
 ## Layers
 
