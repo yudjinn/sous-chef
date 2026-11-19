@@ -249,7 +249,12 @@ lint-demo.yml --ref <branch>`), not on pull requests. It builds sous-chef, then,
 4. `--write-baseline` then `--baseline --fail-on info`: zero new findings, exit 0.
 
 The paths in the SARIF are relative to the repository root (`tests/fixtures/ws/meta-mine/…`),
-because lint finds the git top level, so the alerts link to the fixture files.
+because lint finds the git top level, so the alerts link to the fixture files. First run
+on GitHub (2026-11-19, branch `ci-validate`, run 44505880074): the SARIF passed the schema
+check, the upload was accepted as analysis 2204327004 (4 results, 42 rules), and the four
+alerts point at `tests/fixtures/ws/build/conf/local.conf` lines 9 and 13,
+`tests/fixtures/ws/meta-mine/recipes-app/app/app_0.1.bb` line 22 and
+`tests/fixtures/ws/meta-mine/recipes-app/orphan/orphan_9.%.bbappend` line 1.
 
 **The fixture findings appear in the repository's Security tab** (Code scanning, tool
 `sous-chef`, category `sous-chef-fixture`). They are test data, not problems in sous-chef. To get rid of them: dismiss
