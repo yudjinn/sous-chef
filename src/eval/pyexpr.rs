@@ -32,6 +32,8 @@
 
 use std::cmp::Ordering;
 
+use super::classfn::ClassFn;
+
 /// Maximum nesting of the parser (brackets, calls, operators).
 const MAX_NESTING: usize = 64;
 
@@ -53,6 +55,18 @@ pub trait Env {
     fn get_var_flag(&mut self, name: &str, flag: &str) -> Result<Option<String>, Stop>;
     /// `d.expand(text)`.
     fn expand(&mut self, text: &str) -> Result<String, Stop>;
+    /// `Ok` when the class function `f` may be called: the definition of its name in force
+    /// is the verified one ([`super::classfn`]). By default no definition is known.
+    fn class_fn(&mut self, f: ClassFn) -> Result<(), Stop> {
+        Err(unsupported(format!(
+            "{} is a class function whose definition is not known here",
+            f.name()
+        )))
+    }
+    /// `bb.data.inherits_class(klass, d)`, when certain.
+    fn inherits_class(&mut self, _klass: &str) -> Result<bool, Stop> {
+        Err(unsupported("bb.data.inherits_class here"))
+    }
 }
 
 /// A python value of the subset.
@@ -335,11 +349,14 @@ pub enum Func {
     OeVartrue,
     OeSetDifference,
     OeFilterDefaultFeatures,
+    OeClassFilterFeatures,
     DGetVar,
     DGetVarFlag,
     DExpand,
     Len,
     Bool,
+    /// A function a class defines with `def` ([`super::classfn`]).
+    Class(ClassFn),
 }
 
 impl Func {
@@ -367,6 +384,7 @@ impl Func {
             "vartrue" => Func::OeVartrue,
             "set_difference" => Func::OeSetDifference,
             "filter_default_features" => Func::OeFilterDefaultFeatures,
+            "class_filter_features" => Func::OeClassFilterFeatures,
             _ => return None,
         })
     }
@@ -427,6 +445,12 @@ impl Func {
             ],
             Func::OeSetDifference => &[("variable1", None), ("variable2", None), ("d", None)],
             Func::OeFilterDefaultFeatures => &[("varname", None), ("d", None)],
+            Func::OeClassFilterFeatures => &[
+                ("defaults", None),
+                ("features_var", None),
+                ("filter_var", None),
+                ("d", None),
+            ],
             // `getVar(self, var, expand=True, noweakdefault=False, parsing=False)`: only the
             // first two are accepted.
             Func::DGetVar => &[("var", None), ("expand", Some(D::True))],
@@ -437,6 +461,17 @@ impl Func {
             // Positional-only in python: an empty name never matches a keyword.
             Func::Len => &[("", None)],
             Func::Bool => &[("", Some(D::False))],
+            Func::Class(ClassFn::BaseSetFilespath) => &[("path", None), ("d", None)],
+            Func::Class(ClassFn::GnomeVerdir) => &[("v", None)],
+            Func::Class(ClassFn::MapKernelArch | ClassFn::MapUbootArch) => {
+                &[("a", None), ("d", None)]
+            }
+            Func::Class(
+                ClassFn::GetAutotoolsDep
+                | ClassFn::GetBaseDep
+                | ClassFn::GettextDependencies
+                | ClassFn::GettextOeconf,
+            ) => &[("d", None)],
         }
     }
 
@@ -459,11 +494,13 @@ impl Func {
             Func::OeVartrue => "oe.utils.vartrue",
             Func::OeSetDifference => "oe.utils.set_difference",
             Func::OeFilterDefaultFeatures => "oe.utils.filter_default_features",
+            Func::OeClassFilterFeatures => "oe.utils.class_filter_features",
             Func::DGetVar => "d.getVar",
             Func::DGetVarFlag => "d.getVarFlag",
             Func::DExpand => "d.expand",
             Func::Len => "len",
             Func::Bool => "bool",
+            Func::Class(f) => f.name(),
         }
     }
 }
@@ -980,7 +1017,10 @@ impl Parser {
                         })?;
                         self.call(func)
                     }
-                    _ => Err(unsupported(format!("the name `{n}`"))),
+                    _ => match ClassFn::from_name(&n) {
+                        Some(f) if self.is_op("(") => self.call(Func::Class(f)),
+                        _ => Err(unsupported(format!("the name `{n}`"))),
+                    },
                 }
             }
             Tok::Op(o) => Err(unsupported(format!("`{o}`"))),
@@ -1668,6 +1708,27 @@ fn call(func: Func, a: Vec<PyVal>, env: &mut dyn Env) -> Result<PyVal, Stop> {
                 &PyVal::Str(format!("{n}_OPTED_OUT")),
             )
         }
+        Func::OeClassFilterFeatures => {
+            // `features = set(d.getVar(features_var).split())`; `filtered =
+            // set(bb.utils.filter_string(defaults, d.getVar(filter_var)).split())`;
+            // `" ".join(sorted(features | filtered))`.
+            let fv = get_var(env, &a[1])?;
+            let mut words = py_split_ws(want_str(&fv, "the features value")?);
+            let defaults = want_str(&a[0], "the defaults")?;
+            if !defaults.is_empty() {
+                // `filter_string(val, checkvalues)`: `set(checkvalues)` of `None` raises.
+                let check = get_var(env, &a[2])?;
+                let check = py_split_ws(want_str(&check, "the filter value")?);
+                words.extend(
+                    py_split_ws(defaults)
+                        .into_iter()
+                        .filter(|w| check.contains(w)),
+                );
+            }
+            words.sort();
+            words.dedup();
+            Ok(PyVal::Str(words.join(" ")))
+        }
         Func::DGetVar => {
             if !a[1].truthy()? {
                 return Err(unsupported("d.getVar with expand=False"));
@@ -1693,11 +1754,240 @@ fn call(func: Func, a: Vec<PyVal>, env: &mut dyn Env) -> Result<PyVal, Stop> {
             Ok(PyVal::Str(env.expand(s)?))
         }
         Func::Bool => Ok(PyVal::Bool(a[0].truthy()?)),
+        Func::Class(f) => {
+            env.class_fn(f)?;
+            class_call(f, &a, env)
+        }
         Func::Len => match &a[0] {
             PyVal::Str(s) => Ok(PyVal::Int(s.chars().count() as i128)),
             PyVal::List(l) => Ok(PyVal::Int(l.len() as i128)),
             other => Err(unsupported(format!("len() of {}", other.type_name()))),
         },
+    }
+}
+
+/// `d.getVar(name)` as a python truth value.
+fn var_truthy(env: &mut dyn Env, name: &str) -> Result<bool, Stop> {
+    get_var(env, &PyVal::Str(name.into()))?.truthy()
+}
+
+/// `oe.utils.inherits(d, klass)` with one class: `bb.data.inherits_class(klass, d)`.
+fn inherits(env: &mut dyn Env, klass: &str) -> Result<bool, Stop> {
+    env.inherits_class(klass)
+}
+
+/// `posixpath.join(a, b)`: `b` when it is absolute, else `a` and `b` with one `/` between
+/// them unless `a` is empty or ends with `/`.
+fn path_join(a: &str, b: &str) -> String {
+    if b.starts_with('/') {
+        b.to_string()
+    } else if a.is_empty() || a.ends_with('/') {
+        format!("{a}{b}")
+    } else {
+        format!("{a}/{b}")
+    }
+}
+
+/// The architecture argument of `map_kernel_arch` / `map_uboot_arch`: a string without a
+/// newline (where python's `.` and `$` would read it otherwise).
+fn arch_arg(v: &PyVal) -> Result<&str, Stop> {
+    let a = want_str(v, "the architecture")?;
+    if a.contains('\n') {
+        return Err(unsupported("an architecture holding a newline"));
+    }
+    Ok(a)
+}
+
+/// The class functions of [`super::classfn`], each as its verified definition runs (the
+/// definitions are quoted there): the same reads in the same order, so a read that is not
+/// certain stops the evaluation where python would have needed it.
+fn class_call(f: ClassFn, a: &[PyVal], env: &mut dyn Env) -> Result<PyVal, Stop> {
+    let s = |t: &str| Ok(PyVal::Str(t.to_string()));
+    match f {
+        ClassFn::BaseSetFilespath => {
+            let PyVal::List(path) = &a[0] else {
+                return Err(unsupported(format!(
+                    "base_set_filespath of a path that is {}",
+                    a[0].type_name()
+                )));
+            };
+            let mut path: Vec<String> = path
+                .iter()
+                .map(|p| want_str(p, "a path element").map(str::to_string))
+                .collect::<Result<_, _>>()?;
+            let extra = match get_var(env, &PyVal::Str("FILESEXTRAPATHS".into()))? {
+                PyVal::Str(t) => t,
+                _ => String::new(),
+            };
+            let extra = extra.replace("__default:", "");
+            if !extra.is_empty() {
+                let mut p: Vec<String> = extra.split(':').map(str::to_string).collect();
+                p.extend(path);
+                path = p;
+            }
+            let ov = match get_var(env, &PyVal::Str("FILESOVERRIDES".into()))? {
+                PyVal::Str(t) => t,
+                _ => String::new(),
+            };
+            let overrides = format!(":{ov}");
+            let mut out: Vec<String> = Vec::new();
+            for o in overrides.split(':').rev() {
+                for p in path.iter().filter(|p| !p.is_empty()) {
+                    out.push(path_join(p, o));
+                }
+            }
+            Ok(PyVal::Str(out.join(":")))
+        }
+        ClassFn::GetAutotoolsDep => {
+            if var_truthy(env, "INHIBIT_AUTOTOOLS_DEPS")? {
+                return s("");
+            }
+            let pn = get_var(env, &PyVal::Str("PN".into()))?;
+            let PyVal::Str(pn) = pn else {
+                // `None in [...]` is false, then `None.endswith` raises.
+                return Err(unsupported(
+                    "get_autotools_dep with PN unset (an AttributeError)",
+                ));
+            };
+            if pn == "autoconf-native" || pn == "automake-native" {
+                return s("");
+            }
+            let mut deps = String::from("autoconf-native automake-native ");
+            if pn != "libtool" && pn != "libtool-native" && !pn.ends_with("libtool-cross") {
+                deps.push_str("libtool-native ");
+                if !inherits(env, "native")?
+                    && !inherits(env, "nativesdk")?
+                    && !inherits(env, "cross")?
+                    && !var_truthy(env, "INHIBIT_DEFAULT_DEPS")?
+                {
+                    deps.push_str("libtool-cross ");
+                }
+            }
+            Ok(PyVal::Str(deps))
+        }
+        ClassFn::GetBaseDep => {
+            // `d.getVar('INHIBIT_DEFAULT_DEPS', False)`: the unexpanded value. Unset when the
+            // expanded one is unset, and not empty when the expanded one is not (expansion
+            // and `:remove` only act on a value that is there); an empty expanded value says
+            // nothing about the unexpanded text, so that case is not evaluated.
+            match get_var(env, &PyVal::Str("INHIBIT_DEFAULT_DEPS".into()))? {
+                PyVal::Str(t) if t.is_empty() => Err(unsupported(
+                    "get_base_dep reads the unexpanded INHIBIT_DEFAULT_DEPS, whose expanded value is empty",
+                )),
+                PyVal::Str(_) => s(""),
+                _ => s("${BASE_DEFAULT_DEPS}"),
+            }
+        }
+        ClassFn::GettextDependencies => {
+            if var_truthy(env, "INHIBIT_DEFAULT_DEPS")? && !inherits(env, "cross-canadian")? {
+                return s("");
+            }
+            let nls = get_var(env, &PyVal::Str("USE_NLS".into()))?;
+            if py_eq(&nls, &PyVal::Str("no".into()))? {
+                return s("gettext-minimal-native");
+            }
+            s("gettext-native")
+        }
+        ClassFn::GettextOeconf => {
+            let nls = get_var(env, &PyVal::Str("USE_NLS".into()))?;
+            if py_eq(&nls, &PyVal::Str("no".into()))? {
+                return s("--disable-nls");
+            }
+            if var_truthy(env, "INHIBIT_DEFAULT_DEPS")? && !inherits(env, "cross-canadian")? {
+                return s("--disable-nls");
+            }
+            s("--enable-nls")
+        }
+        ClassFn::MapKernelArch => {
+            let valid = get_var(env, &PyVal::Str("valid_archs".into()))?;
+            let valid = py_split_ws(want_str(&valid, "valid_archs")?);
+            let a = arch_arg(&a[0])?;
+            let c: Vec<char> = a.chars().collect();
+            let opt = |s: &str, p: &str| s.strip_prefix(p).unwrap_or(s).to_string();
+            // `(i.86|athlon|x86.64)$` and the other patterns, as `re.match` reads them
+            // (anchored at the start; `$` at the end, `a` holding no newline).
+            let x86 = (c.len() == 4 && c[0] == 'i' && c[2] == '8' && c[3] == '6')
+                || a == "athlon"
+                || (c.len() == 6 && a.starts_with("x86") && c[4] == '6' && c[5] == '4');
+            let mips = a.strip_prefix("mips").is_some_and(|r| {
+                let r = opt(r, "isa");
+                let r = if r.starts_with("32") || r.starts_with("64") {
+                    r[2..].to_string()
+                } else {
+                    r
+                };
+                opt(&opt(&r, "r6"), "el").is_empty()
+            });
+            let riscv = a.strip_prefix("riscv").is_some_and(|r| {
+                let r = if r.starts_with("32") || r.starts_with("64") {
+                    &r[2..]
+                } else {
+                    r
+                };
+                r.is_empty() || r == "eb"
+            });
+            let out = if x86 {
+                "x86"
+            } else if a == "arceb" {
+                "arc"
+            } else if a == "armeb" {
+                "arm"
+            } else if ["aarch64", "aarch64_be", "aarch64_ilp32", "aarch64_be_ilp32"].contains(&a) {
+                "arm64"
+            } else if ["loongarch32", "loongarch64", "loongarch"].contains(&a) {
+                "loongarch"
+            } else if mips {
+                "mips"
+            } else if a.starts_with("mcf") {
+                "m68k"
+            } else if riscv {
+                "riscv"
+            } else if a.starts_with("ppc") || a.starts_with("powerpc") {
+                "powerpc"
+            } else if a == "sh3" || a == "sh4" {
+                "sh"
+            } else if a.starts_with("bfin") {
+                "blackfin"
+            } else if a.starts_with("microblazeeb") || a.starts_with("microblazeel") {
+                "microblaze"
+            } else if valid.iter().any(|v| v == a) {
+                a
+            } else {
+                let os = get_var(env, &PyVal::Str("TARGET_OS".into()))?;
+                if !want_str(&os, "TARGET_OS")?.starts_with("linux") {
+                    a
+                } else {
+                    // `bb.error(...)`, then `None`: an error BitBake reports.
+                    return Err(unsupported(
+                        "map_kernel_arch reports an error for this architecture",
+                    ));
+                }
+            };
+            Ok(PyVal::Str(out.to_string()))
+        }
+        ClassFn::MapUbootArch => {
+            let a = arch_arg(&a[0])?;
+            let c: Vec<char> = a.chars().collect();
+            Ok(PyVal::Str(
+                if a.starts_with("ppc") || a.starts_with("powerpc") {
+                    "ppc".into()
+                } else if c.len() == 4 && c[0] == 'i' && c[2] == '8' && c[3] == '6' {
+                    "x86".into()
+                } else {
+                    a.to_string()
+                },
+            ))
+        }
+        ClassFn::GnomeVerdir => {
+            let v = want_str(&a[0], "the version")?;
+            let parts: Vec<&str> = v.split('.').collect();
+            let head = parts[..parts.len() - 1].join(".");
+            Ok(PyVal::Str(if head.is_empty() {
+                v.to_string()
+            } else {
+                head
+            }))
+        }
     }
 }
 
@@ -1909,6 +2199,10 @@ mod tests {
         flags: HashMap<(String, String), String>,
         uncertain: Vec<String>,
         reads: Vec<String>,
+        /// The class functions whose verified definition is in force.
+        defined: Vec<ClassFn>,
+        /// `__inherit_cache` as class names; `None`: not certain.
+        inherits: Option<Vec<String>>,
     }
 
     impl Env for Vars {
@@ -1927,6 +2221,20 @@ mod tests {
         }
         fn expand(&mut self, text: &str) -> Result<String, Stop> {
             Ok(text.replace("${A}", "a"))
+        }
+        fn class_fn(&mut self, f: ClassFn) -> Result<(), Stop> {
+            if self.defined.contains(&f) {
+                Ok(())
+            } else {
+                Err(Stop::Unsupported(format!("{} not defined", f.name())))
+            }
+        }
+        fn inherits_class(&mut self, klass: &str) -> Result<bool, Stop> {
+            self.reads.push(format!("inherits {klass}"));
+            match &self.inherits {
+                Some(i) => Ok(i.iter().any(|c| c == klass)),
+                None => Err(Stop::Uncertain("inherits".into())),
+            }
         }
     }
 
@@ -2020,6 +2328,263 @@ mod tests {
         );
         assert_eq!(ok("'a' if 'b' else 'c' if 1 else 'd'", v), "a");
         assert_eq!(ok("bb.utils.contains('X', 'a', 'y', 'n', d,)", v), "y");
+    }
+
+    fn classes(pairs: &[(&str, &str)], inherits: &[&str]) -> Vars {
+        Vars {
+            defined: crate::eval::classfn::ALL.to_vec(),
+            inherits: Some(inherits.iter().map(|s| s.to_string()).collect()),
+            ..env(pairs)
+        }
+    }
+
+    fn class_ok(code: &str, pairs: &[(&str, &str)], inherits: &[&str]) -> String {
+        match run(code, &mut classes(pairs, inherits)) {
+            Ok(s) => s,
+            Err(e) => panic!("{code}: {e:?}"),
+        }
+    }
+
+    /// The class functions of `classfn.rs`; every expected value is what the verified
+    /// definition (OE-core Wrynose `33a6bd6cc8`, executed by python 3 with a datastore
+    /// stub returning these values and `inherits_class` answering from the list) returns.
+    #[test]
+    fn class_functions() {
+        let p = r#"["/m/r/zlib-1.3", "/m/r/zlib", "/m/r/files"]"#;
+        let call = format!("base_set_filespath({p}, d)");
+        assert_eq!(
+            class_ok(&call, &[("FILESOVERRIDES", "arm:dogbonedark:kiss")], &[]),
+            "/m/r/zlib-1.3/kiss:/m/r/zlib/kiss:/m/r/files/kiss:/m/r/zlib-1.3/dogbonedark:/m/r/zlib/dogbonedark:/m/r/files/dogbonedark:/m/r/zlib-1.3/arm:/m/r/zlib/arm:/m/r/files/arm:/m/r/zlib-1.3/:/m/r/zlib/:/m/r/files/"
+        );
+        assert_eq!(
+            class_ok(
+                &call,
+                &[
+                    ("FILESOVERRIDES", "arm:dogbonedark:kiss"),
+                    ("FILESEXTRAPATHS", "/l/a/files:__default:")
+                ],
+                &[]
+            ),
+            "/l/a/files/kiss:/m/r/zlib-1.3/kiss:/m/r/zlib/kiss:/m/r/files/kiss:/l/a/files/dogbonedark:/m/r/zlib-1.3/dogbonedark:/m/r/zlib/dogbonedark:/m/r/files/dogbonedark:/l/a/files/arm:/m/r/zlib-1.3/arm:/m/r/zlib/arm:/m/r/files/arm:/l/a/files/:/m/r/zlib-1.3/:/m/r/zlib/:/m/r/files/"
+        );
+        assert_eq!(
+            class_ok(&call, &[], &[]),
+            "/m/r/zlib-1.3/:/m/r/zlib/:/m/r/files/:/m/r/zlib-1.3/:/m/r/zlib/:/m/r/files/"
+        );
+        assert_eq!(
+            class_ok(
+                r#"base_set_filespath(["/a/", "", "b"], d)"#,
+                &[("FILESOVERRIDES", "::/abs:x")],
+                &[]
+            ),
+            "/a/x:b/x:/abs:/abs:/a/:b/:/a/:b/:/a/:b/"
+        );
+        // A string path iterates its characters in python; not reproduced.
+        assert!(run(r#"base_set_filespath("/a", d)"#, &mut classes(&[], &[])).is_err());
+
+        let auto = "get_autotools_dep(d)";
+        let all = "autoconf-native automake-native libtool-native libtool-cross ";
+        assert_eq!(class_ok(auto, &[("PN", "curl")], &[]), all);
+        assert_eq!(
+            class_ok(auto, &[("PN", "curl"), ("INHIBIT_DEFAULT_DEPS", "1")], &[]),
+            "autoconf-native automake-native libtool-native "
+        );
+        assert_eq!(
+            class_ok(auto, &[("PN", "gmp-native")], &["native"]),
+            "autoconf-native automake-native libtool-native "
+        );
+        assert_eq!(
+            class_ok(auto, &[("PN", "libtool-native")], &["native"]),
+            "autoconf-native automake-native "
+        );
+        assert_eq!(
+            class_ok(auto, &[("PN", "gcc-libtool-cross")], &[]),
+            "autoconf-native automake-native "
+        );
+        assert_eq!(class_ok(auto, &[("PN", "automake-native")], &[]), "");
+        assert_eq!(
+            class_ok(auto, &[("PN", "x"), ("INHIBIT_AUTOTOOLS_DEPS", "1")], &[]),
+            ""
+        );
+        assert_eq!(
+            class_ok(auto, &[("PN", "x"), ("INHIBIT_AUTOTOOLS_DEPS", "")], &[]),
+            all
+        );
+        // PN unset: python raises.
+        assert!(run(auto, &mut classes(&[], &[])).is_err());
+        // inherits_class not certain: stops, but only where python asks.
+        let mut e = Vars {
+            inherits: None,
+            ..classes(&[("PN", "curl")], &[])
+        };
+        assert!(matches!(run(auto, &mut e), Err(Stop::Uncertain(_))));
+        let mut e = Vars {
+            inherits: None,
+            ..classes(&[("PN", "libtool-native")], &[])
+        };
+        assert_eq!(
+            run(auto, &mut e),
+            Ok("autoconf-native automake-native ".into())
+        );
+
+        assert_eq!(
+            class_ok("get_base_dep(d)", &[], &[]),
+            "${BASE_DEFAULT_DEPS}"
+        );
+        assert_eq!(
+            class_ok("get_base_dep(d)", &[("INHIBIT_DEFAULT_DEPS", "1")], &[]),
+            ""
+        );
+        // The unexpanded value is read; an empty expanded value does not tell it.
+        assert!(
+            run(
+                "get_base_dep(d)",
+                &mut classes(&[("INHIBIT_DEFAULT_DEPS", "")], &[])
+            )
+            .is_err()
+        );
+
+        let gd = "gettext_dependencies(d)";
+        assert_eq!(class_ok(gd, &[], &[]), "gettext-native");
+        assert_eq!(
+            class_ok(gd, &[("USE_NLS", "no")], &[]),
+            "gettext-minimal-native"
+        );
+        assert_eq!(class_ok(gd, &[("INHIBIT_DEFAULT_DEPS", "1")], &[]), "");
+        assert_eq!(
+            class_ok(
+                gd,
+                &[("INHIBIT_DEFAULT_DEPS", "1"), ("USE_NLS", "no")],
+                &["cross-canadian"]
+            ),
+            "gettext-minimal-native"
+        );
+        let go = "gettext_oeconf(d)";
+        assert_eq!(class_ok(go, &[("USE_NLS", "yes")], &[]), "--enable-nls");
+        assert_eq!(
+            class_ok(go, &[("USE_NLS", "no"), ("INHIBIT_DEFAULT_DEPS", "1")], &[]),
+            "--disable-nls"
+        );
+        assert_eq!(
+            class_ok(go, &[("INHIBIT_DEFAULT_DEPS", "1")], &[]),
+            "--disable-nls"
+        );
+        assert_eq!(
+            class_ok(go, &[("INHIBIT_DEFAULT_DEPS", "1")], &["cross-canadian"]),
+            "--enable-nls"
+        );
+
+        for (v, want) in [
+            ("2.88.4", "2.88"),
+            ("48", "48"),
+            ("", ""),
+            ("1.", "1"),
+            (".5", ".5"),
+        ] {
+            assert_eq!(class_ok(&format!("gnome_verdir({v:?})"), &[], &[]), want);
+        }
+        assert!(run("gnome_verdir(None)", &mut classes(&[], &[])).is_err());
+        assert!(run("gnome_verdir('1', d)", &mut classes(&[], &[])).is_err());
+        assert!(run("get_base_dep()", &mut classes(&[], &[])).is_err());
+
+        // Without the verified definition in force nothing is evaluated.
+        for code in [
+            auto,
+            "get_base_dep(d)",
+            gd,
+            go,
+            "gnome_verdir('1.2')",
+            call.as_str(),
+        ] {
+            not_evaluated(code, &[("PN", "curl")]);
+        }
+        // A class function is not a value: not called, not evaluated.
+        not_evaluated("get_base_dep", &[]);
+    }
+
+    /// `map_kernel_arch` and `map_uboot_arch` (OE-core Wrynose `kernel-arch.bbclass`): the
+    /// expected values are what the verified definitions return in python 3 (`None`: the
+    /// definition calls `bb.error` and returns `None`, which is not evaluated).
+    #[test]
+    fn kernel_arch_mappings() {
+        const VALID: &str = "alpha cris ia64 i386 x86 m68knommu m68k ppc powerpc powerpc64 ppc64 sparc sparc64 arm aarch64 m32r mips sh sh64 um h8300 parisc s390 v850 avr32 blackfin loongarch64 microblaze nios2 arc riscv xtensa";
+        let vars = [("valid_archs", VALID), ("TARGET_OS", "linux-gnueabi")];
+        let kernel: &[(&str, Option<&str>)] = &[
+            ("i686", Some("x86")),
+            ("i386", Some("x86")),
+            ("ix86", Some("x86")),
+            ("athlon", Some("x86")),
+            ("x86_64", Some("x86")),
+            ("x86-64", Some("x86")),
+            ("x8664", None),
+            ("arceb", Some("arc")),
+            ("armeb", Some("arm")),
+            ("arm", Some("arm")),
+            ("aarch64", Some("arm64")),
+            ("aarch64_be", Some("arm64")),
+            ("aarch64_ilp32", Some("arm64")),
+            ("aarch64_be_ilp32", Some("arm64")),
+            ("loongarch64", Some("loongarch")),
+            ("loongarch", Some("loongarch")),
+            ("loongarch16", None),
+            ("mips", Some("mips")),
+            ("mipsel", Some("mips")),
+            ("mips64el", Some("mips")),
+            ("mipsisa32r6el", Some("mips")),
+            ("mipsisa64r6", Some("mips")),
+            ("mipsr6el", Some("mips")),
+            ("mips32el", Some("mips")),
+            ("mipsx", None),
+            ("mcf5441x", Some("m68k")),
+            ("riscv64", Some("riscv")),
+            ("riscv32eb", Some("riscv")),
+            ("riscveb", Some("riscv")),
+            ("riscv128", None),
+            ("powerpc64le", Some("powerpc")),
+            ("ppc64", Some("powerpc")),
+            ("powerpc", Some("powerpc")),
+            ("sh3", Some("sh")),
+            ("sh4", Some("sh")),
+            ("sh2", None),
+            ("bfin", Some("blackfin")),
+            ("microblazeel", Some("microblaze")),
+            ("microblazee", None),
+            ("microblaze", Some("microblaze")),
+            ("sparc", Some("sparc")),
+            ("xtensa", Some("xtensa")),
+            ("or1k", None),
+        ];
+        for (a, want) in kernel {
+            let r = run(
+                &format!("map_kernel_arch('{a}', d)"),
+                &mut classes(&vars, &[]),
+            );
+            assert_eq!(r.ok().as_deref(), *want, "{a}");
+        }
+        // Outside linux the architecture is returned as it is.
+        let elf = [("valid_archs", VALID), ("TARGET_OS", "elf")];
+        assert_eq!(class_ok("map_kernel_arch('or1k', d)", &elf, &[]), "or1k");
+        // valid_archs is read first: unset, python raises.
+        assert!(run("map_kernel_arch('arm', d)", &mut classes(&[], &[])).is_err());
+        for (a, want) in [
+            ("i686", "x86"),
+            ("ix86", "x86"),
+            ("athlon", "athlon"),
+            ("x86_64", "x86_64"),
+            ("arm", "arm"),
+            ("aarch64", "aarch64"),
+            ("powerpc64le", "ppc"),
+            ("ppc64", "ppc"),
+            ("powerpc", "ppc"),
+            ("i3866", "i3866"),
+        ] {
+            assert_eq!(
+                class_ok(&format!("map_uboot_arch('{a}', d)"), &[], &[]),
+                want,
+                "{a}"
+            );
+        }
+        assert!(run("map_uboot_arch('i\\n86', d)", &mut classes(&[], &[])).is_err());
     }
 
     /// Slices with step 1, as `util-linux.inc` (`'.'.join(d.getVar('PV').split('.')[0:2])`)

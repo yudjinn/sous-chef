@@ -1,51 +1,52 @@
 # Differential report: static evaluation vs bitbake -e
 
 recipe	compared	equal	equal-ws	flagged	gap	bug	unset-both	not-printed	note
-curl	38	34	0	3	1	0	3	0	anonymous python 14 (11 opaque); unfollowed references 2
-sl	30	27	0	2	1	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
-linux-kiss	27	22	0	3	2	0	3	0	anonymous python 15 (11 opaque); unfollowed references 2
-u-boot-kiss	46	41	0	4	1	0	1	0	anonymous python 12 (7 opaque); unfollowed references 2
-kiss-image	27	24	0	2	1	0	3	0	anonymous python 17 (12 opaque); unfollowed references 3
-packagegroup-core-boot	31	27	0	3	1	0	2	0	anonymous python 12 (9 opaque); unfollowed references 2
-zlib	35	32	0	2	1	0	3	0	anonymous python 11 (8 opaque); unfollowed references 2
-openssl	48	45	0	2	1	0	4	0	anonymous python 14 (11 opaque); unfollowed references 2
-busybox	64	58	0	5	1	0	2	0	anonymous python 15 (11 opaque); unfollowed references 2
-dropbear	46	42	0	3	1	0	2	0	anonymous python 14 (11 opaque); unfollowed references 2
-ncurses	54	51	0	2	1	0	4	0	anonymous python 12 (9 opaque); unfollowed references 2
-dbus	45	40	0	4	1	0	2	0	anonymous python 15 (12 opaque); unfollowed references 2
-systemd-boot	42	35	0	5	2	0	2	0	anonymous python 12 (8 opaque); unfollowed references 2
-util-linux	98	91	0	5	2	0	2	0	anonymous python 14 (11 opaque); unfollowed references 2
-gmp-native	36	24	0	10	2	0	2	0	anonymous python 11 (8 opaque); unfollowed references 2
-nativesdk-zlib	35	24	0	9	2	0	3	0	anonymous python 12 (9 opaque); unfollowed references 2
-quilt-native	38	26	0	11	1	0	2	0	anonymous python 12 (9 opaque); unfollowed references 2
-expat	36	33	0	2	1	0	2	0	anonymous python 12 (8 opaque); unfollowed references 2
-glib-2.0	53	47	0	5	1	0	2	0	anonymous python 13 (10 opaque); unfollowed references 2
-base-files	46	43	0	2	1	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
-python3	69	55	0	13	1	0	4	0	anonymous python 14 (11 opaque); unfollowed references 2
-bash	42	38	0	3	1	0	2	0	anonymous python 13 (10 opaque); unfollowed references 2
-opencsd	31	28	0	2	1	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
-virtual/kernel	27	22	0	3	2	0	3	0	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
-virtual/bootloader	46	41	0	4	1	0	1	0	provider u-boot-kiss (PreferredProvider); anonymous python 12 (7 opaque); unfollowed references 2
-curl@default	38	34	0	3	1	0	3	0	anonymous python 14 (11 opaque); unfollowed references 2
-sl@default	30	27	0	2	1	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
-virtual/kernel@default	27	22	0	3	2	0	3	0	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
+curl	38	34	0	2	2	0	3	0	anonymous python 14 (11 opaque); unfollowed references 2
+sl	30	28	0	0	2	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
+linux-kiss	27	22	0	2	3	0	3	0	anonymous python 15 (11 opaque); unfollowed references 2
+u-boot-kiss	46	41	0	3	2	0	1	0	anonymous python 12 (7 opaque); unfollowed references 2
+kiss-image	27	24	0	1	2	0	3	0	anonymous python 17 (12 opaque); unfollowed references 3
+packagegroup-core-boot	31	27	1	1	2	0	2	0	anonymous python 12 (9 opaque); unfollowed references 2
+zlib	35	33	0	0	2	0	3	0	anonymous python 11 (8 opaque); unfollowed references 2
+openssl	48	45	0	1	2	0	4	0	anonymous python 14 (11 opaque); unfollowed references 2
+busybox	64	58	0	4	2	0	2	0	anonymous python 15 (11 opaque); unfollowed references 2
+dropbear	46	42	0	2	2	0	2	0	anonymous python 14 (11 opaque); unfollowed references 2
+ncurses	54	51	0	1	2	0	4	0	anonymous python 12 (9 opaque); unfollowed references 2
+dbus	45	41	0	2	2	0	2	0	anonymous python 15 (12 opaque); unfollowed references 2
+systemd-boot	42	37	0	2	3	0	2	0	anonymous python 12 (8 opaque); unfollowed references 2
+util-linux	98	93	0	2	3	0	2	0	anonymous python 14 (11 opaque); unfollowed references 2
+gmp-native	36	25	1	8	2	0	2	0	anonymous python 11 (8 opaque); unfollowed references 2
+nativesdk-zlib	35	24	0	9	2	0	3	0	anonymous python 12 (9 opaque); unfollowed references 3
+quilt-native	38	26	1	10	1	0	2	0	anonymous python 12 (9 opaque); unfollowed references 2
+expat	36	33	0	1	2	0	2	0	anonymous python 12 (8 opaque); unfollowed references 2
+glib-2.0	53	49	0	2	2	0	2	0	anonymous python 13 (10 opaque); unfollowed references 2
+base-files	46	43	1	0	2	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
+python3	69	55	0	12	2	0	4	0	anonymous python 14 (11 opaque); unfollowed references 2
+bash	42	39	0	1	2	0	2	0	anonymous python 13 (10 opaque); unfollowed references 2
+opencsd	31	29	0	0	2	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
+virtual/kernel	27	22	0	2	3	0	3	0	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
+virtual/bootloader	46	41	0	3	2	0	1	0	provider u-boot-kiss (PreferredProvider); anonymous python 12 (7 opaque); unfollowed references 2
+curl@default	38	34	0	2	2	0	3	0	anonymous python 14 (11 opaque); unfollowed references 2
+sl@default	30	28	0	0	2	0	3	0	anonymous python 10 (7 opaque); unfollowed references 2
+virtual/kernel@default	27	22	0	2	3	0	3	0	provider linux-kiss (PreferredProvider); anonymous python 15 (11 opaque); unfollowed references 2
 
 ## Totals (1090 values compared, explicit machine and distro; `unset` = unset on both sides, `not-printed` = BitBake printed no value; neither counted)
-(equal, but flagged)	148
-equal	950
-flagged	74
-flagged-literal-differs	35
-gap:layerdir-canonical	29
+(equal, but flagged)	157
+equal	962
+equal-ws	4
+flagged	34
+flagged-literal-differs	37
+gap:layerdir-canonical	51
 gap:variant-layername	2
 unset	63
 
 ## Variables by number of differences (any class but equal)
-DEPENDS	25
 FILE	25
 FILESPATH	25
-EXTRA_OECONF	9
+DEPENDS	17
 FILES	8
-PACKAGES	7
+PACKAGES	6
+EXTRA_OECONF	5
 RDEPENDS	5
 FILESEXTRAPATHS	4
 B	3
@@ -56,10 +57,8 @@ WORKDIR	3
 CONFIGURE_FILES	2
 EXTRA_OEMESON	2
 FILE_LAYERNAME	2
-SRC_URI	2
 UBOOT_ARCH_DIR	2
 LDFLAGS	1
-MAJOR_VERSION	1
 OE_DEL	1
 OE_FEATURES	1
 PACKAGE_WRITE_DEPS	1

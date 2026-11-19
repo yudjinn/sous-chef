@@ -78,11 +78,12 @@ use regex::Regex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use super::classfn::{self, ClassDef, ClassFn};
 use super::datastore::{Content, OpKind, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
 use super::license;
 use super::skips;
-use super::variant::ClassExtend;
+use super::variant::{ClassExtend, VarFilter};
 use super::{DataStore, FileVisit, OpStatus, Overlay, Target, VarOp};
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
@@ -175,6 +176,20 @@ pub struct ReplayNotes {
     /// datastore copy (`multi_finalize`'s `safe_d`) carries it. Taken by finalisation.
     #[serde(skip)]
     pub(crate) nativesdk_anon: Option<(Loc, bool)>,
+    /// That anonymous python is OE-core Wrynose's text ([`classfn::NATIVESDK_ANONYMOUS`]):
+    /// its `DEPENDS` and `PACKAGE_WRITE_DEPS` filters are installed with the `PROVIDES` one.
+    #[serde(skip)]
+    pub(crate) nativesdk_anon_verified: bool,
+    /// For each allowlisted class function name ([`super::classfn`]), the last `def` of it
+    /// the parse executed (BitBake runs a `def` when it parses it, into one global python
+    /// context, so the last one wins).
+    #[serde(skip)]
+    pub(crate) class_defs: BTreeMap<String, ClassDef>,
+    /// The read filters class-extension code installed (`d.setVarFilter`), by variable base
+    /// name, with where: applied by finalisation to every read of a certain value (see
+    /// [`super::variant::VarFilter`]).
+    #[serde(skip)]
+    pub(crate) filters: BTreeMap<String, (VarFilter, Loc)>,
 }
 
 /// One anonymous python function.
@@ -2352,6 +2367,16 @@ impl<'a> Replay<'a> {
                 if let Some(n) = &st.name {
                     put_flag(&mut self.ds, n, "func", "1");
                     put_flag(&mut self.ds, n, "python", "1");
+                    if ClassFn::from_name(n).is_some() {
+                        let verified = self.body_text(&st.loc).and_then(|t| classfn::verify(n, &t));
+                        Arc::make_mut(&mut self.ds.notes).class_defs.insert(
+                            n.clone(),
+                            ClassDef {
+                                loc: st.loc.clone(),
+                                verified,
+                            },
+                        );
+                    }
                 }
             }
             "inherit" => {
@@ -2606,12 +2631,21 @@ impl<'a> Replay<'a> {
             .is_some_and(|f| f == "nativesdk.bbclass")
             .then(|| body.as_deref().and_then(nativesdk_provides_filter))
             .flatten();
+        // The whole function is OE-core Wrynose's: its DEPENDS and PACKAGE_WRITE_DEPS
+        // filters are installed when it runs, like the PROVIDES one.
+        let verified = sdk.is_some()
+            && body
+                .as_deref()
+                .is_some_and(|b| classfn::same_text(b, classfn::NATIVESDK_ANONYMOUS));
         if sdk.is_some() {
-            bases.retain(|b| b != "PROVIDES");
+            bases.retain(|b| {
+                b != "PROVIDES" && !(verified && NATIVESDK_FILTERED.contains(&b.as_str()))
+            });
         }
         let notes = Arc::make_mut(&mut self.ds.notes);
         if let Some(guard) = sdk {
             notes.nativesdk_anon = Some((st.loc.clone(), guard));
+            notes.nativesdk_anon_verified = verified;
         }
         notes.python_vars.extend(bases);
         notes.anonymous.push(AnonPython {
@@ -3360,6 +3394,10 @@ impl<'a> Replay<'a> {
 /// Variables OE-core's `native_virtclass_handler` (`classes-recipe/native.bbclass`, Wrynose
 /// `33a6bd6c`) filters with `d.setVarFilter` (`native_filter`) when `BBCLASSEXTEND` contains
 /// `native`; it also renames `<VAR>:<pkg>` package variables of `RDEPENDS` and the others.
+/// The filters of `nativesdk.bbclass`'s anonymous python besides `PROVIDES`
+/// (`clsextend.set_filter(var, deps)`), with `deps`.
+const NATIVESDK_FILTERED: &[&str] = &["DEPENDS", "PACKAGE_WRITE_DEPS"];
+
 const NATIVE_FILTERED: &[&str] = &[
     "DEPENDS",
     "RDEPENDS",
@@ -3597,14 +3635,40 @@ impl Replay<'_> {
         } else {
             Some(true)
         };
+        let verified =
+            std::mem::take(&mut Arc::make_mut(&mut self.ds.notes).nativesdk_anon_verified);
         match applies {
-            Some(true) => self.provides_filter = Some((ProvidesFilter::NativeSdk, loc)),
+            Some(true) => {
+                if verified {
+                    // `ClassExtender("nativesdk", [], d)`: `set_filter("DEPENDS", deps=True)`,
+                    // `set_filter("PACKAGE_WRITE_DEPS", deps=False)`.
+                    let who = "the anonymous python of nativesdk.bbclass (OE-core)";
+                    let (extname, prefixes) = ("nativesdk".to_string(), Vec::new());
+                    let deps = VarFilter::SuffixDeps {
+                        extname: extname.clone(),
+                        prefixes: prefixes.clone(),
+                    };
+                    self.install_filter("DEPENDS", deps, &loc, who);
+                    let pwd = VarFilter::Suffix { extname, prefixes };
+                    self.install_filter("PACKAGE_WRITE_DEPS", pwd, &loc, who);
+                }
+                self.provides_filter = Some((ProvidesFilter::NativeSdk, loc));
+            }
             Some(false) => {}
-            None => self.flag_provides_filter(
-                &ProvidesFilter::NativeSdk,
-                &loc,
-                "PN is not known statically, so whether it applies is not known",
-            ),
+            None => {
+                if verified {
+                    let notes = Arc::make_mut(&mut self.ds.notes);
+                    notes
+                        .python_vars
+                        .extend(NATIVESDK_FILTERED.iter().map(|v| v.to_string()));
+                    self.ds.ovr_cache = OnceLock::new();
+                }
+                self.flag_provides_filter(
+                    &ProvidesFilter::NativeSdk,
+                    &loc,
+                    "PN is not known statically, so whether it applies is not known",
+                )
+            }
         }
     }
 
@@ -3704,6 +3768,60 @@ impl Replay<'_> {
             }
             Some(Err(why)) => self.flag_provides_filter(&filter, &loc, &why),
         }
+    }
+
+    /// `oe.utils.set_class_filter(var, features_var, filter_var, d)` (OE-core Wrynose
+    /// `lib/oe/utils.py`), run by the handler at `loc`: `defaults = d.getVar(var)`, each word
+    /// holding `}` cut out of it (`defaults.replace(word, "")`, with a warning), then
+    /// `d.setVar(var, '${@oe.utils.class_filter_features("<defaults>", "<features_var>",
+    /// "<filter_var>", d)}')`, which [`super::pyexpr`] evaluates when the two variables it
+    /// reads are certain. `false` (nothing done) when the value is not certain, or holds a
+    /// character the python string literal would read otherwise.
+    fn set_class_filter(
+        &mut self,
+        var: &str,
+        features_var: &str,
+        filter_var: &str,
+        loc: &Loc,
+    ) -> bool {
+        let Some(v) = self.ds.value(var) else {
+            // `"}" in None` raises.
+            return false;
+        };
+        if v.unevaluated_python || !v.unresolved.is_empty() {
+            return false;
+        }
+        let mut defaults = v.text.clone();
+        for issue in super::pyexpr::py_split_ws(&v.text) {
+            if issue.contains('}') {
+                defaults = defaults.replace(&issue, "");
+            }
+        }
+        if defaults.contains(['"', '\\', '\n', '\r']) {
+            return false;
+        }
+        let text = format!(
+            "${{@oe.utils.class_filter_features(\"{defaults}\", \"{features_var}\", \"{filter_var}\", d)}}"
+        );
+        self.ds
+            .rewrite(var, text, loc.clone(), OpKind::EventHandler);
+        true
+    }
+
+    /// Installs `filter` on `var` (`d.setVarFilter`, which replaces an earlier one), with a
+    /// note naming `who` installed it at `loc`.
+    fn install_filter(&mut self, var: &str, filter: VarFilter, loc: &Loc, who: &str) {
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        let line = format!(
+            "note: {who} at {loc} filters {var} with {} (OE-core lib/oe/classextend.py), which BitBake applies to the expanded value on every read; the value shown is filtered when it is certain",
+            filter.describe()
+        );
+        let e = notes.var_notes.entry(var.to_string()).or_default();
+        if !e.contains(&line) {
+            e.push(line);
+        }
+        notes.filters.insert(var.to_string(), (filter, loc.clone()));
+        self.ds.ovr_cache = OnceLock::new();
     }
 
     /// The text of the python function `name` (its pieces, in order), read from disk.
@@ -3951,10 +4069,26 @@ impl Replay<'_> {
         const NATIVE: &str = "native_virtclass_handler";
         if self.handles(NATIVE, "RecipePreFinalise") {
             let loc = self.handler_loc(NATIVE, recipe);
+            // The workspace's handler is OE-core Wrynose's: its read filters and
+            // `set_class_filter` are reproduced (`verified`); any other text is flagged.
+            let verified = self
+                .function_body(NATIVE)
+                .is_some_and(|b| classfn::same_text(&b, classfn::NATIVE_VIRTCLASS_HANDLER));
             match static_value(&self.ds, "PN") {
                 Some(Some(pn)) if !pn.ends_with("-native") => {}
                 pn => {
-                    let mut vars = strings(&["DISTRO_FEATURES"]);
+                    let mut vars = Vec::new();
+                    if !(verified
+                        && pn.is_some()
+                        && self.set_class_filter(
+                            "DISTRO_FEATURES",
+                            "DISTRO_FEATURES_NATIVE",
+                            "DISTRO_FEATURES_FILTER_NATIVE",
+                            &loc,
+                        ))
+                    {
+                        vars.push("DISTRO_FEATURES".to_string());
+                    }
                     let ce = self.ds.value("BBCLASSEXTEND").unwrap_or_default();
                     let unsure = ce.unevaluated_python || !ce.unresolved.is_empty();
                     if ce.text.contains("native") || unsure || pn.is_none() {
@@ -3965,10 +4099,35 @@ impl Replay<'_> {
                         match (&pn, certain) {
                             (Some(Some(p)), true) => {
                                 let bpn = static_value(&self.ds, "BPN").flatten();
+                                // `native_filter` on DEPENDS, PACKAGES, PACKAGES_DYNAMIC;
+                                // the runtime variables are also renamed per package
+                                // (`map_dependencies`), which is not reproduced: flagged.
+                                let mut filtered: Vec<&str> = Vec::new();
+                                if let (true, Some(b)) = (verified, &bpn) {
+                                    for (var, regex, selfref) in [
+                                        ("DEPENDS", false, false),
+                                        ("PACKAGES", false, true),
+                                        ("PACKAGES_DYNAMIC", true, true),
+                                    ] {
+                                        let f = VarFilter::Native {
+                                            pn: p.clone(),
+                                            bpn: b.clone(),
+                                            regex,
+                                            selfref,
+                                        };
+                                        self.install_filter(
+                                            var,
+                                            f,
+                                            &loc,
+                                            "native_virtclass_handler (an OE-core event handler)",
+                                        );
+                                        filtered.push(var);
+                                    }
+                                }
                                 vars.extend(
                                     NATIVE_FILTERED
                                         .iter()
-                                        .filter(|v| **v != "PROVIDES")
+                                        .filter(|v| **v != "PROVIDES" && !filtered.contains(v))
                                         .map(|v| v.to_string()),
                                 );
                                 self.provides_filter = Some((
@@ -3986,9 +4145,26 @@ impl Replay<'_> {
         const NATIVESDK: &str = "nativesdk_virtclass_handler";
         if self.handles(NATIVESDK, "RecipePreFinalise") {
             let loc = self.handler_loc(NATIVESDK, recipe);
+            let verified = self
+                .function_body(NATIVESDK)
+                .is_some_and(|b| classfn::same_text(&b, classfn::NATIVESDK_VIRTCLASS_HANDLER));
             match static_value(&self.ds, "PN") {
                 Some(Some(pn)) if pn.ends_with("-nativesdk") || pn.starts_with("nativesdk-") => {
-                    self.handler_flags(NATIVESDK, &loc, &strings(&["DISTRO_FEATURES"]), "filters");
+                    if !(verified
+                        && self.set_class_filter(
+                            "DISTRO_FEATURES",
+                            "DISTRO_FEATURES_NATIVESDK",
+                            "DISTRO_FEATURES_FILTER_NATIVESDK",
+                            &loc,
+                        ))
+                    {
+                        self.handler_flags(
+                            NATIVESDK,
+                            &loc,
+                            &strings(&["DISTRO_FEATURES"]),
+                            "filters",
+                        );
+                    }
                     self.ds.rewrite(
                         "MLPREFIX",
                         "nativesdk-".into(),

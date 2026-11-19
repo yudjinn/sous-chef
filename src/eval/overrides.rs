@@ -31,6 +31,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use super::classfn::ClassFn;
 use super::datastore::{Keyword, Piece, base_of, split_keyword};
 use super::expand::{Expander, PyEvent, Source};
 use super::{DataStore, OpStatus, Value, VarOp};
@@ -203,6 +204,14 @@ impl Source for Eval<'_> {
         v.unevaluated_python |= doubt;
         Some(Some(v))
     }
+
+    fn class_fn(&self, f: ClassFn) -> Result<(), String> {
+        self.ds.class_fn_defined(f)
+    }
+
+    fn inherits_class(&self, klass: &str) -> Option<bool> {
+        self.ds.inherits_class_certain(klass)
+    }
 }
 
 /// The variables BitBake takes from the environment by default (BitBake 2.18
@@ -269,6 +278,7 @@ impl Eval<'_> {
                 push_unique(&mut v.unresolved, "OVERRIDES");
             }
         }
+        self.ds.apply_read_filter(name, &mut v);
         Some(v)
     }
 

@@ -32,6 +32,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use super::Value;
+use super::classfn::ClassFn;
 use super::pyexpr::{self, Stop};
 
 /// Maximum number of substitution passes over one text. BitBake loops until the text stops
@@ -57,6 +58,20 @@ pub trait Source {
     /// `d.getVarFlag(name, flag)`: `Some(Some(v))` the expanded flag, `Some(None)` unset,
     /// `None` when this source cannot answer (python reading a flag is then not evaluated).
     fn lookup_flag(&self, _name: &str, _flag: &str, _exp: &mut Expander) -> Option<Option<Value>> {
+        None
+    }
+
+    /// Whether the class function `f` may be called here (see [`super::classfn`]): `Err`
+    /// says why not. By default no definition is known.
+    fn class_fn(&self, f: ClassFn) -> Result<(), String> {
+        Err(format!(
+            "{} is a class function whose definition is not known here",
+            f.name()
+        ))
+    }
+
+    /// `bb.data.inherits_class(klass, d)`; `None` when not certain.
+    fn inherits_class(&self, _klass: &str) -> Option<bool> {
         None
     }
 }
@@ -381,6 +396,18 @@ impl pyexpr::Env for ExpEnv<'_, '_> {
         } else {
             Err(Stop::Uncertain(why_uncertain("the text of d.expand", &v)))
         }
+    }
+
+    fn class_fn(&mut self, f: ClassFn) -> Result<(), Stop> {
+        self.src.class_fn(f).map_err(Stop::Unsupported)
+    }
+
+    fn inherits_class(&mut self, klass: &str) -> Result<bool, Stop> {
+        self.src.inherits_class(klass).ok_or_else(|| {
+            Stop::Uncertain(format!(
+                "whether the recipe inherits {klass} is not certain (a reference that could inherit a class was not followed, or followed with an uncertain value)"
+            ))
+        })
     }
 }
 

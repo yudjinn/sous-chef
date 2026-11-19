@@ -4,6 +4,7 @@
 //! (`datastore.rs`), whose values are finalised by `overrides.rs` and expanded by
 //! `expand.rs`.
 
+pub mod classfn;
 pub mod datastore;
 pub mod expand;
 mod license;
