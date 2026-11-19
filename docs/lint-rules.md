@@ -307,7 +307,7 @@ Notes:
 | `hygiene/continuation` | W | file | Whitespace after a trailing `\`; a blank line that ends a continued statement before its closing quote. A comment line inside a continued statement is reported by `hygiene/parse-error`, not here. |
 | `hygiene/release-syntax` | E/W | file | A construct that one of the releases the file is checked against lacks, from the `Feature` table: `inherit_defer` before Scarthgap (not in a `.conf`, where `hygiene/parse-error` reports it), `include_all` before Walnascar, a class in `classes-recipe/` or `classes-global/` on Kirkstone, `${UNPACKDIR}` before Styhead (unless a file of the same layer, or of a layer other than the core layer, assigns `UNPACKDIR`: the core layer's own assignment comes with the workspace's release), `addfragments` before Walnascar, and its three-argument form from Whinlatter (BitBake 2.16 needs a fourth argument). Warning: `${WORKDIR}/<file>` for a `file://` entry of the same file's `SRC_URI` on Styhead and later (unpacked into `UNPACKDIR`). The message names the releases. |
 | `hygiene/release-removed` | E/W | file | Something a release the file is checked against removed, renamed or deprecated, from one table (`REMOVALS` in the rule's file, one `KeptUntil*` `Feature` per migration guide; see "Release removals" below): a renamed variable (`BB_RENAMED_VARIABLES`, BitBake's own renames; E: BitBake stops), a variable OE-core dropped (W), an `inherit` (or `INHERIT`-style list word) of a removed class (E, unless a layer other than the core layer has the class), a removed word in `IMAGE_FEATURES` (`debug-tweaks`, E) or a QA list (`license-incompatible`, W), an old virtual toolchain provider name (W), a `SRC_URI` scheme whose fetcher is gone (E); `S` below `${WORKDIR}` or `S = "${UNPACKDIR}/git"` from Whinlatter (E); `LAYERSERIES_COMPAT_<c> = "${LAYERSERIES_CORENAMES}"` from Mickledore (E); an obsolete license name in `LICENSE` (W, E from Styhead); an assignment without whitespace around its operator from Whinlatter (W); (since x7) `${SRCPV}` in `PV` when every release the file is checked against is Nanbield or later (I: from Nanbield `SRCPV = ""` and the revision goes to `PKGV`; not when a layer other than the core layer assigns `SRCPV`). The message names the releases. |
-| `hygiene/parse-error` | E/W | file | Any `Unknown` statement no parser diagnostic covers, and parser diagnostics. Not reported: whitespace after a trailing `\` (left to `hygiene/continuation`). `addfragments` with three or more arguments and `addpylib` with two or more are statements of their own; with fewer each is an unparsed line. `addpylib` is an error outside the base configuration (`conf/layer.conf`, `conf/bitbake.conf`, `conf/bblayers.conf`; BitBake rejects it in a recipe, a class, an `.inc` and any `.conf` those include), and in the base configuration on a release before Mickledore (BitBake 2.4), which has no such directive. Data files are not linted. Warning: the `addtask` quirk that joins two `before`/`after` groups into one task name. Error: everything else. In a `.conf` file, a function, `def`, `inherit`, `inherit_defer`, `addtask`, `deltask`, `addhandler` or `EXPORT_FUNCTIONS` is an error (BitBake's configuration parser rejects them). |
+| `hygiene/parse-error` | E/W | file | Any `Unknown` statement no parser diagnostic covers, and parser diagnostics. Not reported: whitespace after a trailing `\` (left to `hygiene/continuation`). `addfragments` with three or more arguments and `addpylib` with two or more are statements of their own; with fewer each is an unparsed line. `addpylib` is an error outside the base configuration (`conf/layer.conf`, `conf/bitbake.conf`, `conf/bblayers.conf`; BitBake rejects it in a recipe, a class, an `.inc` and any `.conf` those include), and in the base configuration on a release before Mickledore (BitBake 2.4), which has no such directive. Data files are not linted (bitbake-semantics.md, "Data files"): a `.conf` / `.inc` / `.bbclass` in a recipe's `<pn>/`, `<pn>-<pv>/` or `files/` directory, of any `.bb` / `.bbappend` whether BitBake collects it or not (meta-oe's `dynamic-layers/` recipes whose collection is absent included), or under `lib/`, `scripts/`, `wic/`, or one no reference can reach that does not parse (not in `conf/`, not a class in `classes*/`, not at a layer root, not in or below the directory of a file with a reference sous-chef cannot expand). It runs (alone of the file rules) on a `.bb` / `.bbappend` only an inactive `BBFILES_DYNAMIC` entry collects: BitBake parses it wherever the collection is present. Warning: the `addtask` quirk that joins two `before`/`after` groups into one task name. Error: everything else. In a `.conf` file, a function, `def`, `inherit`, `inherit_defer`, `addtask`, `deltask`, `addhandler` or `EXPORT_FUNCTIONS` is an error (BitBake's configuration parser rejects them). |
 
 Notes:
 
@@ -728,6 +728,34 @@ what changed since `x2-migrate` (every other rule as in the tables above):
 
 (The W count fell from 169 to 156 although `missing-metadata` gained 9 warnings: the 22
 `class-export-functions` warnings went; the `release-removed` warnings stay 3.)
+
+Re-measured for branch `lint-dynamic-data` (2026-11-19, the release binary, `sous-chef lint
+--all --format json --build-dir <build>`, cache and `TMPDIR` under
+`runs/lint-dynamic-data/`, no BitBake run) on yocto-kiss (Wrynose, `yocto-kiss/build`) and
+the Scarthgap and Kirkstone release workspaces (live-environment.md, "Release
+workspaces"; OE-core, meta-poky, meta-yocto-bsp, meta-oe):
+
+| Workspace | Before (`4f1bc1a`) | After |
+|---|---|---|
+| Wrynose | 649 findings in 1718 files (0 E, 156 W, 493 I) | the same, every finding |
+| Scarthgap | 1545 findings in 2549 files (369 E, 428 W, 748 I) | 1176 findings in 2545 files (0 E, 428 W, 748 I) |
+| Kirkstone | 1463 findings in 2375 files (366 E, 461 W, 636 I) | 1098 findings in 2372 files (1 E, 461 W, 636 I) |
+
+The only rule whose count changed is `hygiene/parse-error`: 369 -> 0 on Scarthgap, 365 -> 0
+on Kirkstone (0 on Wrynose before and after); every other finding is the same, line for
+line. The 734 removed errors were all false: four data files of meta-oe recipes under
+`dynamic-layers/` whose collection (`meta-python`, `selinux`) is absent, so BitBake does
+not collect the recipe: `meta-python/recipes-connectivity/lirc/lirc/lircd.conf` (277),
+`thingsboard-gateway/thingsboard-gateway/logs.conf` (75), `lirc/lirc/lirc_options.conf`
+(13), and on Scarthgap only `selinux/recipes-devtool/android-tools/android-tools-conf-configfs/10-adbd-configfs.conf`
+(4). `index::scan::mark_data` took the recipe directories only from collected recipes;
+now from every `.bb` / `.bbappend`. `hygiene/parse-error` now also runs on the recipe files
+only an inactive `BBFILES_DYNAMIC` entry collects (21 on Scarthgap, 16 on Kirkstone, 1 on
+Wrynose): no finding. The remaining Kirkstone error is `override/legacy-syntax` on
+meta-oe's `duktape_2.7.0.bb:40` (true, differential.md "Lint on these layers"). The new
+rule that makes an unreachable file that does not parse data marked no file on any of the
+three workspaces: the 15 `.inc` files left as metadata with no reference and no metadata
+place all parse (bitbake-semantics.md, "Data files").
 
 ## Output
 

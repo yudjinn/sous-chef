@@ -211,7 +211,11 @@ Spot checks, ten per release, against the source: **false positives**: all 369 /
 `hygiene/parse-error` errors (4 / 3 files: `lircd.conf`, `lirc_options.conf`,
 `thingsboard-gateway/logs.conf`, `10-adbd-configfs.conf`, data files of meta-oe recipes under
 `dynamic-layers/`; `index::scan::mark_data` takes the recipe directories only from collected
-recipes, and these recipes are `dynamic`, so their data files are linted as configuration),
+recipes, and these recipes are `dynamic`, so their data files are linted as configuration;
+fixed in branch `lint-dynamic-data`: the recipe directories come from every `.bb` /
+`.bbappend`, and `lint --all` gives Scarthgap 1176 findings (0 error, 428 warning, 748
+info) and Kirkstone 1098 (1 error, 461 warning, 636 info), `hygiene/parse-error` 0 on both
+and every other finding unchanged; lint-rules.md, "On a real workspace"),
 and on Kirkstone the advice of `hygiene/git-pv` (19: "set `PV = "<version>+git"`", but
 Kirkstone's `package.bbclass` adds no source revision to `PKGV`; fixed: the rule suggests
 `+git${SRCPV}` for a layer checked against a release with `KeptUntilMickledore`). True:
