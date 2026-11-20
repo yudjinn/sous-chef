@@ -387,6 +387,29 @@ fn remove_in_recipe() {
 }
 
 #[test]
+fn remove_in_recipe_advice_depends_on_where_the_value_is_set() {
+    // lint-precision true-but-unhelpful findings (tests/fixtures/lint-precision/labels.tsv):
+    // "leave the item out of the value" is impossible for CFLAGS, which configuration sets.
+    let env = Env::new();
+    let r = &OverrideRemoveInRecipe;
+    assert_eq!(lines(&env, r, "precision.bb"), [(4, W), (7, W)]);
+    let m = messages(&env, r, "precision.bb");
+    assert!(
+        m[0].ends_with(
+            "CFLAGS is not set in this file, so if a bbappend may need the item back, remove \
+             it through a variable the bbappend can change (`CFLAGS:remove = \"${MY_REMOVALS}\"`)"
+        ),
+        "{}",
+        m[0]
+    );
+    assert!(
+        m[1].contains("leave the item out of the value instead"),
+        "{}",
+        m[1]
+    );
+}
+
+#[test]
 fn weak_after_default() {
     let env = Env::new();
     let r = &OverrideWeakAfterDefault;
