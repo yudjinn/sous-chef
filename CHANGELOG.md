@@ -48,7 +48,10 @@ override chain.
   every anonymous python function, is never run, and a value that depends on it is
   flagged instead of guessed. `BBCLASSEXTEND` variants, `BBMULTICONFIG` configurations
   (`mc=<name>` or `mc:<name>:<recipe>`), a static `BBMASK` and BitBake's skip conditions
-  ("would skip" / "may skip") are modelled.
+  ("would skip" / "may skip") are modelled. `[build_host] arch` / `os` in `sous-chef.toml`
+  give the build host's `os.uname()[4]` and `os.uname()[0].lower()` (`BUILD_ARCH`,
+  `BUILD_OS`), so native and nativesdk recipes evaluate exactly; unset, those values are
+  flagged (sous-chef never reads its own host's).
 - **Lint** (`lint` tool and `sous-chef lint`): 42 rules in three families (`hygiene/`,
   `org/`, `override/`), each layer checked against every release its `LAYERSERIES_COMPAT`
   claims; `--fix` prints safe fixes as a diff and `--write` applies them through the
@@ -89,13 +92,13 @@ override chain.
 
 Static values compared with `bitbake -e` on the same workspace, one machine and distro per
 release, latest run 2026-11-20 ([docs/differential.md](https://github.com/yudjinn/sous-chef/blob/v0.1.0/docs/differential.md), "After
-acc-anon-models"):
+build-host"; the first three rows with `[build_host]` set to the build host's values):
 
 | Release | Values compared | Equal to BitBake (+ whitespace only) | Known gap | Differ without a flag |
 |---|---|---|---|---|
-| Wrynose (6.0), yocto-kiss, 23 recipes and 2 variants | 1090 | 1000 (+2) | 53 | 0 |
-| Scarthgap (5.0), OE-core, meta-yocto, meta-oe, 28 targets | 1186 | 1137 (+2) | 3 | 0 |
-| Kirkstone (4.0), same layers, 28 targets | 1145 | 1073 (+2) | 1 | 0 |
+| Wrynose (6.0), yocto-kiss, 23 recipes and 2 variants | 1090 | 1022 (+1) | 58 | 0 |
+| Scarthgap (5.0), OE-core, meta-yocto, meta-oe, 28 targets | 1186 | 1156 (+3) | 5 | 0 |
+| Kirkstone (4.0), same layers, 28 targets | 1145 | 1094 (+3) | 1 | 0 |
 | Scarthgap, `mc:musl` and default configuration, 6 targets | 659 | 600 | 13 | 0 |
 
 Every other value that differs is flagged, with its cause (`note: uncertain: ...`); for

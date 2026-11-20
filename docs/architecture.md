@@ -191,6 +191,7 @@ pub struct Workspace {
     pub layers: Vec<Layer>,              // in BBLAYERS order
     pub release: ReleaseInfo,            // T1.6, see "Release contract"
     pub kas: Option<kas::KasProject>,    // M9, see "As implemented in wave 5 and M9"
+    pub build_host: BuildHost,           // build-host: sous-chef.toml [build_host], see "Configuration"
 }
 
 pub struct Layer {
@@ -1585,7 +1586,8 @@ did not apply. Tests: `tests/eval_anon_models.rs` against
 `replay::python_writes` also counts the older `ClassExtender`'s `map_variable`,
 `map_regexp_variable`, `map_depends_variable` (their literal argument) and
 `rename_packages` (`PACKAGES`) as writes. The native / nativesdk `OVERRIDES` stay uncertain
-(bitbake-semantics.md, the host's `os.uname()`).
+(bitbake-semantics.md, the host's `os.uname()`) unless `sous-chef.toml [build_host]` gives
+the build host's values (build-host, "Configuration").
 
 ## Errors
 
@@ -1610,6 +1612,10 @@ writable_layers = ["meta-mycompany"]      # scaffold may write only here
 init_script = "poky/oe-init-build-env"    # sourced before any bitbake command
 release = "scarthgap"                     # optional; overrides detection
 kas = ["kas/base.yaml", "kas/board.yaml"] # optional; a kas project's files, in kas order
+
+[build_host]                              # optional; the host that runs BitBake, never read from the server's host
+arch = "x86_64"                           # os.uname()[4], what `uname -m` prints there (BUILD_ARCH)
+os = "linux"                              # os.uname()[0].lower(), `uname -s` lowered (BUILD_OS); "Linux" is lowered
 
 [bitbake]
 enabled = true
@@ -1636,7 +1642,7 @@ max_age_days = 14                         # handles last stored longer ago are d
 ```
 
 In code (`src/config.rs`): `Config { build_dir, layers, writable_layers, init_script,
-release, kas, bitbake: BitbakeConfig { enabled, allow_destructive, pass_env }, lint: LintConfig {
+release, kas, build_host: BuildHost { arch, os }, bitbake: BitbakeConfig { enabled, allow_destructive, pass_env }, lint: LintConfig {
 disable, severity }, output: OutputConfig { budget_tokens }, hooks: HooksConfig { grep_read,
 bash, edit }, handles: HandlesConfig { max_total_mb, max_age_days }, work_dir, config_dir }`
 (`work_dir` and `config_dir`, the directory of the file read, w12, are not read from the
@@ -1649,7 +1655,23 @@ of its range, `HANDLES_MAX_TOTAL_MB` / `HANDLES_MAX_AGE_DAYS`, is an `Error::Con
 `handles::Retention::default()`). `BitbakeConfig::check` (z1-env): a `pass_env` name that is not in
 `bitbake::env::STRIPPED_ENV` is an `Error::Config` from `Config::from_toml` too
 (`bitbake.pass_env names "MACHINE", which sous-chef never removes from BitBake's
-environment: it already passes; list only TMPDIR`), so a typo is caught. `CliOverrides { build_dir, config, layers, work_dir }` carries
+environment: it already passes; list only TMPDIR`), so a typo is caught.
+`BuildHost { arch, os }` (build-host; `[build_host]`, both `Option<String>`, default unset):
+`BuildHost::check` makes a value that is not one word of ASCII letters, digits and
+`_ . + -` an `Error::Config` from `Config::from_toml` (`build_host.arch = "Power Macintosh"
+is not one word: give what `uname -m` prints on the host that runs BitBake ...`), and
+`os` is lowered on load (`normalise`), as `os.uname()[0].lower()` is;
+`BuildHost::{is_empty, describe}`. `Workspace::discover` copies it to
+`Workspace::build_host`; the replay copies that to `ReplayNotes::build_host`, and
+`expand::Source::host` (answered by `overrides::Eval`) gives it to `pyexpr::Env::host`:
+the subset parses exactly `os.uname()[4]` and `os.uname()[0].lower()`
+(`pyexpr::HostRead::{Arch, OsLower}`) and evaluates them from it, or stops with
+`Stop::Uncertain` naming the key (`pyexpr::host_unknown`). `ConfigCache`'s key includes
+it. A `:=` that evaluated a host read gets a `var_notes` line naming `[build_host]`
+(`Replay::host_note`); `var`'s python note adds `os.uname() from sous-chef.toml
+[build_host]`. `status` has a `build_host` row and JSON field. It lives on `Workspace`, not
+`Target`, because it is a property of the workspace's build host like the release, and no
+tool takes it per call. `CliOverrides { build_dir, config, layers, work_dir }` carries
 the global flags `--build-dir`, `--config`, `--layer` (repeatable).
 
 With no config and no `--build-dir`, discovery walks up from the working directory looking

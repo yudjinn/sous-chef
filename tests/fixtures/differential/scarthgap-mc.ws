@@ -22,6 +22,9 @@ dumps = runs/real-checks/scarthgap-mc
 recorded = differential-scarthgap-mc
 machine = qemux86-64
 distro = poky
+# sous-chef.toml [build_host]: the dumps' BUILD_ARCH / BUILD_OS (build-host)
+build_arch = x86_64
+build_os = linux
 requires = conf/multiconfig/musl.conf
 # what the second configuration changes
 vars = BB_CURRENT_MC TCLIBC TCLIBCAPPEND TARGET_SYS MULTIMACH_TARGET_SYS PREFERRED_PROVIDER_virtual/libc STAGING_DIR_TARGET SSTATE_DIR DEPLOY_DIR

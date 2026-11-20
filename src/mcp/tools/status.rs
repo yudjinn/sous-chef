@@ -45,6 +45,9 @@ pub struct Report {
     /// The workspace release and where it came from (`ReleaseInfo::describe`), for example
     /// `wrynose (LAYERSERIES_CORENAMES)`. `None` when the workspace could not be loaded.
     pub release: Option<String>,
+    /// `sous-chef.toml [build_host]`: the build host's `os.uname()` values the evaluator
+    /// uses (`arch`, `os`; each left out of the JSON when not set).
+    pub build_host: crate::config::BuildHost,
     pub layers: Vec<LayerStatus>,
     /// The kas project, when the workspace is one (left out of the JSON otherwise).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -364,6 +367,7 @@ fn base(config: &Config) -> Report {
             ..BitbakeStatus::default()
         },
         handles: limits(config.handles.retention()),
+        build_host: config.build_host.clone(),
         ..Report::default()
     }
 }
@@ -465,6 +469,23 @@ fn output(
     Ok(out)
 }
 
+/// The `build_host` row: the values given and where from, or what leaving them out means.
+fn build_host_row(b: &crate::config::BuildHost) -> String {
+    let missing: Vec<&str> = [("arch", &b.arch), ("os", &b.os)]
+        .into_iter()
+        .filter(|(_, v)| v.is_none())
+        .map(|(k, _)| k)
+        .collect();
+    match b.describe() {
+        None => "not set: os.uname() values (BUILD_ARCH, BUILD_OS and what is built from them, native and nativesdk OVERRIDES among them) stay uncertain; give [build_host] arch and os in sous-chef.toml".into(),
+        Some(d) if missing.is_empty() => format!("{d} (sous-chef.toml [build_host])"),
+        Some(d) => format!(
+            "{d} (sous-chef.toml [build_host]); {} not set, its os.uname() value stays uncertain",
+            missing.join(", ")
+        ),
+    }
+}
+
 fn table(r: &Report) -> Table {
     let none = || "none".to_string();
     let mut rows: Vec<(&str, String)> =
@@ -479,6 +500,7 @@ fn table(r: &Report) -> Table {
         r.config_problem.clone().unwrap_or_else(|| "ok".into()),
     ));
     rows.push(("release", r.release.clone().unwrap_or_else(none)));
+    rows.push(("build_host", build_host_row(&r.build_host)));
     rows.push(("layers", r.layers.len().to_string()));
     for l in &r.layers {
         rows.push((
@@ -789,6 +811,42 @@ mod tests {
         // BitBake disabled: nothing is started, so nothing is said.
         r.bitbake.enabled = false;
         assert!(!format!("{:?}", table(&r)).contains("bitbake_env"));
+    }
+
+    /// build-host: the `build_host` row says what is set and where from, or what unset
+    /// means; the JSON carries the values given.
+    #[test]
+    fn build_host_row_and_json() {
+        let mut cfg = Config::default();
+        let r = base(&cfg);
+        let text = format!("{:?}", table(&r));
+        assert!(
+            text.contains("not set: os.uname() values (BUILD_ARCH, BUILD_OS"),
+            "{text}"
+        );
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["build_host"], serde_json::json!({}));
+
+        cfg.build_host.arch = Some("x86_64".into());
+        let text = format!("{:?}", table(&base(&cfg)));
+        assert!(
+            text.contains("arch = \\\"x86_64\\\" (sous-chef.toml [build_host]); os not set"),
+            "{text}"
+        );
+        cfg.build_host.os = Some("linux".into());
+        let r = base(&cfg);
+        let text = format!("{:?}", table(&r));
+        assert!(
+            text.contains(
+                "arch = \\\"x86_64\\\", os = \\\"linux\\\" (sous-chef.toml [build_host])"
+            ) && !text.contains("not set"),
+            "{text}"
+        );
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(
+            json["build_host"],
+            serde_json::json!({"arch": "x86_64", "os": "linux"})
+        );
     }
 
     #[test]

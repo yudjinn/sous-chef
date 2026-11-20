@@ -1,8 +1,7 @@
 
-## Files in the history (898 variables without overrides; same set of files: 897)
+## Files in the history (898 variables without overrides; same set of files: 898)
 
 ### Files only in BitBake's history (file, count, first uses)
-{{LIVE}}/yocto-kiss/openembedded-core/meta/classes-recipe/populate_sdk_ext.bbclass	1	kiss-image:B
 ### Files only in the static history (file, count, first uses)
 
 ## Layers (bitbake-layers show-layers vs Workspace::discover)

@@ -672,116 +672,116 @@ gmp-native	PR	equal
 gmp-native	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 gmp-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 gmp-native	SRC_URI	equal	
-gmp-native	DEPENDS	equal-ws	flagged: which override variant or conditional :append/:prepend/:remove of BASEDEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/...
+gmp-native	DEPENDS	equal	
 gmp-native	RDEPENDS:gmp-native	unset	
 gmp-native	PACKAGECONFIG	equal	
 gmp-native	PACKAGES	equal	
-gmp-native	FILES:gmp-native	flagged	unevaluated_python
-gmp-native	OVERRIDES	flagged-literal-differs	unevaluated_python
+gmp-native	FILES:gmp-native	equal	
+gmp-native	OVERRIDES	gap:variant-layername	via ${FILE_LAYERNAME}: bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 gmp-native	MACHINEOVERRIDES	equal	
 gmp-native	DISTROOVERRIDES	equal	
-gmp-native	S	flagged	unevaluated_python
-gmp-native	B	flagged	unevaluated_python
-gmp-native	WORKDIR	flagged	unevaluated_python
+gmp-native	S	equal	
+gmp-native	B	equal	
+gmp-native	WORKDIR	equal	
 gmp-native	LICENSE	equal	
 gmp-native	INHERIT	equal	
 gmp-native	PROVIDES	equal	
-gmp-native	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of EXTRA_OECONF applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend...
+gmp-native	EXTRA_OECONF	equal	
 gmp-native	EXTRA_OECMAKE	unset	
-gmp-native	CFLAGS	flagged	unevaluated_python
-gmp-native	FILESPATH	flagged	unevaluated_python
+gmp-native	CFLAGS	equal	
+gmp-native	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 gmp-native	MACHINE	equal	
 gmp-native	DISTRO	equal	
 gmp-native	TMPDIR	equal	
-gmp-native	ARM_INSTRUCTION_SET	equal	flagged: which override variant or conditional :append/:prepend/:remove of ARM_INSTRUCTION_SET applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+gmp-native	ARM_INSTRUCTION_SET	equal	
 gmp-native	BBCLASSEXTEND	equal	
-gmp-native	DESCRIPTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-gmp-native	FILES	equal	flagged: which override variant or conditional :append/:prepend/:remove of FILES applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+gmp-native	DESCRIPTION	equal	
+gmp-native	FILES	equal	
 gmp-native	HOMEPAGE	equal	
 gmp-native	LIC_FILES_CHKSUM	equal	
 gmp-native	MIPS_INSTRUCTION_SET	equal	
 gmp-native	REVISION	equal	
-gmp-native	SECTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+gmp-native	SECTION	equal	
 gmp-native	SSTATE_SCAN_FILES	equal	
-gmp-native	SUMMARY	equal	flagged: which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+gmp-native	SUMMARY	equal	
 nativesdk-zlib	PN	equal	
 nativesdk-zlib	PV	equal	
 nativesdk-zlib	PR	equal	
 nativesdk-zlib	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 nativesdk-zlib	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 nativesdk-zlib	SRC_URI	equal	
-nativesdk-zlib	DEPENDS	flagged-literal-differs	unevaluated_python; also: a BB_RECIPE_VIRTUAL_PROVIDERS word is left in the static DEPENDS (ast.handleVirtRecipeProviders)
+nativesdk-zlib	DEPENDS	equal	
 nativesdk-zlib	RDEPENDS:nativesdk-zlib	unset	
 nativesdk-zlib	PACKAGECONFIG	unset	
-nativesdk-zlib	PACKAGES	flagged	unevaluated_python
-nativesdk-zlib	FILES:nativesdk-zlib	flagged	unevaluated_python
-nativesdk-zlib	OVERRIDES	flagged-literal-differs	unevaluated_python
+nativesdk-zlib	PACKAGES	equal-ws	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write PACKAGES
+nativesdk-zlib	FILES:nativesdk-zlib	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write FILES:nativesdk-zlib
+nativesdk-zlib	OVERRIDES	gap:variant-layername	via ${FILE_LAYERNAME}: bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 nativesdk-zlib	MACHINEOVERRIDES	equal	
 nativesdk-zlib	DISTROOVERRIDES	equal	
-nativesdk-zlib	S	flagged	unevaluated_python
-nativesdk-zlib	B	flagged	unevaluated_python
-nativesdk-zlib	WORKDIR	flagged	unevaluated_python
+nativesdk-zlib	S	equal	
+nativesdk-zlib	B	equal	
+nativesdk-zlib	WORKDIR	equal	
 nativesdk-zlib	LICENSE	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write LICENSE
 nativesdk-zlib	INHERIT	equal	
 nativesdk-zlib	PROVIDES	equal	
-nativesdk-zlib	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of DISABLE_STATIC applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+nativesdk-zlib	EXTRA_OECONF	equal	
 nativesdk-zlib	EXTRA_OECMAKE	unset	
-nativesdk-zlib	CFLAGS	flagged	unevaluated_python
-nativesdk-zlib	FILESPATH	flagged	unevaluated_python
+nativesdk-zlib	CFLAGS	equal	
+nativesdk-zlib	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 nativesdk-zlib	MACHINE	equal	
 nativesdk-zlib	DISTRO	equal	
 nativesdk-zlib	TMPDIR	equal	
 nativesdk-zlib	BBCLASSEXTEND	equal	
 nativesdk-zlib	CVE_PRODUCT	equal	
-nativesdk-zlib	DESCRIPTION	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write DESCRIPTION; which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known staticall...
+nativesdk-zlib	DESCRIPTION	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write DESCRIPTION
 nativesdk-zlib	HOMEPAGE	equal	
-nativesdk-zlib	LDFLAGS	equal	flagged: which override variant or conditional :append/:prepend/:remove of TARGET_LDFLAGS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+nativesdk-zlib	LDFLAGS	equal	
 nativesdk-zlib	LIC_FILES_CHKSUM	equal	
 nativesdk-zlib	PREMIRRORS	equal	
-nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write RDEPENDS:nativesdk-zlib-ptest; which override variant or conditional :append/:prepend/:remove of RDEPENDS:nativesdk-zlib-ptest applies depends on OVERRIDES ...
-nativesdk-zlib	SECTION	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write SECTION; which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@o...
-nativesdk-zlib	SUMMARY	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write SUMMARY; which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@o...
+nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write RDEPENDS:nativesdk-zlib-ptest
+nativesdk-zlib	SECTION	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write SECTION
+nativesdk-zlib	SUMMARY	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write SUMMARY
 nativesdk-zlib	UPSTREAM_CHECK_URI	equal	
 quilt-native	PN	equal	
 quilt-native	PV	equal	
 quilt-native	PR	equal	
 quilt-native	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 quilt-native	FILE_LAYERNAME	equal	
-quilt-native	SRC_URI	equal	flagged: which override variant or conditional :append/:prepend/:remove of SRC_URI applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-quilt-native	DEPENDS	equal-ws	flagged: which override variant or conditional :append/:prepend/:remove of DEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:rem...
+quilt-native	SRC_URI	equal	
+quilt-native	DEPENDS	equal	
 quilt-native	RDEPENDS:quilt-native	equal	
 quilt-native	PACKAGECONFIG	unset	
-quilt-native	PACKAGES	flagged	unevaluated_python
-quilt-native	FILES:quilt-native	flagged	unevaluated_python
-quilt-native	OVERRIDES	flagged	unevaluated_python
+quilt-native	PACKAGES	equal	
+quilt-native	FILES:quilt-native	equal	
+quilt-native	OVERRIDES	equal	
 quilt-native	MACHINEOVERRIDES	equal	
 quilt-native	DISTROOVERRIDES	equal	
-quilt-native	S	flagged	unevaluated_python
-quilt-native	B	flagged	unevaluated_python
-quilt-native	WORKDIR	flagged	unevaluated_python
+quilt-native	S	equal	
+quilt-native	B	equal	
+quilt-native	WORKDIR	equal	
 quilt-native	LICENSE	equal	
 quilt-native	INHERIT	equal	
 quilt-native	PROVIDES	equal	
-quilt-native	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of USRBINPATH applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:...
+quilt-native	EXTRA_OECONF	equal	
 quilt-native	EXTRA_OECMAKE	unset	
-quilt-native	CFLAGS	flagged	unevaluated_python
-quilt-native	FILESPATH	flagged	unevaluated_python
+quilt-native	CFLAGS	equal	
+quilt-native	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 quilt-native	MACHINE	equal	
 quilt-native	DISTRO	equal	
 quilt-native	TMPDIR	equal	
 quilt-native	CACHED_CONFIGUREVARS	equal	
 quilt-native	CLEANBROKEN	equal	
-quilt-native	DESCRIPTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-quilt-native	FILES	equal	flagged: which override variant or conditional :append/:prepend/:remove of FILES applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-quilt-native	FILES:quilt-native-doc	flagged	unevaluated_python
+quilt-native	DESCRIPTION	equal	
+quilt-native	FILES	equal	
+quilt-native	FILES:quilt-native-doc	equal	
 quilt-native	HOMEPAGE	equal	
 quilt-native	INHIBIT_AUTOTOOLS_DEPS	equal	
 quilt-native	LIC_FILES_CHKSUM	equal	
-quilt-native	PACKAGE_WRITE_DEPS	flagged	unevaluated_python
+quilt-native	PACKAGE_WRITE_DEPS	equal	
 quilt-native	PATCHTOOL	equal	
-quilt-native	RDEPENDS:quilt-native-ptest	equal	flagged: which override variant or conditional :append/:prepend/:remove of RDEPENDS:quilt-native-ptest applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-quilt-native	SECTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-quilt-native	SUMMARY	equal	flagged: which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	RDEPENDS:quilt-native-ptest	equal	
+quilt-native	SECTION	equal	
+quilt-native	SUMMARY	equal	
 expat	PN	equal	
 expat	PV	equal	
 expat	PR	equal	

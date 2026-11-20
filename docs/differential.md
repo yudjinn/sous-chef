@@ -65,6 +65,11 @@ cargo test --release --test differential -- --ignored --nocapture
   SOUS_CHEF_DIFF_WS=kirkstone scripts/differential.sh
   SOUS_CHEF_DIFF_NO_BITBAKE=1 SOUS_CHEF_DIFF_DIR=... cargo test --release --test differential -- --ignored
   ```
+- **Build host** (since build-host): `build_arch` / `build_os` in a `.ws` file give the
+  static side `sous-chef.toml [build_host]` (`arch`, `os`), set to the dumps' `BUILD_ARCH`
+  / `BUILD_OS` (`x86_64`, `linux` in every recorded dump); the summary's
+  `[build_host]:` line says what was used. `SOUS_CHEF_DIFF_NO_BUILD_HOST=1` measures
+  without it.
 
 ## Other releases: Scarthgap and Kirkstone (acc-releases)
 
@@ -278,6 +283,58 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
 - **Workspace level**: bbappend order agrees for all 26 recipes (`optee-os` fixed, bug 2);
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
+
+## After build-host
+
+Re-run on 2026-11-20 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/build-host/`, release build), after `sous-chef.toml
+[build_host]` was added (bitbake-semantics.md, "The build host from `sous-chef.toml`"):
+the `.ws` files give `build_arch = x86_64`, `build_os = linux`, the `BUILD_ARCH` /
+`BUILD_OS` of every recorded dump (`runs/differential/env/*.env`,
+`runs/acc-releases/{scarthgap,kirkstone}/env/*.env`, `runs/real-checks/scarthgap-mc/env/`).
+"Before" is the same tree without the setting (`runs/build-host/before/`): it reproduced the
+recorded outputs of acc-anon-models byte for byte. "equal" counts equal and equal after
+whitespace; "of which flagged" is part of it.
+
+| | compared | equal | of which flagged | flagged | flagged, literal differs | known gap | bug |
+|---|---|---|---|---|---|---|---|
+| Wrynose, before | 1090 | 1002 | 32 | 30 | 5 | 53 | **0** |
+| Wrynose, `[build_host]` | 1090 | 1023 | 17 | 7 | 2 | 58 | **0** |
+| Scarthgap, before | 1186 | 1139 | 30 | 37 | 7 | 3 | **0** |
+| Scarthgap, `[build_host]` | 1186 | 1159 | 17 | 17 | 5 | 5 | **0** |
+| Kirkstone, before | 1145 | 1075 | 30 | 64 | 5 | 1 | **0** |
+| Kirkstone, `[build_host]` | 1145 | 1097 | 16 | 42 | 5 | 1 | **0** |
+
+Every value whose class changed is on `gmp-native`, `nativesdk-zlib` or `quilt-native`.
+Became equal and certain: `WORKDIR`, `S`, `B`, `CFLAGS`, `FILESPATH` (Scarthgap,
+Kirkstone), `FILES:<pn>`, the native `OVERRIDES` where the recipe is a `-native` file
+(quilt-native everywhere, gmp-native and nativesdk-zlib on Kirkstone), quilt-native
+`PACKAGES` and (Wrynose) `PACKAGE_WRITE_DEPS`, and Wrynose `nativesdk-zlib` `DEPENDS`
+(literal differs before: the nativesdk filter now maps a certain value). Became a known gap
+and no longer flagged, each checked in `report.txt`: the variants' `OVERRIDES` on Wrynose
+and Scarthgap are `gap:variant-layername` (BitBake's dump has `layer-${FILE_LAYERNAME}`,
+the static side `layer-core`; the rest of the text is the same, `linux:x86-64:pn-...`), and
+Wrynose `FILESPATH` of the three is `gap:layerdir-canonical` (the same paths through
+bitbake-setup's `layers/` symlinks). No value became certain and different. The image
+histories now read `populate_sdk_ext.bbclass` as BitBake's do (`IMGCLASSES`'s `SDK_OS`
+test evaluates): `workspace.txt` lists no file only in BitBake's history on Wrynose and
+Kirkstone.
+
+What stays flagged on the native targets is not the host: `nativesdk.bbclass`'s anonymous
+python (it writes per-package variables through computed names: `FILES:nativesdk-zlib`,
+`LICENSE`, `SUMMARY`, `DESCRIPTION`, `SECTION`, `RDEPENDS:nativesdk-zlib-ptest`,
+`PACKAGES`, and on Scarthgap / Kirkstone `PROVIDES`), the older `ClassExtender`'s
+`map_depends_variable` (`nativesdk-zlib` `DEPENDS`, literal differs, Scarthgap /
+Kirkstone), `native.bbclass`'s `map_dependencies` (`gmp-native` `PACKAGES`, literal
+differs, and `FILES:gmp-native`, Scarthgap / Kirkstone), and on Scarthgap / Kirkstone a
+handler or class filter on `gmp-native` `DEPENDS`. The rest of the flagged values are on
+other targets and unchanged (busybox `configmangle`, glib-2.0 `EXTRA_OEMESON`, Kirkstone's
+`SRCPV`, ...).
+
+The Scarthgap multiconfig differential (`differential_scarthgap_mc`) was not re-run: its
+static side needs `conf/multiconfig/musl.conf` in the live build directory, which was
+removed after real-checks, and this change writes nothing there. Its recorded outputs are
+unchanged (measured without `[build_host]`).
 
 ## After acc-anon-models
 

@@ -9,6 +9,9 @@ dumps = runs/acc-releases/scarthgap
 recorded = differential-scarthgap
 machine = qemux86-64
 distro = poky
+# sous-chef.toml [build_host]: the dumps' BUILD_ARCH / BUILD_OS (build-host)
+build_arch = x86_64
+build_os = linux
 # autotools, meson, cmake, plain make
 recipes = curl zlib openssl ncurses bash util-linux glib-2.0 dbus expat
 # python: the interpreter, setuptools / pep517 (flit) modules

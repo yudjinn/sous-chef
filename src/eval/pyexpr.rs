@@ -23,7 +23,11 @@
 //!   slice `x[a:b]` (no step) of a list or a string, bounds integers, booleans or `None`;
 //! - the string methods `split()` / `split(sep)`, `strip()` / `strip(chars)`,
 //!   `replace(old, new)`, `startswith(s)`, `endswith(s)`, `lower()`, `upper()` (ASCII text
-//!   only), `sep.join(list)`.
+//!   only), `sep.join(list)`;
+//! - exactly `os.uname()[4]` and `os.uname()[0].lower()` (OE-core's `BUILD_ARCH` /
+//!   `BUILD_OS`), whose values come from `sous-chef.toml [build_host]` ([`Env::host`]);
+//!   not given there, they stop with [`Stop::Uncertain`] naming the key. The host
+//!   sous-chef runs on is never read.
 //!
 //! A python error (an `AttributeError` on `None`, an `IndexError`, a `ValueError` in
 //! `to_boolean`) is never reproduced: evaluation stops with [`Stop::Unsupported`], since BitBake
@@ -69,6 +73,49 @@ pub trait Env {
     fn inherits_class(&mut self, _klass: &str) -> Result<bool, Stop> {
         Err(unsupported("bb.data.inherits_class here"))
     }
+    /// What the build host's `os.uname()` gives for `read`: only from `sous-chef.toml
+    /// [build_host]`, never from the host sous-chef runs on. By default not known.
+    fn host(&mut self, read: HostRead) -> Result<String, Stop> {
+        Err(host_unknown(read))
+    }
+}
+
+/// A read of the build host's `os.uname()` the subset knows (OE-core `bitbake.conf`,
+/// Kirkstone to Wrynose: `BUILD_ARCH := "${@os.uname()[4]}"`,
+/// `BUILD_OS := "${@os.uname()[0].lower()}"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostRead {
+    /// `os.uname()[4]`: the machine (`uname -m`), `[build_host] arch`.
+    Arch,
+    /// `os.uname()[0].lower()`: the system name lowered, `[build_host] os`.
+    OsLower,
+}
+
+impl HostRead {
+    /// The code as written.
+    pub fn code(self) -> &'static str {
+        match self {
+            HostRead::Arch => "os.uname()[4]",
+            HostRead::OsLower => "os.uname()[0].lower()",
+        }
+    }
+
+    /// The `[build_host]` key that gives it.
+    pub fn key(self) -> &'static str {
+        match self {
+            HostRead::Arch => "arch",
+            HostRead::OsLower => "os",
+        }
+    }
+}
+
+/// Why a host read is not evaluated when `[build_host]` does not give it.
+pub fn host_unknown(read: HostRead) -> Stop {
+    Stop::Uncertain(format!(
+        "{} is the build host's, which sous-chef does not read; give [build_host] {} in sous-chef.toml",
+        read.code(),
+        read.key()
+    ))
 }
 
 /// A python value of the subset.
@@ -585,6 +632,8 @@ pub struct Expr(Node);
 #[derive(Debug, Clone, PartialEq)]
 enum Node {
     Lit(PyVal),
+    /// `os.uname()[4]` or `os.uname()[0].lower()` ([`Env::host`]).
+    Host(HostRead),
     List(Vec<Node>),
     Call {
         func: Func,
@@ -627,7 +676,7 @@ impl Expr {
 impl Node {
     fn funcs(&self, out: &mut Vec<Func>) {
         match self {
-            Node::Lit(_) => {}
+            Node::Lit(_) | Node::Host(_) => {}
             Node::List(v) | Node::Tuple(v) => v.iter().for_each(|n| n.funcs(out)),
             Node::Call { func, args, kwargs } => {
                 if !out.contains(func) {
@@ -1016,6 +1065,7 @@ impl Parser {
                             Ok(Node::Lit(PyVal::D))
                         }
                     }
+                    "os" => self.host_read(),
                     "bb" | "oe" => {
                         self.eat_op(".")?;
                         let module = self.name()?;
@@ -1043,6 +1093,45 @@ impl Parser {
                 }
             }
             Tok::Op(o) => Err(unsupported(format!("`{o}`"))),
+        }
+    }
+
+    /// After the name `os`: exactly `.uname()[4]` or `.uname()[0].lower()` ([`HostRead`]).
+    /// `os.uname()[0]` not lowered is refused: `[build_host] os` gives the lowered name only,
+    /// its case is not known. Any other `os.` name or `uname()` field is outside the subset.
+    fn host_read(&mut self) -> Result<Node, Stop> {
+        self.eat_op(".")?;
+        let f = self.name()?;
+        if f != "uname" {
+            return Err(unsupported(format!("os.{f} is not on the allowlist")));
+        }
+        self.eat_op("(")?;
+        self.eat_op(")")?;
+        let field = match (self.peek(), self.peek_at(1), self.peek_at(2)) {
+            (Some(Tok::Op("[")), Some(Tok::Int(i)), Some(Tok::Op("]"))) => *i,
+            _ => {
+                return Err(unsupported(
+                    "os.uname() other than os.uname()[4] or os.uname()[0].lower()",
+                ));
+            }
+        };
+        self.pos += 3;
+        match field {
+            4 => Ok(Node::Host(HostRead::Arch)),
+            0 if self.is_op(".")
+                && matches!(self.peek_at(1), Some(Tok::Name(n)) if n == "lower")
+                && matches!(self.peek_at(2), Some(Tok::Op("(")))
+                && matches!(self.peek_at(3), Some(Tok::Op(")"))) =>
+            {
+                self.pos += 4;
+                Ok(Node::Host(HostRead::OsLower))
+            }
+            0 => Err(unsupported(
+                "os.uname()[0] not lowered (its case is not known; [build_host] os gives os.uname()[0].lower())",
+            )),
+            i => Err(unsupported(format!(
+                "os.uname()[{i}] (only [4] and [0].lower() can be given in [build_host])"
+            ))),
         }
     }
 
@@ -1186,6 +1275,7 @@ fn node_candidates(n: &Node, env: &mut dyn Env, out: &mut Vec<String>, depth: us
 fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
     match n {
         Node::Lit(v) => Ok(v.clone()),
+        Node::Host(h) => env.host(*h).map(PyVal::Str),
         Node::List(items) => Ok(PyVal::List(
             items
                 .iter()
@@ -2333,6 +2423,8 @@ mod tests {
         defined: Vec<ClassFn>,
         /// `__inherit_cache` as class names; `None`: not certain.
         inherits: Option<Vec<String>>,
+        /// `[build_host]` arch and os.
+        host: (Option<String>, Option<String>),
     }
 
     impl Env for Vars {
@@ -2366,6 +2458,67 @@ mod tests {
                 None => Err(Stop::Uncertain("inherits".into())),
             }
         }
+        fn host(&mut self, read: HostRead) -> Result<String, Stop> {
+            match read {
+                HostRead::Arch => self.host.0.clone(),
+                HostRead::OsLower => self.host.1.clone(),
+            }
+            .ok_or_else(|| host_unknown(read))
+        }
+    }
+
+    /// build-host: `os.uname()[4]` and `os.uname()[0].lower()` (OE-core `bitbake.conf`'s
+    /// `BUILD_ARCH` / `BUILD_OS`) evaluate to `[build_host]` when it gives them, and stay
+    /// unevaluated (uncertain, naming the key) when not. No other `os` read parses.
+    #[test]
+    fn host_reads_come_from_build_host_only() {
+        let mut e = env(&[("TARGET_ARCH", "x86_64")]);
+        for code in ["os.uname()[4]", "os.uname()[0].lower()"] {
+            let r = run(code, &mut e);
+            assert!(
+                matches!(&r, Err(Stop::Uncertain(w)) if w.contains("give [build_host]")),
+                "{code}: {r:?}"
+            );
+        }
+        e.host = (Some("x86_64".into()), Some("linux".into()));
+        assert_eq!(run("os.uname()[4]", &mut e).unwrap(), "x86_64");
+        assert_eq!(run(" os.uname()[0].lower() ", &mut e).unwrap(), "linux");
+        assert_eq!(
+            run("os.uname()[4].replace('_', '-')", &mut e).unwrap(),
+            "x86-64"
+        );
+        assert_eq!(
+            run("os.uname()[0].lower().upper()", &mut e).unwrap(),
+            "LINUX"
+        );
+        assert_eq!(
+            run("'linux' in os.uname()[0].lower()", &mut e).unwrap(),
+            "True"
+        );
+        // Not given by `[build_host]`, or not `os.uname()` at all: outside the subset.
+        for code in [
+            "os.uname()[0]",
+            "os.uname()[1]",
+            "os.uname()[2]",
+            "os.uname()",
+            "os.uname()[-1]",
+            "os.uname().machine",
+            "os.uname()[4:]",
+            "os.getcwd()",
+            "os.getuid()",
+            "os.environ",
+            "os",
+        ] {
+            let r = run(code, &mut e);
+            assert!(matches!(r, Err(Stop::Unsupported(_))), "{code}: {r:?}");
+        }
+        // Only arch given: os stays unknown.
+        e.host = (Some("aarch64".into()), None);
+        assert_eq!(run("os.uname()[4]", &mut e).unwrap(), "aarch64");
+        assert!(matches!(
+            run("os.uname()[0].lower()", &mut e),
+            Err(Stop::Uncertain(_))
+        ));
     }
 
     fn env(pairs: &[(&str, &str)]) -> Vars {

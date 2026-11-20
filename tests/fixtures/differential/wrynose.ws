@@ -10,6 +10,10 @@ dumps = runs/differential
 recorded = differential
 machine = dogbonedark
 distro = kiss
+# sous-chef.toml [build_host] for the static side: the dumps' BUILD_ARCH / BUILD_OS
+# (build-host; leave out to measure without it)
+build_arch = x86_64
+build_os = linux
 recipes = curl sl linux-kiss u-boot-kiss kiss-image packagegroup-core-boot
 recipes = zlib openssl busybox dropbear ncurses dbus systemd-boot util-linux
 recipes = gmp-native nativesdk-zlib quilt-native expat glib-2.0 base-files

@@ -1,9 +1,7 @@
 
-## Files in the history (983 variables without overrides; same set of files: 981)
+## Files in the history (983 variables without overrides; same set of files: 983)
 
 ### Files only in BitBake's history (file, count, first uses)
-{{LIVE}}/releases/kirkstone/openembedded-core/meta/classes/populate_sdk_base.bbclass	2	core-image-minimal:PACKAGES core-image-minimal:B
-{{LIVE}}/releases/kirkstone/openembedded-core/meta/classes/populate_sdk_ext.bbclass	1	core-image-minimal:B
 ### Files only in the static history (file, count, first uses)
 
 ## Layers (bitbake-layers show-layers vs Workspace::discover)

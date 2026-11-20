@@ -686,7 +686,7 @@ core-image-minimal	SRC_URI	equal
 core-image-minimal	DEPENDS	flagged	unevaluated_python
 core-image-minimal	RDEPENDS:core-image-minimal	unset	
 core-image-minimal	PACKAGECONFIG	unset	
-core-image-minimal	PACKAGES	equal	flagged: an inherit at meta:classes/image.bbclass:19 could not be followed exactly (python in IMGCLASSES); populate_sdk_base, populate_sdk_ext, which it may read and sous-chef did not, would change PACKAGES
+core-image-minimal	PACKAGES	equal	
 core-image-minimal	FILES:core-image-minimal	equal	
 core-image-minimal	OVERRIDES	equal	
 core-image-minimal	MACHINEOVERRIDES	equal	
@@ -957,79 +957,79 @@ quilt-native	PV	equal
 quilt-native	PR	equal	
 quilt-native	FILE	equal	
 quilt-native	FILE_LAYERNAME	unset	
-quilt-native	SRC_URI	equal	flagged: which override variant or conditional :append/:prepend/:remove of SRC_URI applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-quilt-native	DEPENDS	equal	flagged: which override variant or conditional :append/:prepend/:remove of BASEDEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	SRC_URI	equal	
+quilt-native	DEPENDS	equal	
 quilt-native	RDEPENDS:quilt-native	equal	
 quilt-native	PACKAGECONFIG	unset	
-quilt-native	PACKAGES	flagged	unevaluated_python
-quilt-native	FILES:quilt-native	flagged	unevaluated_python
-quilt-native	OVERRIDES	flagged	unevaluated_python
+quilt-native	PACKAGES	equal	
+quilt-native	FILES:quilt-native	equal	
+quilt-native	OVERRIDES	equal	
 quilt-native	MACHINEOVERRIDES	equal	
 quilt-native	DISTROOVERRIDES	equal	
-quilt-native	S	flagged	unevaluated_python
-quilt-native	B	flagged	unevaluated_python
-quilt-native	WORKDIR	flagged	unevaluated_python
+quilt-native	S	equal	
+quilt-native	B	equal	
+quilt-native	WORKDIR	equal	
 quilt-native	LICENSE	equal	
 quilt-native	INHERIT	equal	
 quilt-native	PROVIDES	equal	
-quilt-native	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of USRBINPATH applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:...
+quilt-native	EXTRA_OECONF	equal	
 quilt-native	EXTRA_OECMAKE	unset	
-quilt-native	CFLAGS	flagged	unevaluated_python
-quilt-native	FILESPATH	flagged	unevaluated_python
+quilt-native	CFLAGS	equal	
+quilt-native	FILESPATH	equal	
 quilt-native	MACHINE	equal	
 quilt-native	DISTRO	equal	
 quilt-native	TMPDIR	equal	
 quilt-native	CACHED_CONFIGUREVARS	equal	
 quilt-native	CLEANBROKEN	equal	
-quilt-native	DESCRIPTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	DESCRIPTION	equal	
 quilt-native	EXTRA_AUTORECONF	equal	
-quilt-native	FILES	equal	flagged: which override variant or conditional :append/:prepend/:remove of FILES applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-quilt-native	FILES:quilt-native-doc	flagged	unevaluated_python
+quilt-native	FILES	equal	
+quilt-native	FILES:quilt-native-doc	equal	
 quilt-native	HOMEPAGE	equal	
 quilt-native	INHIBIT_AUTOTOOLS_DEPS	equal	
 quilt-native	LIC_FILES_CHKSUM	equal	
 quilt-native	PATCHTOOL	equal	
-quilt-native	RDEPENDS:quilt-native-ptest	equal	flagged: which override variant or conditional :append/:prepend/:remove of RDEPENDS:quilt-native-ptest applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-quilt-native	SECTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-quilt-native	SUMMARY	equal	flagged: which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	RDEPENDS:quilt-native-ptest	equal	
+quilt-native	SECTION	equal	
+quilt-native	SUMMARY	equal	
 gmp-native	PN	equal	
 gmp-native	PV	equal	
 gmp-native	PR	equal	
 gmp-native	FILE	equal	
 gmp-native	FILE_LAYERNAME	unset	
 gmp-native	SRC_URI	equal	
-gmp-native	DEPENDS	equal-ws	flagged: python that is not run (an event handler or class filter) may change DEPENDS; which override variant or conditional :append/:prepend/:remove of BASEDEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os....
+gmp-native	DEPENDS	equal-ws	flagged: python that is not run (an event handler or class filter) may change DEPENDS
 gmp-native	RDEPENDS:gmp-native	unset	
 gmp-native	PACKAGECONFIG	equal	
 gmp-native	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set native.bbclass:158 [map_dependencies]
 gmp-native	FILES:gmp-native	flagged	unevaluated_python
-gmp-native	OVERRIDES	flagged	unevaluated_python
+gmp-native	OVERRIDES	equal	
 gmp-native	MACHINEOVERRIDES	equal	
 gmp-native	DISTROOVERRIDES	equal	
-gmp-native	S	flagged	unevaluated_python
-gmp-native	B	flagged	unevaluated_python
-gmp-native	WORKDIR	flagged	unevaluated_python
+gmp-native	S	equal	
+gmp-native	B	equal	
+gmp-native	WORKDIR	equal	
 gmp-native	LICENSE	equal	
 gmp-native	INHERIT	equal	
 gmp-native	PROVIDES	equal	
-gmp-native	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of EXTRA_OECONF applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend...
+gmp-native	EXTRA_OECONF	equal	
 gmp-native	EXTRA_OECMAKE	unset	
-gmp-native	CFLAGS	flagged	unevaluated_python
-gmp-native	FILESPATH	flagged	unevaluated_python
+gmp-native	CFLAGS	equal	
+gmp-native	FILESPATH	equal	
 gmp-native	MACHINE	equal	
 gmp-native	DISTRO	equal	
 gmp-native	TMPDIR	equal	
 gmp-native	ARM_INSTRUCTION_SET	unset	
 gmp-native	BBCLASSEXTEND	equal	
-gmp-native	DESCRIPTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
-gmp-native	FILES	equal	flagged: which override variant or conditional :append/:prepend/:remove of FILES applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+gmp-native	DESCRIPTION	equal	
+gmp-native	FILES	equal	
 gmp-native	HOMEPAGE	equal	
 gmp-native	LIC_FILES_CHKSUM	equal	
 gmp-native	MIPS_INSTRUCTION_SET	equal	
 gmp-native	REVISION	equal	
-gmp-native	SECTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+gmp-native	SECTION	equal	
 gmp-native	SSTATE_SCAN_FILES	equal	
-gmp-native	SUMMARY	equal	flagged: which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+gmp-native	SUMMARY	equal	
 gmp-native	acpaths	equal	
 nativesdk-zlib	PN	equal	
 nativesdk-zlib	PV	equal	
@@ -1040,32 +1040,32 @@ nativesdk-zlib	SRC_URI	equal
 nativesdk-zlib	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: rename (to) classextend.py:103 [map_depends_variable]; set classextend.py:104 [map_depends_variable]; append classextend.py:105 [map_depends_variable]
 nativesdk-zlib	RDEPENDS:nativesdk-zlib	unset	
 nativesdk-zlib	PACKAGECONFIG	unset	
-nativesdk-zlib	PACKAGES	flagged	unevaluated_python
+nativesdk-zlib	PACKAGES	equal-ws	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write PACKAGES
 nativesdk-zlib	FILES:nativesdk-zlib	flagged	unevaluated_python
-nativesdk-zlib	OVERRIDES	flagged	unevaluated_python
+nativesdk-zlib	OVERRIDES	equal	
 nativesdk-zlib	MACHINEOVERRIDES	equal	
 nativesdk-zlib	DISTROOVERRIDES	equal	
-nativesdk-zlib	S	flagged	unevaluated_python
-nativesdk-zlib	B	flagged	unevaluated_python
-nativesdk-zlib	WORKDIR	flagged	unevaluated_python
+nativesdk-zlib	S	equal	
+nativesdk-zlib	B	equal	
+nativesdk-zlib	WORKDIR	equal	
 nativesdk-zlib	LICENSE	equal	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write LICENSE
 nativesdk-zlib	INHERIT	equal	
 nativesdk-zlib	PROVIDES	equal-ws	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write PROVIDES
-nativesdk-zlib	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of DISABLE_STATIC applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+nativesdk-zlib	EXTRA_OECONF	equal	
 nativesdk-zlib	EXTRA_OECMAKE	unset	
-nativesdk-zlib	CFLAGS	flagged	unevaluated_python
-nativesdk-zlib	FILESPATH	flagged	unevaluated_python
+nativesdk-zlib	CFLAGS	equal	
+nativesdk-zlib	FILESPATH	equal	
 nativesdk-zlib	MACHINE	equal	
 nativesdk-zlib	DISTRO	equal	
 nativesdk-zlib	TMPDIR	equal	
 nativesdk-zlib	BBCLASSEXTEND	equal	
 nativesdk-zlib	CVE_CHECK_IGNORE	equal	
-nativesdk-zlib	DESCRIPTION	equal	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write DESCRIPTION; which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@...
+nativesdk-zlib	DESCRIPTION	equal	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write DESCRIPTION
 nativesdk-zlib	HOMEPAGE	equal	
 nativesdk-zlib	LIC_FILES_CHKSUM	equal	
-nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write RDEPENDS:nativesdk-zlib-ptest; which override variant or conditional :append/:prepend/:remove of RDEPENDS:nativesdk-zlib-ptest applies depends on OVERRIDES entries...
-nativesdk-zlib	SECTION	equal	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write SECTION; which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname...
-nativesdk-zlib	SUMMARY	equal	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write SUMMARY; which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname...
+nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write RDEPENDS:nativesdk-zlib-ptest
+nativesdk-zlib	SECTION	equal	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write SECTION
+nativesdk-zlib	SUMMARY	equal	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write SUMMARY
 nativesdk-zlib	UPSTREAM_CHECK_URI	equal	
 htop	PN	equal	
 htop	PV	equal	

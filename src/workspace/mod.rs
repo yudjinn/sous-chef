@@ -9,7 +9,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::config::Config;
+use crate::config::{BuildHost, Config};
 use crate::error::{Error, Result};
 use crate::release::{self, LintReach, Release, ReleaseInfo};
 use crate::types::{LineSpan, Loc};
@@ -27,6 +27,10 @@ pub struct Workspace {
     pub release: ReleaseInfo,
     /// The kas project, when this is one ([`kas::detect`]); `None` otherwise.
     pub kas: Option<kas::KasProject>,
+    /// `sous-chef.toml [build_host]`: the build host's `os.uname()` values the evaluator
+    /// uses; empty when not configured (those values stay unknown).
+    #[serde(skip_serializing_if = "BuildHost::is_empty")]
+    pub build_host: BuildHost,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -219,6 +223,7 @@ impl Workspace {
             layers: found,
             release,
             kas,
+            build_host: cfg.build_host.clone(),
         })
     }
 

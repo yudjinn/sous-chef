@@ -76,6 +76,10 @@ struct Ws {
     requires: Vec<String>,
     /// Variables compared for every recipe besides [`VARS`].
     vars: Vec<String>,
+    /// `build_arch` / `build_os`: the build host's `os.uname()` values the dumps record
+    /// (`BUILD_ARCH`, `BUILD_OS`), given to sous-chef as `sous-chef.toml [build_host]`.
+    /// Left out: not given (the host values stay flagged).
+    build_host: sous_chef::config::BuildHost,
 }
 
 impl Ws {
@@ -105,6 +109,8 @@ impl Ws {
                 "probe" => ws.probe.extend(v.split_whitespace().map(str::to_string)),
                 "requires" => ws.requires.extend(v.split_whitespace().map(str::to_string)),
                 "vars" => ws.vars.extend(v.split_whitespace().map(str::to_string)),
+                "build_arch" => ws.build_host.arch = Some(v.to_string()),
+                "build_os" => ws.build_host.os = Some(v.to_string()),
                 _ => {}
             }
         }
@@ -652,8 +658,13 @@ fn workspace(w: &Ws) -> (Workspace, Index) {
     let mut cfg = Config {
         build_dir: Some(b.clone()),
         work_dir: b,
+        build_host: w.build_host.clone(),
         ..Config::default()
     };
+    // `SOUS_CHEF_DIFF_NO_BUILD_HOST`: measure without `[build_host]` (the "before" column).
+    if std::env::var_os("SOUS_CHEF_DIFF_NO_BUILD_HOST").is_some() {
+        cfg.build_host = Default::default();
+    }
     cfg.bitbake.enabled = false;
     let ws = Workspace::discover(&cfg).expect("discovering the live workspace");
     let mut idx = Index::open_in(&work_dir(w).join("cache"), &ws).unwrap();
@@ -1239,6 +1250,13 @@ fn run(live: &Path, w: &Ws) {
             w.distro
         );
     }
+    let _ = writeln!(
+        report,
+        "[build_host]: {}\n",
+        ws.build_host
+            .describe()
+            .unwrap_or_else(|| "not set".to_string())
+    );
     let _ = writeln!(
         report,
         "recipe\tcompared\tequal\tequal-ws\tflagged\tgap\tbug\tunset-both\tnot-printed\tnote"

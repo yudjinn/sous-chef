@@ -118,6 +118,10 @@ pub struct ReplayNotes {
     /// `BB_RECIPE_VIRTUAL_PROVIDERS` rewrite of `DEPENDS`.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub var_notes: BTreeMap<String, Vec<String>>,
+    /// `sous-chef.toml [build_host]` (`Workspace::build_host`): what python's
+    /// `os.uname()[4]` / `os.uname()[0].lower()` evaluate to; empty: not known.
+    #[serde(skip_serializing_if = "crate::config::BuildHost::is_empty")]
+    pub build_host: crate::config::BuildHost,
     /// Anonymous python functions, in parse order (configuration classes included: BitBake
     /// runs those for every recipe too).
     pub anonymous: Vec<AnonPython>,
@@ -489,7 +493,8 @@ impl ProbeResult {
 const MAX_COMBINATIONS: usize = 64;
 
 /// `os.uname()[0]` or `os.uname()[4]` (optionally `.lower()`): the host's system name or
-/// machine (`BUILD_OS`, `BUILD_ARCH`), which sous-chef never evaluates. Taken to be one
+/// machine (`BUILD_OS`, `BUILD_ARCH`), which sous-chef evaluates only from `sous-chef.toml
+/// [build_host]` (then this is never met: the python evaluates). Taken to be one
 /// token without whitespace or `/`: Linux reports `Linux` and the kernel's architecture
 /// name (`x86_64`, `aarch64`, `armv7l`). This is a property of the host, not of BitBake
 /// (docs/bitbake-semantics.md, "References that cannot be followed exactly").
@@ -599,12 +604,14 @@ pub struct ConfigCache {
     passes: AtomicU64,
 }
 
+/// Index file, workspace key, machine, distro, multiconfig, `[build_host]`.
 type CacheKey = (
     PathBuf,
     String,
     Option<String>,
     Option<String>,
     Option<String>,
+    crate::config::BuildHost,
 );
 
 #[derive(Debug)]
@@ -853,6 +860,7 @@ fn cached_configuration(
         target.machine.clone(),
         target.distro.clone(),
         target.mc.clone(),
+        ws.build_host.clone(),
     );
     if let Some(e) = cache.lock().get(&key)
         && e.fingerprint == files.fingerprint(e.ds.files())
@@ -2426,6 +2434,10 @@ impl<'a> Replay<'a> {
         recipe_pass: bool,
         pins: Vec<(&'static str, String)>,
     ) -> Replay<'a> {
+        let mut ds = ds;
+        if ds.notes.build_host != ws.build_host {
+            Arc::make_mut(&mut ds.notes).build_host = ws.build_host.clone();
+        }
         Replay {
             index,
             ws,
@@ -2767,6 +2779,7 @@ impl<'a> Replay<'a> {
         self.tainted(base, &st.overrides);
         if op == AssignOp::Immediate && !st.legacy {
             self.immediate_through_effects(base, &st.overrides, st.value.as_deref().unwrap_or(""));
+            self.host_note(base, &st.loc, st.value.as_deref().unwrap_or(""));
         }
         let exported = is_exported(st);
         let overrides = var.overrides.clone();
@@ -2793,6 +2806,40 @@ impl<'a> Replay<'a> {
             .get(base.as_str())
             .and_then(|v| v.content.clone());
         self.after_write(base, &overrides, flag.as_deref(), before != after);
+    }
+
+    /// A `:=` whose text reads the build host's `os.uname()` (`BUILD_ARCH := "${@os.uname()[4]}"`)
+    /// stores the value `[build_host]` gives, if it gives it: a note on the variable says so,
+    /// since the stored text no longer shows the python. Nothing when `[build_host]` is
+    /// empty (the python stays in the text, flagged, and the flag's cause names the key).
+    fn host_note(&mut self, base: &str, loc: &Loc, value: &str) {
+        let host = &self.ds.notes.build_host;
+        let Some(desc) = host.describe() else {
+            return;
+        };
+        let used: Vec<&str> = [
+            (super::pyexpr::HostRead::Arch, host.arch.is_some()),
+            (super::pyexpr::HostRead::OsLower, host.os.is_some()),
+        ]
+        .into_iter()
+        .filter(|(r, given)| *given && value.contains(r.code()))
+        .map(|(r, _)| r.code())
+        .collect();
+        if used.is_empty() {
+            return;
+        }
+        let line = format!(
+            "note: {} in the := at {loc} is the build host's, taken from sous-chef.toml [build_host] ({desc}), not read from any host",
+            used.join(" and ")
+        );
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        let e = notes
+            .var_notes
+            .entry(base_of(base).to_string())
+            .or_default();
+        if !e.contains(&line) {
+            e.push(line);
+        }
     }
 
     /// A `:=` stores its value expanded now, so a flag that comes from a reference effect

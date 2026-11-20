@@ -74,6 +74,12 @@ pub trait Source {
     fn inherits_class(&self, _klass: &str) -> Option<bool> {
         None
     }
+
+    /// The build host's `os.uname()` value for `read`, from `sous-chef.toml [build_host]`;
+    /// `None` when not given.
+    fn host(&self, _read: pyexpr::HostRead) -> Option<String> {
+        None
+    }
 }
 
 /// One `${@...}` the expansion met: evaluated statically or left, and why.
@@ -480,6 +486,12 @@ impl pyexpr::Env for ExpEnv<'_, '_> {
 
     fn class_fn(&mut self, f: ClassFn) -> Result<(), Stop> {
         self.src.class_fn(f).map_err(Stop::Unsupported)
+    }
+
+    fn host(&mut self, read: pyexpr::HostRead) -> Result<String, Stop> {
+        self.src
+            .host(read)
+            .ok_or_else(|| pyexpr::host_unknown(read))
     }
 
     fn inherits_class(&mut self, klass: &str) -> Result<bool, Stop> {
