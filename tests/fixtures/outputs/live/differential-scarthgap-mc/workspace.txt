@@ -1,0 +1,48 @@
+
+## Files in the history (560 variables without overrides; same set of files: 558)
+
+### Files only in BitBake's history (file, count, first uses)
+{{LIVE}}/releases/scarthgap/openembedded-core/meta/classes-recipe/populate_sdk_ext.bbclass	2	core-image-minimal:B mc:musl:core-image-minimal:B
+### Files only in the static history (file, count, first uses)
+
+## Layers (bitbake-layers show-layers vs Workspace::discover)
+bitbake: 4 layers, static: 4 layers
+same	core	{{LIVE}}/releases/scarthgap/openembedded-core/meta	5	| static: Some(("core", "{{LIVE}}/releases/scarthgap/openembedded-core/meta", 5))
+same	yocto	{{LIVE}}/releases/scarthgap/meta-yocto/meta-poky	5	| static: Some(("yocto", "{{LIVE}}/releases/scarthgap/meta-yocto/meta-poky", 5))
+same	yoctobsp	{{LIVE}}/releases/scarthgap/meta-yocto/meta-yocto-bsp	5	| static: Some(("yoctobsp", "{{LIVE}}/releases/scarthgap/meta-yocto/meta-yocto-bsp", 5))
+same	openembedded-layer	{{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe	5	| static: Some(("openembedded-layer", "{{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe", 5))
+
+## bbappend order (bitbake-layers show-appends vs query::appends_for)
+listed twice by show-appends (second listing skipped): ["linux-yocto_6.6.bb"]
+same	base-files_3.0.14.bb	1 bbappend(s)
+same	busybox_1.36.1.bb	1 bbappend(s)
+same	formfactor_0.0.bb	1 bbappend(s)
+same	linux-yocto-dev.bb	1 bbappend(s)
+same	linux-yocto_6.6.bb	1 bbappend(s)
+same	psplash_git.bb	1 bbappend(s)
+same	xserver-xf86-config_0.1.bb	1 bbappend(s)
+
+## Recipe files (index vs workspace::resolve::recipe_files)
+indexed .bb: 1890; matched by BBFILES: 1872
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/openembedded-core/meta/lib/bblayers/templates/example.bb (evaluate("example"): error: not found: recipe example; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/gnome-layer/recipes-graphics/openbox/openbox-xdgmenu_0.3.bb (evaluate("openbox-xdgmenu"): error: not found: recipe openbox-xdgmenu; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-bsp/rwmem/rwmem_1.2.bb (evaluate("rwmem"): error: not found: recipe rwmem; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-connectivity/lirc/lirc_0.10.2.bb (evaluate("lirc"): error: not found: recipe lirc; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-connectivity/netplan/netplan_1.0.bb (evaluate("netplan"): error: not found: recipe netplan; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-connectivity/thingsboard-gateway/thingsboard-gateway_3.4.6.bb (evaluate("thingsboard-gateway"): error: not found: recipe thingsboard-gateway; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-dbs/mongodb/mongodb_git.bb (evaluate("mongodb"): error: not found: recipe mongodb; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-devtools/nanopb/nanopb-generator_0.4.8.bb (evaluate("nanopb-generator"): error: not found: recipe nanopb-generator; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-devtools/nanopb/nanopb-runtime_0.4.8.bb (evaluate("nanopb-runtime"): error: not found: recipe nanopb-runtime; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-devtools/nanopb/nanopb.bb (evaluate("nanopb"): error: not found: recipe nanopb; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-extended/lcdproc/lcdproc_git.bb (evaluate("lcdproc"): error: not found: recipe lcdproc; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-multimedia/kmsxx/kmsxx_git.bb (evaluate("kmsxx"): error: not found: recipe kmsxx; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-support/nvmetcli/nvmetcli_0.7.bb (evaluate("nvmetcli"): error: not found: recipe nvmetcli; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/meta-python/recipes-support/smem/smem_1.5.bb (evaluate("smem"): error: not found: recipe smem; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/perl-layer/recipes-support/rasdaemon/rasdaemon_0.8.0.bb (evaluate("rasdaemon"): error: not found: recipe rasdaemon; list recipes with the recipe tool)
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/selinux/recipes-devtool/android-tools/android-tools-conf-configfs_1.0.bb (evaluate("android-tools-conf-configfs"): succeeds, FILE = "{{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/recipes-devtools/android-tools/android-tools-conf-configfs_1.0.bb")
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/selinux/recipes-devtool/android-tools/android-tools-conf_1.0.bb (evaluate("android-tools-conf"): succeeds, FILE = "{{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/recipes-devtools/android-tools/android-tools-conf_1.0.bb")
+indexed but not matched by BBFILES: {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/dynamic-layers/selinux/recipes-devtool/android-tools/android-tools_29.0.6.r14.bb (evaluate("android-tools"): succeeds, FILE = "{{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/recipes-devtools/android-tools/android-tools_5.1.1.r37.bb")
+
+## Configuration without an explicit machine and distro
+MACHINE = Some(Value { text: "qemux86-64", unevaluated_python: false, unresolved: [] })
+DISTRO = Some(Value { text: "poky", unevaluated_python: false, unresolved: [] })

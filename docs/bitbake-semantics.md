@@ -1732,9 +1732,36 @@ variant only by the evaluated `PN`. Only the words `native`, `nativesdk` and
 
 Read for x5 in BitBake **2.18.0** (`yocto-kiss/bitbake`, branch `2.18`) and, read-only from
 the same repository, the `2.0` (Kirkstone) and `2.8` (Scarthgap) branches; OE-core
-`wrynose`, `scarthgap` and `kirkstone`; kas **5.5**. Not checked against a running BitBake:
-the live workspace has no multiconfig and no BitBake was run for this (see "Not yet
-verified").
+`wrynose`, `scarthgap` and `kirkstone`; kas **5.5**. **Checked against a running BitBake
+on Scarthgap** (real-checks, 2026-11-20; BitBake 2.8.1, parse only): the release workspace
+with `BBMULTICONFIG = "musl"` and `<build>/conf/multiconfig/musl.conf` (`TCLIBC = "musl"`,
+`TMPDIR = "${TOPDIR}/tmp-musl"`), `bitbake -e` of zlib, curl, busybox, quilt-native,
+core-image-minimal and virtual/libc in both configurations, and `bitbake-getvar`
+(`tests/fixtures/outputs/live/differential-scarthgap-mc/`,
+`tests/fixtures/outputs/live/real-checks/multiconfig/`). Confirmed: `BB_CURRENT_MC` is
+`default` in the default configuration and `musl` in the other; the default
+configuration's include history has OE-core's empty `meta/conf/multiconfig/default.conf`
+right after `local.conf` and before the machine conf (the Scarthgap `require`); the
+multiconfig file is found in `<build>/conf/multiconfig/` through `BBPATH` (`TCLIBC`'s
+history in the musl dump: `set <build>/conf/multiconfig/musl.conf:2`, after
+`bitbake.conf:394`'s `??=`, as the static history has it); `TCLIBC`, `TMPDIR`, `WORKDIR`
+(`tmp-musl/work/core2-64-poky-linux-musl/...`), `TARGET_SYS`, `PREFERRED_PROVIDER_virtual/libc`
+(`musl`, from `tclibc-musl.inc`) and the provider `bitbake -e mc:musl:virtual/libc` chose
+(`musl_git.bb`) per configuration; the flag `do_install[mcdepends] = "${MCDEP}"` (with
+`MCDEP:pn-curl` set) is expanded per recipe (`bitbake-getvar -f mcdepends`: the entry for
+curl, empty for zlib) and is set in both configurations' curl alike (BitBake adds the
+dependency only in the one it names first). **New, seen**: `bitbake -e mc:<name>:<recipe>`
+prints `FILE_LAYERNAME` as `None`, so `OVERRIDES` holds a literal `layer-${FILE_LAYERNAME}`:
+`showEnvironment` (2.8 and 2.18 `cooker.py`) takes the recipe's file name from
+`buildTaskData`, which in a multiconfig is the virtual name `mc:<name>:<file>`, and
+`calc_bbfile_priority` matches no `BBFILE_PATTERN` against it (the same as for a
+`virtual:native:` variant). A build parses the real file name (`CookerParser`), and
+`bitbake-getvar -r mc:musl:curl FILE_LAYERNAME` (tinfoil) printed `core`. **Also seen**:
+the include history `bitbake -e mc:<name>:<recipe>` prints is the default
+configuration's (`showEnvironment` emits `self.data.inchistory`, not the multiconfig
+datastore's): it lists `multiconfig/default.conf`, not `musl.conf`, so the place of the
+multiconfig file cannot be read from it (the variable histories do show the file). Not
+checked: the rest of "Not yet verified".
 
 **Reading `BBMULTICONFIG`, and one parse per configuration** (`lib/bb/cookerdata.py`
 `CookerDataBuilder.parseBaseConfiguration`, the same on 2.0, 2.8 and 2.18):
@@ -3539,15 +3566,13 @@ These are reported, never silently guessed. Authoritative mode (M5) covers them.
 Statements above that rest on documentation, memory or the source alone, not on a check
 against BitBake's behaviour or output:
 
-- Multiconfig (x5, "Multiconfig"): all of it, from the BitBake 2.0 / 2.8 / 2.18, OE-core and
-  kas 5.5 source and fixture tests (`tests/multiconfig.rs`); the live workspace has no
-  multiconfig and BitBake was not run. A parse-only run on a workspace with two
-  multiconfigs (`bitbake -e mc:<name>:<recipe>` and `bitbake -e mc:<name>`, no task) would
-  confirm: the multiconfig file's place in the include history (after `conf/local.conf`,
-  before the machine conf); `BB_CURRENT_MC`; which `?=` wins between `local.conf`, the
-  multiconfig file and the machine conf; `MACHINE`, `TMPDIR`, a `PREFERRED_PROVIDER_*` and a
-  machine-overridden recipe variable per configuration; a task's expanded `mcdepends`; and
-  BitBake's errors for an unknown name and for a listed name without a file.
+- Multiconfig (x5, "Multiconfig"): checked on Scarthgap only (real-checks, one
+  multiconfig `musl` with `TCLIBC` and `TMPDIR`; see that section). Still from the source
+  alone: Kirkstone and Wrynose (the Wrynose python `require`, `BB_CURRENT_MC = ""`), two
+  or more multiconfigs, a multiconfig that sets `MACHINE` (so another machine conf), which
+  `?=` wins between `local.conf`, the multiconfig file and the machine conf, `bitbake -e
+  mc:<name>` (configuration only), and BitBake's errors for an unknown name and for a
+  listed name without a file.
 - kas: `layers` null and `{}`, the `KAS_*` overrides, what `kas shell -k` does (before the
   first checkout and with `{repo, file}` includes), the YAML 1.1 rules and `kas-container`
   were settled from the kas 5.5 and PyYAML 6.0.3 source (see "kas"), not by running kas

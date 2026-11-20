@@ -103,6 +103,17 @@ the provider `virtual/kernel`; bootloader `u-boot`; image `core-image-minimal`;
 (cmake), `protobuf`. `@default` probe: `curl`, `virtual/kernel` (MACHINE and DISTRO from
 `local.conf`; equal to the explicit rows on both releases).
 
+**A multiconfig (real-checks, 2026-11-20).** `differential_scarthgap_mc`
+(`tests/fixtures/differential/scarthgap-mc.ws`) runs the Scarthgap workspace with a second
+configuration `musl` (`TCLIBC`, `TMPDIR`) on six targets in both configurations, a recipe
+written `mc:musl:<recipe>` being dumped with `bitbake -e mc:musl:<recipe>` and evaluated
+with `Target::mc`: 659 values, 600 equal, 46 flagged, 2 `gap:python-at-parse`, 11
+`gap:variant-layername` (BitBake's `-e` of a multiconfig recipe has `FILE_LAYERNAME`
+`None`, as for a variant), 0 bugs; summary in
+`tests/fixtures/outputs/live/differential-scarthgap-mc/`, details in live-verification.md
+("Multiconfig against a real BitBake"). The multiconfig was removed from the workspace
+afterwards, so the test returns at once unless the files its `.ws` lists are put back.
+
 ### Totals
 
 | | compared | equal (+ws) | flagged (literal differs) | known gap | **bug** | equal but flagged |

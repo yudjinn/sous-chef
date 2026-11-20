@@ -1,0 +1,28 @@
+== bitbake -e mc:musl:zlib: lines 1-16 of the include history (the default configuration's: default.conf, not musl.conf)
+# INCLUDE HISTORY:
+#
+# {{LIVE}}/releases/scarthgap/build/conf/bblayers.conf
+# {{LIVE}}/releases/scarthgap/openembedded-core/meta/conf/layer.conf
+# {{LIVE}}/releases/scarthgap/meta-yocto/meta-poky/conf/layer.conf
+# {{LIVE}}/releases/scarthgap/meta-yocto/meta-yocto-bsp/conf/layer.conf
+# {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe/conf/layer.conf
+# conf/bitbake.conf includes:
+#   {{LIVE}}/releases/scarthgap/openembedded-core/meta/conf/abi_version.conf
+#   conf/site.conf
+#   conf/auto.conf
+#   {{LIVE}}/releases/scarthgap/build/conf/local.conf
+#   {{LIVE}}/releases/scarthgap/openembedded-core/meta/conf/multiconfig/default.conf
+#   {{LIVE}}/releases/scarthgap/openembedded-core/meta/conf/machine/qemux86-64.conf includes:
+#     {{LIVE}}/releases/scarthgap/openembedded-core/meta/conf/machine/include/qemu.inc
+#     {{LIVE}}/releases/scarthgap/openembedded-core/meta/conf/machine/include/x86/tune-x86-64-v3.inc includes:
+== bitbake -e mc:musl:zlib: the TCLIBC block
+# $TCLIBC [3 operations]
+#   set {{LIVE}}/releases/scarthgap/openembedded-core/meta/conf/bitbake.conf:394
+#     [_defaultval] "glibc"
+#   set {{LIVE}}/releases/scarthgap/build/conf/multiconfig/musl.conf:2
+#     "musl"
+#   set {{LIVE}}/releases/scarthgap/openembedded-core/meta/conf/documentation.conf:424
+#     [doc] "Specifies C library (libc) variant to use during the build process. You can select 'baremetal', 'glibc', 'musl' or 'newlib'."
+# pre-expansion value:
+#   "musl"
+TCLIBC="musl"

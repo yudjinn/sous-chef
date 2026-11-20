@@ -1,0 +1,19 @@
+== bitbake -e zlib: the FILE_LAYERNAME block and the OVERRIDES line
+# $FILE_LAYERNAME [2 operations]
+#   set {{LIVE}}/releases/scarthgap/openembedded-core/meta/conf/bitbake.conf:812
+#     [_defaultval] "config"
+#   set cookerdata.py:499 [_parse_recipe]
+#     "core"
+# pre-expansion value:
+#   "core"
+FILE_LAYERNAME="core"
+OVERRIDES="linux:x86-64:pn-zlib:layer-core:qemuall:qemux86-64:poky:class-target:libc-glibc:forcevariable"
+== bitbake -e mc:musl:zlib: the FILE_LAYERNAME block and the OVERRIDES line
+# $FILE_LAYERNAME [2 operations]
+#   set {{LIVE}}/releases/scarthgap/openembedded-core/meta/conf/bitbake.conf:812
+#     [_defaultval] "config"
+#   set cookerdata.py:499 [_parse_recipe]
+#     "None"
+# pre-expansion value:
+#   "None"
+OVERRIDES="linux-musl:x86-64:pn-zlib:layer-\${FILE_LAYERNAME}:qemuall:qemux86-64:poky:class-target:libc-musl:forcevariable"

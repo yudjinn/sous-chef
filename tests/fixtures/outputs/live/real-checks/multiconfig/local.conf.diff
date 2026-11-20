@@ -1,0 +1,7 @@
+8a9,14
+> # real-checks (sous-chef, temporary): a musl multiconfig, and one mcdepends on curl only
+> # (the flag is expanded per recipe; MCDEP_REALCHECKS is empty for every other recipe).
+> BBMULTICONFIG = "musl"
+> MCDEP_REALCHECKS = ""
+> MCDEP_REALCHECKS:pn-curl = "mc::musl:zlib:do_populate_sysroot"
+> do_install[mcdepends] = "${MCDEP_REALCHECKS}"

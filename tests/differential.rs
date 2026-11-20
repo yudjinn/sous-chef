@@ -71,6 +71,11 @@ struct Ws {
     distro: String,
     recipes: Vec<String>,
     probe: Vec<String>,
+    /// Files (relative to the build directory) the run needs; without them it is skipped
+    /// (`scarthgap-mc`: the multiconfig file, which exists only while the check runs).
+    requires: Vec<String>,
+    /// Variables compared for every recipe besides [`VARS`].
+    vars: Vec<String>,
 }
 
 impl Ws {
@@ -98,6 +103,8 @@ impl Ws {
                 "distro" => ws.distro = v.to_string(),
                 "recipes" => ws.recipes.extend(v.split_whitespace().map(str::to_string)),
                 "probe" => ws.probe.extend(v.split_whitespace().map(str::to_string)),
+                "requires" => ws.requires.extend(v.split_whitespace().map(str::to_string)),
+                "vars" => ws.vars.extend(v.split_whitespace().map(str::to_string)),
                 _ => {}
             }
         }
@@ -208,7 +215,9 @@ const GAP_BBCLASSEXTEND: &str = "bbclassextend"; // variants not resolved
 /// `bitbake -e <variant>` parses the virtual file name (`virtual:native:<file>`), which no
 /// `BBFILE_PATTERN` matches, so `FILE_LAYERNAME` is `None` there; a build parses the real
 /// file name and every variant has the layer's name, which the static side gives
-/// (BitBake 2.18.0 `cooker.py` `buildFile` / `CookerParser`, `calc_bbfile_priority`).
+/// (BitBake 2.18.0 `cooker.py` `buildFile` / `CookerParser`, `calc_bbfile_priority`). The
+/// same for `bitbake -e mc:<name>:<recipe>` (real-checks, seen on Scarthgap): the recipe's
+/// file name from `buildTaskData` is `mc:<name>:<file>` (`showEnvironment`, 2.8 and 2.18).
 const GAP_VARIANT_LAYERNAME: &str = "variant-layername";
 
 /// The static `DEPENDS` still holds a `BB_RECIPE_VIRTUAL_PROVIDERS` word, which BitBake
@@ -219,6 +228,9 @@ const VIRT_HINT: &str = "a BB_RECIPE_VIRTUAL_PROVIDERS word is left in the stati
 struct Ctx<'a> {
     bb: &'a EnvDump,
     ds: &'a DataStore,
+    /// Evaluated in a multiconfig (`mc:<name>:<recipe>`): BitBake's dump is of a virtual
+    /// file name, as for a variant.
+    in_mc: bool,
     /// symlinked layer path prefix -> canonical, for `GAP_LAYERDIR`.
     path_map: &'a [(String, String)],
     memo: HashMap<String, (Class, String)>,
@@ -400,7 +412,7 @@ impl Ctx<'_> {
             return (Class::Flagged(ok), why);
         }
         if bb_name == "FILE_LAYERNAME"
-            && self.ds.replay().variant.is_some()
+            && (self.ds.replay().variant.is_some() || self.in_mc)
             && bv.is_some_and(|v| {
                 v.value.is_none()
                     && v.ops
@@ -410,7 +422,7 @@ impl Ctx<'_> {
         {
             return (
                 Class::Gap(GAP_VARIANT_LAYERNAME),
-                "bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build".into(),
+                "bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build".into(),
             );
         }
         if norm_ws(&self.canon(b)) == norm_ws(&self.canon(s)) {
@@ -766,6 +778,12 @@ fn run_recipe(
     };
     let text = fs::read_to_string(dump_path(w, recipe)).unwrap_or_default();
     let bb = envdump::parse_str(&text);
+    // `mc:<name>:<recipe>`: `bitbake -e mc:<name>:<recipe>` on the BitBake side, the
+    // evaluation with `Target::mc` on the static side.
+    let (mc, recipe) = match recipe.strip_prefix("mc:").and_then(|r| r.split_once(':')) {
+        Some((m, r)) => (Some(m.to_string()), r),
+        None => (None, recipe),
+    };
     let mut note = String::new();
     if !bb.stats.found_header || bb.variables.is_empty() {
         let err = fs::read_to_string(format!("{}.err", dump_path(w, recipe).display()))
@@ -779,8 +797,16 @@ fn run_recipe(
     }
     // The static side: a virtual/ name through provider selection, else the name.
     let mut t = target(w, recipe, explicit);
+    t.mc = mc.clone();
     if recipe.starts_with("virtual/") {
-        let p = Providers::new(idx, ws, t.machine.as_deref(), t.distro.as_deref()).unwrap();
+        let p = Providers::new_in(
+            idx,
+            ws,
+            t.machine.as_deref(),
+            t.distro.as_deref(),
+            mc.as_deref(),
+        )
+        .unwrap();
         let set = p.providers(recipe).unwrap();
         match set.selected() {
             Some(sel) => {
@@ -825,6 +851,7 @@ fn run_recipe(
     );
 
     let mut names: Vec<String> = VARS.iter().map(|s| s.to_string()).collect();
+    names.extend(w.vars.iter().cloned());
     for v in own_vars(&ds) {
         if !names.contains(&v) {
             names.push(v);
@@ -833,6 +860,7 @@ fn run_recipe(
     let mut cx = Ctx {
         bb: &bb,
         ds: &ds,
+        in_mc: mc.is_some(),
         path_map: pmap,
         memo: HashMap::new(),
         stack: HashSet::new(),
@@ -1146,7 +1174,24 @@ fn release(name: &str) {
         );
         return;
     }
+    if let Some(missing) = w.requires.iter().find(|r| !w.build.join(r).exists()) {
+        eprintln!(
+            "{} is not there (the workspace is set up for this run only; see the .ws file); skipping",
+            w.build.join(missing).display()
+        );
+        return;
+    }
     run(&live, &w);
+}
+
+/// The Scarthgap workspace with a second configuration, `musl` (real-checks): recipes
+/// written `mc:musl:<recipe>` are dumped with `bitbake -e mc:musl:<recipe>` and evaluated
+/// with `Target::mc`. The multiconfig exists only while the check runs (the .ws file says
+/// what to add); without it this returns at once.
+#[test]
+#[ignore = "needs the live environment: set SOUS_CHEF_LIVE and run with --ignored"]
+fn differential_scarthgap_mc() {
+    release("scarthgap-mc");
 }
 
 #[test]
@@ -1456,6 +1501,114 @@ fn run(live: &Path, w: &Ws) {
         tracked_bugs.is_empty(),
         "bugs on tracked variables: {tracked_bugs:?}"
     );
+}
+
+/// The recorded multiconfig run (real-checks, `differential_scarthgap_mc`; the workspace's
+/// multiconfig was removed afterwards, so this reads the recorded files only): no bug; in
+/// the musl configuration every difference is the one its default counterpart has, or the
+/// `bitbake -e mc:<name>:<recipe>` `FILE_LAYERNAME` gap; what the configuration changes is
+/// equal. And the `var` / `deps` answers recorded beside it agree with `bitbake-getvar`.
+#[test]
+fn recorded_scarthgap_multiconfig() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/outputs/live");
+    let classes = fs::read_to_string(root.join("differential-scarthgap-mc/classes.tsv")).unwrap();
+    let mut class: HashMap<(String, String), String> = HashMap::new();
+    for l in classes.lines().skip(1) {
+        let f: Vec<&str> = l.split('\t').collect();
+        class.insert((f[0].to_string(), f[1].to_string()), f[2].to_string());
+    }
+    assert!(class.values().all(|c| c != "bug"), "{classes}");
+    let mut mc_rows = 0;
+    for ((recipe, var), c) in &class {
+        let Some(base) = recipe.strip_prefix("mc:musl:") else {
+            continue;
+        };
+        mc_rows += 1;
+        // Equal, flagged (the static value says it may differ), or the BitBake-side gap.
+        if matches!(c.as_str(), "equal" | "equal-ws" | "unset")
+            || c.starts_with("flagged")
+            || c == "gap:variant-layername"
+        {
+            continue;
+        }
+        // Any other class only where the default configuration has the same.
+        let def = class
+            .get(&(base.to_string(), var.clone()))
+            .map(String::as_str)
+            .unwrap_or("-");
+        assert_eq!(
+            def, c,
+            "{recipe} {var}: {c} in musl, {def} in the default configuration"
+        );
+    }
+    assert!(mc_rows > 300, "{mc_rows}");
+    for r in [
+        "zlib",
+        "curl",
+        "busybox",
+        "core-image-minimal",
+        "virtual/libc",
+    ] {
+        for v in [
+            "BB_CURRENT_MC",
+            "TCLIBC",
+            "TMPDIR",
+            "TARGET_SYS",
+            "WORKDIR",
+            "PREFERRED_PROVIDER_virtual/libc",
+        ] {
+            let k = (format!("mc:musl:{r}"), v.to_string());
+            assert_eq!(class.get(&k).map(String::as_str), Some("equal"), "{k:?}");
+        }
+    }
+
+    let mc = root.join("real-checks/multiconfig");
+    let getvar = fs::read_to_string(mc.join("bitbake-getvar.out")).unwrap();
+    let tools = fs::read_to_string(mc.join("sous-chef-tools.out")).unwrap();
+    let answer = |cmd: &str| -> String {
+        let at = getvar
+            .find(&format!("$ bitbake-getvar {cmd}\n"))
+            .expect(cmd);
+        getvar[at..].lines().nth(1).unwrap().to_string()
+    };
+    assert_eq!(answer("--value -r mc:musl:curl TCLIBC"), "musl");
+    assert!(tools.contains(
+        "applied\t=\t-\tbuild:conf/multiconfig/musl.conf:2\tTCLIBC = \"musl\"\nfinal: \"musl\""
+    ));
+    // BitBake's `-e` dump had `FILE_LAYERNAME` None in the multiconfig; bitbake-getvar
+    // (a real parse of the recipe file) and the static side say `core`.
+    assert_eq!(answer("--value -r mc:musl:curl FILE_LAYERNAME"), "core");
+    let fl = fs::read_to_string(mc.join("bitbake-e-FILE_LAYERNAME.out")).unwrap();
+    assert!(fl.contains("set cookerdata.py:499 [_parse_recipe]\n#     \"None\""));
+    assert!(
+        tools.contains(
+            "=== 15:13:45 var {\"name\": \"FILE_LAYERNAME\", \"recipe\": \"mc:musl:curl\"}"
+        )
+    );
+    assert!(tools.contains("final: \"core\""));
+    assert_eq!(
+        answer("--value -r mc:musl:zlib WORKDIR"),
+        "{{LIVE}}/releases/scarthgap/build/tmp-musl/work/core2-64-poky-linux-musl/zlib/1.3.1"
+    );
+    assert!(tools.contains(
+        "final: \"{{LIVE}}/releases/scarthgap/build/tmp-musl/work/core2-64-poky-linux-musl/zlib/1.3.1\""
+    ));
+    // The mcdepends flag: its expanded value, where it applies, and the configuration it
+    // names; BitBake sets the flag in both configurations' curl and adds the dependency only
+    // in the one named first (`mc::musl`: the default).
+    let dep = "mc::musl:zlib:do_populate_sysroot";
+    assert_eq!(answer("--value -f mcdepends -r curl do_install"), dep);
+    assert_eq!(
+        answer("--value -f mcdepends -r mc:musl:curl do_install"),
+        dep
+    );
+    assert_eq!(answer("--value -f mcdepends -r zlib do_install"), "");
+    assert!(tools.contains(&format!("final[mcdepends]: \"{dep}\"")));
+    assert!(tools.contains("do_install\t(default)\tmusl\tzlib\tdo_populate_sysroot\tapplies here\tbuild:conf/local.conf:14"));
+    assert!(tools.contains(
+        "do_install\t(default)\tmusl\tzlib\tdo_populate_sysroot\tnot in this configuration"
+    ));
+    assert!(tools.contains("musl\tgit (preferred by layer priority and version)\tselected by PREFERRED_PROVIDER_virtual/libc"));
 }
 
 /// What the classification reads from a dump, through `envdump` (the reader this test used

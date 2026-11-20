@@ -1319,6 +1319,79 @@ BitBake commands of this item, all in `{{LIVE}}/yocto-kiss/build`, one client at
 | `bitbake curl` (bbappend removed) | kas, yocto-kiss files | succeeded, 918 of 919 not rerun |
 | `bitbake -n curl` | kas, yocto-kiss files | 919 not rerun |
 
+### Multiconfig against a real BitBake (Scarthgap, parse only): confirmed, one BitBake quirk
+
+In the Scarthgap release workspace (`{{LIVE}}/releases/scarthgap/build`, BitBake 2.8.1),
+its `conf/` copied first (`runs/real-checks/scarthgap-conf-before/`): `BBMULTICONFIG =
+"musl"` and an `mcdepends` on curl alone appended to `local.conf`
+(`MCDEP_REALCHECKS:pn-curl = "mc::musl:zlib:do_populate_sysroot"`, `do_install[mcdepends]
+= "${MCDEP_REALCHECKS}"`), and `conf/multiconfig/musl.conf` with `TCLIBC = "musl"` and
+`TMPDIR = "${TOPDIR}/tmp-musl"` (recorded in
+`tests/fixtures/outputs/live/real-checks/multiconfig/`). Afterwards the file and directory
+were removed and `local.conf` copied back: `diff -r` against the copy is empty, the five
+files' sha256 as before. BitBake left `build/tmp-musl/` (904 KB).
+
+**The differential with a multiconfig.** `tests/differential.rs` takes a recipe written
+`mc:<name>:<recipe>` (BitBake side: `bitbake -e mc:<name>:<recipe>` through
+`scripts/differential.sh`, unchanged; static side: `Target::mc`, provider selection with
+`Providers::new_in(.., mc)`), extra variables per workspace (`vars =`) and files a run
+needs (`requires =`, so `differential_scarthgap_mc` returns at once now that the
+multiconfig is gone). Workspace `tests/fixtures/differential/scarthgap-mc.ws`: zlib, curl,
+busybox, quilt-native, core-image-minimal and virtual/libc in both configurations (12
+`bitbake -e`, 5.8 to 78 s, the first parsing both configurations), plus `BB_CURRENT_MC`,
+`TCLIBC`, `TCLIBCAPPEND`, `TARGET_SYS`, `MULTIMACH_TARGET_SYS`,
+`PREFERRED_PROVIDER_virtual/libc`, `STAGING_DIR_TARGET`, `SSTATE_DIR`, `DEPLOY_DIR`.
+`show-layers.out` and `show-appends.out` were copied from the acc-releases run (same
+layers) so that no `bitbake-layers` ran. Result
+(`tests/fixtures/outputs/live/differential-scarthgap-mc/`): **659 values, 600 equal, 46
+flagged, 2 `gap:python-at-parse`, 11 `gap:variant-layername`, 0 bugs**. Every variable the
+second configuration changes is equal in all 12 targets (the two `flagged` are
+quilt-native's `TARGET_SYS` / `MULTIMACH_TARGET_SYS`, flagged in both configurations); in
+the musl configuration every other difference is flagged or the same one its default
+counterpart has (busybox's `DEPENDS`, `ua_extend_depends`), except the 11 below.
+
+**BitBake's `-e` of a multiconfig recipe has `FILE_LAYERNAME` `None`** (and so
+`layer-${FILE_LAYERNAME}` in `OVERRIDES`) in all six musl dumps; the static side says
+`core`. `bitbake-getvar -r mc:musl:curl FILE_LAYERNAME` (a real parse) prints `core`: the
+`-e` path looks the layer up by the virtual file name `mc:musl:<file>`, as it does for a
+`virtual:native:` variant (bitbake-semantics.md "Multiconfig"). The harness's
+`gap:variant-layername` now covers both (`Ctx::in_mc`); nothing to fix in sous-chef. Also
+seen: the include history of `bitbake -e mc:musl:zlib` is the default configuration's
+(`multiconfig/default.conf`, not `musl.conf`).
+
+**The tools** (`sous-chef-scarthgap.toml`, static; `tools/calls-mc.json`) against
+`bitbake-getvar` (`tools/getvar-scarthgap.sh`):
+
+| Question | sous-chef | BitBake |
+|---|---|---|
+| `status` | `multiconfigs BBMULTICONFIG = "musl" (build:conf/local.conf:11)`, `multiconfig musl build:conf/multiconfig/musl.conf:1`, `multiconfig_present default meta:conf/multiconfig/default.conf:1 (not in BBMULTICONFIG)` | `bitbake-getvar --value BBMULTICONFIG`: `musl` |
+| `var TCLIBC recipe=curl mc=musl` and `recipe=mc:musl:curl` | `shadowed ??= bitbake.conf:394`, `applied = build:conf/multiconfig/musl.conf:2`, `final: "musl"`, the multiconfig note | `musl`; the dump's history the same two operations |
+| `var TCLIBC recipe=curl` | `glibc` | `glibc` (dump) |
+| `var WORKDIR recipe=mc:musl:zlib` | `<build>/tmp-musl/work/core2-64-poky-linux-musl/zlib/1.3.1` | the same |
+| `var FILE_LAYERNAME recipe=mc:musl:curl` | `core` | `core` (getvar; the `-e` dump: `None`, above) |
+| `var PREFERRED_PROVIDER_virtual/libc mc=musl` | `musl`, `tclibc-musl.inc:9` | `musl` |
+| `deps virtual/libc kind=providers` with and without `mc=musl` | `musl` selected / `glibc` selected | `bitbake -e mc:musl:virtual/libc` parsed `musl_git.bb`, `bitbake -e virtual/libc` `glibc_2.39.bb` |
+| `var do_install[mcdepends] recipe=curl` | `final[mcdepends]: "mc::musl:zlib:do_populate_sysroot"` from `build:conf/local.conf:14` | `bitbake-getvar --value -f mcdepends -r curl do_install`: the same (`-u`: `${MCDEP_REALCHECKS}`) |
+| `deps curl kind=mcdepends` | `do_install (default) musl zlib do_populate_sysroot applies here build:conf/local.conf:14` | the flag above |
+| `deps mc:musl:curl kind=mcdepends` | the same row, `not in this configuration (BitBake adds it only when building in (default))` | `-r mc:musl:curl`: the flag is set there too; `add_mcdepends` adds it only `if mc == frommc` (source) |
+| `deps zlib kind=mcdepends` | `no task of this recipe has an mcdepends flag` | `-r zlib`: the flag is set, expanding to `""` |
+| `var nope mc=nope` | error `multiconfig nope; known: musl` | (not run) |
+
+All agree. Two small things not fixed: `deps zlib kind=mcdepends` says no task "has an
+mcdepends flag" where BitBake has the flag with an empty value (no entry either way); and
+the `kind=mcdepends` answers end with `none changes DEPENDS by name` (the anonymous-python
+note names `DEPENDS` for every kind but runtime and packageconfig, `deps_var` in
+`src/mcp/tools/deps.rs`). Not run: a `bitbake -g` that would show the mc dependency in the
+task graph (only `-e` and `bitbake-getvar` were allowed). Test on the recorded files:
+`tests/differential.rs` `recorded_scarthgap_multiconfig` (normal gate).
+
+BitBake commands of this item, all in `{{LIVE}}/releases/scarthgap/build`, one client at
+a time, parse only: `bitbake -e` of the 12 targets (`scripts/differential.sh`,
+`SOUS_CHEF_DIFF_WS=scarthgap-mc`), and ten `bitbake-getvar` (`--value BBMULTICONFIG`; `-f
+mcdepends` for curl, `-u` for curl, zlib, `mc:musl:curl`; `TCLIBC` and `FILE_LAYERNAME` for
+`mc:musl:curl`, `FILE_LAYERNAME` for curl; `PREFERRED_PROVIDER_virtual/libc` and `WORKDIR`
+for `mc:musl:zlib`).
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,

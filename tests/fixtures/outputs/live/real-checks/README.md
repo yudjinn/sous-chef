@@ -17,3 +17,20 @@ scratch layer through `kas-scratch.yaml`.
 | `diffsigs-curl-do_install.out` | the same for `curl do_install`, run by sous-chef's `sigs` (init-script runner) and taken from the handle it stored (stdout as printed; there was no stderr) |
 | `sigdata-basehashes.out` | `{{LIVE}}/runs/real-checks/tools/sigbase.py` on the stamps directories of zlib and curl: the two newest sigdata files of each task decoded (Python `compression.zstd`), with basehash, taint and `CFLAGS` |
 | `zlib_%.bbappend.txt` | the scratch bbappend (removed from the layer afterwards) |
+
+## multiconfig/
+
+The Scarthgap release workspace (BitBake 2.8.1) with a temporary second configuration;
+its `conf/` was restored afterwards. The differential summary of the same run is in
+`../differential-scarthgap-mc/` (written by `tests/differential.rs`,
+`differential_scarthgap_mc`).
+
+| File | Command / source |
+|---|---|
+| `musl.conf` | the `build/conf/multiconfig/musl.conf` used |
+| `local.conf.diff` | `diff` of the original `build/conf/local.conf` and the one used |
+| `bitbake-e-commands.log` | `scripts/differential.sh` (`SOUS_CHEF_DIFF_WS=scarthgap-mc`): the 12 `bitbake -e` with their time and exit status |
+| `bitbake-e-FILE_LAYERNAME.out` | from `bitbake -e zlib` and `bitbake -e mc:musl:zlib`: the `FILE_LAYERNAME` block and the `OVERRIDES` line |
+| `bitbake-e-mc-excerpts.out` | from `bitbake -e mc:musl:zlib`: the first 16 lines of the include history and the `TCLIBC` block (`tools/mc-excerpts.sh`) |
+| `bitbake-getvar.out` | ten `bitbake-getvar` calls in the workspace's environment (`tools/getvar-scarthgap.sh`), each with its command and exit status |
+| `sous-chef-tools.out` | sous-chef's MCP answers (`tools/mcp.py tools/calls-mc.json`, `sous-chef-scarthgap.toml`, static), **trimmed**: the `warning: anonymous python at ...` lines removed |
