@@ -855,11 +855,78 @@ What the labels say, rule by rule (the reasons are in the labels file):
   `shadowed`, `plus-equals-with-override`, `continuation`, `git-pv`, `include-must-exist`,
   `repeated-logic`, `append-no-space`, `release-removed`, `legacy-syntax`.
 
+After the fixes of this branch, on the same sample (the same 150 findings; 13 of the 15
+false positives are no longer reported, so 137 are left, labelled as before):
+
+| | n | TP | TBU | FP | TP / n | not FP / n |
+|---|---|---|---|---|---|---|
+| all | 137 | 76 | 59 | 2 | 55 % | 99 % |
+| error | 1 | 1 | 0 | 0 | 100 % | 100 % |
+| warning | 56 | 35 | 19 | 2 | 62 % | 96 % |
+| info | 80 | 40 | 40 | 0 | 50 % | 100 % |
+
+Fixed, each with a fixture trimmed from the real file and a test that the rule's true
+positives still fire (`tests/lint_hygiene.rs`, `lint_org.rs`, `lint_override.rs`, the
+`precision*` fixtures): `host-path` (a string compared with `=`, `==`, `!=` in `[` / `[[`
+/ `test` is text), `plus-equals-on-default` (an empty `?=` default is not lost),
+`class-recipe-specific` (a recipe value written as the class's is not lost),
+`append-vs-plus-equals` (not when the file assigns an override variant of the variable),
+`recipe-path` (no "PV defaults to 1.0" when the recipe's static tree sets `PV`),
+`duplicate-versions` (uncollected recipes and same-version files are no versions),
+`inc-has-version-data` (an `.inc` that sets `PV` itself needs two versions of one recipe).
+Messages fixed where the advice was wrong: `override/dead` (a misspelt `append` /
+`prepend` / `remove` is named as such; with a partly known override list the name may
+come from a machine, distro or architecture outside the workspace), `class-location` (a
+class nothing uses may belong in `classes/`), `remove-in-recipe` (a variable the file
+does not set cannot be "left out"; remove through a variable a bbappend can change).
+
+Still false: `class-recipe-specific` on `pypi.bbclass` `S` (`python3-maturin` writes the
+same path with `maturin` for `${PYPI_PACKAGE}`: equal only after expansion, which the rule
+does not do). The other row left, `pypi.bbclass:29` on Scarthgap, now names
+`sip_6.8.6.bb:8` (`SECTION = "devel"`), which the class does replace: true. Not changed,
+and true but unhelpful on these layers: `remove-in-recipe` (510 findings, all 17 sampled
+TBU), `recipe-path`'s directory and local-recipe checks, `override/dead` on real
+architecture overrides, `insane-skip`, `autorev` in `poky-floating-revisions.inc`.
+
+`lint --all` (the same commands, release binary at the branch's end), per rule where the
+count changed:
+
+| Rule | Wrynose | Scarthgap | Kirkstone |
+|---|---|---|---|
+| `org/recipe-path` | 101 -> 74 | 138 -> 117 | 123 -> 106 |
+| `org/class-recipe-specific` | 7 -> 3 | 6 -> 4 | 6 -> 3 |
+| `override/plus-equals-on-default` | 0 | 3 -> 0 | 4 -> 0 |
+| `hygiene/host-path` | 0 | 2 -> 0 | 2 -> 0 |
+| `org/duplicate-versions` | 4 | 5 -> 3 | 5 |
+| `org/inc-has-version-data` | 8 -> 7 | 3 | 4 |
+| `override/append-vs-plus-equals` | 6 -> 5 | 7 -> 6 | 6 -> 5 |
+| total | 646 -> 612 (152 W -> 147 W) | 1176 -> 1145 (428 W -> 421 W) | 1098 -> 1071 (461 W -> 452 W) |
+
+Wrynose's total also drops by one `missing-metadata` info in `meta-scratch`, which another
+check removed from the live workspace between the two runs (1721 -> 1718 files). Every
+removed finding was checked: the 65 `recipe-path` "no version" findings are recipes whose
+own lines or required `.inc` set `PV` (`alsa-state.bb`, `mesa.bb` through `mesa.inc`,
+`tzdata.bb` through `timezone.inc`, meta-arm's `fvp-*.bb`, ...); the `class-recipe-specific`
+ones replace an identical value (`gnomebase` `S`, `native` / `cross-canadian`
+`EXCLUDE_FROM_WORLD`, `systemd-boot-cfg` `PACKAGE_ARCH`, `pypi` `SECTION` on Kirkstone).
+Messages changed, same findings: `override/dead` (all), `remove-in-recipe` (the ones whose
+file does not set the variable), `class-location` (classes nothing uses).
+
+**Kept repeatable:** `tests/lint_precision.rs` (`#[ignore]`, needs `SOUS_CHEF_LIVE`)
+re-lints the three workspaces with the CLI and fails when a TP or TBU row of the labels
+file is no longer reported or a FP row with `fixed = yes` is reported again (rows keyed by
+release, rule and pointer; messages may change); a FP with `fixed = no` is only printed.
+`SOUS_CHEF_PRECISION_BIN` points it at a release binary (about 2.5 minutes for the three
+workspaces). Run against the `2bd568c` binary it fails on exactly the 13 fixed rows.
+
 To extend or re-draw the sample: re-run `runs/lint-precision/run.sh` (or the same `lint
 --all --format json` commands), run `scripts/lint-sample.py` with a new seed or size on the
 three JSON files, label the new rows (TP / FP / TBU and a reason, from the file and the
-release's sources), and append them to `tests/fixtures/lint-precision/labels.tsv`; the
-`lint_precision` live test (below) then holds them.
+release's sources; `fixed = no` for a FP), and append them to
+`tests/fixtures/lint-precision/labels.tsv`; when a fix removes a FP, set its `fixed` to
+`yes`. The `lint_precision` live test (above) then holds them. The helper scripts used
+for this measurement (`run.sh`, `tools/precision.py`, `tools/compare.py`,
+`tools/mark.py`) are in `runs/lint-precision/` of the live environment.
 
 ## Output
 

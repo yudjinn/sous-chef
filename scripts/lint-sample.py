@@ -16,7 +16,7 @@ Findings in a layer named by --exclude-layer are left out before sampling (the l
 workspace's `meta-scratch` is a throwaway layer other checks rewrite).
 
 Output on stdout: the TSV header of tests/fixtures/lint-precision/labels.tsv and one row
-per sampled finding with the label and reason columns empty, then on stderr the strata.
+per sampled finding with the label, fixed and reason columns empty, then on stderr the strata.
 """
 
 import argparse
@@ -25,7 +25,7 @@ import random
 import sys
 from collections import defaultdict
 
-HEADER = ["rule", "release", "pointer", "severity", "label", "reason", "message"]
+HEADER = ["rule", "release", "pointer", "severity", "label", "fixed", "reason", "message"]
 
 
 def main():
@@ -75,7 +75,7 @@ def main():
     for r in rules:
         pool = sorted(by_rule[r])
         for release, pointer, message, sev in sorted(rng.sample(pool, alloc[r])):
-            out.write("\t".join([r, release, pointer, sev, "", "", message]) + "\n")
+            out.write("\t".join([r, release, pointer, sev, "", "", "", message]) + "\n")
         print(f"{r}\t{counts[r]}\t{alloc[r]}", file=sys.stderr)
     print(f"total\t{sum(counts.values())}\t{sum(alloc.values())}\tseed {args.seed}", file=sys.stderr)
 
