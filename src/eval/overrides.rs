@@ -212,6 +212,14 @@ impl Source for Eval<'_> {
     fn inherits_class(&self, klass: &str) -> Option<bool> {
         self.ds.inherits_class_certain(klass)
     }
+
+    fn host(&self, read: super::pyexpr::HostRead) -> Option<String> {
+        let b = &self.ds.notes.build_host;
+        match read {
+            super::pyexpr::HostRead::Arch => b.arch.clone(),
+            super::pyexpr::HostRead::OsLower => b.os.clone(),
+        }
+    }
 }
 
 /// The variables BitBake takes from the environment by default (BitBake 2.18

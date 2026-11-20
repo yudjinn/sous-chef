@@ -203,14 +203,25 @@ pub fn python_eval_notes(log: &eval::overrides::PythonLog) -> Vec<String> {
         1 => "; OVERRIDES, which decides its override variants, needed 1 more".into(),
         n => format!("; OVERRIDES, which decides its override variants, needed {n} more"),
     };
+    // `os.uname()` is evaluated only from `sous-chef.toml [build_host]`: say so.
+    let host = log
+        .own
+        .iter()
+        .chain(&log.overrides)
+        .any(|e| e.evaluated && e.code.contains("os.uname("));
+    let host = if host {
+        "; os.uname() from sous-chef.toml [build_host]"
+    } else {
+        ""
+    };
     if !done.is_empty() {
         out.push(format!(
-            "note: python evaluated statically (pure helpers, exact): {}{in_ovr}",
+            "note: python evaluated statically (pure helpers, exact): {}{in_ovr}{host}",
             list(&done)
         ));
     } else if ovr > 0 {
         out.push(format!(
-            "note: OVERRIDES, which decides its override variants, has python evaluated statically (pure helpers, exact): {}",
+            "note: OVERRIDES, which decides its override variants, has python evaluated statically (pure helpers, exact): {}{host}",
             list(&log.overrides.iter().filter(|e| e.evaluated).collect::<Vec<_>>())
         ));
     }
