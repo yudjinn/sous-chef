@@ -7,13 +7,6 @@ change tool arguments, output formats and configuration keys.
 
 ## [Unreleased]
 
-### Changed
-
-- `override/remove-in-recipe` is info by default, also in recipes, includes and classes
-  (it was a warning there): every finding in a labelled sample of upstream layers was true
-  but unhelpful (docs/lint-rules.md, "Measured precision"). `"override/remove-in-recipe" =
-  "warning"` under `[lint.severity]` in `sous-chef.toml` restores a warning.
-
 ## [0.1.0] - 2026-11-20
 
 The first release: one Rust binary that serves MCP over stdio for Yocto / OpenEmbedded
@@ -111,7 +104,9 @@ compared.
 
 Lint precision, measured on a stratified random sample of 150 `lint --all` findings over the
 three releases ([docs/lint-rules.md](https://github.com/yudjinn/sous-chef/blob/v0.1.0/docs/lint-rules.md), "Measured precision"): 15 false
-positives found, 13 fixed before this release.
+positives found, 13 fixed before this release. `override/remove-in-recipe` is info by
+default because every sampled finding of it was correct but unhelpful on upstream layers;
+`"override/remove-in-recipe" = "warning"` under `[lint.severity]` makes it a warning.
 
 [Unreleased]: https://github.com/yudjinn/sous-chef/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/yudjinn/sous-chef/releases/tag/v0.1.0
