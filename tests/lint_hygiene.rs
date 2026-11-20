@@ -241,7 +241,10 @@ fn host_path_strings_compared_in_a_test_are_text() {
         &[],
     );
     assert_eq!(lines(&found), [21, 22], "{found:#?}");
-    assert!(found.iter().all(|f| f.2.contains("`/usr/lib`")), "{found:#?}");
+    assert!(
+        found.iter().all(|f| f.2.contains("`/usr/lib`")),
+        "{found:#?}"
+    );
     // The rule's own bad fixture is unchanged.
     let bad = check(&HygieneHostPath, "host-path", "bad.bb", "x_1.0.bb", &[]);
     assert_eq!(lines(&bad), [4, 5, 6, 7, 11], "{bad:#?}");

@@ -833,6 +833,7 @@ fn dead_names_a_misspelt_operation() {
         got[0].message
     );
     assert!(got[1].message.contains("(`boardx`?)"), "{}", got[1].message);
+    assert!(got.iter().all(|f| !f.message.contains("  ")), "{:#?}", got);
 }
 
 #[test]

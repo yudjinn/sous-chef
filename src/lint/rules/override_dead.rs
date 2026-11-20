@@ -94,14 +94,20 @@ impl Rule for OverrideDead {
                     // A misspelt operation (`do_install_ptest:aapend` in OE-core wrynose's
                     // python3-wcwidth: lint-precision).
                     Some(c) if OPERATIONS.contains(&c) => format!(
-                        "override `{dead}` in `{name}` looks like a misspelt `:{c}`: as written                          it is an override nothing sets, so this never applies; write `:{c}`"
+                        "override `{dead}` in `{name}` looks like a misspelt `:{c}`: as written \
+                         it is an override nothing sets, so this never applies; write `:{c}`"
                     ),
                     hint if known.partial => format!(
-                        "override `{dead}` in `{name}` is no machine, distro, class, package or                          OVERRIDES entry in this workspace, so it does not apply here; unless a                          machine, distro or architecture outside this workspace sets it, fix the                          name{} or remove the line",
+                        "override `{dead}` in `{name}` is no machine, distro, class, package or \
+                         OVERRIDES entry in this workspace, so it does not apply here; unless a \
+                         machine, distro or architecture outside this workspace sets it, fix the \
+                         name{} or remove the line",
                         hint.map(|c| format!(" (`{c}`?)")).unwrap_or_default()
                     ),
                     hint => format!(
-                        "override `{dead}` in `{name}` is no machine, distro, class, package or                          OVERRIDES entry in the workspace, so this never applies; fix the                          name{} or remove the line",
+                        "override `{dead}` in `{name}` is no machine, distro, class, package or \
+                         OVERRIDES entry in the workspace, so this never applies; fix the \
+                         name{} or remove the line",
                         hint.map(|c| format!(" (`{c}`?)")).unwrap_or_default()
                     ),
                 };

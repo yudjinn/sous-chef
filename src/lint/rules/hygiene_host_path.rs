@@ -386,7 +386,10 @@ mod tests {
         );
         assert!(host_paths("\ttest /usr/lib = \"$x\"").is_empty());
         assert_eq!(host_paths("\tif [ -d /usr/lib ]; then").len(), 1);
-        assert_eq!(host_paths("\tif [ -d /usr/lib -a \"$x\" = y ]; then").len(), 1);
+        assert_eq!(
+            host_paths("\tif [ -d /usr/lib -a \"$x\" = y ]; then").len(),
+            1
+        );
         assert_eq!(host_paths("\techo = /etc/x").len(), 0);
         // A continued command keeps its name.
         let mut cmd = Command::default();

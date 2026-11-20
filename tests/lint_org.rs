@@ -223,7 +223,11 @@ fn recipe_path_no_version_when_a_required_file_sets_pv() {
         "{}",
         messages(&found)
     );
-    assert!(found[0].message.contains("has no version"), "{}", found[0].message);
+    assert!(
+        found[0].message.contains("has no version"),
+        "{}",
+        found[0].message
+    );
 }
 
 #[test]
