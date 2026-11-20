@@ -199,14 +199,8 @@ fn a_kas_file_path_with_a_colon_is_refused() {
 fn dead(pid: &str) -> bool {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        match fs::read_to_string(format!("/proc/{pid}/stat")) {
-            Err(_) => return true,
-            Ok(stat) => {
-                let state = stat.rsplit(')').next().unwrap_or("").trim_start();
-                if state.starts_with('Z') || state.starts_with('X') {
-                    return true;
-                }
-            }
+        if !common::process_alive(pid.trim().parse().unwrap()) {
+            return true;
         }
         if Instant::now() > deadline {
             return false;

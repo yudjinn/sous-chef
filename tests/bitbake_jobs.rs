@@ -144,13 +144,8 @@ async fn wait_for_file(path: &Path) {
 }
 
 fn alive(pid: &str) -> bool {
-    // A zombie still has a /proc entry; check its state.
-    fs::read_to_string(format!("/proc/{pid}/stat"))
-        .map(|s| {
-            s.rsplit_once(')')
-                .is_some_and(|(_, rest)| !rest.trim_start().starts_with('Z'))
-        })
-        .unwrap_or(false)
+    // A zombie still exists; `process_alive` checks its state.
+    common::process_alive(pid.trim().parse().unwrap())
 }
 
 // --- argv ------------------------------------------------------------------------------
