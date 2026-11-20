@@ -88,18 +88,23 @@ override chain.
 ### Accuracy
 
 Static values compared with `bitbake -e` on the same workspace, one machine and distro per
-release, latest run 2026-11-19 ([docs/differential.md](https://github.com/yudjinn/sous-chef/blob/v0.1.0/docs/differential.md), "After
-acc-unfollowed"):
+release, latest run 2026-11-20 ([docs/differential.md](https://github.com/yudjinn/sous-chef/blob/v0.1.0/docs/differential.md), "After
+acc-anon-models"):
 
 | Release | Values compared | Equal to BitBake (+ whitespace only) | Known gap | Differ without a flag |
 |---|---|---|---|---|
-| Wrynose (6.0), yocto-kiss, 23 recipes and 2 variants | 1090 | 967 (+2) | 59 | 0 |
-| Scarthgap (5.0), OE-core, meta-yocto, meta-oe, 28 targets | 1186 | 1098 (+2) | 9 | 0 |
-| Kirkstone (4.0), same layers, 28 targets | 1145 | 1037 (+2) | 7 | 0 |
+| Wrynose (6.0), yocto-kiss, 23 recipes and 2 variants | 1090 | 1000 (+2) | 53 | 0 |
+| Scarthgap (5.0), OE-core, meta-yocto, meta-oe, 28 targets | 1186 | 1137 (+2) | 3 | 0 |
+| Kirkstone (4.0), same layers, 28 targets | 1145 | 1073 (+2) | 1 | 0 |
+| Scarthgap, `mc:musl` and default configuration, 6 targets | 659 | 600 | 13 | 0 |
 
-Every other value that differs is flagged (`depends on python, not evaluated` or an
-unresolved reference); for those, `var` with `authoritative: true` asks BitBake. Functions
-and variable flags were not compared.
+Every other value that differs is flagged, with its cause (`note: uncertain: ...`); for
+those, `var` with `authoritative: true` asks BitBake. Functions and variable flags were not
+compared.
+
+Lint precision, measured on a stratified random sample of 150 `lint --all` findings over the
+three releases ([docs/lint-rules.md](https://github.com/yudjinn/sous-chef/blob/v0.1.0/docs/lint-rules.md), "Measured precision"): 15 false
+positives found, 13 fixed before this release.
 
 [Unreleased]: https://github.com/yudjinn/sous-chef/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/yudjinn/sous-chef/releases/tag/v0.1.0

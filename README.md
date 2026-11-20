@@ -111,31 +111,40 @@ scores of 0.60 against 0.83.
 ### Accuracy
 
 Static answers were compared with `bitbake -e` on the same workspace: on Wrynose, yocto-kiss
-(MACHINE `dogbonedark`, DISTRO `kiss`; 23 recipes and two `BBCLASSEXTEND` variants;
-re-measured for x7-cleanup on the same dumps), and on Scarthgap and Kirkstone, OE-core,
-meta-yocto and meta-oe (MACHINE `qemux86-64`, DISTRO `poky`; 28 targets each, 5 of them
-from meta-oe; acc-releases) ([docs/differential.md](docs/differential.md)):
+(MACHINE `dogbonedark`, DISTRO `kiss`; 23 recipes and two `BBCLASSEXTEND` variants), and on
+Scarthgap and Kirkstone, OE-core, meta-yocto and meta-oe (MACHINE `qemux86-64`, DISTRO
+`poky`; 28 targets each, 5 of them from meta-oe), plus a second configuration (`musl`
+multiconfig) on Scarthgap ([docs/differential.md](docs/differential.md)):
 
 | Release | Values compared | Equal to BitBake | Differ, and flagged | Documented gap | Differ without a flag |
 |---|---|---|---|---|---|
-| Wrynose (6.0) | 1090 | 950 (87%) | 109 | 31 | 0 |
-| Scarthgap (5.0) | 1186 | 1033 (87%) | 150 | 3 | 0 |
-| Kirkstone (4.0) | 1145 | 907 (79%) | 237 | 1 | 0 |
+| Wrynose (6.0) | 1090 | 1002 (92%) | 35 | 53 | 0 |
+| Scarthgap (5.0) | 1186 | 1139 (96%) | 44 | 3 | 0 |
+| Kirkstone (4.0) | 1145 | 1075 (94%) | 69 | 1 | 0 |
+| Scarthgap, `mc:musl` and default | 659 | 600 (91%) | 46 | 13 | 0 |
 
-(Before x1 evaluated the allowlisted python helpers, Wrynose: 702 equal, 357 flagged. The
-first Scarthgap and Kirkstone runs found 2 and 31 values that differed without a flag; the
-release-specific causes were fixed, see differential.md, "Other releases".)
+"Differ without a flag" is the number that matters: a value sous-chef gives as certain has
+never been wrong in these comparisons. A flagged value says why (`note: uncertain: ...`:
+the python it did not run, the reference it could not follow, the anonymous function that
+may write it); for those, `var` with `authoritative: true` asks BitBake. Most flagged values
+left are native and nativesdk variants, whose `OVERRIDES` hold values BitBake takes from the
+build host (`os.uname()`). The Wrynose gaps are paths BitBake spells through
+bitbake-setup's symlinked `layers/` directory and sous-chef through the symlink's target
+(the same files), and `FILE_LAYERNAME`, which `bitbake -e` of a variant or of
+`mc:<name>:<recipe>` shows as unset although a build sets it. Each release was measured with
+one machine and one distro; functions and variable flags were not compared.
 
-A flagged value carries `depends on python, not evaluated` or names an unresolved
-reference; for those, `var` with `authoritative: true` asks BitBake. On Wrynose the 31 gaps
-are 29 paths that BitBake spells through bitbake-setup's symlinked `layers/` directory and
-sous-chef through the symlink's target (the same files), and 2 `FILE_LAYERNAME` values of a
-variant, which `bitbake -e <variant>` shows differently from a build; the release workspaces
-have no symlinks, so only the variant gap (Scarthgap) and one value set by a recipe's
-anonymous python remain. Kirkstone has more flagged values because its work directory holds
-`${EXTENDPE}` (python with `int()`), which flags `WORKDIR`, `S` and `B` in every recipe. Each
-release was measured with one machine and one distro; functions and variable flags were not
-compared.
+(History: the first measurement, before python helpers were evaluated, had 702 of 1090
+equal on Wrynose; the first Scarthgap and Kirkstone runs found 2 and 31 values that differed
+without a flag, all fixed.)
+
+Lint was measured too: a stratified random sample of 150 findings from `lint --all` over the
+three releases, each checked against the BitBake and OE-core source. 15 were false
+positives; 13 are fixed, so 99% of the sampled findings that remain are correct, and a test
+re-checks the labelled sample ([docs/lint-rules.md](docs/lint-rules.md), "Measured
+precision"). Many correct findings on upstream layers are still noise for those layers
+(OE-core does some things on purpose that a product layer should not), which is why
+upstream layers are only linted with `--all`.
 
 ### Speed
 
