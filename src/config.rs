@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
 use crate::handles::Retention;
@@ -29,6 +29,9 @@ pub struct Config {
     /// this order as kas combines `a.yaml:b.yaml` on its command line. Relative to the
     /// file's directory. Empty: kas detection (see `workspace::kas`).
     pub kas: Vec<PathBuf>,
+    /// `[build_host]`: what `os.uname()` gives on the machine that runs BitBake. Unset
+    /// fields stay unknown (the values built from them are flagged).
+    pub build_host: BuildHost,
     pub bitbake: BitbakeConfig,
     pub lint: LintConfig,
     pub output: OutputConfig,
@@ -52,6 +55,7 @@ impl Default for Config {
             init_script: None,
             release: None,
             kas: Vec::new(),
+            build_host: BuildHost::default(),
             bitbake: BitbakeConfig::default(),
             lint: LintConfig::default(),
             output: OutputConfig::default(),
@@ -59,6 +63,74 @@ impl Default for Config {
             handles: HandlesConfig::default(),
             work_dir: PathBuf::from("."),
             config_dir: None,
+        }
+    }
+}
+
+/// `[build_host]`: the two host values OE-core's `bitbake.conf` reads at parse time, as the
+/// host that runs BitBake reports them (`BUILD_ARCH := "${@os.uname()[4]}"`,
+/// `BUILD_OS := "${@os.uname()[0].lower()}"`, the same lines on Kirkstone, Scarthgap and
+/// Wrynose). sous-chef never reads them from the host it runs on, which may not be the
+/// build host: given here, the python subset evaluates `os.uname()[4]` to `arch` and
+/// `os.uname()[0].lower()` to `os`; left out, those expressions stay unevaluated and every
+/// value built from them is flagged. See docs/bitbake-semantics.md, "The host's
+/// `os.uname()`".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BuildHost {
+    /// `os.uname()[4]`, what `uname -m` prints on the build host (`x86_64`, `aarch64`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arch: Option<String>,
+    /// `os.uname()[0].lower()`, what `uname -s` prints on the build host, lowered (`linux`).
+    /// Written with capitals (`Linux`), it is lowered on load; `os.uname()[0]` itself (not
+    /// lowered) stays unknown, since its case is not given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub os: Option<String>,
+}
+
+impl BuildHost {
+    /// Neither value is given.
+    pub fn is_empty(&self) -> bool {
+        self.arch.is_none() && self.os.is_none()
+    }
+
+    /// `arch = "x86_64", os = "linux"`: the values given, for notes and `status`; `None`
+    /// when none is.
+    pub fn describe(&self) -> Option<String> {
+        let parts: Vec<String> = [("arch", &self.arch), ("os", &self.os)]
+            .into_iter()
+            .filter_map(|(k, v)| v.as_ref().map(|v| format!("{k} = {v:?}")))
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(", "))
+    }
+
+    /// Every value that is not one word of the characters a kernel's `uname` fields use
+    /// (ASCII letters, digits, `_`, `.`, `+`, `-`), one message each. `uname -m` output
+    /// with a space (`Power Macintosh`) is refused, and so is anything python's expansion
+    /// would treat as more text to expand (`$`, `{`).
+    pub fn check(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        for (key, what, v) in [
+            ("arch", "uname -m", &self.arch),
+            ("os", "uname -s", &self.os),
+        ] {
+            let Some(v) = v else { continue };
+            let ok = !v.is_empty()
+                && v.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'+' | b'-'));
+            if !ok {
+                problems.push(format!(
+                    "build_host.{key} = {v:?} is not one word: give what `{what}` prints on the host that runs BitBake (letters, digits and _ . + - only, no spaces), or leave it out"
+                ));
+            }
+        }
+        problems
+    }
+
+    /// Lowers `os` (python's `str.lower`, which on ASCII text is ASCII lowering).
+    pub fn normalise(&mut self) {
+        if let Some(o) = self.os.as_mut() {
+            o.make_ascii_lowercase();
         }
     }
 }
@@ -311,6 +383,8 @@ impl Config {
         })?;
         let mut problems = cfg.handles.check();
         problems.extend(cfg.bitbake.check());
+        problems.extend(cfg.build_host.check());
+        cfg.build_host.normalise();
         if !problems.is_empty() {
             return Err(Error::Config {
                 msg: format!("{}: {}", origin.display(), problems.join("; ")),
