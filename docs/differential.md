@@ -322,6 +322,13 @@ unflagged and wrong (the older `ClassExtender.map_depends_variable` was not seen
 write), now fixed: those `map_*` calls flag what they write, which flags one more equal
 value on Scarthgap and on Kirkstone (`nativesdk-zlib` `PROVIDES`).
 
+The final run (`runs/acc-anon-models/final`) reproduces the recorded `classes.tsv` and
+`summary.txt` of all three workspaces unchanged. The other live suites, run with
+`--ignored` on the same tree: `live_verify` 12 passed (one assertion changed:
+`live_curl_static_values_equal_bitbake` expected curl's `DEPENDS` to differ and be flagged;
+it is equal to `bitbake -e curl` and certain now), `audit` 1, `release_diff` 1, `skip_live`
+1, `live_build` 1 passed.
+
 ## After acc-unfollowed
 
 Re-run on 2026-11-19 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,

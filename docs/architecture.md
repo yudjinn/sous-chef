@@ -1582,6 +1582,10 @@ write. `DataStore::rewrite` records a name with overrides under its base and del
 active override variants (BitBake's non-parsing `setVar`). `flag_causes` adds why a model
 did not apply. Tests: `tests/eval_anon_models.rs` against
 `tests/fixtures/anon_models/expected.json` (the real functions, `oracle.py`).
+`replay::python_writes` also counts the older `ClassExtender`'s `map_variable`,
+`map_regexp_variable`, `map_depends_variable` (their literal argument) and
+`rename_packages` (`PACKAGES`) as writes. The native / nativesdk `OVERRIDES` stay uncertain
+(bitbake-semantics.md, the host's `os.uname()`).
 
 ## Errors
 

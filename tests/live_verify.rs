@@ -448,12 +448,15 @@ fn live_curl_static_values_equal_bitbake() {
             );
         }
     }
-    // A value with python outside the subset (`get_base_dep(d)`): different, and flagged.
+    // DEPENDS: `get_base_dep(d)` is evaluated since acc-helpers, and the words anonymous
+    // python adds (`PACKAGECONFIG` through base.bbclass, `virtual/update-alternatives`)
+    // are reproduced since acc-anon-models: equal, and certain.
     let ours = ds.value("DEPENDS").unwrap();
-    assert_ne!(Some(&ours.text), bb.get("DEPENDS"));
+    assert_eq!(Some(&ours.text), bb.get("DEPENDS"));
     assert!(
-        ours.unevaluated_python,
-        "DEPENDS differs but is not flagged"
+        !ours.unevaluated_python && ours.unresolved.is_empty(),
+        "DEPENDS equal but flagged: {:?}",
+        ds.flag_causes("DEPENDS")
     );
 }
 
