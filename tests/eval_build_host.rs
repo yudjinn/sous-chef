@@ -233,3 +233,63 @@ fn the_configuration_cache_is_per_build_host() {
     assert_eq!(certain(&c, "BUILD_SYS"), "aarch64-linux");
     assert_eq!(cache.passes(), 3);
 }
+
+/// `var` says where a host value came from: the `:=` note on `BUILD_ARCH` with
+/// `[build_host]`, the key to set in the uncertain cause without it.
+#[tokio::test]
+async fn var_names_build_host_in_its_notes() {
+    use sous_chef::bitbake::JobTable;
+    use sous_chef::handles::HandleStore;
+    use sous_chef::mcp::Ctx;
+    use sous_chef::mcp::tools::var;
+
+    async fn run(root: &Path, host: BuildHost, name: &str) -> String {
+        let mut config = ws_config(root);
+        config.build_host = host;
+        let cache = tempfile::tempdir().unwrap();
+        let workspace = Workspace::discover(&config).unwrap();
+        let mut index = Index::open_in(cache.path(), &workspace).unwrap();
+        index.refresh(&workspace).unwrap();
+        let handles = HandleStore::open(&index.cache_dir().join("handles")).unwrap();
+        let ctx = Ctx {
+            config,
+            workspace,
+            index: tokio::sync::Mutex::new(index),
+            handles,
+            jobs: JobTable::new(),
+        };
+        var::run(
+            &ctx,
+            var::Args {
+                mc: None,
+                name: name.into(),
+                recipe: Some("hosttool".into()),
+                machine: None,
+                distro: None,
+                authoritative: false,
+                flags: false,
+                budget_tokens: Some(4000),
+                format: None,
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    let (_tmp, root) = host_ws();
+    let out = run(&root, host(Some("x86_64"), Some("linux")), "BUILD_ARCH").await;
+    assert!(
+        out.contains("final: \"x86_64\"")
+            && out.contains("note: os.uname()[4] in the := at meta-core:conf/bitbake.conf:")
+            && out.contains(
+                "is the build host's, taken from sous-chef.toml [build_host] (arch = \"x86_64\", os = \"linux\"), not read from any host"
+            ),
+        "{out}"
+    );
+    let out = run(&root, BuildHost::default(), "BUILD_ARCH").await;
+    assert!(
+        out.contains("give [build_host] arch in sous-chef.toml")
+            && !out.contains("taken from sous-chef.toml"),
+        "{out}"
+    );
+}

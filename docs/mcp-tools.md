@@ -64,6 +64,16 @@ Common to every tool:
   kas file kas/board.yaml:5 (kas project without a build directory; ...)`, from
   `tests/eval_w8.rs`). When nothing sets `MACHINE`, every evaluated view ends with
   `note: no MACHINE is set (...)`: machine-specific values are not applied.
+- **The build host** (since build-host) is not an argument: `sous-chef.toml [build_host]`
+  (`arch`, `os`) gives what `os.uname()[4]` and `os.uname()[0].lower()` are on the machine
+  that runs BitBake, for every evaluation. Without it, `BUILD_ARCH`, `BUILD_OS` and every
+  value built from them (native and nativesdk `OVERRIDES`, `WORKDIR`, `S`, ...) are flagged,
+  the cause naming the key (`os.uname()[4] is the build host's, which sous-chef does not
+  read; give [build_host] arch in sous-chef.toml`). With it, `var BUILD_ARCH` carries `note:
+  os.uname()[4] in the := at meta:conf/bitbake.conf:137 is the build host's, taken from
+  sous-chef.toml [build_host] (arch = "x86_64", os = "linux"), not read from any host`, and
+  a value whose own python read it says `os.uname() from sous-chef.toml [build_host]` in
+  its python note.
 - **Multiconfig** (since x5; bitbake-semantics.md "Multiconfig"). `var`, `overrides`, `deps`
   and `recipe` take `mc` (a name in `BBMULTICONFIG`), and also a recipe written
   `mc:<name>:<recipe>` (or the old `multiconfig:<name>:<recipe>`; both forms naming
@@ -1446,6 +1456,11 @@ says to rerun the command. `status` shows the store's size and the limits.
 
 ### `status`
 No arguments. Workspace roots, the release (`release`, e.g. `wrynose (LAYERSERIES_CORENAMES)`),
+the build host (since build-host; `build_host`: `arch = "x86_64", os = "linux" (sous-chef.toml
+[build_host])`, a value not set named as uncertain, or `not set: os.uname() values
+(BUILD_ARCH, BUILD_OS and what is built from them, native and nativesdk OVERRIDES among
+them) stay uncertain; give [build_host] arch and os in sous-chef.toml`; JSON `build_host
+{arch, os}`, each left out when not set),
 layer count, file counts by kind, index path and age, whether a build directory and a usable
 bitbake environment were found, and the running job if any (`job`, e.g.
 `job:1 task hello running 1s`), and the handle store (`handles`: how many handles it holds,

@@ -493,7 +493,8 @@ impl ProbeResult {
 const MAX_COMBINATIONS: usize = 64;
 
 /// `os.uname()[0]` or `os.uname()[4]` (optionally `.lower()`): the host's system name or
-/// machine (`BUILD_OS`, `BUILD_ARCH`), which sous-chef never evaluates. Taken to be one
+/// machine (`BUILD_OS`, `BUILD_ARCH`), which sous-chef evaluates only from `sous-chef.toml
+/// [build_host]` (then this is never met: the python evaluates). Taken to be one
 /// token without whitespace or `/`: Linux reports `Linux` and the kernel's architecture
 /// name (`x86_64`, `aarch64`, `armv7l`). This is a property of the host, not of BitBake
 /// (docs/bitbake-semantics.md, "References that cannot be followed exactly").

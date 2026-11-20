@@ -35,7 +35,8 @@ and override chain, and it sees layers that `.gitignore` hides from Grep and Glo
 - Values are static. Allowlisted python helpers are evaluated; anything else in `${@...}`
   and anonymous python is not, and the answer says so: then use `var` with
   `authoritative: true` (runs `bitbake -e`), or say the value is uncertain.
-- A note `no MACHINE is set` means pass `machine`. Multiconfig: pass `mc`.
+- A note `no MACHINE is set` means pass `machine`. Multiconfig: pass `mc`. A note
+  `give [build_host] ...` (native values) means the user can set it in `sous-chef.toml`.
 - **`lint` checks conventions and release compatibility, not whether the build works.** No
   finding is not a clean bill of health: its note says what was not checked. When asked
   what is wrong with a layer, also read its recipes.

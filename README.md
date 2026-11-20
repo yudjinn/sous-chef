@@ -114,21 +114,25 @@ Static answers were compared with `bitbake -e` on the same workspace: on Wrynose
 (MACHINE `dogbonedark`, DISTRO `kiss`; 23 recipes and two `BBCLASSEXTEND` variants), and on
 Scarthgap and Kirkstone, OE-core, meta-yocto and meta-oe (MACHINE `qemux86-64`, DISTRO
 `poky`; 28 targets each, 5 of them from meta-oe), plus a second configuration (`musl`
-multiconfig) on Scarthgap ([docs/differential.md](docs/differential.md)):
+multiconfig) on Scarthgap ([docs/differential.md](docs/differential.md)). The first three
+rows were measured with `[build_host]` set to the build host's `x86_64` / `linux`; the
+multiconfig row without it:
 
 | Release | Values compared | Equal to BitBake | Differ, and flagged | Documented gap | Differ without a flag |
 |---|---|---|---|---|---|
-| Wrynose (6.0) | 1090 | 1002 (92%) | 35 | 53 | 0 |
-| Scarthgap (5.0) | 1186 | 1139 (96%) | 44 | 3 | 0 |
-| Kirkstone (4.0) | 1145 | 1075 (94%) | 69 | 1 | 0 |
+| Wrynose (6.0) | 1090 | 1023 (94%) | 9 | 58 | 0 |
+| Scarthgap (5.0) | 1186 | 1159 (98%) | 22 | 5 | 0 |
+| Kirkstone (4.0) | 1145 | 1097 (96%) | 47 | 1 | 0 |
 | Scarthgap, `mc:musl` and default | 659 | 600 (91%) | 46 | 13 | 0 |
 
 "Differ without a flag" is the number that matters: a value sous-chef gives as certain has
 never been wrong in these comparisons. A flagged value says why (`note: uncertain: ...`:
 the python it did not run, the reference it could not follow, the anonymous function that
-may write it); for those, `var` with `authoritative: true` asks BitBake. Most flagged values
-left are native and nativesdk variants, whose `OVERRIDES` hold values BitBake takes from the
-build host (`os.uname()`). The Wrynose gaps are paths BitBake spells through
+may write it); for those, `var` with `authoritative: true` asks BitBake. Native and
+nativesdk variants become exact when `[build_host]` is set in `sous-chef.toml`: their
+`OVERRIDES` hold values BitBake takes from the build host (`os.uname()`), and without the
+setting the flagged values were 30, 37 and 64 (Wrynose, Scarthgap, Kirkstone) instead of 7,
+17 and 42, with no value certain and wrong either way. The Wrynose gaps are paths BitBake spells through
 bitbake-setup's symlinked `layers/` directory and sous-chef through the symlink's target
 (the same files), and `FILE_LAYERNAME`, which `bitbake -e` of a variant or of
 `mc:<name>:<recipe>` shows as unset although a build sets it. Each release was measured with
@@ -512,6 +516,10 @@ init_script = "poky/oe-init-build-env"  # sourced before any bitbake command; de
 release = "scarthgap"                 # default: detected from the core layer
 kas = ["kas/base.yml", "kas/board.yml"]  # a kas project's files, in kas's order; default: detected
 
+[build_host]                          # the machine that runs BitBake; default: not set
+arch = "x86_64"                       # `uname -m` there (os.uname()[4], BUILD_ARCH)
+os = "linux"                          # `uname -s` there, lowered (BUILD_OS)
+
 [bitbake]
 enabled = true                        # false: never run BitBake
 allow_destructive = false             # allow cleansstate, cleanall, devtool reset, devtool finish
@@ -537,7 +545,8 @@ max_age_days = 14                     # drop handles older than this (1 to 3650)
 ```
 
 The flags `--build-dir` and `--layer` replace `build_dir` and `layers`. A `[handles]` value
-out of range, or a `pass_env` name other than `TMPDIR`, is a configuration error; a server whose configuration does not load still
+out of range, a `pass_env` name other than `TMPDIR`, or a `[build_host]` value that is not
+one word (letters, digits, `_ . + -`), is a configuration error; a server whose configuration does not load still
 starts, and every tool and `status` report the error. Details: "Configuration" in
 [docs/architecture.md](docs/architecture.md).
 
@@ -546,6 +555,15 @@ BitBake that is the build output directory, and kas (or a passthrough list) woul
 sous-chef's temporary directory to it, moving the whole build there. `MACHINE`, `DISTRO`,
 `DL_DIR`, `SSTATE_DIR` and the rest of BitBake's passthrough variables reach it as usual.
 `status` says when a `TMPDIR` was set and withheld.
+
+`[build_host]` gives what BitBake reads from the host it runs on at parse time
+(`BUILD_ARCH := "${@os.uname()[4]}"`, `BUILD_OS := "${@os.uname()[0].lower()}"` in
+OE-core's `bitbake.conf`). sous-chef never reads them from its own host, which may not be
+the build host. Unset, those values and everything built from them (`BUILD_SYS`,
+`SDKMACHINE`, and the `OVERRIDES`, `WORKDIR`, `S` and override decisions of every native
+and nativesdk recipe) are flagged uncertain; set, they are exact, and a wrong value makes
+them certain and wrong, so give what `uname -m` and `uname -s` print on the machine that
+runs BitBake. `status` shows the setting.
 
 ### Tools
 

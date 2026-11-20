@@ -425,7 +425,9 @@ host or files (as listed below).
 Not evaluated: `oe.utils.set_intersect` (it returns `" ".join(val1 & val2)`, a set of
 several strings in python's hash order: COMBINED_FEATURES stays flagged), and every other
 function. Those that read the host or the filesystem must never be evaluated statically:
-`os.uname()` (`BUILD_ARCH`, `BUILD_OS`), `oe.utils.cpu_count()` (`PARALLEL_MAKE`,
+`os.uname()` (`BUILD_ARCH`, `BUILD_OS`: only `os.uname()[4]` and `os.uname()[0].lower()`,
+and only from `sous-chef.toml [build_host]`, never from the host sous-chef runs on, see
+"The build host from `sous-chef.toml`"), `oe.utils.cpu_count()` (`PARALLEL_MAKE`,
 `BB_NUMBER_THREADS`), `os.getpid()`, `time.strftime(...)`, `bb.utils.which(...)` (searches
 `PATH` on disk), `oe.utils.read_file(...)`, `get_perl_version(d)` and the other functions
 that open files of the sysroot or the kernel build directory, `bb.fetch.get_checksum_file_list`,
@@ -504,7 +506,8 @@ only for something that can still change it; what follows **cannot**, and does n
   When `OVERRIDES` has entries that are not known statically, any decision on an inactive
   variant may be wrong: flagged, with the cause "which override variant ... depends on
   OVERRIDES entries that are not known statically (`<entry>`)". On yocto-kiss this is
-  every native and nativesdk target (`BUILD_ARCH` is `os.uname()`).
+  every native and nativesdk target (`BUILD_ARCH` is `os.uname()`) unless
+  `[build_host]` gives it.
 - **python in a flag only** (`X[doc] = "${@...}"`): flags are not `_content`.
 
 What does flag: python left in the text (own or of a referenced value); a `:remove` whose
@@ -727,7 +730,11 @@ in all three, for acc-unfollowed (`kiss-image` `DEPENDS` was wrong and unflagged
   that may be read is not certain.
 - **The host's `os.uname()`**: `include conf/machine-sdk/${SDKMACHINE}.conf` with
   `SDKMACHINE ??= "${BUILD_ARCH}"`, `BUILD_ARCH := "${@os.uname()[4]}"`. sous-chef never
-  evaluates `os.uname()`; it takes `os.uname()[0]` and `[4]` (with `.lower()`) to be one
+  reads `os.uname()` of the host it runs on. Since build-host, `sous-chef.toml
+  [build_host]` gives the build host's values (`arch`: `os.uname()[4]`, `os`:
+  `os.uname()[0].lower()`; "The build host from `sous-chef.toml`" below); what follows here
+  applies to a value `[build_host]` does not give. sous-chef takes `os.uname()[0]` and `[4]`
+  (with `.lower()`) to be one
   path component without whitespace (on Linux: `Linux`, and the kernel's architecture name:
   `x86_64`, `aarch64`, `armv7l`). **This is the one assumption about the host, not about
   BitBake.** With it, an `include` / `require` word `<prefix><T><suffix>` reads, for each
@@ -754,10 +761,9 @@ in all three, for acc-unfollowed (`kiss-image` `DEPENDS` was wrong and unflagged
   - *The server's own `os.uname()`*. The server may run on another host than the build (a
     workspace read over the network, a container): a wrong value would be certain and
     wrong. Not done.
-  - *Values set by the user* (`sous-chef.toml`). Exact when set, unchanged when not; it
-    needs a configuration field and an evaluation input outside `src/eval` (`Config`,
-    `Target`, the tools that build a `Target`), so it was left for a change that owns them.
-    Measured on the recorded dumps with `BUILD_ARCH = x86_64`, `BUILD_OS = linux` pinned
+  - *Values set by the user* (`sous-chef.toml`). Exact when set, unchanged when not. Done
+    in build-host (below). Before it, measured on the recorded dumps with `BUILD_ARCH =
+    x86_64`, `BUILD_OS = linux` pinned
     (a local experiment, not kept): flagged values Wrynose 30 to 7 (literal differs 5 to
     2), Scarthgap 37 to 17 (7 to 5), Kirkstone 64 to 42 (5 to 5), and no new unflagged
     difference once the class-extension writes below are flagged (before that fix the
@@ -774,6 +780,48 @@ in all three, for acc-unfollowed (`kiss-image` `DEPENDS` was wrong and unflagged
   / `rename_package_variables` were seen: on the samples `nativesdk-zlib` `DEPENDS` was
   flagged only through the host entries of `OVERRIDES`, and its `PROVIDES` (equal after
   whitespace) not at all; it is flagged now.
+
+- **The build host from `sous-chef.toml`** (build-host). `[build_host] arch` and `os` are
+  what the host that runs BitBake reports; the python subset (`pyexpr`) evaluates exactly
+  `os.uname()[4]` to `arch` and `os.uname()[0].lower()` to `os`, and nothing else of `os`
+  (`os.uname()[0]` not lowered stays unevaluated: `os` gives the lowered name only, and
+  `uname -s` text such as `Linux` is lowered on load as python's `str.lower` does on ASCII).
+  A value not given stays as described above. BitBake computes these once, in the
+  `bitbake.conf` `:=` lines, in the BitBake server process (`os.uname()` of that host);
+  everything else that holds them reads `BUILD_ARCH` / `BUILD_OS` through ordinary
+  metadata, which the replay already follows. The host reads at parse time, checked in
+  `meta/conf/bitbake.conf` and `meta/classes*` of each release (Wrynose
+  `yocto-kiss/openembedded-core`, Scarthgap and Kirkstone `releases/<name>/openembedded-core`):
+
+  | Read | Where | Wrynose | Scarthgap | Kirkstone | Given by `[build_host]` |
+  |---|---|---|---|---|---|
+  | `os.uname()[4]` | `BUILD_ARCH :=`, `bitbake.conf` | 137 | 134 | 130 | yes, `arch` |
+  | `os.uname()[0].lower()` | `BUILD_OS :=`, `bitbake.conf` | 138 | 135 | 131 | yes, `os` |
+  | `time.strftime(..., time.gmtime())` | `DATE :=` / `TIME :=`, `bitbake.conf` | 203-204 | 200-201 | 196-197 | no: the clock, not a property a user can state |
+  | `sys.executable` | `PYTHON =`, `bitbake.conf` | 593 | 574 | 566 | no: the interpreter path of the BitBake process |
+  | `oe.utils.cpu_count()` (`len(os.sched_getaffinity(0))`, clamped) | `BB_NUMBER_THREADS`, `PARALLEL_MAKE`, `XZ_THREADS`, `ZSTD_THREADS ?=`, `bitbake.conf` | 863-876 | 867-880 | 854-867 | no: the affinity of the BitBake process, which `taskset` or a cgroup changes per run |
+  | `os.getuid()` | `HOST_USER_UID :=`, `insane.bbclass` | 1038 | 1099 | 960 | no: the user running BitBake; only QA reads it |
+  | `lsb_distro_identifier(d)` (`/etc/os-release` and friends) | `NATIVELSBSTRING`, `base.bbclass` `ConfigParsed` handler | yes | yes | yes | no: a handler sous-chef does not run (above) |
+
+  `platform.system()` (`sstate.bbclass`), `platform.uname()` (`buildstats.bbclass`),
+  `socket.gethostname()` (`icecc.bbclass`) and the `os.environ` reads are in task or event
+  code, not parse-time values. What becomes certain with `arch` / `os` given, checked on all
+  three releases (the same text): `BUILD_ARCH`, `BUILD_OS`, `BUILD_SYS`
+  (`${BUILD_ARCH}${BUILD_VENDOR}-${BUILD_OS}`), `SDKMACHINE ??= "${BUILD_ARCH}"` (so
+  `include conf/machine-sdk/${SDKMACHINE}.conf` reads one file exactly, and with it
+  `SDK_ARCH`), `SDK_OS = "${BUILD_OS}"` (`bitbake.conf` lines 177-178 / 826 on Wrynose,
+  174-175 / 830 on Scarthgap, 170-171 / 819 on Kirkstone), in native recipes `TARGET_ARCH` /
+  `TARGET_OS` / `HOST_ARCH` / `HOST_OS` / `PACKAGE_ARCH` (`native.bbclass`: `${BUILD_ARCH}` /
+  `${BUILD_OS}`, lines 14-36 on Wrynose and Scarthgap, 8-30 on Kirkstone), in nativesdk
+  recipes the same names through `${SDK_ARCH}` / `${SDK_OS}`, `TRANSLATED_TARGET_ARCH` (`d.getVar('TARGET_ARCH').replace("_",
+  "-")`, `x86-64`), the first two `OVERRIDES` entries and every value decided by them
+  (`WORKDIR`, `S`, `B`, `FILESPATH`, `CFLAGS`, override variants). Images' `IMGCLASSES`
+  word `['', 'populate_sdk_ext']['linux' in d.getVar("SDK_OS")]` evaluates, so
+  `populate_sdk_ext` is inherited as in BitBake. Measured (docs/differential.md, "After
+  build-host"): with `arch = "x86_64"`, `os = "linux"` (the recorded dumps' `BUILD_ARCH` /
+  `BUILD_OS`) no value became certain and different; flagged values went from 30 / 37 / 64
+  to 7 / 17 / 42 (Wrynose / Scarthgap / Kirkstone). A wrong `[build_host]` makes these
+  values certain and wrong: it must be what the BitBake host reports.
 
 - **A file the index does not hold**: the replay reads statements from the index, so an
   `include` / `require` / `inherit` of a file that exists on disk (inside the workspace)
@@ -1816,7 +1864,8 @@ with a `bb.warn`); `d.setVar(var, '${@oe.utils.class_filter_features("<defaults>
 break; `class_filter_features` is on the inline python allowlist ("Inline python evaluated
 statically"). On the live workspace `DISTRO_FEATURES` of the native and nativesdk variants is
 not certain at that point (their `OVERRIDES` hold `os.uname()` through `BUILD_OS` /
-`TARGET_ARCH`), so it stays flagged there.
+`TARGET_ARCH`), so it stays flagged there, unless `sous-chef.toml [build_host]` gives both
+values.
 
 sous-chef (w10, `eval::variant`, `replay::recipe_pass` with `Replay::extend_variant`,
 `Replay::finalize`, `Replay::class_extend_handlers`): a target naming a variant (by name,
