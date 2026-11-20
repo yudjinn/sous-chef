@@ -387,6 +387,29 @@ fn remove_in_recipe() {
 }
 
 #[test]
+fn remove_in_recipe_advice_depends_on_where_the_value_is_set() {
+    // lint-precision true-but-unhelpful findings (tests/fixtures/lint-precision/labels.tsv):
+    // "leave the item out of the value" is impossible for CFLAGS, which configuration sets.
+    let env = Env::new();
+    let r = &OverrideRemoveInRecipe;
+    assert_eq!(lines(&env, r, "precision.bb"), [(4, W), (7, W)]);
+    let m = messages(&env, r, "precision.bb");
+    assert!(
+        m[0].ends_with(
+            "CFLAGS is not set in this file, so if a bbappend may need the item back, remove \
+             it through a variable the bbappend can change (`CFLAGS:remove = \"${MY_REMOVALS}\"`)"
+        ),
+        "{}",
+        m[0]
+    );
+    assert!(
+        m[1].contains("leave the item out of the value instead"),
+        "{}",
+        m[1]
+    );
+}
+
+#[test]
 fn weak_after_default() {
     let env = Env::new();
     let r = &OverrideWeakAfterDefault;
@@ -526,6 +549,16 @@ fn append_vs_plus_equals() {
 }
 
 #[test]
+fn append_vs_plus_equals_keeps_append_when_a_variant_replaces_the_variable() {
+    // lint-precision false positive (tests/fixtures/lint-precision/labels.tsv): lttng-modules
+    // keeps `SRC_URI:append` for its devupstream variant; DEPENDS beside it still fires.
+    let env = Env::new();
+    let r = &OverrideAppendVsPlusEquals;
+    assert_eq!(lines(&env, r, "precision-devupstream.bb"), [(16, I)]);
+    assert_eq!(lines(&env, r, "bad.bb"), [(3, I), (5, I)]);
+}
+
+#[test]
 fn plus_equals_on_default() {
     let env = Env::new();
     let r = &OverridePlusEqualsOnDefault;
@@ -560,6 +593,25 @@ fn plus_equals_on_default() {
         ),
         []
     );
+}
+
+#[test]
+fn plus_equals_on_default_an_empty_default_is_not_lost() {
+    // lint-precision false positives (tests/fixtures/lint-precision/labels.tsv): every
+    // finding of the rule on the three live workspaces was a `?= ""` default.
+    let env = Env::with(&[(
+        "meta-core/classes-recipe/kernelish.bbclass",
+        "KERNEL_EXTRA_ARGS ?= \"\"\nKERNEL_OTHER_ARGS ?= \"-j1\"\n".to_string(),
+    )]);
+    let r = &OverridePlusEqualsOnDefault;
+    assert_eq!(
+        lines(&env, r, "precision-empty-default.conf"),
+        [(9, W), (11, W)]
+    );
+    let m = messages(&env, r, "precision-empty-default.conf");
+    assert!(m[1].contains("kernelish.bbclass:2"), "{}", m[1]);
+    // The true positives of the rule's own fixture still fire.
+    assert_eq!(lines(&env, r, "bad.conf"), [(2, W), (3, W), (5, W)]);
 }
 
 #[test]
@@ -759,6 +811,29 @@ fn dead_on_the_real_datastore() {
         rows(&recipe_findings(&env, "deadgood", &OverrideDead)),
         [] as [&str; 0]
     );
+}
+
+#[test]
+fn dead_names_a_misspelt_operation() {
+    // lint-precision true positive (tests/fixtures/lint-precision/labels.tsv): `aapend` is
+    // `append` misspelt; the message says so instead of "fix the name or remove the line".
+    let env = recipe_env("dead", "precision", "deadtypo");
+    let got = recipe_findings(&env, "deadtypo", &OverrideDead);
+    assert_eq!(
+        rows(&got),
+        [
+            "warning meta-mine:recipes-app/deadtypo/deadtypo_1.0.bb:4",
+            "warning meta-mine:recipes-app/deadtypo/deadtypo_1.0.bb:7",
+        ]
+    );
+    assert!(
+        got[0].message.contains("looks like a misspelt `:append`")
+            && got[0].message.ends_with("write `:append`"),
+        "{}",
+        got[0].message
+    );
+    assert!(got[1].message.contains("(`boardx`?)"), "{}", got[1].message);
+    assert!(got.iter().all(|f| !f.message.contains("  ")), "{:#?}", got);
 }
 
 #[test]

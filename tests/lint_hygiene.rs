@@ -229,6 +229,27 @@ fn host_path_bad_and_good() {
     );
 }
 
+#[test]
+fn host_path_strings_compared_in_a_test_are_text() {
+    // lint-precision false positives (tests/fixtures/lint-precision/labels.tsv): a quoted
+    // path compared with `!=` in `[ ]`; the true positives beside them still fire.
+    let found = check(
+        &HygieneHostPath,
+        "host-path",
+        "precision-compare.bb",
+        "x_1.0.bb",
+        &[],
+    );
+    assert_eq!(lines(&found), [21, 22], "{found:#?}");
+    assert!(
+        found.iter().all(|f| f.2.contains("`/usr/lib`")),
+        "{found:#?}"
+    );
+    // The rule's own bad fixture is unchanged.
+    let bad = check(&HygieneHostPath, "host-path", "bad.bb", "x_1.0.bb", &[]);
+    assert_eq!(lines(&bad), [4, 5, 6, 7, 11], "{bad:#?}");
+}
+
 // ---------------------------------------------------------------------------------------
 // hygiene/tabs
 

@@ -114,13 +114,13 @@ summary line and notes go to stderr.
 | `override/legacy-syntax` | E | file | Underscore override syntax: a name the parser marks legacy (`VAR_append`, `VAR_remove`, `RDEPENDS_${PN}`, a package variable followed by `_<lowercase package>`), or `VAR_<o>` whose trailing `_` elements are all machine or distro names of the workspace, known `class-*` overrides or `pn-<name>`. (Since x7) also the package variables of OE-core's `scripts/contrib/convert-overrides.py` that the parser's list lacks (`SYSTEMD_SERVICE_${PN}`, `INITSCRIPT_PARAMS_${PN}`, `INITSCRIPT_NAME`, `ALTERNATIVE`, `USERADD_PARAM`, `GROUPADD_PARAM`, `PKGV`, `IMAGE_CMD_<type>`, ...), but not `ALTERNATIVE_TARGET_<pkg>` / `ALTERNATIVE_PRIORITY_<pkg>`, which `update-alternatives.bbclass` still reads with `_`. Never flags `do_install`, the per-collection `layer.conf` names, a `PREFERRED_*` name itself (`PREFERRED_PROVIDER_virtual/kernel`, `PREFERRED_VERSION_<pn>`, `PREFERRED_PROVIDER_<machine>`), `SRCREV_<name>` or a suffix that is a collection name; a machine or distro suffix after the name a `PREFERRED_*` variable is keyed by is reported (`PREFERRED_PROVIDER_virtual/kernel_qemux86`, which the old syntax read as an override: write `PREFERRED_PROVIDER_virtual/kernel:qemux86`). The message names what the fix writes (`VAR_qemux86_append`: `VAR:qemux86:append`). Misses `VAR_<machine>` when that machine has no `.conf` in the workspace. |
 | `override/append-no-space` | W | file | `:append` value without a leading space, or `:prepend` without a trailing space, on a variable known to be a space-separated list. Not flagged: colon lists (`FILESEXTRAPATHS`), scalars, flags and unknown variables; values starting with `${@`, and a `:prepend` value ending in python; a value starting (`:append`) or ending (`:prepend`) with `${NAME}`, unless the file itself gives `NAME` a non-empty literal value without the space; `+=` / `=+` on an `:append` / `:prepend` name (they add the space); function bodies. |
 | `override/plus-equals-with-override` | W | file | `VAR:foo += "x"` (and `=+`, `.=`, `=.`): this builds the variable `VAR:foo`, which replaces `VAR` when `foo` is active, rather than appending to `VAR`. Suggests `VAR:append:foo`. Not flagged: the package override of a package-scoped variable (`FILES:${PN} +=`, `RDEPENDS:libfoo +=`), overrides containing `${` or not starting with `[a-z0-9]`, names with `:append` / `:prepend` / `:remove`. A condition after the package is flagged (`RDEPENDS:${PN}:qemux86 +=`). |
-| `override/remove-in-recipe` | W/I | file | `:remove` (not on a flag). Warning in a `.bb`, `.inc` or `.bbclass`: it is applied last, so no bbappend or conf can add the item back. Info in a `.bbappend`, a `.conf`, or an `.inc` under a `conf/` directory (configuration), where it is the usual tool. |
-| `override/dead` | W/I | recipe | An override element of an inactive operation in the recipe's own files (the `.bb`, its `.inc` files, its bbappends) that is no entry of the recipe's `OVERRIDES` (an entry that holds python is never a name), no machine, distro, class or declared override of the workspace, and no word of any `*OVERRIDES` assignment. Suggests the closest known name. Info instead of warning when the override list is only partly known. Never checks package names, `${...}` elements or legacy names. |
+| `override/remove-in-recipe` | W/I | file | `:remove` (not on a flag). Warning in a `.bb`, `.inc` or `.bbclass`: it is applied last, so no bbappend or conf can add the item back. Info in a `.bbappend`, a `.conf`, or an `.inc` under a `conf/` directory (configuration), where it is the usual tool. (Since lint-precision) The advice depends on where the value is set: when the file itself assigns the name before `:remove`, leave the item out there; otherwise (`CFLAGS:remove`, `DEBUG_OPTIMIZATION:remove`: configuration sets them) remove it through a variable a bbappend can change. |
+| `override/dead` | W/I | recipe | An override element of an inactive operation in the recipe's own files (the `.bb`, its `.inc` files, its bbappends) that is no entry of the recipe's `OVERRIDES` (an entry that holds python is never a name), no machine, distro, class or declared override of the workspace, and no word of any `*OVERRIDES` assignment. Suggests the closest known name; (since lint-precision) an element within edit distance 2 of `append`, `prepend` or `remove` is named as that operation misspelt (`do_install_ptest:aapend` in OE-core Wrynose's `python3-wcwidth`). Info instead of warning when the override list is only partly known, and then the message says the name may be set by a machine, distro or architecture outside the workspace (on OE-core these are mostly real architecture and OS overrides: `arc`, `sh4`, `darwin`, `mingw32`). Never checks package names, `${...}` elements or legacy names. |
 | `override/shadowed` | I | recipe | A `NAME =` / `NAME :=` in the recipe's own files that the evaluation marks shadowed, when a later `=` / `:=` of exactly the same name follows. BitBake's rewrite of virtual providers in `DEPENDS` (a `rewrite` row of the history) is no assignment and replaces nothing. Not flagged: functions; a later assignment in a bbappend other than the earlier one's; any `NAME` that something in the tree could read first (a `:=` mentioning it, an `inherit` / `include` / `require` with `${NAME}`); an earlier assignment in a file that more than one recipe (or a class, `.conf` or bbappend) reaches through `require` / `include`, unless the later one is in that same file. |
 | `override/weak-after-default` | I | file | `??=` after a `=`, `:=` or `?=` of exactly the same name (overrides and flag included) earlier in the same file; an `unset` in between starts over. |
 | `override/missing-package` | E | file | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RCONFLICTS`, `RPROVIDES`, `RREPLACES`, `FILES`, `ALLOW_EMPTY` and the `pkg_*` functions set to a value without a package override (`:${PN}`), in recipes that produce packages. Also `VAR:append`, `VAR:append:<cond>` and a function `pkg_postinst()`. Not flagged: an empty value (`FILES = ""`; but `+=` / `=+` store a space and are flagged), flags, `:remove` alone, legacy names (`override/legacy-syntax`), the classes `image` and `core-image`, a class that inherits one of them or itself empties `PACKAGES`. |
-| `override/append-vs-plus-equals` | I | file | An unconditional `VAR:append =` in a `.bb` after a plain `VAR =` / `VAR :=` in the same file, where `+=` (or `.=`) would do. Not flagged when a later statement of the file assigns `VAR` again or is an `inherit`, `require` or `include`, after an `unset VAR`, or outside `.bb` files (in bbappends and classes `:append` is usually right). |
-| `override/plus-equals-on-default` | W | file | `VAR +=` (and `=+`, `.=`, `=.`) on a plain name in a conf file, when a `?=` of the same name is parsed later and nothing gave `VAR` a value before: the default is lost. Suggest `:append`. Parse order comes from the evaluated configuration; nothing is reported when the order cannot be told. |
+| `override/append-vs-plus-equals` | I | file | An unconditional `VAR:append =` in a `.bb` after a plain `VAR =` / `VAR :=` in the same file, where `+=` (or `.=`) would do. Not flagged when a later statement of the file assigns `VAR` again or is an `inherit`, `require` or `include`, when (since lint-precision) the file assigns an override variant `VAR:<o>` anywhere (it replaces `VAR` with its `+=` text, but still gets the `:append`: OE-core's `lttng-modules` and `SRC_URI:class-devupstream`), after an `unset VAR`, or outside `.bb` files (in bbappends and classes `:append` is usually right). |
+| `override/plus-equals-on-default` | W | file | `VAR +=` (and `=+`, `.=`, `=.`) on a plain name in a conf file, when a `?=` of the same name is parsed later and nothing gave `VAR` a value before: the default is lost. Suggest `:append`. Not flagged (since lint-precision) when that default is empty (`VAR ?= ""`, as OE-core's `bitbake.conf` writes `DISTRO_EXTRA_RDEPENDS`): nothing is lost. Parse order comes from the evaluated configuration; nothing is reported when the order cannot be told. |
 | `override/filesextrapaths` | E | file | `FILESEXTRAPATHS` replaced instead of extended (any operator but `=.` / `.=` without `:prepend` / `:append`; `=.` / `.=` on a conditional name or in a `.conf`), a prepend (`:prepend`, `=.`) without the trailing colon or an append (`:append`, `.=`) without the leading one, or no `:=` when the value uses `${THISDIR}`, `${FILE_DIRNAME}` or `${FILE}` outside the `.bb` itself and outside an `.inc` that only `.bb` files of its own directory include. Not flagged: `:remove`, a `?=` / `??=` in a `.conf` (the default's definition), and a value whose end in question is a `${NAME}` the file does not set to a literal value (python never). |
 
 Notes:
@@ -196,13 +196,13 @@ Notes:
 
 | Id | Sev | Scope | Flags |
 |---|---|---|---|
-| `org/recipe-path` | W/I | layer | Recipe not at `recipes-<category>/<dir>/<file>.bb` (W); `<dir>` holds only this recipe and is neither its `PN` nor a prefix of it (I); file name with more than one `_` (W) or no `_<pv>` (I); upper-case letters in `PN` (W). Recipes under `dynamic-layers/` are skipped; the no-version check skips `packagegroup-*` and recipes whose static tree (their own lines and the files they require) inherits an image class (`image`, `core-image`, `*-image`) or `packagegroup`; the directory check skips such an image in `images/` and such a packagegroup in `packagegroups/`. A `.bb` no `BBFILES` glob matches gets one finding instead, naming its layer's globs: I in a directory that is clearly no recipe tree (a `lib/`, `scripts/`, `files/`, `wic/`, `templates/` or `*-templates/` component, or a recipe's own `<pn>/` directory), W anywhere else; a `.bb` left out by an inactive `BBFILES_DYNAMIC` entry or `BBMASK` gets none. |
-| `org/duplicate-versions` | I | layer | Two or more versions of a recipe whose statements are mostly identical (at least 60 percent of the longer one, and at least 3): suggest a shared `<pn>.inc`. Version data and `require` / `include` lines are left out of the comparison. Reported on the newest version. |
-| `org/inc-has-version-data` | W/I | file | An `.inc` that `.bb` files of two or more versions require or include directly sets `PV`, `SRCREV` / `SRCREV_<name>` (not with `AUTOREV`) or a `SRC_URI` checksum flag (W), or `LIC_FILES_CHKSUM` (I: fine while the license text is the same). Appending to `PV` is not flagged. |
+| `org/recipe-path` | W/I | layer | Recipe not at `recipes-<category>/<dir>/<file>.bb` (W); `<dir>` holds only this recipe and is neither its `PN` nor a prefix of it (I); file name with more than one `_` (W) or no `_<pv>` (I); upper-case letters in `PN` (W). Recipes under `dynamic-layers/` are skipped; the no-version check skips `packagegroup-*` and recipes whose static tree (their own lines and the files they require) inherits an image class (`image`, `core-image`, `*-image`) or `packagegroup`, and (since lint-precision) recipes whose static tree sets `PV` (meta-oe's `colord-native.bb` requires `colord.inc`, which sets it); the directory check skips such an image in `images/` and such a packagegroup in `packagegroups/`. A `.bb` no `BBFILES` glob matches gets one finding instead, naming its layer's globs: I in a directory that is clearly no recipe tree (a `lib/`, `scripts/`, `files/`, `wic/`, `templates/` or `*-templates/` component, or a recipe's own `<pn>/` directory), W anywhere else; a `.bb` left out by an inactive `BBFILES_DYNAMIC` entry or `BBMASK` gets none. |
+| `org/duplicate-versions` | I | layer | Two or more versions of a recipe whose statements are mostly identical (at least 60 percent of the longer one, and at least 3): suggest a shared `<pn>.inc`. Version data and `require` / `include` lines are left out of the comparison. Reported on the newest version. (Since lint-precision) A `.bb` BitBake does not collect is left out, and two files of the same version are never compared: they are alternatives (meta-oe's `dynamic-layers/selinux/` copies of `android-tools-conf`), not versions. |
+| `org/inc-has-version-data` | W/I | file | An `.inc` that `.bb` files of two or more versions (since lint-precision: of one recipe when the `.inc` sets `PV` itself, which every includer then gets; OE-core's `common-clang.inc` sets the one `PV` of `clang`, `llvm`, `lld`, ..., one file each, and is not reported) require or include directly sets `PV`, `SRCREV` / `SRCREV_<name>` (not with `AUTOREV`) or a `SRC_URI` checksum flag (W), or `LIC_FILES_CHKSUM` (I: fine while the license text is the same). Appending to `PV` is not flagged. |
 | `org/inc-unused` | I | layer | A `.inc` that no `require`, `include` or `include_all` of the workspace resolves to. An unresolved argument with `${...}` that could match the file name keeps it from being reported. |
 | `org/include-must-exist` | W | file | `include` of a file the recipe cannot work without (it sets `SRC_URI` or `LICENSE`, or defines a `do_*` task or `addtask`): use `require`. Also `require` of a file that does not resolve. A `require` whose argument still contains `${` is never reported, even when it expands statically (a known miss). |
 | `org/repeated-logic` | I | layer | The same function body (5 or more lines) or the same 5 consecutive assignments in three or more recipes of a layer: suggest a bbclass or `.inc`. Recipes are counted by `PN` (an `.inc` counts as itself); classes are not looked at. Reported on the first file in path order. |
-| `org/class-recipe-specific` | W | file | A bbclass sets `SRC_URI`, `PV` or `LICENSE` with `=` or `:=`, or sets another variable with `=` / `:=` that a recipe inheriting it directly sets before its `inherit` line (the class replaces the recipe's value). `?=`, `??=`, `+=` and `:append` are not flagged. |
+| `org/class-recipe-specific` | W | file | A bbclass sets `SRC_URI`, `PV` or `LICENSE` with `=` or `:=`, or sets another variable with `=` / `:=` that a recipe inheriting it directly sets before its `inherit` line (the class replaces the recipe's value). `?=`, `??=`, `+=` and `:append` are not flagged, nor (since lint-precision) a recipe value written exactly as the class's, whitespace aside (OE-core's `python-async.inc` and `pypi.bbclass` both write `SECTION = "devel/python"`: nothing is lost). A value equal only after expansion (`python3-maturin`'s `S`) is still reported. |
 | `org/class-export-functions` | W | file | A bbclass defines `<class>_do_<task>` without `EXPORT_FUNCTIONS do_<task>`, or defines `do_<task>` directly for a task it does not add itself with `addtask` (this replaces the recipe's own definition). Classes with `-` in the name are skipped. (Since x7) Only a task: `do_<task>` must be added by `addtask` somewhere in the workspace (base.bbclass's standard tasks included) or by the class itself (also from python, `bb.build.addtask('do_x', ...)`); a function the class uses as a helper is never reported: named in a `[prefuncs]` / `[postfuncs]` flag or a `*FUNCS` / `*_COMMAND` list (`do_qa_sysroot`, `package_do_filedeps`), called as the first word of a line of another function or with `exec_func("<name>"` (`do_package_deb`). An index with no `addtask` at all says nothing about tasks, and every `do_*` counts as one. |
 | `org/class-location` | I | layer | Class in `classes/` in a layer all of whose releases search `classes-recipe/` and `classes-global/` (Langdale and later): suggest the directory that matches how the workspace uses it. Not flagged for a layer that claims Kirkstone, or for a class used both globally and by recipes. |
 | `org/inherit-defer` | I | file | In a `.bb`, `inherit ${VAR}` where `VAR` may be changed later (a later statement of the file, a bbappend of the recipe, or anonymous python there): suggest `inherit_defer`. Silent unless every release the layer is checked against has `inherit_defer` (Scarthgap and later). |
@@ -240,7 +240,10 @@ Notes:
 - **`class-location`.** Global use: `base`, a word of a static `INHERIT`, `USER_CLASSES`,
   `PACKAGE_CLASSES` or `INHERIT_DISTRO` value, or an inherit by a class in
   `classes-global/`. Recipe use: an index `inherit` edge from any other file. Neither: the
-  message names both directories.
+  message (since lint-precision) says to keep the class in `classes/` if it is meant for
+  both contexts, where OE-core keeps `archiver`, `externalsrc` and the like (BitBake
+  searches `classes/` after `classes-<type>/`, `BBHandler.py`), and names both directories
+  otherwise.
 - **`inherit-defer`.** The rule's release range starts at Scarthgap, so it runs for a layer
   checked against Scarthgap or later; it then stays silent when any of the layer's releases
   lacks `inherit_defer`, since the suggestion would not parse there.
@@ -756,6 +759,174 @@ meta-oe's `duktape_2.7.0.bb:40` (true, differential.md "Lint on these layers"). 
 rule that makes an unreachable file that does not parse data marked no file on any of the
 three workspaces: the 15 `.inc` files left as metadata with no reference and no metadata
 place all parse (bitbake-semantics.md, "Data files").
+
+## Measured precision
+
+Measured 2026-11-20 on branch `lint-precision` (from `2bd568c`), the release binary, no
+BitBake run. How many findings are right, on a stratified random sample of the three live
+workspaces (live-environment.md): Wrynose (yocto-kiss, `--build-dir yocto-kiss/build`),
+Scarthgap and Kirkstone (`releases/<r>/build`; OE-core, meta-poky, meta-yocto-bsp,
+meta-oe).
+
+Method:
+
+1. `sous-chef lint --all --format json --build-dir <build>` on each workspace (cache and
+   `TMPDIR` under `runs/lint-precision/`; the script is `runs/lint-precision/run.sh`):
+   Wrynose 646 findings in 1721 files (0 E, 152 W, 494 I), Scarthgap 1176 (0 E, 428 W,
+   748 I), Kirkstone 1098 (1 E, 461 W, 636 I). Wrynose is 3 below the 649 of
+   `lint-dynamic-data`: the live workspace changed since (a test recipe in the throwaway
+   layer `meta-scratch` adds one `HOMEPAGE` info; four `trusted-firmware-a` "no SUMMARY"
+   warnings are gone).
+2. `scripts/lint-sample.py --seed 20261120 --size 150 --exclude-layer meta-scratch` pools
+   the 2919 findings outside `meta-scratch` and stratifies by rule: every rule that fired
+   gets min(3, its count), the remaining 150 - 70 = 80 are shared in proportion to each
+   rule's remaining count (largest remainder). 24 rules fired; the strata (population /
+   sampled) are in the per-rule table below.
+3. Each finding was labelled from the file itself and the BitBake / OE-core source of the
+   release of its workspace (not from the rule's description): **TP** (true positive: the
+   file has the problem and the advice is right), **FP** (false positive: the file does
+   not have the problem, or BitBake / OE-core accepts it as written), **TBU** (true but
+   unhelpful: correct, but the advice is wrong or it is noise for this kind of layer, such
+   as OE-core doing it on purpose). The labels, with a one-line reason each, are
+   `tests/fixtures/lint-precision/labels.tsv`.
+
+"TP / n" is the strict precision; "not FP / n" counts the true-but-unhelpful findings as
+correct. The population-weighted estimate (each rule's sample rates weighted by its count
+in the 2919) is 50.5 % TP, 46.8 % TBU, 2.7 % FP.
+
+Before the fixes of this branch:
+
+| | n | TP | TBU | FP | TP / n | not FP / n |
+|---|---|---|---|---|---|---|
+| all | 150 | 76 | 59 | 15 | 51 % | 90 % |
+| error | 1 | 1 | 0 | 0 | 100 % | 100 % |
+| warning | 65 | 35 | 19 | 11 | 54 % | 83 % |
+| info | 84 | 40 | 40 | 4 | 48 % | 95 % |
+
+| Rule | Population | n | TP | TBU | FP |
+|---|---|---|---|---|---|
+| `hygiene/autorev` | 38 | 4 | 0 | 4 | 0 |
+| `hygiene/continuation` | 28 | 4 | 4 | 0 | 0 |
+| `hygiene/git-pv` | 38 | 4 | 4 | 0 | 0 |
+| `hygiene/host-path` | 4 | 3 | 0 | 0 | 3 |
+| `hygiene/insane-skip` | 68 | 5 | 0 | 5 | 0 |
+| `hygiene/missing-metadata` | 762 | 24 | 22 | 2 | 0 |
+| `hygiene/release-removed` | 5 | 3 | 3 | 0 | 0 |
+| `hygiene/tabs` | 342 | 13 | 13 | 0 | 0 |
+| `org/class-export-functions` | 5 | 3 | 1 | 2 | 0 |
+| `org/class-location` | 103 | 6 | 0 | 6 | 0 |
+| `org/class-recipe-specific` | 19 | 4 | 0 | 0 | 4 |
+| `org/duplicate-versions` | 14 | 3 | 1 | 0 | 2 |
+| `org/inc-has-version-data` | 15 | 3 | 0 | 2 | 1 |
+| `org/include-must-exist` | 4 | 3 | 3 | 0 | 0 |
+| `org/recipe-path` | 362 | 13 | 0 | 12 | 1 |
+| `org/repeated-logic` | 10 | 3 | 3 | 0 | 0 |
+| `override/append-no-space` | 7 | 3 | 3 | 0 | 0 |
+| `override/append-vs-plus-equals` | 19 | 3 | 2 | 0 | 1 |
+| `override/dead` | 288 | 11 | 2 | 9 | 0 |
+| `override/legacy-syntax` | 1 | 1 | 1 | 0 | 0 |
+| `override/plus-equals-on-default` | 7 | 3 | 0 | 0 | 3 |
+| `override/plus-equals-with-override` | 104 | 6 | 6 | 0 | 0 |
+| `override/remove-in-recipe` | 510 | 17 | 0 | 17 | 0 |
+| `override/shadowed` | 166 | 8 | 8 | 0 | 0 |
+
+What the labels say, rule by rule (the reasons are in the labels file):
+
+- The 15 false positives: `host-path` (3: a quoted path compared with `!=` in `[ ]`),
+  `class-recipe-specific` (4: the recipe's value the class replaces is the same text, or
+  the same after expansion), `plus-equals-on-default` (3: the `?=` default that is "lost"
+  is `""`), `duplicate-versions` (2: a `dynamic-layers/` recipe BitBake does not collect,
+  the same version as the recipe it stands in for), `inc-has-version-data` (1:
+  `common-clang.inc` sets the one `PV` of many recipes, none of which has two versions),
+  `recipe-path` (1: "PV defaults to 1.0" while the required `.inc` sets `PV`),
+  `append-vs-plus-equals` (1: `SRC_URI:append` kept on purpose because
+  `SRC_URI:class-devupstream` replaces `SRC_URI` for a variant).
+- Mostly true but unhelpful on these upstream layers: `remove-in-recipe` (per-architecture
+  removals of things that do not build there; `:remove` of a configuration default, which
+  the recipe cannot "leave out"), `recipe-path` (directories named after the project family,
+  local-only recipes without an upstream version), `override/dead` (architecture, OS and
+  machine overrides valid for configurations outside the workspace; one real typo,
+  `do_install_ptest:aapend` in OE-core Wrynose's `python3-wcwidth`), `class-location`
+  (OE-core keeps classes usable in either context in `classes/`, which BitBake searches
+  after `classes-<type>/`, BBHandler.py), `insane-skip` (ffmpeg's textrel, firmware),
+  `autorev` (`poky-floating-revisions.inc`, `linux-yocto-dev`), `class-export-functions`
+  (`kernel.bbclass`'s `do_kernel_version_sanity_check`, a task no other class defines).
+- Fully right in the sample: `missing-metadata` apart from two image recipes, `tabs`,
+  `shadowed`, `plus-equals-with-override`, `continuation`, `git-pv`, `include-must-exist`,
+  `repeated-logic`, `append-no-space`, `release-removed`, `legacy-syntax`.
+
+After the fixes of this branch, on the same sample (the same 150 findings; 13 of the 15
+false positives are no longer reported, so 137 are left, labelled as before):
+
+| | n | TP | TBU | FP | TP / n | not FP / n |
+|---|---|---|---|---|---|---|
+| all | 137 | 76 | 59 | 2 | 55 % | 99 % |
+| error | 1 | 1 | 0 | 0 | 100 % | 100 % |
+| warning | 56 | 35 | 19 | 2 | 62 % | 96 % |
+| info | 80 | 40 | 40 | 0 | 50 % | 100 % |
+
+Fixed, each with a fixture trimmed from the real file and a test that the rule's true
+positives still fire (`tests/lint_hygiene.rs`, `lint_org.rs`, `lint_override.rs`, the
+`precision*` fixtures): `host-path` (a string compared with `=`, `==`, `!=` in `[` / `[[`
+/ `test` is text), `plus-equals-on-default` (an empty `?=` default is not lost),
+`class-recipe-specific` (a recipe value written as the class's is not lost),
+`append-vs-plus-equals` (not when the file assigns an override variant of the variable),
+`recipe-path` (no "PV defaults to 1.0" when the recipe's static tree sets `PV`),
+`duplicate-versions` (uncollected recipes and same-version files are no versions),
+`inc-has-version-data` (an `.inc` that sets `PV` itself needs two versions of one recipe).
+Messages fixed where the advice was wrong: `override/dead` (a misspelt `append` /
+`prepend` / `remove` is named as such; with a partly known override list the name may
+come from a machine, distro or architecture outside the workspace), `class-location` (a
+class nothing uses may belong in `classes/`), `remove-in-recipe` (a variable the file
+does not set cannot be "left out"; remove through a variable a bbappend can change).
+
+Still false: `class-recipe-specific` on `pypi.bbclass` `S` (`python3-maturin` writes the
+same path with `maturin` for `${PYPI_PACKAGE}`: equal only after expansion, which the rule
+does not do). The other row left, `pypi.bbclass:29` on Scarthgap, now names
+`sip_6.8.6.bb:8` (`SECTION = "devel"`), which the class does replace: true. Not changed,
+and true but unhelpful on these layers: `remove-in-recipe` (510 findings, all 17 sampled
+TBU), `recipe-path`'s directory and local-recipe checks, `override/dead` on real
+architecture overrides, `insane-skip`, `autorev` in `poky-floating-revisions.inc`.
+
+`lint --all` (the same commands, release binary at the branch's end), per rule where the
+count changed:
+
+| Rule | Wrynose | Scarthgap | Kirkstone |
+|---|---|---|---|
+| `org/recipe-path` | 101 -> 74 | 138 -> 117 | 123 -> 106 |
+| `org/class-recipe-specific` | 7 -> 3 | 6 -> 4 | 6 -> 3 |
+| `override/plus-equals-on-default` | 0 | 3 -> 0 | 4 -> 0 |
+| `hygiene/host-path` | 0 | 2 -> 0 | 2 -> 0 |
+| `org/duplicate-versions` | 4 | 5 -> 3 | 5 |
+| `org/inc-has-version-data` | 8 -> 7 | 3 | 4 |
+| `override/append-vs-plus-equals` | 6 -> 5 | 7 -> 6 | 6 -> 5 |
+| total | 646 -> 612 (152 W -> 147 W) | 1176 -> 1145 (428 W -> 421 W) | 1098 -> 1071 (461 W -> 452 W) |
+
+Wrynose's total also drops by one `missing-metadata` info in `meta-scratch`, which another
+check removed from the live workspace between the two runs (1721 -> 1718 files). Every
+removed finding was checked: the 65 `recipe-path` "no version" findings are recipes whose
+own lines or required `.inc` set `PV` (`alsa-state.bb`, `mesa.bb` through `mesa.inc`,
+`tzdata.bb` through `timezone.inc`, meta-arm's `fvp-*.bb`, ...); the `class-recipe-specific`
+ones replace an identical value (`gnomebase` `S`, `native` / `cross-canadian`
+`EXCLUDE_FROM_WORLD`, `systemd-boot-cfg` `PACKAGE_ARCH`, `pypi` `SECTION` on Kirkstone).
+Messages changed, same findings: `override/dead` (all), `remove-in-recipe` (the ones whose
+file does not set the variable), `class-location` (classes nothing uses).
+
+**Kept repeatable:** `tests/lint_precision.rs` (`#[ignore]`, needs `SOUS_CHEF_LIVE`)
+re-lints the three workspaces with the CLI and fails when a TP or TBU row of the labels
+file is no longer reported or a FP row with `fixed = yes` is reported again (rows keyed by
+release, rule and pointer; messages may change); a FP with `fixed = no` is only printed.
+`SOUS_CHEF_PRECISION_BIN` points it at a release binary (about 2.5 minutes for the three
+workspaces). Run against the `2bd568c` binary it fails on exactly the 13 fixed rows.
+
+To extend or re-draw the sample: re-run `runs/lint-precision/run.sh` (or the same `lint
+--all --format json` commands), run `scripts/lint-sample.py` with a new seed or size on the
+three JSON files, label the new rows (TP / FP / TBU and a reason, from the file and the
+release's sources; `fixed = no` for a FP), and append them to
+`tests/fixtures/lint-precision/labels.tsv`; when a fix removes a FP, set its `fixed` to
+`yes`. The `lint_precision` live test (above) then holds them. The helper scripts used
+for this measurement (`run.sh`, `tools/precision.py`, `tools/compare.py`,
+`tools/mark.py`) are in `runs/lint-precision/` of the live environment.
 
 ## Output
 
