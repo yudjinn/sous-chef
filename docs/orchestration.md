@@ -806,3 +806,42 @@ flagging them would flag nearly everything); `ConfigParsed` handlers neither run
 flagged; the `lint --fix` dry run shows the first round only; sigs' dependency-hash chain
 and multiconfig unverified against a real build; tests not run on macOS (only the release
 build is).
+
+## Release batch (2026-11-20)
+
+The integration branch was pushed and opened as PR #2 into `dev` (CI green on Linux and
+macOS); merging it is the user's (the permission check refuses PR merges from here). Merged
+on `worktree-w2-integration` after it, each with the gate and, where evaluation changed,
+all differentials on the merged tree:
+
+- **release-prep**: CHANGELOG for 0.1.0, macOS test job (fixes: `/proc` liveness checks
+  replaced by `ps`; macOS `/var` symlink in two tests), marketplace file at the repository
+  root, release workflow creates a draft with changelog notes and checks the tag against
+  `Cargo.toml`, `docs/releasing.md`.
+- **real-checks**: `sigs` through a dependency's hash checked against a real rebuild (zlib
+  `CFLAGS` via a scratch bbappend; curl and zlib built only); two fixes (a guessed "own
+  inputs did not change", cause rows cut on deep chains). Multiconfig differential on
+  Scarthgap (`mc:musl`, parse only): 659 values, 0 bugs. Live Claude Code session showed
+  the PostToolUse Bash hook gets only the first ~30 KB plus `persistedOutputPath`; the hook
+  now reads the persisted file.
+- **bench-rerun**: Sonnet 5.5, 14 tasks x 2 runs, tool search on, `.gitignore` confound
+  fixed for both conditions: 1.26x tokens without the plugin, 1.6-1.7x turns, tool calls
+  and wall time, score 0.85 vs 0.90; $3.51. One plugin-caused wrong answer (`var` on a task
+  function did not show its postfuncs), fixed in var-taskfuncs.
+- **lint-precision**: stratified random sample of 150 findings over three releases, labelled
+  against the source: 15 false positives, 13 fixed (not-false-positive 90% to 99%); advice
+  fixed for three rules; ignored live test re-checks the labels.
+- **acc-anon-models**: exact models of seven verified OE-core anonymous functions;
+  literal-differs 30 / 38 / 35 to 5 / 7 / 5; native `OVERRIDES` kept uncertain (no exact
+  narrowing; a config setting for the build host is the open option).
+- **var-taskfuncs**: `var` on a task function lists prefuncs / postfuncs with pointers and
+  the `cleandirs` / `dirs` / `lockfiles` flags; `recipe show=tasks` gains a `funcs` column.
+
+State (`worktree-w2-integration`, CI green): 1,347 tests. Differential, equal / differ and
+flagged / gap / bug: Wrynose 1,002 / 35 / 53 / 0; Scarthgap 1,139 / 44 / 3 / 0; Kirkstone
+1,075 / 69 / 1 / 0; Scarthgap multiconfig 600 / 46 / 13 / 0.
+
+Waiting on the user: merge PR #2 (closing #1 and #3, which it contains); tag v0.1.0 per
+docs/releasing.md; three decisions (release-profile `strip = true`; lower
+`override/remove-in-recipe` to info; a `sous-chef.toml` setting for the build host's
+architecture so native `OVERRIDES` can be exact).
