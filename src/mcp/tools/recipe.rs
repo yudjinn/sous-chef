@@ -341,7 +341,7 @@ pub fn resolve_selected_variant_in(
 
 /// The evaluation target of a recipe file, or of its class-extended variant
 /// (`virtual:<word>:<layer>:<path>`, see `eval::variant`).
-pub use views::task_names;
+pub use views::{addtask_locs, task_names};
 
 pub fn eval_label(recipe: &RecipeRow, variant: Option<&ClassExtend>) -> String {
     match variant {
@@ -1710,6 +1710,33 @@ mod views {
             }
         }
         Ok(order)
+    }
+
+    /// The `addtask` statements that add `task` (`do_` prefixed), in parse order, since the
+    /// last `deltask` that removed it: the same events as [`tasks`]. Empty when no
+    /// `addtask` adds it (or a later `deltask` removed it).
+    pub fn addtask_locs(index: &Index, ds: &DataStore, task: &str) -> Result<Vec<Loc>> {
+        let mut out: Vec<Loc> = Vec::new();
+        for e in task_events(index, ds)? {
+            match e {
+                Event::Add { name, loc, .. } => {
+                    if prefixed(&name) == task {
+                        out.push(loc);
+                    }
+                }
+                Event::Del { names, .. } => {
+                    if ds
+                        .expand(&names)
+                        .text
+                        .split_whitespace()
+                        .any(|n| prefixed(n) == task)
+                    {
+                        out.clear();
+                    }
+                }
+            }
+        }
+        Ok(out)
     }
 
     pub fn tasks(index: &Index, ds: &DataStore) -> Result<Table> {

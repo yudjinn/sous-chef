@@ -26,7 +26,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::recipe;
+use super::{recipe, taskfuncs};
 use crate::error::{Error, Result};
 use crate::eval::datastore::full_name;
 use crate::eval::{self, DataStore, OpKind, OpStatus, Target, UnsetRecord, VarOp};
@@ -89,7 +89,6 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         args.mc.as_deref(),
     )?;
     let ds = eval::evaluate(&index, &ctx.workspace, &target)?;
-    drop(index);
 
     let mut t = Table::new(&["status", "op", "override", "loc", "snippet"]);
     let mut python = 0usize;
@@ -107,6 +106,18 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     } else {
         name.clone()
     };
+    // A task function: what BitBake runs with it (`taskfuncs`).
+    let task_run = if flag.is_none() && runs_as_task(&ds, &lookup) {
+        let added = if ds.tasks().contains(&lookup) {
+            recipe::addtask_locs(&index, &ds, &lookup)?
+        } else {
+            Vec::new()
+        };
+        Some(task_notes(ctx, &ds, &lookup, &added))
+    } else {
+        None
+    };
+    drop(index);
 
     let mut finals: Vec<String> = Vec::new();
     match &flag {
@@ -137,6 +148,9 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     }
     for f in &finals {
         t.note(f);
+    }
+    for n in task_run.iter().flatten() {
+        t.note(n);
     }
     if flag.is_none() && !ds.is_function(&lookup) {
         for n in python_eval_notes(&ds.python_log(&lookup)) {
@@ -520,6 +534,82 @@ fn is_function_op(ds: &DataStore, op: &VarOp) -> bool {
                 .parse::<Loc>()
                 .is_ok()
         })
+}
+
+// ---- what a task runs ----
+
+/// `name` is a function that is a task (`addtask`) or has `[prefuncs]` / `[postfuncs]`.
+fn runs_as_task(ds: &DataStore, name: &str) -> bool {
+    ds.is_function(name)
+        && (ds.tasks().iter().any(|t| t == name)
+            || taskfuncs::RUN_FLAGS
+                .iter()
+                .any(|f| ds.raw_flag(name, f).is_some()))
+}
+
+/// The lines `var` adds for a task function (`taskfuncs`): that it is a task and the run
+/// order, each prefunc and postfunc with where it is defined and the flag operation that
+/// added it, the flags that change how it runs, and the functions not run that may change
+/// the lists (at most [`taskfuncs::MAX_WRITER_NOTES`]). `added`: its `addtask` statements.
+fn task_notes(ctx: &Ctx, ds: &DataStore, name: &str, added: &[Loc]) -> Vec<String> {
+    let mut out = Vec::new();
+    let is_task = ds.tasks().iter().any(|t| t == name);
+    if is_task {
+        let at = match added.split_first() {
+            Some((first, [])) => format!(" (addtask at {first})"),
+            Some((first, rest)) => format!(" (addtask at {first}, +{} more)", rest.len()),
+            None => String::new(),
+        };
+        let noexec = ds
+            .flag(name, "noexec")
+            .is_some_and(|v| v.text.trim() == "1");
+        if noexec {
+            out.push(format!(
+                "task: {name}{at} has [noexec] \"1\": BitBake does not run it or its [prefuncs] / [postfuncs], it only writes the stamp"
+            ));
+        } else {
+            out.push(format!(
+                "task: {name}{at} runs its [prefuncs], then {name}, then its [postfuncs]"
+            ));
+        }
+    } else {
+        out.push(format!(
+            "note: {name} is not a task (no addtask): its [prefuncs] / [postfuncs] run only when it runs as a task, not when another function calls it"
+        ));
+    }
+    for flag in taskfuncs::RUN_FLAGS {
+        let one = flag.trim_end_matches('s');
+        match taskfuncs::flag_funcs(ds, name, flag) {
+            None => out.push(format!("{flag}: none set")),
+            Some(ff) => {
+                if let Some(why) = &ff.uncertain {
+                    out.push(format!("{flag}: uncertain: {why}"));
+                }
+                for f in &ff.funcs {
+                    let from = match (&f.set_op, &f.set_at) {
+                        (Some(op), Some(at)) => format!(" (by [{flag}] {op} at {at})"),
+                        _ => String::new(),
+                    };
+                    out.push(format!("{one}: {} {}{from}", f.name, f.defined));
+                }
+            }
+        }
+    }
+    let flags = taskfuncs::run_flags(ds, name);
+    if !flags.is_empty() {
+        out.push(format!("flags: {}", flags.join("; ")));
+    }
+    let writers = taskfuncs::may_write(&ctx.workspace, ds, name);
+    for w in writers.iter().take(taskfuncs::MAX_WRITER_NOTES) {
+        out.push(w.note(name));
+    }
+    if writers.len() > taskfuncs::MAX_WRITER_NOTES {
+        out.push(format!(
+            "note: not run: +{} more functions may change {name}[prefuncs] / [postfuncs]",
+            writers.len() - taskfuncs::MAX_WRITER_NOTES
+        ));
+    }
+    out
 }
 
 // ---- rows ----
