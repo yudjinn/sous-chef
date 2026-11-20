@@ -757,6 +757,107 @@ rule that makes an unreachable file that does not parse data marked no file on a
 three workspaces: the 15 `.inc` files left as metadata with no reference and no metadata
 place all parse (bitbake-semantics.md, "Data files").
 
+## Measured precision
+
+Measured 2026-11-20 on branch `lint-precision` (from `2bd568c`), the release binary, no
+BitBake run. How many findings are right, on a stratified random sample of the three live
+workspaces (live-environment.md): Wrynose (yocto-kiss, `--build-dir yocto-kiss/build`),
+Scarthgap and Kirkstone (`releases/<r>/build`; OE-core, meta-poky, meta-yocto-bsp,
+meta-oe).
+
+Method:
+
+1. `sous-chef lint --all --format json --build-dir <build>` on each workspace (cache and
+   `TMPDIR` under `runs/lint-precision/`; the script is `runs/lint-precision/run.sh`):
+   Wrynose 646 findings in 1721 files (0 E, 152 W, 494 I), Scarthgap 1176 (0 E, 428 W,
+   748 I), Kirkstone 1098 (1 E, 461 W, 636 I). Wrynose is 3 below the 649 of
+   `lint-dynamic-data`: the live workspace changed since (a test recipe in the throwaway
+   layer `meta-scratch` adds one `HOMEPAGE` info; four `trusted-firmware-a` "no SUMMARY"
+   warnings are gone).
+2. `scripts/lint-sample.py --seed 20261120 --size 150 --exclude-layer meta-scratch` pools
+   the 2919 findings outside `meta-scratch` and stratifies by rule: every rule that fired
+   gets min(3, its count), the remaining 150 - 70 = 80 are shared in proportion to each
+   rule's remaining count (largest remainder). 24 rules fired; the strata (population /
+   sampled) are in the per-rule table below.
+3. Each finding was labelled from the file itself and the BitBake / OE-core source of the
+   release of its workspace (not from the rule's description): **TP** (true positive: the
+   file has the problem and the advice is right), **FP** (false positive: the file does
+   not have the problem, or BitBake / OE-core accepts it as written), **TBU** (true but
+   unhelpful: correct, but the advice is wrong or it is noise for this kind of layer, such
+   as OE-core doing it on purpose). The labels, with a one-line reason each, are
+   `tests/fixtures/lint-precision/labels.tsv`.
+
+"TP / n" is the strict precision; "not FP / n" counts the true-but-unhelpful findings as
+correct. The population-weighted estimate (each rule's sample rates weighted by its count
+in the 2919) is 50.5 % TP, 46.8 % TBU, 2.7 % FP.
+
+Before the fixes of this branch:
+
+| | n | TP | TBU | FP | TP / n | not FP / n |
+|---|---|---|---|---|---|---|
+| all | 150 | 76 | 59 | 15 | 51 % | 90 % |
+| error | 1 | 1 | 0 | 0 | 100 % | 100 % |
+| warning | 65 | 35 | 19 | 11 | 54 % | 83 % |
+| info | 84 | 40 | 40 | 4 | 48 % | 95 % |
+
+| Rule | Population | n | TP | TBU | FP |
+|---|---|---|---|---|---|
+| `hygiene/autorev` | 38 | 4 | 0 | 4 | 0 |
+| `hygiene/continuation` | 28 | 4 | 4 | 0 | 0 |
+| `hygiene/git-pv` | 38 | 4 | 4 | 0 | 0 |
+| `hygiene/host-path` | 4 | 3 | 0 | 0 | 3 |
+| `hygiene/insane-skip` | 68 | 5 | 0 | 5 | 0 |
+| `hygiene/missing-metadata` | 762 | 24 | 22 | 2 | 0 |
+| `hygiene/release-removed` | 5 | 3 | 3 | 0 | 0 |
+| `hygiene/tabs` | 342 | 13 | 13 | 0 | 0 |
+| `org/class-export-functions` | 5 | 3 | 1 | 2 | 0 |
+| `org/class-location` | 103 | 6 | 0 | 6 | 0 |
+| `org/class-recipe-specific` | 19 | 4 | 0 | 0 | 4 |
+| `org/duplicate-versions` | 14 | 3 | 1 | 0 | 2 |
+| `org/inc-has-version-data` | 15 | 3 | 0 | 2 | 1 |
+| `org/include-must-exist` | 4 | 3 | 3 | 0 | 0 |
+| `org/recipe-path` | 362 | 13 | 0 | 12 | 1 |
+| `org/repeated-logic` | 10 | 3 | 3 | 0 | 0 |
+| `override/append-no-space` | 7 | 3 | 3 | 0 | 0 |
+| `override/append-vs-plus-equals` | 19 | 3 | 2 | 0 | 1 |
+| `override/dead` | 288 | 11 | 2 | 9 | 0 |
+| `override/legacy-syntax` | 1 | 1 | 1 | 0 | 0 |
+| `override/plus-equals-on-default` | 7 | 3 | 0 | 0 | 3 |
+| `override/plus-equals-with-override` | 104 | 6 | 6 | 0 | 0 |
+| `override/remove-in-recipe` | 510 | 17 | 0 | 17 | 0 |
+| `override/shadowed` | 166 | 8 | 8 | 0 | 0 |
+
+What the labels say, rule by rule (the reasons are in the labels file):
+
+- The 15 false positives: `host-path` (3: a quoted path compared with `!=` in `[ ]`),
+  `class-recipe-specific` (4: the recipe's value the class replaces is the same text, or
+  the same after expansion), `plus-equals-on-default` (3: the `?=` default that is "lost"
+  is `""`), `duplicate-versions` (2: a `dynamic-layers/` recipe BitBake does not collect,
+  the same version as the recipe it stands in for), `inc-has-version-data` (1:
+  `common-clang.inc` sets the one `PV` of many recipes, none of which has two versions),
+  `recipe-path` (1: "PV defaults to 1.0" while the required `.inc` sets `PV`),
+  `append-vs-plus-equals` (1: `SRC_URI:append` kept on purpose because
+  `SRC_URI:class-devupstream` replaces `SRC_URI` for a variant).
+- Mostly true but unhelpful on these upstream layers: `remove-in-recipe` (per-architecture
+  removals of things that do not build there; `:remove` of a configuration default, which
+  the recipe cannot "leave out"), `recipe-path` (directories named after the project family,
+  local-only recipes without an upstream version), `override/dead` (architecture, OS and
+  machine overrides valid for configurations outside the workspace; one real typo,
+  `do_install_ptest:aapend` in OE-core Wrynose's `python3-wcwidth`), `class-location`
+  (OE-core keeps classes usable in either context in `classes/`, which BitBake searches
+  after `classes-<type>/`, BBHandler.py), `insane-skip` (ffmpeg's textrel, firmware),
+  `autorev` (`poky-floating-revisions.inc`, `linux-yocto-dev`), `class-export-functions`
+  (`kernel.bbclass`'s `do_kernel_version_sanity_check`, a task no other class defines).
+- Fully right in the sample: `missing-metadata` apart from two image recipes, `tabs`,
+  `shadowed`, `plus-equals-with-override`, `continuation`, `git-pv`, `include-must-exist`,
+  `repeated-logic`, `append-no-space`, `release-removed`, `legacy-syntax`.
+
+To extend or re-draw the sample: re-run `runs/lint-precision/run.sh` (or the same `lint
+--all --format json` commands), run `scripts/lint-sample.py` with a new seed or size on the
+three JSON files, label the new rows (TP / FP / TBU and a reason, from the file and the
+release's sources), and append them to `tests/fixtures/lint-precision/labels.tsv`; the
+`lint_precision` live test (below) then holds them.
+
 ## Output
 
 A summary line first (counts by severity and by rule), then one row per finding:
