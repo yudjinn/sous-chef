@@ -563,6 +563,25 @@ fn plus_equals_on_default() {
 }
 
 #[test]
+fn plus_equals_on_default_an_empty_default_is_not_lost() {
+    // lint-precision false positives (tests/fixtures/lint-precision/labels.tsv): every
+    // finding of the rule on the three live workspaces was a `?= ""` default.
+    let env = Env::with(&[(
+        "meta-core/classes-recipe/kernelish.bbclass",
+        "KERNEL_EXTRA_ARGS ?= \"\"\nKERNEL_OTHER_ARGS ?= \"-j1\"\n".to_string(),
+    )]);
+    let r = &OverridePlusEqualsOnDefault;
+    assert_eq!(
+        lines(&env, r, "precision-empty-default.conf"),
+        [(9, W), (11, W)]
+    );
+    let m = messages(&env, r, "precision-empty-default.conf");
+    assert!(m[1].contains("kernelish.bbclass:2"), "{}", m[1]);
+    // The true positives of the rule's own fixture still fire.
+    assert_eq!(lines(&env, r, "bad.conf"), [(2, W), (3, W), (5, W)]);
+}
+
+#[test]
 fn plus_equals_on_default_uses_the_configuration_order() {
     // local.conf:13 `DISTRO_FEATURES += "wayland"` is parsed before testdistro.conf:5
     // `DISTRO_FEATURES ?= ...`; meta-mine's `BBFILES +=` comes after bblayers.conf's
