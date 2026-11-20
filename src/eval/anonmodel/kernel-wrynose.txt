@@ -1,0 +1,109 @@
+python __anonymous () {
+    pn = d.getVar("PN")
+    kpn = d.getVar("KERNEL_PACKAGE_NAME")
+
+    # XXX Remove this after bug 11905 is resolved
+    #  FILES:${KERNEL_PACKAGE_NAME}-dev doesn't expand correctly
+    if kpn == pn:
+        bb.warn("Some packages (E.g. *-dev) might be missing due to "
+                "bug 11905 (variable KERNEL_PACKAGE_NAME == PN)")
+
+    # The default kernel recipe builds in a shared location defined by
+    # bitbake/distro confs: STAGING_KERNEL_DIR and STAGING_KERNEL_BUILDDIR.
+    # Set these variables to directories under ${WORKDIR} in alternate
+    # kernel recipes (I.e. where KERNEL_PACKAGE_NAME != kernel) so that they
+    # may build in parallel with the default kernel without clobbering.
+    if kpn != "kernel":
+        workdir = d.getVar("WORKDIR")
+        sourceDir = os.path.join(workdir, 'kernel-source')
+        artifactsDir = os.path.join(workdir, 'kernel-build-artifacts')
+        d.setVar("STAGING_KERNEL_DIR", sourceDir)
+        d.setVar("STAGING_KERNEL_BUILDDIR", artifactsDir)
+
+    # Merge KERNEL_IMAGETYPE and KERNEL_ALT_IMAGETYPE into KERNEL_IMAGETYPES
+    type = d.getVar('KERNEL_IMAGETYPE') or ""
+    alttype = d.getVar('KERNEL_ALT_IMAGETYPE') or ""
+    types = d.getVar('KERNEL_IMAGETYPES') or ""
+    if type not in types.split():
+        types = (type + ' ' + types).strip()
+    if alttype not in types.split():
+        types = (alttype + ' ' + types).strip()
+    d.setVar('KERNEL_IMAGETYPES', types)
+
+    # Since kernel-fitimage.bbclass got replaced by kernel-fit-image.bbclass
+    if "fitImage" in types:
+        bb.error("fitImage is no longer supported as a KERNEL_IMAGETYPE(S). FIT images are built by the linux-yocto-fitimage recipe.")
+
+    # KERNEL_IMAGETYPES may contain a mixture of image types supported directly
+    # by the kernel build system and types which are created by post-processing
+    # the output of the kernel build system (e.g. compressing vmlinux ->
+    # vmlinux.gz in kernel_do_transform_kernel()).
+    # KERNEL_IMAGETYPE_FOR_MAKE should contain only image types supported
+    # directly by the kernel build system.
+    if not d.getVar('KERNEL_IMAGETYPE_FOR_MAKE'):
+        typeformake = set()
+        for type in types.split():
+            if type == 'vmlinux.gz':
+                type = 'vmlinux'
+            typeformake.add(type)
+
+        d.setVar('KERNEL_IMAGETYPE_FOR_MAKE', ' '.join(sorted(typeformake)))
+
+    kname = d.getVar('KERNEL_PACKAGE_NAME') or "kernel"
+    imagedest = d.getVar('KERNEL_IMAGEDEST')
+
+    for type in types.split():
+        if bb.data.inherits_class('nopackages', d):
+            continue
+        typelower = type.lower()
+        d.appendVar('PACKAGES', ' %s-image-%s' % (kname, typelower))
+        d.setVar('FILES:' + kname + '-image-' + typelower, '/' + imagedest + '/' + type + '-${KERNEL_VERSION_NAME}' + ' /' + imagedest + '/' + type)
+        d.appendVar('RDEPENDS:%s-image' % kname, ' %s-image-%s (= ${EXTENDPKGV})' % (kname, typelower))
+        splitmods = d.getVar("KERNEL_SPLIT_MODULES")
+        if splitmods != '1':
+            d.appendVar('RDEPENDS:%s-image' % kname, ' %s-modules (= ${EXTENDPKGV})' % kname)
+            d.appendVar('RDEPENDS:%s-image-%s' % (kname, typelower), ' %s-modules-${KERNEL_VERSION_PKG_NAME} (= ${EXTENDPKGV})' % kname)
+            d.setVar('PKG:%s-modules' % kname, '%s-modules-${KERNEL_VERSION_PKG_NAME}' % kname)
+            d.appendVar('RPROVIDES:%s-modules' % kname, ' %s-modules-${KERNEL_VERSION_PKG_NAME}' % kname)
+
+        d.setVar('PKG:%s-image-%s' % (kname,typelower), '%s-image-%s-${KERNEL_VERSION_PKG_NAME}' % (kname, typelower))
+        d.setVar('ALLOW_EMPTY:%s-image-%s' % (kname, typelower), '1')
+
+        if d.getVar('KERNEL_IMAGETYPE_SYMLINK') == '1':
+            d.prependVar('pkg_postinst:%s-image-%s' % (kname,typelower), """set +e
+if [ -n "$D" ]; then
+    ln -sf %s-${KERNEL_VERSION} $D/${KERNEL_IMAGEDEST}/%s > /dev/null 2>&1
+else
+    ln -sf %s-${KERNEL_VERSION} ${KERNEL_IMAGEDEST}/%s > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo "Filesystem on ${KERNEL_IMAGEDEST}/ doesn't support symlinks, falling back to copied image (%s)."
+        install -m 0644 ${KERNEL_IMAGEDEST}/%s-${KERNEL_VERSION} ${KERNEL_IMAGEDEST}/%s
+    fi
+fi
+set -e
+""" % (type, type, type, type, type, type, type))
+            d.setVar('pkg_postrm:%s-image-%s' % (kname,typelower), """set +e
+if [ -f "${KERNEL_IMAGEDEST}/%s" -o -L "${KERNEL_IMAGEDEST}/%s" ]; then
+    rm -f ${KERNEL_IMAGEDEST}/%s  > /dev/null 2>&1
+fi
+set -e
+""" % (type, type, type))
+
+
+    if d.getVar('INITRAMFS_IMAGE') and bb.utils.to_boolean(d.getVar('INITRAMFS_IMAGE_BUNDLE')):
+        if d.getVar('INITRAMFS_MULTICONFIG'):
+            d.appendVarFlag('do_bundle_initramfs', 'mcdepends', ' mc:${BB_CURRENT_MC}:${INITRAMFS_MULTICONFIG}:${INITRAMFS_IMAGE}:do_image_complete')
+        else:
+            d.appendVarFlag('do_bundle_initramfs', 'depends', ' ${INITRAMFS_IMAGE}:do_image_complete')
+
+        bb.build.addtask('do_bundle_initramfs', 'do_deploy', 'do_install', d)
+        bb.build.addtask('do_transform_bundled_initramfs', 'do_deploy', 'do_bundle_initramfs', d)
+
+    # NOTE: setting INITRAMFS_TASK is for backward compatibility
+    #       The preferred method is to set INITRAMFS_IMAGE, because
+    #       this INITRAMFS_TASK has circular dependency problems
+    #       if the initramfs requires kernel modules
+    image_task = d.getVar('INITRAMFS_TASK')
+    if image_task:
+        d.appendVarFlag('do_configure', 'depends', ' ${INITRAMFS_TASK}')
+}

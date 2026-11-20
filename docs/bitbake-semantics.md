@@ -598,6 +598,74 @@ Flag writes (`setVarFlag(task, ...)`) change no value. On the three differential
 computed-name value writes are `image.bbclass`'s `d.setVar(task, ...)` (`do_image_*`) and
 `base.bbclass`'s wrapper; nothing anon.rs takes out is reached, and no count changed.
 
+### Anonymous python reproduced exactly (acc-anon-models)
+
+A few OE-core anonymous functions are not left unrun: their writes are reproduced
+(`eval::anonmodel`, `Replay::apply_anon_models`). Confirmed in BitBake 2.18.0 (yocto-kiss
+`6e260eb6ab`), 2.8.1 and 2.0.0 (`lib/bb/data_smart.py`, `lib/bb/parse/ast.py`, the same code
+on all three):
+
+- **When and in which order.** `ast.finalize` runs `runAnonFuncs(d)`: one
+  `better_exec` of `"<name>(d)"` for each name of `__BBANONFUNCS`, in parse order, after
+  `expandKeys` and the `RecipePostKeyExpansion` handlers and before `handleVirtRecipeProviders`.
+  A function reads the datastore as the functions before it left it; a later one cannot
+  change what it read.
+- **What a write stores.** `appendVar(var, value)` is `setVar(var + ":append", value,
+  ignore=True, parsing=True)` and `prependVar` the `:prepend` form: an entry of the
+  `:append` list like a `VAR:append = "..."` statement, so the text is joined without a
+  space and a `:remove` still applies when the value is read. `setVar(var, value)` from
+  anonymous python has no `parsing` in its `loginfo`, so it deletes `var`'s `:append`,
+  `:prepend` and `:remove` lists, deletes (`delVar`) every override variant of `var` whose
+  override is active, and drops `var` from `overridedata`, then stores the value
+  (`DataStore::rewrite`, which since acc-anon-models also deletes the active variants when
+  `OVERRIDES` is known). `setVar` of a name holding `${...}` stores that name literally
+  (`expandKeys` has already run): `python3`'s `d.setVar('ALLOW_EMPTY:${PN}-modules', '1')`
+  writes a variable no `getVar('ALLOW_EMPTY:python3-modules')` reads.
+- **A `def` the function calls.** BitBake executes a top-level `def` when it parses it
+  (`bb.methodpool.insert_method`), into one global context, so the definition in force at
+  `runAnonFuncs` is the last one parsed. A `def` writes what its body writes:
+  `update-alternatives.bbclass`'s `ua_extend_depends(d)` appends to `DEPENDS`, the glib
+  recipe's `find_meson_cross_files(d)` to `EXTRA_OEMESON`. Since acc-anon-models the replay
+  adds the literal writes of every `def` an anonymous function calls (directly or through
+  other `def`s, the last definition of each name) to that function's writes
+  (`Replay::def_call_writes`), so those values are flagged; before, the `glib-2.0`
+  `EXTRA_OEMESON` of Scarthgap and Kirkstone was unflagged and short of the
+  `--cross-file` words once `PACKAGECONFIG_CONFARGS` became certain.
+
+**Which functions, and what they compute.** A model applies only when the function's
+text is byte for byte one of the verified texts in `src/eval/anonmodel/` (copied from
+OE-core Wrynose `33a6bd6cc8`, Scarthgap `fc4316861b`, Kirkstone `9687b9409d`; `\r` and
+trailing blank lines aside), and the `def`s it calls are the verified texts too. Every
+input must be certain on a copy of the datastore where only names an *earlier* function
+that is not modelled may write count as written by python; a function that would raise,
+`bb.error` or `bb.fatal` is not modelled. Otherwise its writes stay flagged and
+`DataStore::flag_causes` says why (`its verified text is modelled, but not here: <why>`).
+
+| Function | Texts | Reproduced | Inputs that must be certain |
+|---|---|---|---|
+| `base.bbclass` `python ()`: the `PACKAGECONFIG` block | 3 (Wrynose; Scarthgap; Kirkstone; the block is the same in Scarthgap and Kirkstone) | `appendVar('DEPENDS' / 'RDEPENDS:${PN}' / 'RRECOMMENDS:${PN}' / 'PACKAGECONFIG_CONFARGS', ...)` through the local wrapper, as described under "Anonymous python writes that cannot happen", plus the wrapper's `expandFilter`: for a name containing `DEPENDS` (Wrynose: or starting with `RRECOMMENDS`) the words of `d.expand(" ".join(appends))` without `(...)` versions (`bb.utils.explode_deps`) get the `nativesdk-` prefix when the recipe inherits `nativesdk` or `cross-canadian`, the `-native` suffix when it inherits `native` (Wrynose: or `cross`), else the `MLPREFIX` prefix when that is not empty; `-native` words and words containing `-cross-` are kept, `virtual/x` becomes `virtual/<prefix>x<ext>`. Refused: more than six fields (`bb.error`), an invalid or active conflict (`bb.error` / `bb.fatal`), a flag `export` / `unexport`, a `??=` flag | `PACKAGECONFIG` and its flags (no anonymous python, uncertain file or reference effect may write them), and, when a list is not empty, the inherits above and `MLPREFIX`, `PN` |
+| `cmake.bbclass` `python()` | 1 | `OECMAKE_GENERATOR` containing `Unix Makefiles`: `OECMAKE_GENERATOR_ARGS = "-G '<g>' -DCMAKE_MAKE_PROGRAM=<MAKE>"`, `do_compile[progress] = "percent"`; containing `Ninja`: `DEPENDS:append " ninja-native"`, the `ninja` args, `do_compile[progress] = "outof:^\[(\d+)/(\d+)\]\s+"`; else `bb.fatal` (refused) | `OECMAKE_GENERATOR`, `MAKE` |
+| `update-alternatives.bbclass` `python __anonymous()` with `update_alternatives_enabled`, `ua_extend_depends` (and `gen_updatealternativesvardeps` on Scarthgap / Kirkstone, which writes only `<V>_VARDEPS` / `<V>_VARDEPS_<p>`) | 2 | nothing when the recipe inherits `native`, `cross`, `crosssdk` or `cross-canadian` or `TARGET_OS` is `mingw32`; else `DEPENDS:append " virtual/${MLPREFIX}update-alternatives"` unless `virtual/update-alternatives` is a **substring** of `PROVIDES` | the inherits, `TARGET_OS`, `PROVIDES` |
+| `packagegroup.bbclass` first `python ()` | 1 | unless `PACKAGEGROUP_DISABLE_COMPLEMENTARY` is `1`: `PACKAGES` set to each package followed by its `-dbg`, `-dev` (and `-ptest` when `DISTRO_FEATURES` contains `ptest`), package by package; `ALLOW_EMPTY:<pkg> = "1"` for each package of the (new) list | `PACKAGES`, `PACKAGEGROUP_DISABLE_COMPLEMENTARY`, `DISTRO_FEATURES` |
+| `kernel.bbclass` `python __anonymous()` | 3 | `STAGING_KERNEL_DIR` / `STAGING_KERNEL_BUILDDIR` = `os.path.join(WORKDIR, 'kernel-source' / 'kernel-build-artifacts')` when `KERNEL_PACKAGE_NAME` is not `kernel`; `KERNEL_IMAGETYPES` merged (`KERNEL_IMAGETYPE`, then `KERNEL_ALT_IMAGETYPE`, put first when not a word of it, `.strip()`); `KERNEL_IMAGETYPE_FOR_MAKE` (sorted set, `vmlinux.gz` as `vmlinux`) when empty; `PACKAGES:append " <kname>-image-<type.lower()>"` per type unless the recipe inherits `nopackages`. Not reproduced (still flagged): the per-image `FILES:`, `RDEPENDS:`, `PKG:`, `ALLOW_EMPTY:`, `pkg_postinst:` / `pkg_postrm:` writes, the flags. Refused: a `fitImage` type (`bb.error` on Wrynose), a non-ASCII type | those variables, `WORKDIR` when used |
+| `kernel-devicetree.bbclass` `python ()` | 1 | unless `nopackages`: `PACKAGES:append " ${KERNEL_PACKAGE_NAME}-devicetree"`, and `" ${KERNEL_PACKAGE_NAME}-image-zimage-bundle"` when `KERNEL_DEVICETREE_BUNDLE` is `1` (text unexpanded, as python passes it) | the inherit, `KERNEL_DEVICETREE_BUNDLE` |
+| the `python3` recipe's `python(){` (manifest) | 2 (Wrynose; Scarthgap = Kirkstone) | from `<THISDIR>/python3/python3-manifest.json`: `RPROVIDES:class-native`; per manifest key in file order (`object_pairs_hook=OrderedDict`) the `FILES:<pn>-<key>` appends of `files` and, when `INCLUDE_PYCS` is `1`, `cached` (Scarthgap / Kirkstone first `setVar` it to `''`), the `RDEPENDS:` / `RRECOMMENDS:` appends (`${PN}` words cut at their first `-`), `SUMMARY:` set; `PACKAGES` set to the new packages followed by the old. Not reproduced: the `ALLOW_EMPTY:${PN}-*` writes (literal names). Refused: no `# EOC` line, a non-ASCII header (`str.find` counts characters, `seek` bytes), a name repeated in an object, a field of another type than python iterates as text, `pgo` without `qemu-usermode` (`bb.fatal`) | `THISDIR`, `RPROVIDES`, `INCLUDE_PYCS`, `PACKAGES`, `PN`, `PACKAGECONFIG`, `MACHINE_FEATURES`; the file |
+
+The manifest is read from the layer (a fixed path next to the recipe, which BitBake itself
+records as a parse dependency with `bb.parse.mark_dependency`) and parsed with the rules of
+python's `json.loads` that matter here; its content is not pinned by a hash: the function
+text is what is verified, and it handles any manifest the same way. A manifest outside the
+workspace or one that cannot be read leaves the writes flagged.
+
+Rejected (each one or two values on the samples): the glib recipe's `find_meson_cross_files`
+(`os.path.exists` on the build host), `psplash`'s anonymous python (the fetcher:
+`bb.fetch2.Fetch(...).localpath`), `busybox.inc`'s `configmangle` function (one value per
+release; its `if "${OE_DEL}":` tests a python string literal, which `MethodNode.eval` passes
+to `bb.methodpool.insert_method` unexpanded, so the test is always true), OE-core's
+class-extension `map_dependencies` / `map_depends_variable` (Scarthgap / Kirkstone
+`native.bbclass`, `lib/oe/classextend.py`; flagged on the native variants anyway, see
+"Overrides" for their `OVERRIDES`).
+
 ### References that cannot be followed exactly
 
 Checked in BitBake 2.18.0 (yocto-kiss), 2.8 (Scarthgap) and 2.0 (Kirkstone), the same code
@@ -666,6 +734,46 @@ in all three, for acc-unfollowed (`kiss-image` `DEPENDS` was wrong and unflagged
   `T`, the first file of that shape along the search path, or nothing: every such file the
   replay can read is read on a copy, as above (OE-core's `conf/machine-sdk/*.conf`: plain
   `SDK_ARCH`, `SDK_CC_ARCH`, `SDK_MACHINE_FEATURES`, `ABIEXTENSION:class-nativesdk`).
+
+  **The native and nativesdk `OVERRIDES` (acc-anon-models): kept uncertain.** There the
+  first two entries are `${@os.uname()[0].lower()}` (`TARGET_OS` = `BUILD_OS`) and
+  `${@d.getVar('TARGET_ARCH').replace("_", "-")}` (`TARGET_ARCH` = `BUILD_ARCH` =
+  `os.uname()[4]`), and `WORKDIR`, `S`, `B`, `T`, `FILESPATH` (`FILESOVERRIDES`) and every
+  path under them hold those values in their text. Three ways out were weighed:
+  - *Narrowing the override decisions* (no host value assumed). Not provable: BitBake's
+    selection loop (`getVarFlag`, `for o in self.overrides: ... elif a == o: match =
+    active[a]; del active[a]`) keeps, for each active variant, the **first** position its
+    override has in `OVERRIDES`, and the latest of those wins. An unknown entry before the
+    known ones that repeats a known name (`class-native`) moves that variant to the front,
+    so a second unknown entry naming another variant (`class-nativesdk`) would win. With
+    entries that may be any text, no decision that an unknown entry could touch is
+    certain; and a `:append:<o>` / `:remove:<o>` whose `<o>` is not a known entry applies
+    exactly when an unknown entry is `<o>`. A narrowing needs an assumption about the
+    host's values (that `os.uname()` gives no name the metadata uses as an override), which
+    is not BitBake behaviour; it was not made.
+  - *The server's own `os.uname()`*. The server may run on another host than the build (a
+    workspace read over the network, a container): a wrong value would be certain and
+    wrong. Not done.
+  - *Values set by the user* (`sous-chef.toml`). Exact when set, unchanged when not; it
+    needs a configuration field and an evaluation input outside `src/eval` (`Config`,
+    `Target`, the tools that build a `Target`), so it was left for a change that owns them.
+    Measured on the recorded dumps with `BUILD_ARCH = x86_64`, `BUILD_OS = linux` pinned
+    (a local experiment, not kept): flagged values Wrynose 30 to 7 (literal differs 5 to
+    2), Scarthgap 37 to 17 (7 to 5), Kirkstone 64 to 42 (5 to 5), and no new unflagged
+    difference once the class-extension writes below are flagged (before that fix the
+    Scarthgap / Kirkstone `nativesdk-zlib` `DEPENDS` came out unflagged and short of the
+    `nativesdk-` mapping).
+
+  **Class-extension writes of the older `ClassExtender`** (Scarthgap / Kirkstone
+  `lib/oe/classextend.py`, called from `nativesdk.bbclass`'s anonymous python and
+  `multilib.bbclass`): `map_variable(v)` and `map_regexp_variable(v)` `d.setVar(v, ...)`,
+  `map_depends_variable(v)` renames `v` to `v + "_NONML"` and sets `v` to
+  `${@oe.classextend.get_depends('<v>', d)}`, `rename_packages()` does the same for
+  `PACKAGES`. Since acc-anon-models the replay counts these as writes of `v` (and
+  `PACKAGES`), so they are flagged; before, only Wrynose's `set_filter` / `map_packagevars`
+  / `rename_package_variables` were seen: on the samples `nativesdk-zlib` `DEPENDS` was
+  flagged only through the host entries of `OVERRIDES`, and its `PROVIDES` (equal after
+  whitespace) not at all; it is flagged now.
 
 - **A file the index does not hold**: the replay reads statements from the index, so an
   `include` / `require` / `inherit` of a file that exists on disk (inside the workspace)

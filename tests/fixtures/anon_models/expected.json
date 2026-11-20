@@ -1,0 +1,109 @@
+{
+ "base-k-plain": {
+  "DEPENDS": "base1 lib32-depa lib32-depc lib32-dep2",
+  "PACKAGECONFIG_CONFARGS": "--x --en-a --dis-b Documentation",
+  "RDEPENDS:amb5": "r0 lib32-rdepa",
+  "RRECOMMENDS:amb5": " rreca rrecc"
+ },
+ "base-s-mlprefix": {
+  "DEPENDS": "base1 lib32-depa virtual/lib32-libx lib32-q zlib-native gcc-cross-arm",
+  "PACKAGECONFIG_CONFARGS": " --en-a",
+  "RDEPENDS:amb4": " lib32-rdepa",
+  "RRECOMMENDS:amb4": " rreca rrecc"
+ },
+ "base-w-mlprefix": {
+  "DEPENDS": "base1 lib32-depa virtual/lib32-libx lib32-q zlib-native gcc-cross-arm",
+  "PACKAGECONFIG_CONFARGS": " --en-a",
+  "RDEPENDS:amb2": " lib32-rdepa",
+  "RRECOMMENDS:amb2": " lib32-rreca lib32-rrecc"
+ },
+ "base-w-noflags": {
+  "DEPENDS": "base1",
+  "PACKAGECONFIG_CONFARGS": "--x"
+ },
+ "base-w-plain": {
+  "DEPENDS": "base1 depa depc dep2 (>= 1.0)",
+  "PACKAGECONFIG_CONFARGS": "--x --en-a --dis-b Documentation --dis-e",
+  "RDEPENDS:amb1": "r0 rdepa",
+  "RRECOMMENDS:amb1": " rreca rrecc"
+ },
+ "cmake-make": {
+  "DEPENDS": "d0",
+  "OECMAKE_GENERATOR_ARGS": "-G 'Unix Makefiles' -DCMAKE_MAKE_PROGRAM=gmake",
+  "do_compile[progress]": "percent"
+ },
+ "cmake-ninja": {
+  "DEPENDS": "d0 ninja-native",
+  "OECMAKE_GENERATOR_ARGS": "-G 'Ninja' -DCMAKE_MAKE_PROGRAM=ninja",
+  "do_compile[progress]": "outof:^\\[(\\d+)/(\\d+)\\]\\s+"
+ },
+ "devicetree": {
+  "PACKAGES": "kernel kernel-devicetree"
+ },
+ "devicetree-bundle": {
+  "PACKAGES": "kernel kernel-devicetree kernel-image-zimage-bundle"
+ },
+ "kernel-k": {
+  "KERNEL_IMAGETYPES": "Image.gz Image",
+  "KERNEL_IMAGETYPE_FOR_MAKE": "Image Image.gz",
+  "PACKAGES": "kernel kernel-image-image.gz kernel-image-image"
+ },
+ "kernel-s-alt": {
+  "KERNEL_IMAGETYPES": "bzImage",
+  "KERNEL_IMAGETYPE_FOR_MAKE": "bzImage",
+  "PACKAGES": "kern2 kern2-image-bzimage",
+  "STAGING_KERNEL_BUILDDIR": "/w/amk2/kernel-build-artifacts",
+  "STAGING_KERNEL_DIR": "/w/amk2/kernel-source"
+ },
+ "kernel-w": {
+  "KERNEL_IMAGETYPES": "vmlinux.gz Image zImage",
+  "KERNEL_IMAGETYPE_FOR_MAKE": "Image vmlinux zImage",
+  "PACKAGES": "kernel kernel-base kernel-image-vmlinux.gz kernel-image-image kernel-image-zimage"
+ },
+ "packagegroup-disabled": {
+  "ALLOW_EMPTY:amp2": "1",
+  "PACKAGES": "amp2"
+ },
+ "packagegroup-ptest": {
+  "ALLOW_EMPTY:amp1": "1",
+  "ALLOW_EMPTY:amp1-dbg": "1",
+  "ALLOW_EMPTY:amp1-extra-ptest": "1",
+  "PACKAGES": "amp1 amp1-dbg amp1-dev amp1-ptest amp1-extra amp1-extra-dbg amp1-extra-dev amp1-extra-ptest"
+ },
+ "python3-s": {
+  "FILES:amy2-core": " /usr/bin/python3 /usr/lib/python3.x/abc.py",
+  "FILES:amy2-io": " /usr/lib/python3.x/io.py",
+  "FILES:amy2-misc": " /usr/lib/python3.x/misc.py",
+  "PACKAGES": "amy2-io amy2-dev amy2-misc amy2-core",
+  "RDEPENDS:amy2-core": "",
+  "RDEPENDS:amy2-io": " amy2-core amy2-math",
+  "RPROVIDES:class-native": "python3-misc-native python3-core-native python3-io-native",
+  "RRECOMMENDS:amy2-io": " amy2-codecs",
+  "SUMMARY:amy2-core": "Python interpreter and core modules",
+  "SUMMARY:amy2-io": "Python low-level I/O"
+ },
+ "python3-w": {
+  "FILES:amy1-core": "/c0 /usr/bin/python3 /usr/lib/python3.x/abc.py /usr/lib/python3.x/__pycache__/abc.*.pyc",
+  "FILES:amy1-io": " /usr/lib/python3.x/io.py /usr/lib/python3.x/__pycache__/io.*.pyc",
+  "FILES:amy1-misc": " /usr/lib/python3.x/misc.py",
+  "PACKAGES": "amy1-io amy1-dev amy1-misc amy1-core",
+  "RDEPENDS:amy1-core": "",
+  "RDEPENDS:amy1-io": " amy1-core amy1-math",
+  "RPROVIDES:class-native": "x python3-misc-native python3-core-native python3-io-native",
+  "RRECOMMENDS:amy1-io": " amy1-codecs",
+  "SUMMARY:amy1-core": "Python interpreter and core modules",
+  "SUMMARY:amy1-io": "Python low-level I/O"
+ },
+ "ua-s-mingw": {
+  "DEPENDS": "d0"
+ },
+ "ua-s-mlprefix": {
+  "DEPENDS": "d0 virtual/lib32-update-alternatives"
+ },
+ "ua-s-provided": {
+  "DEPENDS": "d0"
+ },
+ "ua-w": {
+  "DEPENDS": "d0 virtual/update-alternatives"
+ }
+}

@@ -5,6 +5,7 @@
 //! `expand.rs`.
 
 mod anon;
+mod anonmodel;
 pub mod classfn;
 pub mod datastore;
 pub mod expand;

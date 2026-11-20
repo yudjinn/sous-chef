@@ -1,0 +1,10 @@
+python __anonymous() {
+    if not update_alternatives_enabled(d):
+        return
+
+    # compute special vardeps
+    gen_updatealternativesvardeps(d)
+
+    # extend the depends to include virtual/update-alternatives
+    ua_extend_depends(d)
+}

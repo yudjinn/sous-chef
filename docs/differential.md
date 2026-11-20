@@ -279,6 +279,67 @@ after the fixes of bugs 1 to 4, observation 6 and the reader switch:
   `evaluate("example")` is `NotFound`, as `bitbake -e example` is (bug 4); configuration
   without a machine: `MACHINE = dogbonedark`, `DISTRO = kiss`.
 
+## After acc-anon-models
+
+Re-run on 2026-11-20 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,
+`SOUS_CHEF_DIFF_DIR` under `runs/acc-anon-models/`, release build), after the writes of
+seven verified OE-core anonymous functions are reproduced and the writes of the `def`s
+anonymous python calls are flagged (bitbake-semantics.md, "Anonymous python reproduced
+exactly"). "equal" counts equal and equal after whitespace; "of which flagged" is part of
+it.
+
+| | compared | equal | of which flagged | flagged | flagged, literal differs | known gap | bug |
+|---|---|---|---|---|---|---|---|
+| Wrynose, before (`2bd568c`) | 1090 | 969 | 34 | 32 | 30 | 59 | **0** |
+| Wrynose, anonymous python models | 1090 | 1002 | 32 | 30 | 5 | 53 | **0** |
+| Scarthgap, before | 1186 | 1100 | 40 | 39 | 38 | 9 | **0** |
+| Scarthgap, anonymous python models | 1186 | 1139 | 29 | 37 | 7 | 3 | **0** |
+| Scarthgap, + older `ClassExtender` writes flagged | 1186 | 1139 | 30 | 37 | 7 | 3 | **0** |
+| Kirkstone, before | 1145 | 1039 | 36 | 64 | 35 | 7 | **0** |
+| Kirkstone, anonymous python models | 1145 | 1075 | 29 | 64 | 5 | 1 | **0** |
+| Kirkstone, + older `ClassExtender` writes flagged | 1145 | 1075 | 30 | 64 | 5 | 1 | **0** |
+
+What became equal to BitBake's text (some of these values still carry a flag from another
+function that is not modelled, `systemd.bbclass`'s or `uboot-sign.bbclass`'s `DEPENDS`
+writes for instance): `DEPENDS` with the words `PACKAGECONFIG` adds, `cmake`'s
+`ninja-native` and update-alternatives' `virtual/update-alternatives` (curl, dbus,
+glib-2.0, python3, u-boot, expat, htop, jq, fmt, protobuf), `EXTRA_OECONF` /
+`EXTRA_OEMESON` / `EXTRA_OECMAKE` through `PACKAGECONFIG_CONFARGS` (curl, dropbear,
+util-linux, dbus, python3, htop, jq, psplash, protobuf), the kernels' `PACKAGES`
+(`kernel-image-*`, `kernel-devicetree`), `packagegroup-core-boot` `PACKAGES`, and
+python3's `PACKAGES`, `FILES:python3-*`, `RDEPENDS:python3-*`. The 6 / 6 / 6
+`gap:python-at-parse` rows (`DEPENDS` short of `virtual/update-alternatives`, unflagged:
+`ua_extend_depends` is a `def` the anonymous function calls, which the replay did not see)
+are equal now. One value moved the other way and is now flagged as it should be: `glib-2.0`
+`EXTRA_OEMESON` (Wrynose: `gap:layerdir-canonical`, Scarthgap / Kirkstone: unflagged
+`gap:python-at-parse` once `PACKAGECONFIG_CONFARGS` was exact) holds what
+`find_meson_cross_files(d)` appends, a `def` that tests files on the build host; the
+replay now flags what every called `def` writes by name.
+
+Left, literal differs: `busybox` `configmangle` (all three), the native and nativesdk
+`OVERRIDES` (Wrynose, Scarthgap), `nativesdk-zlib` `DEPENDS` (all three: the class
+extension's dependency mapping), `gmp-native` `PACKAGES` (Scarthgap, Kirkstone:
+`native.bbclass` `map_dependencies`), `psplash` `PACKAGES` (fetcher), `glib-2.0`
+`EXTRA_OEMESON`. Known gap: `psplash` `RDEPENDS:psplash` (static unset).
+
+**Native and nativesdk `OVERRIDES`: kept uncertain** (bitbake-semantics.md, "References that
+cannot be followed exactly", the host's `os.uname()`). No narrowing of the override
+decisions is provable without assuming the host's values, and the server's own
+`os.uname()` may not be the build host's. With `BUILD_ARCH` / `BUILD_OS` pinned to the
+dumps' `x86_64` / `linux` (an experiment, `runs/acc-anon-models/diffexp2`, not kept) the
+flagged values would drop to Wrynose 7 (literal differs 2), Scarthgap 17 (5), Kirkstone 42
+(5); that experiment first showed Scarthgap / Kirkstone `nativesdk-zlib` `DEPENDS` turning
+unflagged and wrong (the older `ClassExtender.map_depends_variable` was not seen as a
+write), now fixed: those `map_*` calls flag what they write, which flags one more equal
+value on Scarthgap and on Kirkstone (`nativesdk-zlib` `PROVIDES`).
+
+The final run (`runs/acc-anon-models/final`) reproduces the recorded `classes.tsv` and
+`summary.txt` of all three workspaces unchanged. The other live suites, run with
+`--ignored` on the same tree: `live_verify` 12 passed (one assertion changed:
+`live_curl_static_values_equal_bitbake` expected curl's `DEPENDS` to differ and be flagged;
+it is equal to `bitbake -e curl` and certain now), `audit` 1, `release_diff` 1, `skip_live`
+1, `live_build` 1 passed.
+
 ## After acc-unfollowed
 
 Re-run on 2026-11-19 against the same dumps (`SOUS_CHEF_DIFF_NO_BITBAKE=1`,

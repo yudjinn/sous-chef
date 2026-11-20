@@ -1,0 +1,24 @@
+# A small python3 manifest for tests/eval_anon_models.rs, laid out like the real one:
+# a comment header, the end-of-comment marker line, then the JSON.
+# EOC
+{
+    "core": {
+        "summary": "Python interpreter and core modules",
+        "rdepends": [],
+        "files": ["${bindir}/python3", "${libdir}/python${PYTHON_MAJMIN}/abc.py"],
+        "cached": ["${libdir}/python${PYTHON_MAJMIN}/__pycache__/abc.*.pyc"]
+    },
+    "io": {
+        "summary": "Python low-level I/O",
+        "rdepends": ["core", "${PN}-math"],
+        "rrecommends": ["${PN}-codecs"],
+        "files": ["${libdir}/python${PYTHON_MAJMIN}/io.py"],
+        "cached": ["${libdir}/python${PYTHON_MAJMIN}/__pycache__/io.*.pyc"]
+    },
+    "misc": {
+        "summary": "Python misc",
+        "rdepends": ["core"],
+        "files": ["${libdir}/python${PYTHON_MAJMIN}/misc.py"],
+        "cached": []
+    }
+}

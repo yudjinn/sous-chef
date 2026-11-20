@@ -79,6 +79,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use super::anon::{self, Guard, NoWrite};
+use super::anonmodel::{self, Applied, Model};
 use super::classfn::{self, ClassDef, ClassFn};
 use super::datastore::{Content, OpKind, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
@@ -216,6 +217,15 @@ pub struct ReplayNotes {
     /// context, so the last one wins).
     #[serde(skip)]
     pub(crate) class_defs: BTreeMap<String, ClassDef>,
+    /// For each `def` a modelled anonymous function calls ([`anonmodel::DEFS`]), the last
+    /// definition the parse executed and whether it is the verified text.
+    #[serde(skip)]
+    pub(crate) model_defs: BTreeMap<String, (Loc, bool)>,
+    /// Every top-level `def` the parse executed, by name: the last one (BitBake's global
+    /// method pool keeps the last). Anonymous python that calls one writes what it writes
+    /// ([`Replay::def_call_writes`]).
+    #[serde(skip)]
+    pub(crate) def_locs: BTreeMap<String, Loc>,
     /// The read filters class-extension code installed (`d.setVarFilter`), by variable base
     /// name, with where: applied by finalisation to every read of a certain value (see
     /// [`super::variant::VarFilter`]).
@@ -253,6 +263,13 @@ pub struct AnonPython {
     /// `python_vars` by `eval::anon`.
     #[serde(skip)]
     pub(crate) computed_writes: Vec<Option<String>>,
+    /// Its text is a verified one whose writes the replay reproduces ([`anonmodel`]), with
+    /// the indices of the [`AnonPython::entries`] the model covers.
+    #[serde(skip)]
+    pub(crate) model: Option<(Model, Vec<usize>)>,
+    /// What the model did on this recipe (set by finalisation).
+    #[serde(skip)]
+    pub(crate) model_applied: Option<Applied>,
 }
 
 impl AnonPython {
@@ -2646,6 +2663,17 @@ impl<'a> Replay<'a> {
                             },
                         );
                     }
+                    Arc::make_mut(&mut self.ds.notes)
+                        .def_locs
+                        .insert(n.clone(), st.loc.clone());
+                    if anonmodel::is_model_def(n) {
+                        let verified = self
+                            .body_text(&st.loc)
+                            .is_some_and(|t| anonmodel::def_verified(n, &t));
+                        Arc::make_mut(&mut self.ds.notes)
+                            .model_defs
+                            .insert(n.clone(), (st.loc.clone(), verified));
+                    }
                 }
             }
             "inherit" => {
@@ -2918,11 +2946,16 @@ impl<'a> Replay<'a> {
                 .find(|(n, g)| n == s && matches!(g, Guard::PackageconfigList { .. }) == wrapper)
                 .map(|(_, g)| g.clone())
         };
+        let model = body.as_deref().and_then(anonmodel::recognise);
+        let mut cover: Vec<usize> = Vec::new();
         let mut bases = Vec::new();
         let mut entries: Vec<(String, Option<Guard>)> = Vec::new();
         for s in &sets {
             let e = self.ds.expand(s);
             let b = base_of(&e.text).to_string();
+            if model.is_some_and(|m| m.covers(anonmodel::Source::Literal(s))) {
+                cover.push(entries.len());
+            }
             entries.push((b.clone(), guard_of(s, false)));
             bases.push(b);
         }
@@ -2931,6 +2964,9 @@ impl<'a> Replay<'a> {
         let mut sets = sets;
         for s in body.as_deref().map(wrapper_writes).unwrap_or_default() {
             let e = self.ds.expand(&s).text;
+            if model.is_some_and(|m| m.covers(anonmodel::Source::Wrapper(&s))) {
+                cover.push(entries.len());
+            }
             entries.push((e.clone(), guard_of(&s, true)));
             bases.push(e);
             if !sets.contains(&s) {
@@ -2965,6 +3001,7 @@ impl<'a> Replay<'a> {
             && body
                 .as_deref()
                 .is_some_and(|b| classfn::same_text(b, classfn::NATIVESDK_ANONYMOUS));
+        let model = if sdk.is_some() { None } else { model };
         if sdk.is_some() {
             // PROVIDES, and with the verified function DEPENDS / PACKAGE_WRITE_DEPS, are
             // modelled as read filters, not as writes: drop them from both lists.
@@ -2992,6 +3029,8 @@ impl<'a> Replay<'a> {
                 .as_deref()
                 .map(computed_value_writes)
                 .unwrap_or_else(|| vec![None]),
+            model: model.map(|m| (m, cover)),
+            model_applied: None,
         });
         self.ds.ovr_cache = OnceLock::new();
     }
@@ -4248,8 +4287,13 @@ impl Replay<'_> {
         // installs.)
         self.features_backfill();
         self.nativesdk_anonymous_filter();
+        // What the `def` functions anonymous python calls write by name.
+        self.def_call_writes();
         // Writes of anonymous python whose conditions are false here do not happen.
         self.resolve_anonymous_writes();
+        // The writes of the verified functions the replay models, in the order BitBake
+        // runs them (after the proofs, which therefore never read a modelled value).
+        self.apply_anon_models();
         if self.ws.release.release.has(Feature::RecipeVirtualProviders) {
             virtual_recipe_providers(&mut self.ds, recipe);
         }
@@ -4289,6 +4333,224 @@ impl Replay<'_> {
             for (a, r) in notes.anonymous.iter_mut().zip(returns) {
                 a.returns_early = r;
             }
+        }
+    }
+
+    /// The variables the `def` functions an anonymous function calls (directly, or through
+    /// other `def`s) write by a literal name (`find_meson_cross_files(d)` in OE-core's glib
+    /// recipe appends to `EXTRA_OEMESON`; `ua_extend_depends(d)` to `DEPENDS`): added to the
+    /// function's entries, so they are flagged like its own writes. The definition in force
+    /// is the last one the parse executed, as in BitBake's method pool; what the function
+    /// writes through other code (`oe.*` modules, computed names) stays under the opaque
+    /// warning, as before.
+    fn def_call_writes(&mut self) {
+        const MAX_DEFS: usize = 64;
+        if self.ds.notes.def_locs.is_empty() {
+            return;
+        }
+        let defs = self.ds.notes.def_locs.clone();
+        let mut def_texts: HashMap<String, Option<String>> = HashMap::new();
+        let n = self.ds.notes.anonymous.len();
+        for i in 0..n {
+            let loc = self.ds.notes.anonymous[i].loc.clone();
+            let Some(body) = self.body_text(&loc) else {
+                continue;
+            };
+            // (the def called from the anonymous function, a name written)
+            let mut found: Vec<(String, String)> = Vec::new();
+            let mut todo: Vec<(String, String)> = called_names(&body)
+                .into_iter()
+                .filter(|f| defs.contains_key(f))
+                .map(|f| (f.clone(), f))
+                .collect();
+            let mut seen: BTreeSet<String> = BTreeSet::new();
+            while let Some((root, f)) = todo.pop() {
+                if seen.len() >= MAX_DEFS || !seen.insert(f.clone()) {
+                    continue;
+                }
+                let text = match def_texts.get(&f) {
+                    Some(t) => t.clone(),
+                    None => {
+                        let t = defs.get(&f).and_then(|l| self.body_text(l));
+                        def_texts.insert(f.clone(), t.clone());
+                        t
+                    }
+                };
+                let Some(text) = text else { continue };
+                for s in python_writes(&text).0 {
+                    found.push((root.clone(), s));
+                }
+                for g in called_names(&text) {
+                    if defs.contains_key(&g) && !seen.contains(&g) {
+                        todo.push((root.clone(), g));
+                    }
+                }
+            }
+            if found.is_empty() {
+                continue;
+            }
+            let model = self.ds.notes.anonymous[i].model.as_ref().map(|(m, _)| *m);
+            let mut add: Vec<(String, bool)> = Vec::new();
+            for (root, s) in found {
+                let b = base_of(&self.ds.expand(&s).text).to_string();
+                let covered = model.is_some_and(|m| m.covers(anonmodel::Source::DefCall(&root)));
+                add.push((b, covered));
+            }
+            let notes = Arc::make_mut(&mut self.ds.notes);
+            let a = &mut notes.anonymous[i];
+            for (b, covered) in add {
+                if covered && let Some((_, cover)) = a.model.as_mut() {
+                    cover.push(a.entries.len());
+                }
+                a.entries.push((b.clone(), None));
+                if !a.sets.contains(&b) {
+                    a.sets.push(b.clone());
+                }
+                notes.python_vars.insert(b);
+            }
+        }
+        self.ds.ovr_cache = OnceLock::new();
+    }
+
+    /// The anonymous functions with a model ([`anonmodel`]), in order. Each runs on a copy of
+    /// the datastore where only the names earlier functions may still write count as
+    /// written by python (a later function cannot change what an earlier one reads); its
+    /// writes are applied to the datastore and the entries it covers are dropped. A name
+    /// leaves `python_vars` when no other entry, and no handler or filter, still has it.
+    fn apply_anon_models(&mut self) {
+        let n = self.ds.notes.anonymous.len();
+        if !self.ds.notes.anonymous.iter().any(|a| a.model.is_some()) {
+            return;
+        }
+        let ws = self.ws;
+        let read_file = |p: &Path| -> Option<String> {
+            let abs = ws.confine(p).ok()?;
+            fs::read_to_string(abs).ok()
+        };
+        for i in 0..n {
+            let Some((model, cover)) = self.ds.notes.anonymous[i].model.clone() else {
+                continue;
+            };
+            if self.ds.notes.anonymous[i].returns_early.is_some() {
+                continue;
+            }
+            // The names functions `i..` contribute, and those earlier ones still may write.
+            let notes = &self.ds.notes;
+            let later: BTreeSet<String> = notes.anonymous[i..]
+                .iter()
+                .flat_map(|a| a.entries.iter().map(|(e, _)| e.clone()))
+                .collect();
+            let earlier: BTreeSet<String> = notes.anonymous[..i]
+                .iter()
+                .filter(|a| a.returns_early.is_none())
+                .flat_map(|a| a.entries.iter().map(|(e, _)| e.clone()))
+                .collect();
+            let mut trial = self.ds.fork();
+            {
+                let tn = Arc::make_mut(&mut trial.notes);
+                let fixed = tn.fixed_python_vars.clone();
+                tn.python_vars
+                    .retain(|v| !later.contains(v) || earlier.contains(v) || fixed.contains(v));
+            }
+            trial.ovr_cache = OnceLock::new();
+            let ctx = anonmodel::Ctx {
+                ds: &trial,
+                read_file: &read_file,
+            };
+            let result = anonmodel::run(model, &ctx);
+            let loc = self.ds.notes.anonymous[i].loc.clone();
+            let applied = match result {
+                Ok(writes) => {
+                    let mut names: BTreeSet<String> = BTreeSet::new();
+                    for w in writes {
+                        names.insert(base_of(write_name(&w)).to_string());
+                        self.apply_model_write(w, &loc);
+                    }
+                    let notes = Arc::make_mut(&mut self.ds.notes);
+                    let a = &mut notes.anonymous[i];
+                    let mut covered: Vec<String> = Vec::new();
+                    for idx in cover.iter().rev() {
+                        if *idx < a.entries.len() {
+                            covered.push(a.entries.remove(*idx).0);
+                        }
+                    }
+                    // A covered name leaves `python_vars` unless something else has it.
+                    let still: BTreeSet<String> = notes
+                        .anonymous
+                        .iter()
+                        .flat_map(|a| a.entries.iter().map(|(e, _)| e.clone()))
+                        .collect();
+                    for c in &covered {
+                        if !still.contains(c) && !notes.fixed_python_vars.contains(c) {
+                            notes.python_vars.remove(c);
+                        }
+                    }
+                    covered.sort();
+                    covered.dedup();
+                    let what = if names.is_empty() {
+                        "it writes nothing here".to_string()
+                    } else {
+                        format!(
+                            "its writes to {} are reproduced",
+                            names.into_iter().collect::<Vec<_>>().join(", ")
+                        )
+                    };
+                    for c in &covered {
+                        let line = format!(
+                            "note: anonymous python at {loc} is OE-core's verified text ({}), whose writes sous-chef reproduces: {what}",
+                            model.name()
+                        );
+                        let e = notes.var_notes.entry(base_of(c).to_string()).or_default();
+                        if !e.contains(&line) {
+                            e.push(line);
+                        }
+                    }
+                    Applied::Done
+                }
+                Err(why) => Applied::Refused(why),
+            };
+            Arc::make_mut(&mut self.ds.notes).anonymous[i].model_applied = Some(applied);
+            self.ds.ovr_cache = OnceLock::new();
+        }
+    }
+
+    /// One write of a model, as BitBake's datastore method stores it (see [`anonmodel`]).
+    fn apply_model_write(&mut self, w: anonmodel::Write, loc: &Loc) {
+        let var_ref = |name: &str, extra: Option<&str>, flag: Option<String>| {
+            let mut parts = name.split(':');
+            let base = parts.next().unwrap_or(name).to_string();
+            let mut overrides: Vec<String> = parts.map(str::to_string).collect();
+            if let Some(x) = extra {
+                overrides.push(x.to_string());
+            }
+            VarRef {
+                base,
+                overrides,
+                flag,
+                legacy_syntax: false,
+            }
+        };
+        match w {
+            anonmodel::Write::Append(name, text) => self.ds.apply(VarOp {
+                var: var_ref(&name, Some("append"), None),
+                op: AssignOp::Set,
+                value: text,
+                loc: loc.clone(),
+                via: Vec::new(),
+                kind: OpKind::AnonPython,
+            }),
+            anonmodel::Write::Set(name, text) => {
+                self.ds
+                    .rewrite(&name, text, loc.clone(), OpKind::AnonPython)
+            }
+            anonmodel::Write::SetFlag(name, flag, text) => self.ds.apply(VarOp {
+                var: var_ref(&name, None, Some(flag)),
+                op: AssignOp::Set,
+                value: text,
+                loc: loc.clone(),
+                via: Vec::new(),
+                kind: OpKind::AnonPython,
+            }),
         }
     }
 
@@ -4478,9 +4740,9 @@ impl Replay<'_> {
             known(&format!("{var}_BACKFILL")),
             known(&format!("{var}_BACKFILL_CONSIDERED")),
         ) else {
-            Arc::make_mut(&mut self.ds.notes)
-                .python_vars
-                .insert(var.to_string());
+            let notes = Arc::make_mut(&mut self.ds.notes);
+            notes.python_vars.insert(var.to_string());
+            notes.fixed_python_vars.insert(var.to_string());
             return;
         };
         let add: Vec<&str> = backfill
@@ -4546,6 +4808,9 @@ impl Replay<'_> {
                     let notes = Arc::make_mut(&mut self.ds.notes);
                     notes
                         .python_vars
+                        .extend(NATIVESDK_FILTERED.iter().map(|v| v.to_string()));
+                    notes
+                        .fixed_python_vars
                         .extend(NATIVESDK_FILTERED.iter().map(|v| v.to_string()));
                     self.ds.ovr_cache = OnceLock::new();
                 }
@@ -5503,6 +5768,35 @@ fn multilib_provides_filter(body: &str) -> bool {
         && sets_provides_filter(body, "variant, prefixes, d")
 }
 
+/// The variable a model's write changes.
+fn write_name(w: &anonmodel::Write) -> &str {
+    match w {
+        anonmodel::Write::Append(n, _)
+        | anonmodel::Write::Set(n, _)
+        | anonmodel::Write::SetFlag(n, _, _) => n,
+    }
+}
+
+/// The names `body` calls as plain functions (`f(`, not a method `x.f(`, not a `def f(`).
+fn called_names(body: &str) -> BTreeSet<String> {
+    static CALL: LazyLock<Option<Regex>> =
+        LazyLock::new(|| Regex::new(r"(?m)(^|[^\w.])([A-Za-z_]\w*)\s*\(").ok());
+    let Some(re) = CALL.as_ref() else {
+        return BTreeSet::new();
+    };
+    let mut out = BTreeSet::new();
+    for c in re.captures_iter(body) {
+        let Some(m) = c.get(2) else { continue };
+        // `def f(` defines rather than calls.
+        let line_start = body[..m.start()].rfind('\n').map_or(0, |p| p + 1);
+        if body[line_start..m.start()].trim() == "def" {
+            continue;
+        }
+        out.insert(m.as_str().to_string());
+    }
+    out
+}
+
 /// Variables a python body writes through a function it defines itself that writes `d`
 /// with a computed name (OE-core `base.bbclass`'s anonymous python: `def appendVar(varname,
 /// appends): ... d.appendVar(varname, ...)`, called as `appendVar('PACKAGECONFIG_CONFARGS',
@@ -5694,6 +5988,25 @@ fn python_writes(body: &str) -> (Vec<String>, bool) {
         add("PACKAGES");
         add("PACKAGES_DYNAMIC");
     }
+    // The older `ClassExtender` (Scarthgap / Kirkstone `lib/oe/classextend.py`):
+    // `map_variable(v)`, `map_regexp_variable(v)` and `map_depends_variable(v)` set `v`
+    // (`d.setVar`, `renameVar` to `v + "_NONML"`); `rename_packages()` renames `PACKAGES`.
+    static MAP_VAR: LazyLock<Option<Regex>> = LazyLock::new(|| {
+        Regex::new(
+            r#"\.(?:map_variable|map_regexp_variable|map_depends_variable)\s*\(\s*(?:'([^'\\]*)'|"([^"\\]*)")"#,
+        )
+        .ok()
+    });
+    if let Some(re) = MAP_VAR.as_ref() {
+        for c in re.captures_iter(body) {
+            if let Some(m) = c.get(1).or_else(|| c.get(2)) {
+                add(m.as_str());
+            }
+        }
+    }
+    if body.contains(".rename_packages(") {
+        add("PACKAGES");
+    }
     (sets, opaque)
 }
 
@@ -5778,6 +6091,29 @@ mod tests {
         for n in ["DEPENDS", "PROVIDES", "RDEPENDS", "PKG", "PACKAGES", "X"] {
             assert!(sets.iter().any(|s| s == n), "{n}: {sets:?}");
         }
+    }
+
+    #[test]
+    fn python_writes_sees_the_older_class_extender() {
+        // nativesdk.bbclass's anonymous python (OE-core Scarthgap / Kirkstone).
+        let (sets, _) = python_writes(
+            "    clsextend = oe.classextend.NativesdkClassExtender(\"nativesdk\", d)\n    clsextend.rename_packages()\n    clsextend.map_depends_variable(\"DEPENDS\")\n    clsextend.map_variable(\"PROVIDES\")\n    clsextend.map_regexp_variable('PACKAGES_DYNAMIC')\n",
+        );
+        for n in ["PACKAGES", "DEPENDS", "PROVIDES", "PACKAGES_DYNAMIC"] {
+            assert!(sets.iter().any(|s| s == n), "{n}: {sets:?}");
+        }
+    }
+
+    #[test]
+    fn called_names_are_calls_not_definitions_or_methods() {
+        let body = "def helper(d):\n    pass\n    helper(d)\n    x.method(d)\n    other (d)\n";
+        let names = called_names(body);
+        assert!(
+            names.contains("helper") && names.contains("other"),
+            "{names:?}"
+        );
+        assert!(!names.contains("method"), "{names:?}");
+        assert!(!called_names("def only(d):\n    return 1\n").contains("only"));
     }
 
     #[test]
