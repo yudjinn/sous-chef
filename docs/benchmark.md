@@ -618,7 +618,9 @@ No answer was flagged overconfident. Every answer with a wrong claim:
   `[postfuncs]` flag. The r1 session asked `var` for `name=do_install[postfuncs]` and got
   `" remove_libtool_la rm_systemd_unitdir"`, the right answer (score 1.00). A product bug:
   `var` on a task function does not mention its `prefuncs` / `postfuncs` unless they are
-  asked for by name (or with `flags=true`). The same session also called the tool by a
+  asked for by name (or with `flags=true`). (Fixed after the rerun, var-taskfuncs: `var`
+  on a task function now lists its prefuncs and postfuncs with pointers, and `recipe
+  show=tasks` has them in a `funcs` column; mcp-tools.md has the busybox output.) The same session also called the tool by a
   short name (`item`: "No such tool available") and tried to Read a path under a
   non-existent `layers/` directory.
 - **t11 r1**: "BitBake de-duplicates the trailing `sysvinit`" (it does not). The raw value
