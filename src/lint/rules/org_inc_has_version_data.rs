@@ -1,7 +1,7 @@
 //! `org/inc-has-version-data`: A `.inc` shared by several versions sets version data.
 //!
 //! See docs/lint-rules.md. Applies to an `.inc` that `.bb` files of at least two different
-//! `PV`s `require` or `include` directly (index edges; a file that is not indexed is
+//! `PV`s of the same recipe (`PN`) `require` or `include` directly (index edges; a file that is not indexed is
 //! skipped). Reported assignments (no overrides):
 //!
 //! - `PV` set with `=`, `?=`, `??=` or `:=` (appending, e.g. `PV .= "+git"`, is generic);
@@ -10,6 +10,8 @@
 //!   sha512);
 //! - `LIC_FILES_CHKSUM` set with `=`, `?=`, `??=` or `:=`: as **info**, since sharing it is
 //!   fine while the license text is the same in every version.
+
+use std::collections::BTreeMap;
 
 use crate::index::query;
 use crate::index::scan::written_name;
@@ -29,11 +31,13 @@ fn sets(op: AssignOp) -> bool {
     )
 }
 
-/// The recipe name and the sorted distinct versions of the `.bb` files that pull `file` in.
+/// The recipes (`PN`s) of which `.bb` files of two or more versions pull `file` in, and the
+/// sorted distinct versions of those files. Files of different recipes, one version each,
+/// do not count: OE-core's `common-clang.inc` sets the one `PV` of `clang`, `llvm`,
+/// `lld`, ... (lint-precision); a shared `PV` there is the point of the `.inc`.
 fn users(cx: &LintContext<'_>) -> Option<(String, Vec<String>)> {
     let row = query::file_for_loc(cx.index, &cx.loc).ok()??;
-    let mut pns: Vec<String> = Vec::new();
-    let mut pvs: Vec<String> = Vec::new();
+    let mut by_pn: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for e in query::edges_to(cx.index, row.id).ok()? {
         if !matches!(e.kind.as_str(), "require" | "include" | "include_all")
             || e.src.kind != FileKind::Recipe
@@ -41,19 +45,29 @@ fn users(cx: &LintContext<'_>) -> Option<(String, Vec<String>)> {
             continue;
         }
         if let (Some(pn), Some(pv)) = (e.src.pn.clone(), e.src.pv.clone()) {
-            if !pns.contains(&pn) {
-                pns.push(pn);
-            }
+            let pvs = by_pn.entry(pn).or_default();
             if !pvs.contains(&pv) {
                 pvs.push(pv);
             }
         }
     }
-    if pvs.len() < 2 {
+    let mut pns: Vec<String> = Vec::new();
+    let mut pvs: Vec<String> = Vec::new();
+    for (pn, versions) in by_pn {
+        if versions.len() < 2 {
+            continue;
+        }
+        pns.push(pn);
+        for pv in versions {
+            if !pvs.contains(&pv) {
+                pvs.push(pv);
+            }
+        }
+    }
+    if pns.is_empty() {
         return None;
     }
     pvs.sort_by(|a, b| query::vercmp(a, b));
-    pns.sort();
     Some((pns.join(", "), pvs))
 }
 

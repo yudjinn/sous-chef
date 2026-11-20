@@ -792,6 +792,26 @@ fn inc_has_version_data() {
 }
 
 #[test]
+fn inc_has_version_data_needs_two_versions_of_one_recipe() {
+    // lint-precision false positive (tests/fixtures/lint-precision/labels.tsv): OE-core's
+    // common-clang.inc sets the PV of clang, lld, llvm-project-source, one version each
+    // (file-name versions git and none); v.inc of v 1.0 and 2.0 still fires.
+    let found = env("inc-has-version-data", &["precision-layer"])
+        .lint(&OrgIncHasVersionData, "precision-layer");
+    assert_eq!(
+        rows(&found),
+        [
+            "warning precision-layer:recipes-app/v/v.inc:3",
+            "warning precision-layer:recipes-app/v/v.inc:4",
+            "warning precision-layer:recipes-app/v/v.inc:5",
+            "info precision-layer:recipes-app/v/v.inc:6",
+        ],
+        "{}",
+        messages(&found)
+    );
+}
+
+#[test]
 fn include_must_exist() {
     let found = bad_and_good(&OrgIncludeMustExist, "include-must-exist", &[]);
     assert_eq!(
