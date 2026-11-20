@@ -2,12 +2,14 @@
 //!
 //! See docs/lint-rules.md. `:remove` is applied last, after every append and override
 //! (bitbake-semantics.md, "Overrides"), so nothing later (a bbappend, a distro or local
-//! conf) can add the removed item back. Warning in recipes, includes and classes; info in
-//! bbappends and configuration files (and in `.inc` files under a `conf/` directory, such
-//! as `conf/machine/include/*.inc`, which are configuration), where it is the usual tool.
-//! The advice depends on whether the file itself sets the variable: then leave the item
-//! out of the value; else (`CFLAGS:remove`) remove it through a variable a bbappend can
-//! change.
+//! conf) can add the removed item back. Info by default (warning until 2026-11-20, lowered
+//! by user decision: all 17 sampled findings were true but unhelpful on upstream layers,
+//! docs/lint-rules.md "Measured precision"); `[lint.severity]` raises it again. The message
+//! differs between recipes, includes and classes and bbappends and configuration files
+//! (and `.inc` files under a `conf/` directory, such as `conf/machine/include/*.inc`, which
+//! are configuration), where it is the usual tool. In the former the advice depends on
+//! whether the file itself sets the variable: then leave the item out of the value; else
+//! (`CFLAGS:remove`) remove it through a variable a bbappend can change.
 
 use crate::lint::helpers;
 use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
@@ -26,7 +28,7 @@ impl Rule for OverrideRemoveInRecipe {
     }
 
     fn default_severity(&self) -> Severity {
-        Severity::Warning
+        Severity::Info
     }
 
     fn check(&self, cx: &LintContext<'_>, out: &mut Vec<Finding>) {
@@ -95,7 +97,7 @@ impl Rule for OverrideRemoveInRecipe {
                     ),
                 ));
             } else {
-                let mut f = helpers::finding(
+                out.push(helpers::finding(
                     self,
                     cx,
                     line,
@@ -104,9 +106,7 @@ impl Rule for OverrideRemoveInRecipe {
                          back (removes apply last); prefer changing the value where it is set \
                          if you own that layer"
                     ),
-                );
-                f.severity = Severity::Info;
-                out.push(f);
+                ));
             }
         }
     }

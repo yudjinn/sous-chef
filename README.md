@@ -521,7 +521,7 @@ pass_env = []                         # TMPDIR: pass it to BitBake after all (by
 disable = ["style/variable-order"]    # rule ids or groups; default: none
 
 [lint.severity]                       # rule id or group to info, warning or error
-"override/remove-in-recipe" = "info"
+"override/remove-in-recipe" = "warning"  # info by default since 2026-11-20
 
 [output]
 budget_tokens = 600                   # default output budget of every tool
