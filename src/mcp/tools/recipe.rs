@@ -1740,7 +1740,7 @@ mod views {
     }
 
     pub fn tasks(index: &Index, ds: &DataStore) -> Result<Table> {
-        let mut t = Table::new(&["task", "state", "after", "pieces", "loc"]);
+        let mut t = Table::new(&["task", "state", "after", "pieces", "funcs", "loc"]);
         // bb.build.addtask / deltask over __BBTASKS and the deps flags.
         let mut order: Vec<String> = Vec::new();
         let mut deps: HashMap<String, Vec<String>> = HashMap::new();
@@ -1847,13 +1847,15 @@ mod views {
                     after.join(" ")
                 },
                 &pieces(ds, task),
+                &crate::mcp::tools::taskfuncs::cell(ds, task),
                 &loc,
             ]);
         }
         for (task, loc) in &deleted {
-            t.row(&[task, "deleted", "-", "-", &loc.to_string()]);
+            t.row(&[task, "deleted", "-", "-", "-", &loc.to_string()]);
         }
         t.note("note: order from the addtask / deltask statements in parse order (the index: configuration classes, recipe, includes and classes, bbappends, deferred inherits; the replay does not run them); dependencies first");
+        t.note("note: funcs: the [prefuncs] (pre) and [postfuncs] (post) BitBake runs before and after the task, as set in the metadata; anonymous python and event handlers may add more (var name=<task> lists those and where each function is defined)");
         t.note("note: not accounted for: tasks added or deleted by anonymous python (bb.build.addtask / deltask), do_x[deps] set directly, and dependencies on other recipes' tasks ([depends], [deptask], [rdeptask], [recrdeptask])");
         for task in &sorted {
             if let Some((op, _)) = ds.flag_history(task, "deps").into_iter().last() {
