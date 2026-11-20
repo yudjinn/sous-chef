@@ -1,18 +1,32 @@
 # sous-chef Claude Code plugin
 
-This directory is a Claude Code plugin (T7.5) and a one-plugin marketplace that serves it.
-It bundles the MCP server, three `PostToolUse` hook entries (served by four handlers) and a
-skill. Installation is in the
+This directory is a Claude Code plugin (T7.5). It bundles the MCP server, three
+`PostToolUse` hook entries (served by four handlers) and a skill. The repository root is a
+one-plugin marketplace that serves it. Installation is in the
 top-level [README](../README.md#install). This file records what the packaging rests on, the
 hook wire format `sous-chef hook` is built against (T7.1 to T7.4), and what was checked
 against a real Claude Code.
+
+## Install
+
+The plugin runs the `sous-chef` binary by name and does not ship it: install the binary
+first (a release tarball or `cargo install`, see the top-level README), into a directory on
+the `PATH` Claude Code is started with, at the same version as the plugin. Then:
+
+```sh
+claude plugin marketplace add yudjinn/sous-chef#v0.1.0   # the marketplace, pinned to the release tag
+claude plugin install sous-chef@sous-chef
+```
+
+From a clone: `claude plugin marketplace add ./` in the repository root (read in place), or
+`claude --plugin-dir ./plugin` for one session.
 
 ## Layout
 
 | File | What it is |
 |---|---|
-| `.claude-plugin/plugin.json` | The manifest: name `sous-chef`, version (kept equal to `Cargo.toml`), description. No component paths: everything is in the default locations |
-| `.claude-plugin/marketplace.json` | A marketplace named `sous-chef` whose one plugin has source `./`, this directory. `claude plugin marketplace add ./plugin` registers it from a clone |
+| `.claude-plugin/plugin.json` | The manifest: name `sous-chef`, version (kept equal to `Cargo.toml`), description, homepage, repository, license. No component paths: everything is in the default locations |
+| `../.claude-plugin/marketplace.json` | At the **repository root**: a marketplace named `sous-chef` whose one plugin has source `./plugin`, this directory. `claude plugin marketplace add yudjinn/sous-chef#<tag>` registers it from GitHub, `claude plugin marketplace add ./` from a clone |
 | `.mcp.json` | The MCP server `sous-chef` (`plugin:sous-chef:sous-chef` in `/mcp`): `sh -c 'cd "$CLAUDE_PROJECT_DIR" 2>/dev/null; exec sous-chef serve'` |
 | `hooks/hooks.json` | `PostToolUse` hooks on `Grep\|Read`, `Bash` and `Edit\|Write\|MultiEdit`, each `command -v sous-chef >/dev/null 2>&1 \|\| exit 0; exec sous-chef hook`, timeout 10 s |
 | `skills/yocto-layers/SKILL.md` | The skill `sous-chef:yocto-layers`: which tool to use instead of Grep and Read, pointers and handles, static values, writing, releases, hooks, kas |
@@ -36,16 +50,45 @@ agree with each other and with `Cargo.toml`; every command they run is a real su
 `hook::HANDLERS` and every handled tool has a matcher; each hook command, run with `sh -c`
 as Claude Code runs it, reaches its handler when `sous-chef` is on `PATH` and exits 0 with
 no output when it is not; the MCP command, started outside the project, serves the
-workspace in `$CLAUDE_PROJECT_DIR` and lists every tool of the registry (16 now); the events captured
-from a real session give the expected context; the skill's tool names are all registered.
+workspace in `$CLAUDE_PROJECT_DIR` and lists every tool of the registry (18 now); the events captured
+from a real session give the expected context; the skill's tool names are all registered;
+the marketplace at the repository root lists `./plugin` and no second marketplace file
+sits in `plugin/`.
 
 ### Decisions
 
-- **The binary comes from `PATH`.** A plugin can ship executables in `bin/`, but that
-  directory is only put on the Bash tool's `PATH`, a source checkout has no built binary to
-  ship, and claude.ai and Cowork refuse to install a plugin that has `bin/`. So the user
-  installs `sous-chef` with `cargo install --path .` (into `~/.cargo/bin`), and the plugin
-  runs it by name. A binary elsewhere: put it, or a symlink to it, on `PATH`.
+- **The binary comes from `PATH`.** Re-checked on 2026-11-20 against the documentation for
+  Claude Code 2.1.328 (plugins reference, components, marketplace reference, install), for
+  the first release. The ways a plugin can get an executable, and why each other one was
+  not taken:
+  - `bin/` in the plugin: put only on the **Bash tool's** `PATH` (the docs say nothing of
+    hook or MCP processes); claude.ai and Cowork refuse to install a plugin that has a
+    top-level `bin/`; and the plugin is a directory of a git repository, so it would have to
+    commit four platform binaries per release.
+  - A `SessionStart` hook that downloads the release binary into `${CLAUDE_PLUGIN_DATA}`
+    (the docs show this pattern for `node_modules`): the plugin would make network
+    connections and verify downloads on every new version, the first session would start
+    without a server, and sous-chef promises to make no network connection itself.
+  - A `userConfig` option holding a path (`${user_config.KEY}` in the MCP config,
+    `CLAUDE_PLUGIN_OPTION_<KEY>` in hooks): every user would be prompted for it, and the
+    common case, a binary on `PATH`, needs nothing.
+  - An external program the plugin configures but does not install, found on `PATH`, is
+    what the docs describe for LSP plugins ("Your plugin configures the connection but
+    doesn't install the server binary ... Claude Code starts `command` by name from the
+    user's `PATH`"). That is what this plugin does: the user installs `sous-chef` from a
+    release tarball (into `~/.local/bin`, say) or with `cargo install` (into
+    `~/.cargo/bin`), and the plugin runs it by name. A binary elsewhere: put it, or a
+    symlink to it, on `PATH`. The plugin's version (`plugin.json`, equal to `Cargo.toml`)
+    and the marketplace tag tell the user which binary release goes with it.
+- **The marketplace is at the repository root.** `claude plugin marketplace add
+  owner/repo` reads `.claude-plugin/marketplace.json` at the root of the repository (another
+  path needs `extraKnownMarketplaces` with `path` in settings, which the CLI cannot set), and
+  a relative plugin source resolves from that root, so the entry's source is `./plugin`. A
+  marketplace added from GitHub is cloned whole (about 10 MB, mostly tests and docs;
+  `--sparse .claude-plugin plugin` limits the checkout). `#v0.1.0` after the
+  repository pins it to a tag; without it, it follows the default branch. The plugin
+  version is set in `plugin.json` only (an entry version would be overridden by it, and
+  `claude plugin validate` warns when they differ).
 - **Fail open when the binary is missing.** The documentation says a command hook that
   cannot start (missing executable, exit 127 from the shell) is a non-blocking error: the
   tool call goes ahead, and Claude Code shows a `hook error` notice. The hooks are written in
@@ -80,8 +123,10 @@ from a real session give the expected context; the skill's tool names are all re
   unknown key, say) switches nothing off; the handlers then fail open on it.
 - **`license: "MIT"`** in `plugin.json` and in the marketplace entry (a display field both
   accept), matching [`LICENSE`](../LICENSE) at the repository root. `claude plugin validate
-  ./plugin` (Claude Code 2.1.327) passes, and its directory-submission checks report one
-  warning only: `ICON_MISSING` (the plugin has no icon).
+  ./plugin` (Claude Code 2.1.327, and again 2.1.328 on 2026-11-20 with `homepage` and
+  `repository` added) passes, and its directory-submission checks report one warning only:
+  `ICON_MISSING` (the plugin has no icon). `claude plugin validate .` at the repository root
+  validates the marketplace: `✔ Validation passed` (2.1.328).
 
 ### Plugin format (confirmed)
 
@@ -139,7 +184,9 @@ build) on `PATH`:
   (LAYERSERIES_CORENAMES)` for the project directory, and the plugin hook running on one
   Grep and two Reads (`finished with status 0`, 5 to 7 ms, `provided additionalContext`);
   `hook.log` has `grep_read 1 ms: context added` for each.
-- In a scratch `CLAUDE_CONFIG_DIR`: `claude plugin marketplace add ./plugin` (`Successfully
+- In a scratch `CLAUDE_CONFIG_DIR` (when the marketplace file was still in `plugin/`; it
+  moved to the repository root for the first release, and the install from GitHub has not
+  been run yet): `claude plugin marketplace add ./plugin` (`Successfully
   added marketplace: sous-chef`), `claude plugin install sous-chef@sous-chef`
   (`Successfully installed`, read in place from `plugin/`), `claude mcp list` in the
   workspace: `plugin:sous-chef:sous-chef: ... ✔ Connected`; with `sous-chef` off `PATH`:

@@ -71,7 +71,8 @@ override chain.
     pointer to the bbappend to write instead.
   - Each hook can be switched off under `[hooks]` in `sous-chef.toml`.
   - The repository is a plugin marketplace: `claude plugin marketplace add
-    yudjinn/sous-chef`, then `claude plugin install sous-chef@sous-chef`.
+    yudjinn/sous-chef#v0.1.0`, then `claude plugin install sous-chef@sous-chef`. The
+    plugin runs the `sous-chef` binary from `PATH`; install it first.
 - **Build environments**: OE's `oe-init-build-env`, bitbake-setup's `init-build-env`, the
   environment the server was started in, and **kas** projects. kas files are read as kas
   merges them (includes, lock files) without running kas; `KAS_MACHINE`, `KAS_DISTRO`,

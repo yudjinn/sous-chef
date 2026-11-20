@@ -1,0 +1,18 @@
+{
+  "name": "sous-chef",
+  "description": "The sous-chef Claude Code plugin for Yocto / OpenEmbedded layers. The plugin runs the sous-chef binary, which is installed separately (a release tarball or cargo install).",
+  "owner": {
+    "name": "sous-chef contributors",
+    "url": "https://github.com/yudjinn/sous-chef"
+  },
+  "plugins": [
+    {
+      "name": "sous-chef",
+      "source": "./plugin",
+      "description": "MCP server, hooks and a skill for Yocto / OpenEmbedded layers; needs the sous-chef binary on PATH",
+      "license": "MIT",
+      "homepage": "https://github.com/yudjinn/sous-chef",
+      "repository": "https://github.com/yudjinn/sous-chef"
+    }
+  ]
+}

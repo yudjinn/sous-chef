@@ -165,47 +165,70 @@ network connection itself (a BitBake build it starts may fetch, as any build doe
 
 ### Install
 
-**The binary.** Needs Rust 1.89 or newer (edition 2024; the repository pins the toolchain
-it is tested with in `rust-toolchain.toml`). SQLite is bundled.
+Two parts: the `sous-chef` binary, and (for Claude Code) the plugin that runs it. The plugin
+does not contain or download the binary; it runs `sous-chef` by name, so install the binary
+first, into a directory on the `PATH` Claude Code is started with. Use the same version for
+both. Releases and their notes: [GitHub releases](https://github.com/yudjinn/sous-chef/releases)
+and [CHANGELOG.md](CHANGELOG.md).
 
-```sh
-cargo install --path .        # from a clone: installs sous-chef into ~/.cargo/bin
-cargo install --locked --git https://github.com/yudjinn/sous-chef sous-chef   # without a clone
-sous-chef --version
-```
-
-**From a release (available after the first release; there is none yet).** Each release
-will have a tarball per target, `sous-chef-<tag>-<target>.tar.gz`, for
+**The binary, from a release.** Each release has a tarball per target,
+`sous-chef-<tag>-<target>.tar.gz` (the binary, `LICENSE` and `README.md`), for
 `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` (glibc 2.35 or newer) and
 `x86_64-apple-darwin` and `aarch64-apple-darwin`, and a `SHA256SUMS` file:
 
 ```sh
-tag=v0.1.0 target=x86_64-unknown-linux-gnu
+tag=v0.1.0 target=x86_64-unknown-linux-gnu    # or aarch64-unknown-linux-gnu, aarch64-apple-darwin, x86_64-apple-darwin
 base=https://github.com/yudjinn/sous-chef/releases/download/$tag
 curl -fLO "$base/sous-chef-$tag-$target.tar.gz" -fLO "$base/SHA256SUMS"
-sha256sum --ignore-missing -c SHA256SUMS         # macOS: shasum -a 256 --ignore-missing -c
+sha256sum --ignore-missing -c SHA256SUMS         # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
 tar -xzf "sous-chef-$tag-$target.tar.gz"
-install "sous-chef-$tag-$target/sous-chef" ~/.local/bin/
+mkdir -p ~/.local/bin && install "sous-chef-$tag-$target/sous-chef" ~/.local/bin/
+sous-chef --version                              # sous-chef 0.1.0
 ```
 
-The release workflow is [`.github/workflows/release.yml`](.github/workflows/release.yml).
-The plugin (below) still comes from a clone of the repository.
+The macOS binaries are not signed or notarized. A tarball fetched with `curl` carries no
+quarantine attribute, so the binary runs; one downloaded with a browser may be stopped by
+Gatekeeper, and `xattr -d com.apple.quarantine ~/.local/bin/sous-chef` clears it.
 
-The plugin and the MCP configurations below run `sous-chef` by name, so `~/.cargo/bin`
-(or wherever the binary is) must be on the `PATH` Claude Code sees.
-
-**The Claude Code plugin.** [`plugin/`](plugin/) bundles the MCP server, the hooks and a
-skill for working on layers. It is also a one-plugin marketplace, so it installs from a
-clone:
+**The binary, from source.** Needs Rust 1.89 or newer (edition 2024; the repository pins
+the toolchain it is tested with in `rust-toolchain.toml`) and a C compiler (SQLite is
+bundled and compiled in). `cargo install` puts it in `~/.cargo/bin`:
 
 ```sh
-claude plugin marketplace add ./plugin
+# A release, pinned to the commit its tag points at; the full hash:
+#   git ls-remote https://github.com/yudjinn/sous-chef 'refs/tags/v0.1.0^{}'
+cargo install --locked --git https://github.com/yudjinn/sous-chef --rev <full commit hash> sous-chef
+cargo install --path .        # from a clone
+sous-chef --version
+```
+
+The plugin and the MCP configurations below run `sous-chef` by name, so `~/.local/bin`,
+`~/.cargo/bin` (or wherever the binary is) must be on the `PATH` Claude Code sees. A
+binary elsewhere: put a symlink to it in a directory on `PATH`.
+
+**The Claude Code plugin.** [`plugin/`](plugin/) bundles the MCP server, the hooks and a
+skill for working on layers. The repository is a plugin marketplace
+([`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json)) named `sous-chef`
+with this one plugin. Add it pinned to the release whose binary you installed, then install
+the plugin:
+
+```sh
+claude plugin marketplace add yudjinn/sous-chef#v0.1.0
 claude plugin install sous-chef@sous-chef
 ```
 
-(Inside a session: `/plugin marketplace add ./plugin`, then `/plugin install
-sous-chef@sous-chef`.) The plugin is read in place from `plugin/`, so a `git pull` updates
-it. To try it for one session without installing: `claude --plugin-dir ./plugin`.
+(Inside a session: `/plugin marketplace add yudjinn/sous-chef#v0.1.0`, then `/plugin
+install sous-chef@sous-chef`, then `/reload-plugins`.) `claude plugin list` shows
+`sous-chef@sous-chef` with version 0.1.0. To move to a later release, install its binary,
+then `claude plugin marketplace remove sous-chef` and add the marketplace again with the
+new tag (removing the marketplace uninstalls the plugin; install it again). Without `#tag`
+the marketplace follows the repository's default branch, which may need a newer binary than
+the one released.
+
+From a clone, register the clone itself; it is read in place, so a `git pull` updates the
+plugin: `claude plugin marketplace add ./` (in the repository root), then `claude plugin
+install sous-chef@sous-chef`. To try the plugin for one session without installing:
+`claude --plugin-dir ./plugin`.
 
 Start Claude Code in the project directory (the one with `sous-chef.toml`, or the build
 directory's parent): the plugin starts the server there (`$CLAUDE_PROJECT_DIR`). `/mcp`
