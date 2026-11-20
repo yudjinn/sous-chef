@@ -21,6 +21,7 @@ the contracts, the measurements and the project's history.
 | [differential.md](differential.md) | How often static evaluation equals `bitbake -e`, and every difference | Evaluator work |
 | [performance.md](performance.md) | Index, refresh, tool and hook timings on that workspace | Anyone changing the index or the hooks |
 | [ci.md](ci.md) | `sous-chef lint` in CI: exit codes, SARIF and GitHub annotations, the baseline | Anyone wiring lint into a pipeline |
+| [releasing.md](releasing.md) | Cutting a release: version, changelog, tag, the release workflow, publishing the draft, verifying the install | The maintainer |
 | [benchmark.md](benchmark.md) | Whole-task pilot: Claude Code sessions with and without the plugin, tokens and scores per task | Anyone judging what the plugin saves |
 | [milestones/](milestones/) | The tasks | Whoever is assigned them |
 | [orchestration.md](orchestration.md) | How the orchestrator runs five agents per wave: streams, git layout, briefs, review | The orchestrator |

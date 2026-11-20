@@ -109,16 +109,15 @@ git diff .sous-chef-baseline.json      # review, then commit
 The job checks out the layer repository and its dependencies, installs `sous-chef`, runs
 lint with SARIF output and uploads it to code scanning.
 
-**Getting the binary.** There is no release yet. Until there is, build it from the
-repository with `cargo install --git` (a few minutes on a hosted runner; the runner's
-preinstalled stable Rust is enough, sous-chef needs 1.89 or newer). Pin a commit with
-`--rev` so a new commit on sous-chef's default branch cannot change your CI:
+**Getting the binary.** Download a release's tarball and check it against the release's
+`SHA256SUMS` (README, "Install"; seconds, and the version is pinned by the tag). Or build it
+from the repository with `cargo install --git` (a few minutes on a hosted runner; the
+runner's preinstalled stable Rust is enough, sous-chef needs 1.89 or newer), pinning a
+commit with `--rev` so a new commit on sous-chef's default branch cannot change your CI:
 
 ```sh
-cargo install --locked --git https://github.com/yudjinn/sous-chef --rev <commit> sous-chef
+cargo install --locked --git https://github.com/yudjinn/sous-chef --rev <full commit hash> sous-chef
 ```
-
-Once a release exists, download its binary instead (README, "Install").
 
 **Permissions.** Upload needs `security-events: write`; `contents: read` is what checkout
 needs (and what code scanning requires in a private repository). A pull request from a
