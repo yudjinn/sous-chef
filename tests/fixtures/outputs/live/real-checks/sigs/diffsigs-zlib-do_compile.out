@@ -1,0 +1,5 @@
+NOTE: Starting bitbake server...
+Hash for task dependency zlib:do_configure changed from 5df8f861e819daaf0a56cd3eeba1adbc1745686247079c6a4b0e16e18f4484c6 to c54a2de5c5e0e7f7665e66820cb45c001e4f29bd1d8e17b277c7a12109f240ca
+    basehash changed from befafd053abc82c589033591f0e7ddae77544f3281513755bbcea3569cef8568 to cd2687dfa4bd126c99e8e80084014fcbcbf1db20f218ae040b1d7e43aa1418b9
+    Variable CFLAGS value changed:
+    "${TARGET_CFLAGS} -D_REENTRANT -fPIE {+-O1+}"

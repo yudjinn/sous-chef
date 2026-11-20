@@ -107,3 +107,7 @@ own INFO / ERROR lines are kept: they are part of what a kas-mode job prints.
 | `y3-leftovers/log.do_compile.1958029.trimmed` | that task's log, **trimmed** to lines 1-3 and 250-285 |
 | `y3-leftovers/run.do_compile.1958029` | that task's run file, whole |
 
+
+## real-checks: sigs through a dependency, multiconfig, live hooks (2026-11-20)
+
+Under `real-checks/`, with its own README listing every file.

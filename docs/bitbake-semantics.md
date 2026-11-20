@@ -2485,7 +2485,39 @@ branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
   stamp has the `stamp-extra-info` suffix (`.<taskhash>.dogbonedark`, `MACHINE`) but its
   sigdata file has none; the noexec `do_build` has a stamp and no sigdata file. No change
   reached curl through a dependency's hash in this round (none of curl's dependencies
-  changed), so that case is still checked only on hand-written output.
+  changed); real-checks did that (next item).
+- **A change through a dependency's hash, confirmed on a real build** (real-checks,
+  2026-11-20; `tests/fixtures/outputs/live/real-checks/sigs/`): `CFLAGS:append:class-target
+  = " -O1"` in a scratch `zlib_%.bbappend`, curl rebuilt (only zlib's 8 and curl's 11 tasks
+  ran). `bitbake-diffsigs -c never -t curl do_configure` printed five nested `Hash for task
+  dependency` lines, `curl:do_prepare_recipe_sysroot` (the task that depends on
+  `zlib:do_populate_sysroot`: `do_prepare_recipe_sysroot[deptask] = "do_populate_sysroot"`,
+  OE-core `staging.bbclass`),
+  `zlib:do_populate_sysroot`, `zlib:do_install`, `zlib:do_compile`, `zlib:do_configure`,
+  then at 20 spaces `basehash changed` and `Variable CFLAGS value changed:` with the word
+  diff `"${TARGET_CFLAGS} -D_REENTRANT -fPIE {+-O1+}"` (the value with the `:append`
+  applied, unexpanded). `do_compile` one level more, `do_install` two. **The recursion hides
+  a task's own change**: `compare_sigfiles` (2.18 `siggen.py`, at the `recursecb` call)
+  does `output = [output[-1]] + recout; break` when a dependency's comparison is found, so
+  what it had found for the task itself (its `basehash`, its variables) is dropped. Seen:
+  `-t zlib do_compile` printed only `Hash for task dependency zlib:do_configure changed` and
+  that comparison, although zlib's `do_compile`, `do_install` and `do_populate_sysroot`
+  each had their own basehash changed (the sigdata files read with Python's
+  `compression.zstd`: `basehash c5321af4c3` -> `6fa9a314e7` for `do_compile`, `CFLAGS` in
+  each task's `varvals`, `sigdata-basehashes.out`); curl's tasks' basehashes were
+  unchanged. So the output says whether the task's own inputs changed only when no
+  dependency's hash changed. A `Taint ... changed` line is appended after that loop, so it
+  can follow a recursion at depth 0. Side observations: a `zlib_%.bbappend` applies to
+  `zlib-native` and `nativesdk-zlib` too (the bbappend matches the recipe file, and
+  `BBCLASSEXTEND` variants are parsed from it), so an unconditional `CFLAGS:append` changed
+  the signatures of most native recipes (a dry run wanted 83 sstate objects, 0 found); and
+  **a dry run (`bitbake -n`) is not free of side effects**: `RunQueueExecute.__init__` (2.18
+  `runqueue.py`) fires `StaleSetSceneTasks` for every setscene task whose stamps do not
+  match its current hash, with no `dry_run` check, and OE-core's
+  `sstate_eventhandler_stalesstate` (`sstate.bbclass`) uninstalls those tasks' outputs from
+  `TMPDIR` (`sstate_clean_manifest`, stamps removed: "Removing 11 stale sstate objects for
+  arch dogbonedark..."); the sstate cache is not touched, and the next real build restored
+  them from it.
 
 ### Package data
 

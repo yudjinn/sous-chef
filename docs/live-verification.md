@@ -1236,6 +1236,89 @@ only target, the only recipe cleaned.
 | `bitbake-getvar -r curl --value T`, twice (`log recipe=curl task=compile`) | sous-chef init-script mode | read-only |
 | `bitbake curl` (bbappend removed) | kas, yocto-kiss files | succeeded, 918 of 919 not rerun (curl from sstate) |
 
+## Three features never run for real (real-checks, 2026-11-20)
+
+`sigs` through a dependency's hash, multiconfig against a real BitBake, and the Bash and
+Edit hooks in a live Claude Code session. sous-chef: the release build of branch
+`real-checks`; configurations, cache (`XDG_CACHE_HOME`), `TMPDIR`, helper scripts
+(`tools/`) and raw outputs in `{{LIVE}}/runs/real-checks/`; recorded copies in
+`tests/fixtures/outputs/live/real-checks/` (README there).
+
+### sigs through a dependency's hash: confirmed, two fixes
+
+The user allowed building `curl` and `zlib` for this item. In the kas build, one BitBake
+client at a time (`tools/bbcheck.sh` before each), `build/conf/bblayers.conf` and
+`local.conf` copied before (`conf-before/`) and after (`conf-after/`): identical.
+
+**The change.** `scratch/meta-scratch/recipes-test/zlib/zlib_%.bbappend` through
+`kas-scratch.yaml`. The first version, `CFLAGS:append = " -O1"`, was dropped after its dry
+run: the bbappend applies to `zlib-native` too, a dependency of most native recipes, and
+`bitbake -n curl` wanted 83 sstate objects and found none (glibc, openssl, python3-native,
+... would have rebuilt). That dry run was not free: it "removed 83 stale sstate objects"
+from `build/tmp` (bitbake-semantics.md "Task signatures": `StaleSetSceneTasks` fires in a
+dry run too); the next build restored them from the sstate cache. The second,
+`CFLAGS:append:class-target = " -O1"` (`-O1` changes the object code, so zlib's output
+hash and with it curl's dependency hashes change despite hash equivalence): dry run 899
+of 919 not rerun, only zlib (8) and curl (12) tasks. `bitbake curl`: 76 s, succeeded;
+the tasks that ran (not `_setscene`) were zlib's `do_configure` to `do_packagedata` and
+curl's `do_prepare_recipe_sysroot` to `do_package_write_ipk`; the 71 native objects the
+first dry run had removed came back as `_setscene`.
+
+**BitBake against sous-chef** (`bitbake-diffsigs -c never -t <pn> <task>` through
+`kas-scratch.yaml`; `sigs` through the init-script runner, the scratch layer in
+`bblayers.conf` at the time):
+
+| Task | `bitbake-diffsigs` | sous-chef `sigs` |
+|---|---|---|
+| `curl do_configure` | 5 nested `Hash for task dependency` lines: `curl:do_prepare_recipe_sysroot`, `zlib:do_populate_sysroot`, `zlib:do_install`, `zlib:do_compile`, `zlib:do_configure`; then `basehash changed` and `Variable CFLAGS value changed:` `"${TARGET_CFLAGS} -D_REENTRANT -fPIE {+-O1+}"` | the same five `via` rows with the same hashes, `cause CFLAGS (zlib)` with the word diff at `meta-scratch:recipes-test/zlib/zlib_%.bbappend:3` (the `:append:class-target` line); 8.9 s |
+| `curl do_compile` / `do_install` | one / two more levels (`curl:do_configure`, `curl:do_compile`) | the same chain, the same cause and pointer |
+| `zlib do_configure` | `basehash changed`, the `CFLAGS` word diff | `its own inputs changed (basehash)`, the same cause and pointer |
+| `zlib do_compile` | only `Hash for task dependency zlib:do_configure changed` and that comparison | (before the fix) `its own inputs did not change; a dependency's did` |
+
+Chain, root cause, the owner recipe (zlib, from the innermost dependency) and the pointer
+to the assignment in the bbappend: **right**. Two things were wrong, both fixed in
+`src/mcp/tools/sigs.rs`:
+
+- **"its own inputs did not change" was a guess.** zlib's `do_compile`, `do_install` and
+  `do_populate_sysroot` each had their own basehash changed (the two sigdata files of each
+  task decoded with Python's `compression.zstd`, `tools/sigbase.py`:
+  `sigdata-basehashes.out`; `CFLAGS` is in each task's `varvals`), but `bitbake-diffsigs`
+  printed only the dependency: `compare_sigfiles` replaces the task's own lines by the
+  dependency's comparison (bitbake-semantics.md "Task signatures"). The row now says
+  `re-ran: a dependency's hash changed, by way of ...` and a note says a change of the
+  task's own inputs would not be listed. (For curl's tasks the old claim happened to be
+  true: their basehashes were unchanged.)
+- **The cause was cut by the budget on a deep chain.** `sigs curl install` (seven
+  dependencies) at the default 250 tokens showed the seven `via` rows and dropped the one
+  `cause` row (`+2 more over budget_tokens`). The `via` rows now come after the causes.
+
+Tests: `tests/live_build.rs` `real_diffsigs_through_a_dependency_hash`,
+`real_diffsigs_hide_a_tasks_own_change_behind_a_dependency` (the recorded outputs and
+sigdata summary); `tests/sigs.rs`
+`real_change_through_a_dependency_points_at_the_dependencys_bbappend` (the real
+`do_configure` and `do_install` outputs replayed through the tool on a fixture copy with a
+zlib recipe and the same bbappend: chain, pointer, wording, cause before the path at the
+default budget); the two hand-written snapshots updated for the wording and order.
+
+**Restored.** The bbappend removed, `bitbake curl` through yocto-kiss's own kas files:
+`Sstate summary: Wanted 40 Local 40 ... 100% match`, "918 of 919 didn't need to be
+rerun" (no task but `_setscene` ones; two "Removing N stale sstate objects" lines for the
+`-O1` outputs), then `bitbake -n curl`: "919 didn't need to be rerun". `bblayers.conf`
+and `local.conf` byte-identical to `conf-before/`. `scratch/meta-scratch/recipes-test/`
+holds only `broken-fetch`.
+
+BitBake commands of this item, all in `{{LIVE}}/yocto-kiss/build`, one client at a time:
+
+| Command | Through | Result |
+|---|---|---|
+| `bitbake -n curl` with `CFLAGS:append = " -O1"` | kas-scratch | dry run; 83 sstate misses; removed 83 stale objects from `tmp` |
+| `bitbake -n curl` with `CFLAGS:append:class-target = " -O1"` | kas-scratch | dry run; only zlib and curl tasks |
+| `bitbake curl` with that bbappend | kas-scratch | succeeded, 76 s; zlib's and curl's tasks ran, the rest from sstate |
+| `bitbake-diffsigs -c never -t curl do_configure / curl do_compile / zlib do_configure / zlib do_compile` | kas-scratch | the comparisons above |
+| `bitbake-diffsigs -c never -t ...` (sous-chef `sigs`: curl configure, compile, install; zlib configure, compile; three runs of the server) | sous-chef init-script mode | read-only |
+| `bitbake curl` (bbappend removed) | kas, yocto-kiss files | succeeded, 918 of 919 not rerun |
+| `bitbake -n curl` | kas, yocto-kiss files | 919 not rerun |
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,
