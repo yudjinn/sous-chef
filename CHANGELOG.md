@@ -88,7 +88,7 @@ override chain.
 ### Accuracy
 
 Static values compared with `bitbake -e` on the same workspace, one machine and distro per
-release, latest run 2026-11-19 ([docs/differential.md](docs/differential.md), "After
+release, latest run 2026-11-19 ([docs/differential.md](https://github.com/yudjinn/sous-chef/blob/v0.1.0/docs/differential.md), "After
 acc-unfollowed"):
 
 | Release | Values compared | Equal to BitBake (+ whitespace only) | Known gap | Differ without a flag |
