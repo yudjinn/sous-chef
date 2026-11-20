@@ -481,14 +481,8 @@ fn read_pids(file: &Path) -> (u32, u32) {
 fn dead(pid: u32) -> bool {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        match fs::read_to_string(format!("/proc/{pid}/stat")) {
-            Err(_) => return true,
-            Ok(stat) => {
-                let state = stat.rsplit(')').next().unwrap_or("").trim_start();
-                if state.starts_with('Z') || state.starts_with('X') {
-                    return true;
-                }
-            }
+        if !common::process_alive(pid) {
+            return true;
         }
         if Instant::now() > deadline {
             return false;
@@ -508,7 +502,6 @@ fn sleeping_command(env: &BbEnv, pidfile: &Path, ignore_term: bool) -> tokio::pr
     cmd
 }
 
-#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn timeout_kills_the_process_group() {
     let tmp = tempfile::tempdir().unwrap();
@@ -537,7 +530,6 @@ async fn timeout_kills_the_process_group() {
     assert!(dead(sleeper), "its child {sleeper} survived");
 }
 
-#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn timeout_kills_a_group_that_ignores_sigterm() {
     let tmp = tempfile::tempdir().unwrap();
@@ -556,7 +548,6 @@ async fn timeout_kills_a_group_that_ignores_sigterm() {
     assert!(dead(sleeper), "its child {sleeper} survived");
 }
 
-#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn cancellation_kills_the_process_group() {
     let tmp = tempfile::tempdir().unwrap();
@@ -585,7 +576,6 @@ async fn cancellation_kills_the_process_group() {
     assert!(dead(sleeper));
 }
 
-#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn dropping_a_running_command_kills_its_group() {
     let tmp = tempfile::tempdir().unwrap();

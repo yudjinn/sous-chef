@@ -36,3 +36,20 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test
+
+  # Release binaries are built for macOS too, so the suite runs there as well (clippy and
+  # tests; formatting does not depend on the platform and is checked once, above).
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Toolchain
+        run: |
+          rustup install
+          rustc -V
+          cargo clippy -V
+      - uses: Swatinem/rust-cache@v2.9.3
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --no-fail-fast

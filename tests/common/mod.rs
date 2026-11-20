@@ -118,3 +118,17 @@ pub fn files_under(dir: &Path) -> Vec<PathBuf> {
     out.sort();
     out
 }
+
+/// True while `pid` runs: it exists and is not a zombie. Asks `ps -o stat= -p PID`, which
+/// procps (Linux) and BSD `ps` (macOS) both understand, instead of reading `/proc`, which
+/// macOS does not have. `ps` prints nothing, and exits 1, for a pid that is gone; a zombie's
+/// state starts with `Z` (`X`, dead, is Linux only).
+pub fn process_alive(pid: u32) -> bool {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .expect("running ps");
+    let stat = String::from_utf8_lossy(&out.stdout);
+    let stat = stat.trim();
+    !stat.is_empty() && !stat.starts_with('Z') && !stat.starts_with('X')
+}

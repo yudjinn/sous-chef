@@ -151,15 +151,24 @@ fn manifest_and_marketplace_parse_and_agree() {
         assert!(plugin_path(rel).is_file(), "plugin/{rel} missing");
     }
 
-    let mk = plugin_json(".claude-plugin/marketplace.json");
+    // The marketplace is at the repository root, where `claude plugin marketplace add
+    // yudjinn/sous-chef` looks for it; its one plugin is `plugin/`.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mk: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join(".claude-plugin/marketplace.json")).unwrap(),
+    )
+    .unwrap();
     assert_eq!(mk["name"], PLUGIN_NAME);
     assert!(mk["owner"]["name"].is_string());
     let plugins = mk["plugins"].as_array().unwrap();
     assert_eq!(plugins.len(), 1);
     assert_eq!(plugins[0]["name"], PLUGIN_NAME);
-    assert_eq!(
-        plugins[0]["source"], "./",
-        "the marketplace root is the plugin"
+    assert_eq!(plugins[0]["source"], "./plugin");
+    // One version, in plugin.json: an entry version would be overridden by it anyway.
+    assert!(plugins[0].get("version").is_none());
+    assert!(
+        !plugin_path(".claude-plugin/marketplace.json").exists(),
+        "a second marketplace inside plugin/ would register under the same name"
     );
 }
 

@@ -26,6 +26,10 @@ fn value(ds: &eval::DataStore, name: &str) -> Option<String> {
 #[test]
 fn an_overlay_replaces_and_adds_files_for_one_evaluation_only() {
     let (_tmp, root) = temp_ws();
+    // The workspace knows its layers by their real paths, and a file that does not exist
+    // yet cannot be resolved through a symlink: on macOS the temp directory is under
+    // /var, a symlink to /private/var.
+    let root = std::fs::canonicalize(root).unwrap();
     let ws = Workspace::discover(&ws_config(&root)).unwrap();
     let cache_dir = tempfile::tempdir().unwrap();
     let mut idx = Index::open_in(cache_dir.path(), &ws).unwrap();
@@ -90,6 +94,7 @@ fn an_overlay_replaces_and_adds_files_for_one_evaluation_only() {
 #[test]
 fn an_overlay_conf_replays_the_configuration_without_caching_it() {
     let (_tmp, root) = temp_ws();
+    let root = std::fs::canonicalize(root).unwrap(); // see the test above
     // local.conf includes an .inc that does not exist yet.
     let local = root.join("build/conf/local.conf");
     let text = std::fs::read_to_string(&local).unwrap();
