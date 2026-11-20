@@ -54,6 +54,26 @@ python3 bench/score.py blind              # then fill <run dir>/scoring/marks.js
 python3 bench/score.py compute
 ```
 
+The Sonnet rerun (docs/benchmark.md, "Rerun on Sonnet 5.5 with the current code") used:
+
+```sh
+RUN=$SOUS_CHEF_LIVE/runs/bench-rerun     # prepared as above, plus rg-bin/rg and rg-ignore
+python3 bench/run.py --model sonnet --tool-search --no-vcs-ignore --repeats 2 \
+    --max-budget-usd 3 --cost-cap 30 --overhead --run-dir $RUN
+BENCH_RUN_DIR=$RUN python3 bench/score.py blind     # then fill $RUN/scoring/marks.json
+BENCH_RUN_DIR=$RUN python3 bench/score.py compute-repeats   # results/rerun-*.{tsv,md}
+```
+
+- `--tool-search` offers `ToolSearch` in both conditions (Claude Code's default: deferred
+  MCP tools); without it every MCP tool loads upfront, as in the pilot.
+- `--no-vcs-ignore` sets `USE_BUILTIN_RIPGREP=0` and puts `<run dir>/rg-bin` first on
+  `PATH`; `rg-bin/rg` runs the system ripgrep with `--no-ignore-vcs --ignore-file
+  <run dir>/rg-ignore` (`/build/*` and `!/build/conf/`), so Grep sees the layers that
+  yocto-kiss's `.gitignore` hides, in both conditions. `--only ignore-probe` checks it.
+- `--repeats N` runs every cell N times (run ids `-r1`..`-rN`); `--cost-cap` stops before a
+  session once the stored runs' reported cost reaches it; `--max-budget-usd` is passed to
+  each session.
+
 Every session runs with the workspace as working directory, `--setting-sources ""` (no
 user, project or local settings: no user plugins, hooks or permissions), `--permission-mode
 dontAsk` (anything not allowed is denied, never prompted), `--no-session-persistence`,

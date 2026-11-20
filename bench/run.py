@@ -44,6 +44,10 @@ SYSTEM_APPEND = (
 # they are not in the default set); no Edit, Write, NotebookEdit, WebFetch, WebSearch,
 # Agent or anything else.
 TOOLS = "Read,Grep,Glob,Bash,Skill"
+# With --tool-search (the rerun), ToolSearch is offered in both conditions: Claude Code's
+# default. Leaving it out of --tools makes Claude Code load every MCP tool upfront, which
+# is what the pilot did (docs/benchmark.md, "Plugin overhead after the definition cuts").
+TOOLS_SEARCH = TOOLS + ",ToolSearch"
 
 # Bash commands that run without a prompt. Under --permission-mode dontAsk anything else
 # (and anything Claude Code does not classify as read-only) is denied. Compound commands
@@ -66,7 +70,7 @@ DENY_READ = [f"Read(/{os.path.join(LIVE, d)}/**)" for d in OUTSIDE] + [
 # are denied below, and BitBake is also switched off in the benchmark's sous-chef.toml.
 SC = "mcp__plugin_sous-chef_sous-chef__"
 SC_READ_ONLY = ["recipe", "var", "deps", "search", "item", "overrides", "layers", "lint",
-                "class", "status", "slice", "log", "diff", "audit"]
+                "class", "status", "slice", "log", "diff", "audit", "sigs", "pkgdata"]
 ALLOW_B = [SC + t for t in SC_READ_ONLY]
 DENY = [
     "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Agent", "Task",
@@ -95,11 +99,14 @@ def command(prompt, cond, opts):
         "--no-session-persistence",
         "--setting-sources", "",
         "--permission-mode", "dontAsk",
-        "--tools", TOOLS,
+        "--tools", TOOLS_SEARCH if opts.tool_search else TOOLS,
         "--append-system-prompt", SYSTEM_APPEND,
         "--disallowedTools", *DENY,
         "--allowedTools", *(ALLOW_COMMON + (ALLOW_B if cond == "B" else [])),
     ]
+    if opts.max_budget_usd:
+        # A per-session guard far above any expected session cost.
+        argv += ["--max-budget-usd", str(opts.max_budget_usd)]
     if cond == "A":
         # No MCP server at all.
         argv += ["--strict-mcp-config"]
@@ -116,6 +123,18 @@ def environment(opts):
     # --setting-sources; condition B cannot use --strict-mcp-config (it would drop the
     # plugin's server too), so switch them off in both conditions.
     env["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false"
+    # Tool search at Claude Code's default in both conditions.
+    env.pop("ENABLE_TOOL_SEARCH", None)
+    rg_bin = os.path.join(opts.run_dir, "rg-bin")
+    if opts.no_vcs_ignore:
+        # The .gitignore confound (docs/benchmark.md, "Why the baseline missed files"):
+        # yocto-kiss/.gitignore lists the kas-cloned layers, and Claude Code's Grep (ripgrep)
+        # skips gitignored files, so the baseline's Grep could not see OE-core. The run
+        # directory's rg-bin/rg runs the system ripgrep with --no-ignore-vcs, and
+        # USE_BUILTIN_RIPGREP=0 makes Claude Code use the rg on PATH instead of its bundled
+        # one. Glob already ignores .gitignore by default. Both conditions get it.
+        env["PATH"] = rg_bin + os.pathsep + env["PATH"]
+        env["USE_BUILTIN_RIPGREP"] = "0"
     return env
 
 
@@ -186,6 +205,10 @@ def summarize(run_id, task_id, cond, meta, parsed):
         "init_model": init.get("model"), "claude_version": init.get("claude_code_version"),
         "answer": res.get("result"),
     }
+
+
+def spent(run_dir):
+    return sum((s.get("cost_usd") or 0) for s in stored(run_dir).values())
 
 
 def run_one(run_id, task_id, cond, prompt, opts):
@@ -266,6 +289,15 @@ def main():
     ap.add_argument("--overhead", action="store_true",
                     help="also run the trivial overhead prompt once per condition")
     ap.add_argument("--model", default="haiku")
+    ap.add_argument("--repeats", type=int, default=1,
+                    help="sessions per task and condition; run ids get -r1, -r2, ... when > 1")
+    ap.add_argument("--tool-search", action="store_true",
+                    help="offer ToolSearch in both conditions (Claude Code's default)")
+    ap.add_argument("--no-vcs-ignore", action="store_true",
+                    help="Grep through <run dir>/rg-bin/rg (--no-ignore-vcs) in both conditions")
+    ap.add_argument("--max-budget-usd", type=float, help="per-session --max-budget-usd")
+    ap.add_argument("--cost-cap", type=float,
+                    help="stop before a session once the stored runs' reported cost reaches this")
     ap.add_argument("--max-turns", type=int, default=25)
     ap.add_argument("--timeout", type=int, default=300, help="seconds per session")
     ap.add_argument("--run-dir", default=os.path.join(LIVE, "runs", "x6-benchmark"))
@@ -285,6 +317,9 @@ def main():
     if opts.only and "containment" in opts.only.split(","):
         # Checks the sandbox: every attempt below must be denied.
         jobs.append(("containment", spec["containment_prompt"]))
+    if opts.only and "ignore-probe" in opts.only.split(","):
+        # Checks the .gitignore fix: Grep must find files in OE-core.
+        jobs.append(("ignore-probe", spec["ignore_probe_prompt"]))
     for t in spec["tasks"]:
         if opts.only and t["id"] not in opts.only.split(","):
             continue
@@ -292,15 +327,20 @@ def main():
     conds = opts.conditions.split(",")
     done = stored(opts.run_dir)
     n = 0
-    for task_id, prompt in jobs:
-        for cond in conds:
-            run_id = f"{task_id}-{cond}"
-            if run_id in done and not opts.dry_run:
-                continue
-            if opts.limit is not None and n >= opts.limit:
-                return
-            run_one(run_id, task_id, cond, prompt, opts)
-            n += 1
+    for rep in range(1, opts.repeats + 1):
+        for task_id, prompt in jobs:
+            for cond in conds:
+                run_id = f"{task_id}-{cond}" + (f"-r{rep}" if opts.repeats > 1 else "")
+                if run_id in done and not opts.dry_run:
+                    continue
+                if opts.limit is not None and n >= opts.limit:
+                    return
+                if opts.cost_cap is not None and not opts.dry_run:
+                    total = spent(opts.run_dir)
+                    if total >= opts.cost_cap:
+                        sys.exit(f"cost cap reached: {total:.2f} USD >= {opts.cost_cap}")
+                run_one(run_id, task_id, cond, prompt, opts)
+                n += 1
 
 
 if __name__ == "__main__":
