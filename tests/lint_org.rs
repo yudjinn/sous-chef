@@ -246,6 +246,44 @@ fn duplicate_versions() {
 }
 
 #[test]
+fn duplicate_versions_leaves_out_uncollected_and_same_version_files() {
+    // lint-precision false positives (tests/fixtures/lint-precision/labels.tsv): meta-oe's
+    // android-tools-conf and its dynamic-layers/selinux copy (version 1.0 both, the copy not
+    // collected); the dup recipes of two versions beside them still fire.
+    let env = env("duplicate-versions", &["precision-layer"]);
+    let found = env.lint(&OrgDuplicateVersions, "precision-layer");
+    assert_eq!(
+        rows(&found),
+        ["info precision-layer:recipes-app/dup/dup_2.0.bb:1"],
+        "{}",
+        messages(&found)
+    );
+    // Also when both files are collected: the same version is no other version.
+    let both = env_with(
+        "duplicate-versions",
+        &["precision-layer"],
+        &[],
+        Some("wrynose"),
+        |root| {
+            let conf = root.join("precision-layer/conf/layer.conf");
+            let text = fs::read_to_string(&conf).unwrap().replace(
+                "${LAYERDIR}/recipes-*/*/*.bbappend\"",
+                "${LAYERDIR}/recipes-*/*/*.bbappend \\\n            \
+                 ${LAYERDIR}/dynamic-layers/*/recipes-*/*/*.bb\"",
+            );
+            fs::write(conf, text).unwrap();
+        },
+    );
+    let found = both.lint(&OrgDuplicateVersions, "precision-layer");
+    assert_eq!(
+        rows(&found),
+        ["info precision-layer:recipes-app/dup/dup_2.0.bb:1"],
+        "{}",
+        messages(&found)
+    );
+}
+
+#[test]
 fn inc_unused() {
     let found = bad_and_good(&OrgIncUnused, "inc-unused", &[]);
     assert_eq!(
