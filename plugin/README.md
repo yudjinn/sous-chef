@@ -22,9 +22,9 @@ against a real Claude Code.
 | Handler (`hook.log` name) | Matcher | What it does | `[hooks]` switch | Live |
 |---|---|---|---|---|
 | `grep_read` | `Grep\|Read` | adds the enclosing item and the recipe's contributing files as `additionalContext` | `grep_read` | confirmed (Grep content mode, Read) |
-| `bash` | `Bash` | replaces the output of a large `bitbake`, `devtool` or `bitbake-layers` command (also through `kas build` / `kas shell -c`) with a digest and a handle | `bash` | not captured live |
+| `bash` | `Bash` | replaces the output of a large `bitbake`, `devtool` or `bitbake-layers` command (also through `kas build` / `kas shell -c`) with a digest and a handle | `bash` | confirmed (real-checks, 2.1.328) |
 | `bash_grep` | `Bash` | annotates a plain `grep -n` / `rg -n` like Grep, as `additionalContext` | `grep_read` | not captured live |
-| `edit` | `Edit\|Write\|MultiEdit` | reindexes the file, adds up to five lint findings; a line when the layer is not writable | `edit` | not captured live |
+| `edit` | `Edit\|Write\|MultiEdit` | reindexes the file, adds up to five lint findings; a line when the layer is not writable | `edit` | confirmed (Edit, real-checks, 2.1.328) |
 
 All switches default to `true`. Live means checked in a real Claude Code session (below);
 the others are tested against hand-written events in the documented shape and, for the
@@ -144,15 +144,57 @@ build) on `PATH`:
   (`Successfully installed`, read in place from `plugin/`), `claude mcp list` in the
   workspace: `plugin:sous-chef:sous-chef: ... ✔ Connected`; with `sous-chef` off `PATH`:
   `✘ Failed to connect`.
-- **Not checked live:** the Bash and edit hooks. A second run that would have edited a file
-  in the scratch copy and run a fake `bitbake` script there was refused by the permission
-  classifier of the session doing the check, and was not retried another way. Both are
-  covered by `tests/plugin_packaging.rs` through the plugin's own hook command, and by the
-  handler tests, against the hand-written events.
+- **Not checked live then:** the Bash and edit hooks (a second run was refused by the
+  permission classifier of the session doing the check). Checked on 2026-11-20, below
+  ("Checked with Claude Code 2.1.328").
 - The server's start-up line on stderr (`sous-chef: serving 14 tools on stdio for 3
   layers`, as captured that day; `diff` and `audit` came later, and the line now says 16)
   appears in Claude Code's debug log at `[ERROR]` level: Claude Code logs all server stderr
   that way. Harmless.
+
+### Checked with Claude Code 2.1.328 (2026-11-20, real-checks)
+
+Three `claude -p` sessions (`--model haiku`, reported as `claude-haiku-5-5`; total cost
+US$0.0067) in a scratch copy of `tests/fixtures/ws` under `{{LIVE}}/runs/real-checks/hooks/`,
+indexed beforehand, with the release build of branch `real-checks` on `PATH`. Flags:
+`--plugin-dir plugin --setting-sources '' --no-session-persistence --permission-mode
+dontAsk --tools Bash,Edit,Read --allowedTools 'Bash(./bitbake curl)'
+'Edit(//<ws>/meta-core/recipes-core/hello/hello_1.1.bb)' --max-turns 8 --max-budget-usd
+0.50 --output-format stream-json --verbose --include-hook-events`, plus `--settings` with a
+capture hook (`PostToolUse` on `Bash|Edit`, a script that appends the event to a file and
+prints nothing; hooks from `--settings` do run with `--setting-sources ''`);
+`ENABLE_CLAUDEAI_MCP_SERVERS=false` and the parent's `CLAUDE_CODE_*` variables removed.
+`./bitbake` is a script that `cat`s the recorded console of y1's real configure failure of
+curl (33 946 bytes); nothing ran BitBake. `--include-hook-events` puts each hook's stdout in
+the stream (`hook_response`, with `stdout`, `exit_code`, `outcome`).
+
+- **Bash: the hook gets a cut output.** For this 33 946-byte output Claude Code passed
+  `tool_response.stdout` as its first **29 999** bytes, plus two fields the hooks reference
+  does not list: `persistedOutputPath` (a file under
+  `~/.claude/projects/<project>/<session>/tool-results/` holding the whole output, byte for
+  byte the console, copied by the capture hook while it existed) and `persistedOutputSize:
+  33946`; also `noOutputExpected: false`. First session: the digest was made from the cut
+  text (`345 lines, 29999 bytes`; first error `configure failed`, line 32, because the
+  `configure: error:` line is past the cut) and, since the reply kept the two fields, the
+  model was shown `<persisted-output> Output too large (33.2KB). Full output saved to:
+  <file> Preview (first 2KB): <the digest>`. **Fixed** (`src/hook/bash.rs`,
+  `persisted_output`): the hook reads the whole output from that file (an absolute regular
+  file, at most 64 MiB, larger than the `stdout` given) and removes the two fields from its
+  reply. Third session: `401 lines, 33946 bytes`, the `configure: error: libpsl ...` row,
+  and the model was shown the 525-byte digest itself; Claude Code accepted the reply
+  without the fields.
+- **Edit**: on `meta-core/.../hello_1.1.bb` (meta-core is not writable in the fixture's
+  `sous-chef.toml`) the hook answered `meta-core is not a writable layer: ... (scaffold
+  kind=where name=hello says where)` as `additionalContext`, and the model relayed it.
+  The Edit event's `tool_response` had the documented fields (`filePath`, `oldString`,
+  `newString`, `originalFile`, `structuredPatch`, `userModified`, `replaceAll`).
+- Read (the model read the file before editing) gave the `grep_read` context as before.
+- Session two's Edit was refused by the permission rule: `Edit(/<abs path>)` is anchored
+  at the settings source, not the filesystem root; `Edit(//<abs path>)` is the absolute
+  form (permissions reference). Session one asked for an edit of a line the file does not
+  have, and the model made none.
+
+Replay tests on the captured events: `tests/hook_live_session.rs`.
 
 ### Real events
 
@@ -362,8 +404,9 @@ meta-openembedded scale was not measured.
 - Whether Claude Code's Bash tool runs commands with a tty. Assumed not (then `rg` prints
   no line numbers unless given `-n`, and no headings). With a tty, `rg -n` would print
   headings and `<line>:<text>`, which the Bash grep handler skips.
-- The Bash and Edit / Write events have not been captured from a live session; their
-  recorded events under `tests/fixtures/hooks/` are still the hand-written ones. Read's
-  `startLine` is now confirmed 1-based.
+- A Bash event and an Edit event were captured live (real-checks, 2.1.328; below); a
+  Write and a MultiEdit event, and a grep run through Bash (`bash_grep`), were not. The
+  hand-written events under `tests/fixtures/hooks/` are kept; the captured ones are in
+  `tests/fixtures/outputs/live/hooks/live_*`. Read's `startLine` is confirmed 1-based.
 - Whether an `mcp_tool` hook can pass the whole `tool_response` object. If it can, a hidden
   `hook` MCP tool would save a process start per event; not needed for the budget today.

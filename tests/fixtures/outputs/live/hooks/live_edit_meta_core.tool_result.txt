@@ -1,0 +1,1 @@
+The file {{LIVE}}/runs/real-checks/hooks/ws/meta-core/recipes-core/hello/hello_1.1.bb has been updated successfully. (file state is current in your context — no need to Read it back)

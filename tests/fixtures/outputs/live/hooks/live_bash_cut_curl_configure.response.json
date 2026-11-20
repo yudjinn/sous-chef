@@ -1,0 +1,12 @@
+{
+ "hookSpecificOutput": {
+  "hookEventName": "PostToolUse",
+  "updatedToolOutput": {
+   "interrupted": false,
+   "isImage": false,
+   "noOutputExpected": false,
+   "stderr": "",
+   "stdout": "sous-chef: bitbake output (401 lines, 33946 bytes) stored as h:a13826d049; the full text is there, read it with the slice tool.\nfield\tvalue\nrecipe\tcurl\nversion\t8.19.0\ntask\tdo_configure\nexit\t1\nerror (configure, line 380)\tconfigure: error: libpsl libs and/or directories were not found where specified!\ncontext\tchecking for psl_builtin in -lpsl... no\nfunction\toe_runconf (run file line 255); called from autotools_do_configure < do_configure\nhandle\th:a13826d049\nslice handle=h:a13826d049 failures=true | grep=RE | lines=379-381\n"
+  }
+ }
+}

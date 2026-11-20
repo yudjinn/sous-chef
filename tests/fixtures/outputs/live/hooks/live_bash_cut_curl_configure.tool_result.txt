@@ -1,0 +1,11 @@
+sous-chef: bitbake output (401 lines, 33946 bytes) stored as h:a13826d049; the full text is there, read it with the slice tool.
+field	value
+recipe	curl
+version	8.19.0
+task	do_configure
+exit	1
+error (configure, line 380)	configure: error: libpsl libs and/or directories were not found where specified!
+context	checking for psl_builtin in -lpsl... no
+function	oe_runconf (run file line 255); called from autotools_do_configure < do_configure
+handle	h:a13826d049
+slice handle=h:a13826d049 failures=true | grep=RE | lines=379-381

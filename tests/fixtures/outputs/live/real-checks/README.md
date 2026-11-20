@@ -18,6 +18,20 @@ scratch layer through `kas-scratch.yaml`.
 | `sigdata-basehashes.out` | `{{LIVE}}/runs/real-checks/tools/sigbase.py` on the stamps directories of zlib and curl: the two newest sigdata files of each task decoded (Python `compression.zstd`), with basehash, taint and `CFLAGS` |
 | `zlib_%.bbappend.txt` | the scratch bbappend (removed from the layer afterwards) |
 
+## ../hooks/live_*
+
+Captured from live Claude Code sessions (2.1.328, `--model haiku`) by a capture hook and
+from the `--include-hook-events` stream; scrubbed (`{{LIVE}}`, `{{HOME}}`, `{{USER}}`, also
+inside Claude Code's mangled project directory name). Replayed by
+`tests/hook_live_session.rs`.
+
+| File | What |
+|---|---|
+| `live_bash_cut_curl_configure.event.json` | session 1's `PostToolUse` Bash event for `./bitbake curl` (a script printing the y1 console with `cat`): `stdout` cut to 29 999 bytes, `persistedOutputPath`, `persistedOutputSize` |
+| `live_bash_cut_curl_configure.response_before_fix.json`, `.tool_result_before_fix.txt` | session 1: sous-chef's reply, and the tool result the model was shown |
+| `live_bash_cut_curl_configure.response.json`, `.tool_result.txt` | session 3 (after the fix): the same |
+| `live_edit_meta_core.event.json`, `.response.json`, `.tool_result.txt` | session 3's Edit of `meta-core/recipes-core/hello/hello_1.1.bb`: the event, sous-chef's reply, the tool result |
+
 ## multiconfig/
 
 The Scarthgap release workspace (BitBake 2.8.1) with a temporary second configuration;

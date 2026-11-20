@@ -1,0 +1,44 @@
+{
+ "session_id": "759e5255-b597-4573-919b-05bdc07b78da",
+ "transcript_path": "{{HOME}}/.claude/projects/-home-{{USER}}-Development-sous-chef-live-runs-real-checks-hooks-ws/759e5255-b597-4573-919b-05bdc07b78da.jsonl",
+ "cwd": "{{LIVE}}/runs/real-checks/hooks/ws",
+ "prompt_id": "69bfc639-7c0d-46ee-b255-a547db30d7f1",
+ "permission_mode": "dontAsk",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Edit",
+ "tool_input": {
+  "file_path": "{{LIVE}}/runs/real-checks/hooks/ws/meta-core/recipes-core/hello/hello_1.1.bb",
+  "old_string": "PACKAGECONFIG ??= \"greeting\"",
+  "new_string": "PACKAGECONFIG ??= \"greeting extra\"",
+  "replace_all": false
+ },
+ "tool_response": {
+  "filePath": "{{LIVE}}/runs/real-checks/hooks/ws/meta-core/recipes-core/hello/hello_1.1.bb",
+  "oldString": "PACKAGECONFIG ??= \"greeting\"",
+  "newString": "PACKAGECONFIG ??= \"greeting extra\"",
+  "originalFile": "require hello.inc\n\nLIC_FILES_CHKSUM = \"file://COPYING;md5=0835ade698e0bcf8506ecda2f7b4f302\"\n\nSRC_URI += \"file://hello.patch\"\nSRC_URI[sha256sum] = \"2222222222222222222222222222222222222222222222222222222222222222\"\n\nPACKAGECONFIG ??= \"greeting\"\nPACKAGECONFIG[greeting] = \"--enable-greeting,--disable-greeting\"\n",
+  "structuredPatch": [
+   {
+    "oldStart": 5,
+    "oldLines": 5,
+    "newStart": 5,
+    "newLines": 5,
+    "lines": [
+     " SRC_URI += \"file://hello.patch\"",
+     " SRC_URI[sha256sum] = \"2222222222222222222222222222222222222222222222222222222222222222\"",
+     " ",
+     "-PACKAGECONFIG ??= \"greeting\"",
+     "+PACKAGECONFIG ??= \"greeting extra\"",
+     " PACKAGECONFIG[greeting] = \"--enable-greeting,--disable-greeting\""
+    ]
+   }
+  ],
+  "userModified": false,
+  "replaceAll": false
+ },
+ "tool_use_id": "toolu_013RzVWJNq5Rh79SbAhUdJPT",
+ "duration_ms": 15
+}

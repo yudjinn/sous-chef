@@ -1,0 +1,6 @@
+{
+ "hookSpecificOutput": {
+  "additionalContext": "meta-core is not a writable layer: this edits upstream metadata, which an update of the layer overwrites; put the change in a bbappend in a writable layer (`scaffold kind=where name=hello` says where).",
+  "hookEventName": "PostToolUse"
+ }
+}

@@ -1392,6 +1392,39 @@ mcdepends` for curl, `-u` for curl, zlib, `mc:musl:curl`; `TCLIBC` and `FILE_LAY
 `mc:musl:curl`, `FILE_LAYERNAME` for curl; `PREFERRED_PROVIDER_virtual/libc` and `WORKDIR`
 for `mc:musl:zlib`).
 
+### The Bash and Edit hooks in a live session: confirmed, one fix
+
+Three isolated `claude -p` sessions (Claude Code 2.1.328, `--model haiku`, US$0.0067 in
+all; flags and setup in plugin/README.md, "Checked with Claude Code 2.1.328") in a scratch
+copy of the fixture workspace (`{{LIVE}}/runs/real-checks/hooks/ws`). The model ran
+`./bitbake curl`, a script that `cat`s the recorded real console of y1's configure failure
+(so the hook saw a bitbake command line and real output, and nothing ran BitBake), and
+edited `meta-core/recipes-core/hello/hello_1.1.bb`. A first attempt to start session one
+failed before any request (`claude` not on the reduced `PATH`, exit 127).
+
+- **The Bash hook ran and replaced the output in every session**, but Claude Code handed
+  it only the first 29 999 of 33 946 bytes, with `persistedOutputPath` and
+  `persistedOutputSize` (not in the hooks reference). The digest of the cut text named the
+  wrong first error (`configure failed`; the `configure: error: libpsl ...` line is past the
+  cut) and, because the reply kept those fields, the model saw the digest wrapped as the
+  2 KB preview of an "Output too large (33.2KB)" saved file. **Fixed** in
+  `src/hook/bash.rs`: the hook reads the whole output from `persistedOutputPath` and drops
+  both fields from its reply. After the fix the model was shown exactly the 525-byte digest
+  (recipe, version, task, exit 1, the `configure: error`, context, function, handle, slice
+  hint) in place of 33 946 bytes, and answered from it.
+- **The Edit follow-up appeared**: `meta-core is not a writable layer: ... (scaffold
+  kind=where name=hello says where)` as `additionalContext`; the model quoted it.
+- No permission refusal of the sessions themselves. Inside them: session two's Edit was
+  denied by its own allow rule (`Edit(/<abs>)` is not absolute; `Edit(//<abs>)` is), and
+  one sous-chef MCP call (`item`) in session three was denied by `dontAsk` (not in the allow
+  list), as configured.
+
+Recorded: `tests/fixtures/outputs/live/hooks/live_*`; tests `tests/hook_live_session.rs`
+(the captured events replayed: the digest from the persisted file equals the live reply
+and the tool result the model saw; without the file, the reply of the session before the
+fix; the Edit follow-up equals the live one) and a unit test of `persisted_output` in
+`src/hook/bash.rs`. Not captured: Write, MultiEdit, a grep through Bash (`bash_grep`).
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,
