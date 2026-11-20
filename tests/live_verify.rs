@@ -1,8 +1,11 @@
 //! T9.2: checks against the live yocto-kiss environment (`docs/live-verification.md`).
 //!
-//! Every test is `#[ignore]` and also returns early, passing, unless `SOUS_CHEF_LIVE` names
-//! the directory that `scripts/live-env.sh` created, so the normal gate never needs the
-//! environment. Run them with
+//! Every test that reads the live environment is `#[ignore]` and also returns early,
+//! passing, unless `SOUS_CHEF_LIVE` names the directory that `scripts/live-env.sh` created,
+//! so the normal gate never needs the environment. Two need nothing live and run in the
+//! normal gate: `live_bug_wrapper_with_bitbake_setup_init_build_env` (a temporary script)
+//! and `live_failed_fetch_log_detected` (a recorded log under `tests/fixtures/`). Run the
+//! others with
 //!
 //! ```sh
 //! SOUS_CHEF_LIVE=~/Development/sous-chef-live cargo test --test live_verify -- --ignored
@@ -445,12 +448,15 @@ fn live_curl_static_values_equal_bitbake() {
             );
         }
     }
-    // A value with python outside the subset (`get_base_dep(d)`): different, and flagged.
+    // DEPENDS: `get_base_dep(d)` is evaluated since acc-helpers, and the words anonymous
+    // python adds (`PACKAGECONFIG` through base.bbclass, `virtual/update-alternatives`)
+    // are reproduced since acc-anon-models: equal, and certain.
     let ours = ds.value("DEPENDS").unwrap();
-    assert_ne!(Some(&ours.text), bb.get("DEPENDS"));
+    assert_eq!(Some(&ours.text), bb.get("DEPENDS"));
     assert!(
-        ours.unevaluated_python,
-        "DEPENDS differs but is not flagged"
+        !ours.unevaluated_python && ours.unresolved.is_empty(),
+        "DEPENDS equal but flagged: {:?}",
+        ds.flag_causes("DEPENDS")
     );
 }
 
@@ -569,11 +575,10 @@ fn live_bug_deps_build_splits_python() {
 
 /// bitbake-setup's `init-build-env` ends with `set --`, which clears the wrapper's
 /// positional parameters: `shift 2` fails and the program never runs (exit 1, no output).
-/// Reproduced with a script of the same shape; BitBake is not started.
+/// Reproduced with a script of the same shape; BitBake is not started. Needs nothing live
+/// (a temporary directory and `bash`), so it runs in the normal gate.
 #[test]
-#[ignore = "needs SOUS_CHEF_LIVE"]
 fn live_bug_wrapper_with_bitbake_setup_init_build_env() {
-    let Some(_root) = live() else { return };
     let tmp = tempfile::tempdir().unwrap();
     let oe = tmp.path().join("oe-init-build-env");
     fs::write(&oe, "BUILDDIR=\"$1\"; export BUILDDIR\n").unwrap();
@@ -616,10 +621,10 @@ fn live_sample(name: &str) -> String {
 }
 
 /// The real failed `do_fetch` log: the first error is the `FetchError`, with the URL.
+/// Reads only the recorded copy under `tests/fixtures/outputs/live/broken-fetch/`, so it
+/// runs in the normal gate.
 #[test]
-#[ignore = "needs SOUS_CHEF_LIVE"]
 fn live_failed_fetch_log_detected() {
-    let Some(_root) = live() else { return };
     let log = live_sample("log.do_fetch.1484343");
     let f = sous_chef::bitbake::logs::detect(&log);
     let first = sous_chef::bitbake::logs::first_error(&f).unwrap();

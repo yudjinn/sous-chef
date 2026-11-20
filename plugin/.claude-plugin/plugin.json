@@ -6,6 +6,8 @@
   "author": {
     "name": "sous-chef contributors"
   },
+  "homepage": "https://github.com/yudjinn/sous-chef",
+  "repository": "https://github.com/yudjinn/sous-chef",
   "license": "MIT",
   "keywords": ["yocto", "openembedded", "bitbake", "mcp", "lint"]
 }

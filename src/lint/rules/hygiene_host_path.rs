@@ -92,6 +92,12 @@ const TEXT_COMMANDS: &[&str] = &[
 /// `grep -q -x "/bin/sh" f`); their unquoted arguments are files and are still checked.
 const PATTERN_COMMANDS: &[&str] = &["sed", "grep", "egrep", "fgrep", "awk", "gawk", "perl"];
 
+/// Test commands, and their string comparison operators: the operands of a comparison
+/// are text (`[ "${systemd_unitdir}" != "/usr/lib/systemd" ]`), while a file test operand
+/// (`[ -d /usr/lib ]`) is still a path on the host.
+const TEST_COMMANDS: &[&str] = &["[", "[[", "test"];
+const COMPARISONS: &[&str] = &["=", "==", "!="];
+
 /// Shell words that come before a command without being one.
 const KEYWORDS: &[&str] = &[
     "if", "then", "else", "elif", "do", "while", "until", "!", "{", "(", "time", "exec",
@@ -142,7 +148,8 @@ fn words(line: &str) -> Vec<(usize, &str)> {
 /// previous line when it ended with `\`, and is left as it stands at the end of this line.
 fn host_paths_in(line: &str, cmd: &mut Command) -> Vec<(&'static str, &'static str)> {
     let mut out = Vec::new();
-    for (_, word) in words(line) {
+    let all = words(line);
+    for (i, &(_, word)) in all.iter().enumerate() {
         let (bare, ends_segment) = match word.strip_suffix(';') {
             Some(w) => (w, true),
             None => (word, false),
@@ -172,11 +179,19 @@ fn host_paths_in(line: &str, cmd: &mut Command) -> Vec<(&'static str, &'static s
                 cmd.operands += 1;
             }
             let symlink_target = name == "ln" && cmd.symbolic && !option && cmd.operands == 1;
+            // An operand of a string comparison in a test (`[ "$x" != "/usr/lib" ]`): text
+            // compared, not a file opened (meta-oe opencv_4.9.0.bb:197).
+            let compared = TEST_COMMANDS.contains(&name)
+                && [i.checked_sub(1), Some(i + 1)].into_iter().any(|j| {
+                    j.and_then(|j| all.get(j))
+                        .is_some_and(|(_, w)| COMPARISONS.contains(w))
+                });
             for (dir, instead, quoted) in paths_in_word(bare) {
                 let data = !target
                     && (TEXT_COMMANDS.contains(&name)
                         || (quoted && PATTERN_COMMANDS.contains(&name))
-                        || symlink_target);
+                        || symlink_target
+                        || compared);
                 if !data {
                     out.push((dir, instead));
                 }
@@ -358,6 +373,24 @@ mod tests {
         assert_eq!(host_paths("\tln /usr/bin/a ${D}/b").len(), 1);
         assert_eq!(host_paths("\techo x | tee /etc/x").len(), 1);
         assert_eq!(host_paths("\tcp \"/etc/x\" ${D}").len(), 1);
+        // A string compared in a test is text (lint-precision: meta-oe
+        // phoronix-test-suite_10.8.2.bb:23, opencv_4.5.5.bb:228, opencv_4.9.0.bb:197); a
+        // file test, or a path next to the comparison in another expression, is not.
+        assert!(
+            host_paths("    if [ \"${systemd_unitdir}\" != \"/usr/lib/systemd\" ]; then")
+                .is_empty()
+        );
+        assert_eq!(
+            host_paths("    if [ \"$libdir\" != \"/usr/lib\" -a -d ${D}/usr/lib ]; then").len(),
+            0
+        );
+        assert!(host_paths("\ttest /usr/lib = \"$x\"").is_empty());
+        assert_eq!(host_paths("\tif [ -d /usr/lib ]; then").len(), 1);
+        assert_eq!(
+            host_paths("\tif [ -d /usr/lib -a \"$x\" = y ]; then").len(),
+            1
+        );
+        assert_eq!(host_paths("\techo = /etc/x").len(), 0);
         // A continued command keeps its name.
         let mut cmd = Command::default();
         assert!(host_paths_in("\tsed -i \\", &mut cmd).is_empty());

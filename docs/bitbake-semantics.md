@@ -224,6 +224,12 @@ Checked against `ast.py` `DataNode.eval` and `data_smart.py`, BitBake master (20
 - `?=` on a variable that has a value re-stores the same value (no effect).
 - `??=` stores a separate default (`_defaultval`); the last one wins; it is used only when the
   variable has no plain value at the end.
+- **`??=` on an override name takes part in the override selection.** `setVarFlag(var,
+  "_defaultval", ...)` runs `_setvar_update_overrides(var)` when `var` has a `:`, as
+  `setVar` does, and `getVarFlag` of the selected variant falls back to its `_defaultval`, so
+  `PACKAGECONFIG:class-target ??= "readline gdbm"` (Kirkstone's `python3_3.10.20.bb`) is the
+  target recipe's `PACKAGECONFIG`. `data_smart.py` on branches `2.0`, `2.8` and `2.18`;
+  confirmed by `bitbake -e python3` on Kirkstone (acc-releases).
 - `:=` expands the value immediately against a copy of the current datastore (overrides and
   appends included). Undefined references stay as `${X}` text and can still expand later.
 - `VAR:append += "x"` is legal (with a warning) and appends `" x"`: the current value of the
@@ -302,19 +308,25 @@ the value exactly as before:
   the escapes `\\ \' \" \n \t` (no prefix, no triple quote, no implicit concatenation);
   decimal integers; `True` / `False` / `None`; list displays `[a, b]`; the name `d` (only
   as an argument, or as `d.getVar` / `d.getVarFlag` / `d.expand`); calls of the allowlisted
-  helpers below and of `len` and `bool` (positional only, as in python), with positional and keyword arguments bound as python binds
+  helpers below and of `len`, `bool` and `int` (positional only, as in python; `int` of an
+  integer, a boolean, or a string that is an optional sign and ASCII digits only: python's
+  surrounding whitespace, `_` and non-ASCII digits are not reproduced, a base argument is
+  rejected), with positional and keyword arguments bound as python binds
   them to the helper's signature; `a + b` (strings, lists); `a % b` with the conversions
   `%s`, `%d` (of an integer) and `%%` only, `b` a single value or a tuple (needed by OE-core's
   arm tune python, see "Corpus" below); `a if c else b`; `and` / `or` (returning an
   operand, as python does) / `not`; one `==`, `!=`, `in` or `not in` per comparison (no
-  chain); `-` before an integer literal; `x[i]` on a list by an integer (negative counted
-  from the end) or a boolean (`['', 'x:'][cond]`); the string methods `split()` /
+  chain), and `<`, `<=`, `>`, `>=` between integers or booleans only (kirkstone / scarthgap
+  `EXTENDPE`: `['','${PE}_'][int(d.getVar('PE') or 0) > 0]`); `-` before an integer literal; `x[i]` on a list by an integer (negative counted
+  from the end) or a boolean (`['', 'x:'][cond]`); a slice `x[a:b]` (no step) of a list or a
+  string, its bounds integers, booleans or `None`, with python's clamping (`util-linux.inc`'s
+  `'.'.join(d.getVar('PV').split('.')[0:2])`); the string methods `split()` /
   `split(sep)`, `strip()` / `strip(chars)`, `replace(old, new)`, `startswith(s)`,
   `endswith(s)`, `lower()` / `upper()` (ASCII text only), `sep.join(list or str)`.
   Rejected, whatever else the expression holds: any other name (`os`, `bb.parse`,
-  `oe.types`, class-defined functions, a bare variable name), attribute or method,
-  `lambda`, comprehensions, generators, slices, `%` with anything else, f-strings, byte
-  strings, `is`, `<` and the other comparisons, arithmetic;
+  `oe.types`, class-defined functions other than the allowlisted ones (below, checked by their text), a bare variable name), attribute or method,
+  `lambda`, comprehensions, generators, a slice with a step, `%` with anything else, f-strings, byte
+  strings, `is`, an order comparison of anything but integers, arithmetic;
 - every value it reads is **certain**: `d.getVar('X')` of a value that holds python left
   unevaluated, an undefined `${VAR}`, an uncertain override decision, a variable anonymous
   python or a handler sets, or one a file reached through an uncertain reference sets,
@@ -360,20 +372,69 @@ Wrynose `33a6bd6cc8` unless said:
 | `oe.utils.prune_suffix(var, suffixes, d)` | `prune_suffix` | each non-empty suffix in order, cut when `var` ends with it; then `MLPREFIX` cut from the front when set and `var` starts with it. |
 | `oe.utils.all_distro_features(d, features, truevalue="1", falsevalue="")` / `any_distro_features(...)` | `all_distro_features` / `any_distro_features` | `bb.utils.contains` / `contains_any` on `DISTRO_FEATURES`. |
 | `oe.utils.filter_default_features(varname, d)`, `oe.utils.set_difference(variable1, variable2, d)` | `filter_default_features`, `set_difference` (Wrynose only: neither function is on `origin/scarthgap` or `origin/kirkstone`) | `set_difference(varname + "_DEFAULTS", varname + "_OPTED_OUT")`: first value falsy: `""`; second falsy: the first value as it is; `*` among the second's words: `""`; else `" ".join(sorted(set(v1.split()) - set(v2.split())))`. Not on the requested allowlist; added because OE-core Wrynose's `bitbake.conf` appends it to `DISTRO_FEATURES` and `MACHINE_FEATURES`, which the skip checks read. A call on an older release, where the function does not exist, fails in BitBake; sous-chef does not check the release here. |
+| `oe.utils.class_filter_features(defaults, features_var, filter_var, d)` | `class_filter_features` (Wrynose only: not on `origin/scarthgap` or `origin/kirkstone`) | `set(d.getVar(features_var).split())` (unset raises) united with `bb.utils.filter_string(defaults, d.getVar(filter_var))` (`''` for empty `defaults`; else the sorted words of `defaults` in the filter value, whose `set(None)` raises), joined sorted. Written by `set_class_filter` ("Class-extension read filters"). |
 | `d.getVar(name)`, `d.getVar(name, True)`, `d.getVar(name, expand=...)` | `data_smart.py` `getVar` | the finalised, expanded value (overrides, appends, removes), `None` when unset; `expand` false is not evaluated (the unexpanded value is not reproduced), nor are `noweakdefault` / `parsing`. |
 | `d.getVarFlag(name, flag)` | `getVarFlag` | the expanded flag (a `??=` flag default when unset), `None`; `expand` false and flags starting with `_` are not evaluated. |
 | `d.expand(text)` | `expand` | the text expanded against the datastore (no owner, so no self-reference check). |
 
+#### Class functions evaluated statically (acc-helpers)
+
+BitBake runs a top-level `def` when it parses it (`ast.PythonMethodNode.eval`:
+`bb.methodpool.insert_method` executes the text into the one global python context
+`bb.utils._context`; the text is also stored as the variable, flags `func`, `python`), so a
+call resolves to the definition of that name executed **last**, and a layer can redefine a
+class function (OE-core's own `gcr` and `libgudev` recipes redefine `gnome_verdir`; meta-gnome
+recipes too). `bb.data.inherits_class(klass, d)` (BitBake 2.18 `lib/bb/data.py`, the same in
+2.0 and 2.8): any path in `__inherit_cache` ending with `/<klass>.bbclass`;
+`oe.utils.inherits(d, *classes)` is `any(inherits_class(c, d) ...)` (the same on kirkstone,
+scarthgap, Wrynose).
+
+sous-chef (`src/eval/classfn.rs`, called from `pyexpr.rs`): for each allowlisted name the
+replay records the last `def` of it the parse executed (`ReplayNotes::class_defs`) and
+whether its text, read back from the file (trailing blank lines and `\r` aside), is the
+verified one; a call is evaluated only then, with the semantics below and the reads in
+python's order (so a read that is not certain stops only where python needs it). Any other
+definition, or none, leaves the expression unevaluated and the note names the reason ("...
+is defined at <loc> with a text other than the verified one", "... is not defined in this
+parse"). `inherits_class` is answered from the replay's `__inherit_cache` only when no
+reference that could inherit a class (an `inherit`, `inherit_defer`, `INHERIT` word, or an
+`include` / `require` outside a `.conf`) was left unfollowed for python or undefined
+variables, or followed with an uncertain value; otherwise the call stops as uncertain. The
+value a function returns is substituted and expanded again in the next pass, as in
+BitBake (`get_base_dep` returns the text `${BASE_DEFAULT_DEPS}`).
+
+| Function | Source (OE-core) | Releases with the verified text | Semantics reproduced; why pure |
+|---|---|---|---|
+| `base_set_filespath(path, d)` | `classes-global/utils.bbclass` (`classes/` on kirkstone) | kirkstone, scarthgap, Wrynose | `path` must be a list of strings (a string would be iterated by character in python; not reproduced). `FILESEXTRAPATHS` (unset: `""`) with `__default:` removed, split on `:` and put before `path` when not empty; `(":" + FILESOVERRIDES).split(":")` reversed; for each override, each non-empty path element, `os.path.join(p, o)` (posix: `o` when absolute, else `p` + `/` unless `p` ends with `/`, + `o`); joined with `:`. Reads two variables, string operations only. |
+| `get_autotools_dep(d)` | `classes-recipe/autotools.bbclass` | kirkstone, scarthgap, Wrynose | `INHIBIT_AUTOTOOLS_DEPS` truthy: `''`; `PN` (unset: python raises); `autoconf-native` / `automake-native`: `''`; else `autoconf-native automake-native `, then unless `PN` is `libtool` / `libtool-native` or ends with `libtool-cross`: `libtool-native `, and `libtool-cross ` unless it inherits `native`, `nativesdk` or `cross` or `INHIBIT_DEFAULT_DEPS` is truthy (in that order, short-circuit). Reads variables and `__inherit_cache` only. |
+| `get_base_dep(d)` | `classes-global/base.bbclass` | kirkstone, scarthgap, Wrynose | `d.getVar('INHIBIT_DEFAULT_DEPS', False)` (unexpanded) truthy: `""`, else the text `${BASE_DEFAULT_DEPS}`. Decided from the expanded value: unset means the unexpanded one is unset, non-empty means it is non-empty (expansion and `:remove` act only on a value that is there); an empty expanded value is not evaluated. |
+| `gettext_dependencies(d)` | `classes-recipe/gettext.bbclass` | kirkstone, scarthgap, Wrynose | `INHIBIT_DEFAULT_DEPS` truthy and not `inherits(d, 'cross-canadian')`: `""`; `USE_NLS == 'no'`: `gettext-minimal-native`; else `gettext-native`. |
+| `gettext_oeconf(d)` | `classes-recipe/gettext.bbclass` | kirkstone, scarthgap, Wrynose | `USE_NLS == 'no'`: `--disable-nls`; `INHIBIT_DEFAULT_DEPS` truthy and not cross-canadian: `--disable-nls`; else `--enable-nls`. |
+| `gnome_verdir(v)` | `classes-recipe/gnomebase.bbclass` | kirkstone, scarthgap, Wrynose | `".".join(v.split(".")[:-1]) or v` on a string. The recipes' own redefinitions (`gcr`: `[:2]`; `libgudev`: `return v`) are other texts: not evaluated. |
+| `map_kernel_arch(a, d)` | `classes-recipe/kernel-arch.bbclass` | scarthgap, Wrynose (kirkstone's has no `loongarch` line: other text, not evaluated) | `valid_archs` read first (unset raises); the `re.match` patterns in order, reproduced as string tests (anchored at the start, `$` at the end; an `a` holding a newline is not evaluated): `(i.86\|athlon\|x86.64)$` `x86`, `arceb$` `arc`, `armeb$` `arm`, the four `aarch64` forms `arm64`, `loongarch(32\|64\|)$` `loongarch`, `mips(isa\|)(32\|64\|)(r6\|)(el\|)$` `mips`, prefix `mcf` `m68k`, `riscv(32\|64\|)(eb\|)$` `riscv`, prefix `ppc` / `powerpc` `powerpc`, `sh(3\|4)$` `sh`, prefix `bfin` `blackfin`, prefix `microblazeeb` / `microblazeel` `microblaze`, a word of `valid_archs` itself; else `a` when `TARGET_OS` does not start with `linux`, and otherwise the function calls `bb.error` and returns `None`: not evaluated. |
+| `map_uboot_arch(a, d)` | `classes-recipe/kernel-arch.bbclass` | kirkstone, scarthgap, Wrynose | prefix `ppc` / `powerpc`: `ppc`; `i.86$`: `x86`; else `a`. |
+
+Checked: every expected value in `pyexpr.rs`'s tests (`class_functions`,
+`kernel_arch_mappings`) is what the verified definition returns when python 3 executes it
+with a datastore stub; `tests/eval_classfn.rs` runs them through the replay with the
+definitions copied into `tests/fixtures/classfn/realdefs.bbclass`. Rejected: busybox's
+`features_to_busybox_conf` / `_del` (recipe code, `busybox.inc`; pure, but built on a nested
+helper mutating lists: not added), `gnome_verdir`'s recipe variants, functions reading the
+host or files (as listed below).
+
 Not evaluated: `oe.utils.set_intersect` (it returns `" ".join(val1 & val2)`, a set of
 several strings in python's hash order: COMBINED_FEATURES stays flagged), and every other
 function. Those that read the host or the filesystem must never be evaluated statically:
-`os.uname()` (`BUILD_ARCH`, `BUILD_OS`), `oe.utils.cpu_count()` (`PARALLEL_MAKE`,
+`os.uname()` (`BUILD_ARCH`, `BUILD_OS`: only `os.uname()[4]` and `os.uname()[0].lower()`,
+and only from `sous-chef.toml [build_host]`, never from the host sous-chef runs on, see
+"The build host from `sous-chef.toml`"), `oe.utils.cpu_count()` (`PARALLEL_MAKE`,
 `BB_NUMBER_THREADS`), `os.getpid()`, `time.strftime(...)`, `bb.utils.which(...)` (searches
 `PATH` on disk), `oe.utils.read_file(...)`, `get_perl_version(d)` and the other functions
 that open files of the sysroot or the kernel build directory, `bb.fetch.get_checksum_file_list`,
 `oe.utils.get_host_gcc_version`. Functions a class defines with `def`
-(`meson_array`, `systemd_filter_services`, `get_base_dep`, `all_multilib_tune_values`, ...)
-are metadata code and are not interpreted. `bb.parse.vars_from_file` (`PN`, `PV` from the
+(`meson_array`, `systemd_filter_services`, `all_multilib_tune_values`, ...) are metadata
+code and are not interpreted, apart from the allowlisted class functions above, checked by
+their text. `bb.parse.vars_from_file` (`PN`, `PV` from the
 file name) is computed by the replay itself ("Replay").
 
 **Corpus** (the `${@...}` of OE-core, meta-arm and meta-kiss* in the live workspace, lines
@@ -423,6 +484,375 @@ Anonymous python that writes through a function it defines (OE-core `base.bbclas
 for one with an override part): with python evaluated, `EXTRA_OECONF` (which appends
 `${PACKAGECONFIG_CONFARGS}`) was otherwise unflagged and short of the options BitBake
 adds.
+
+### When a value is flagged
+
+Checked in BitBake 2.18.0 (`lib/bb/data_smart.py`, `lib/bb/parse/ast.py`) for the
+over-flagging round (`acc-overflag`). A value carries `unevaluated_python` or `unresolved`
+only for something that can still change it; what follows **cannot**, and does not flag
+(tests: `tests/eval_anon_writes.rs`, `python_that_cannot_reach_the_value_does_not_flag_it`):
+
+- **python in an assignment a later `=` replaces**: `DataNode.eval` stores the new text
+  with `setVar(key, val, parsing=True)`, which replaces `_content`; `${@...}` is run only
+  when a value is expanded (`expandWithRefs`), so the replaced text is never run. The
+  exception is `:=`, expanded at once (`e.expand(groupd["value"], ...)`): its python runs
+  even when replaced later; a side effect of inline python (a `d.setVar` inside `${@...}`)
+  is not modelled anywhere (see "What the static evaluator cannot do").
+- **a `?=` that does not apply** (`getFunc` is `getVar(key, False, noweakdefault=True,
+  parsing=True)`; the value is used only when that is `None`), and **a `??=` default**
+  under a set value (stored as `_defaultval`, read only when there is no `_content`).
+- **an override variant or conditional `:append` / `:prepend` / `:remove` whose override
+  is not active**, when `OVERRIDES` is known (`getVarFlag` keeps only active variants).
+  When `OVERRIDES` has entries that are not known statically, any decision on an inactive
+  variant may be wrong: flagged, with the cause "which override variant ... depends on
+  OVERRIDES entries that are not known statically (`<entry>`)". On yocto-kiss this is
+  every native and nativesdk target (`BUILD_ARCH` is `os.uname()`) unless
+  `[build_host]` gives it.
+- **python in a flag only** (`X[doc] = "${@...}"`): flags are not `_content`.
+
+What does flag: python left in the text (own or of a referenced value); a `:remove` whose
+text holds python (it can remove any word); an undefined variable; a referenced value that
+is flagged; a name anonymous python writes (below).
+
+`DataStore::flag_causes(name)` names each cause at the variable that carries it, with the
+references that lead there (`anonymous python at meta:classes-global/base.bbclass:454-737
+may write PACKAGE_ARCH, used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS`); `var` prints
+the first three as `note: uncertain: ...` lines (a write by name of the variable itself has
+its own warning and is not repeated).
+
+### Anonymous python writes that cannot happen
+
+`ast.MethodNode.eval` turns `python () { <body> }` into `def __anon_<line>_<file>(d):` +
+the body (`bb.methodpool.insert_method`) and appends the name to `__BBANONFUNCS`;
+`ast.finalize` runs them after `expandKeys` and the `RecipePostKeyExpansion` handlers,
+before `RecipeTaskPreProcess` and `handleVirtRecipeProviders`, as
+`runAnonFuncs`: `funcname(d)` for each, in order. So a `return` ends that function only,
+and a write under a condition that is false does not happen. `eval::anon` (since
+`acc-overflag`) decides such conditions after finalisation and takes a name out of
+`python_vars` when **every** write to it, from every function, is proved not to happen
+(listed in `ReplayNotes::no_writes`, with the reason per function; `var` says
+`note: anonymous python at <loc> does not write <name> here: <reason>`):
+
+- **An early return**: the function's first statements (after comments, blank lines and
+  `import` lines) are `if <cond>:` / `return` (or `if <cond>: return`), `<cond>` in the
+  subset of "Inline python evaluated statically" and true here. The function writes
+  nothing, whatever names it writes or how (`AnonPython::returns_early`). OE-core
+  `multilib_script.bbclass`: `if not d.getVar("MULTILIB_VARIANTS"): return`, then
+  `d.appendVar("FILES:" + pkg, ...)` (which flags every `FILES:*`).
+- **Writes under `if` / `elif`**: every literal `d.<write>('NAME', ...)` call of the name
+  starts its own line and sits inside an `if <cond>:` or `elif <cond>:` (the statements
+  found by indentation above it), and for each call one of those conditions is false
+  here (`if bb.utils.contains('DISTRO_FEATURES', 'x', True, False, d):`). An `elif` body
+  runs only when its own condition is true. Not used: `else`, a call on the line of its
+  `if`, a call in a nested `def`, a line above it with less indentation that is not a
+  block header (a continued statement), a body with a tab or a triple-quoted string, or
+  one that rebinds `d`, `bb` or `oe`.
+- **OE-core `base.bbclass`, recognised line for line** (indentation included; any other
+  text keeps the writes possible). Wrynose `33a6bd6c` line numbers:
+  - *PACKAGECONFIG* (471-549; the same lines in Scarthgap and Kirkstone except the
+    wrapper's `DEPENDS` / `RRECOMMENDS` test, not used here): the local
+    `appendVar(varname, appends)` returns at once on an empty list; the lists are built
+    from `d.getVarFlags("PACKAGECONFIG")`, which (`data_smart.getVarFlags`, `expand=False`,
+    `internalflags=False`) returns every flag but names starting with `_` or `:`, a
+    `_defaultval_flag_X` as `X` when `X` has no value, unexpanded. Per flag,
+    `items = flagval.split(",")`; a flag in `PACKAGECONFIG` adds item 0 to
+    `PACKAGECONFIG_CONFARGS`, 2 to `DEPENDS`, 3 to `RDEPENDS:${PN}`, 4 to
+    `RRECOMMENDS:${PN}` when not empty; a flag not in it adds item 1 to
+    `PACKAGECONFIG_CONFARGS`. When no flag gives a list an item, that name is not written.
+    Note that **every** flag counts, `doc` too: a `PACKAGECONFIG[doc]` with a comma adds its
+    text after the comma to `PACKAGECONFIG_CONFARGS` in BitBake. Only when nothing python or
+    an uncertain file may have set a flag; a flag `export` / `unexport` (an integer in
+    BitBake, `flagval.split` fails) keeps it possible.
+  - *hg fetcher* (623-642): `d.appendVar("EXTRANATIVEPATH", ' python3-native ')` for a
+    `SRC_URI` entry with `uri.scheme == "hg"`; `bb.fetch2.URI.__init__` takes the scheme
+    from `urllib.parse.urlparse` (lower-cased) of the text before `;`. No entry containing
+    `hg:` in any case: not written.
+  - *multimachine* (694-736, identical in Scarthgap and Kirkstone):
+    `d.setVar('PACKAGE_ARCH', "${MACHINE_ARCH}")` only after
+    `if (pkg_arch == mach_arch): return`, and only when (a) a `file://` entry of `SRC_URI`
+    is found in a `FILESPATH` entry whose `os.path.basename` is `MACHINE` and which
+    `os.path.isdir`, unless `SRC_URI_OVERRIDES_PACKAGE_ARCH` is `'0'`, or (b) some
+    `PACKAGE_ARCH_<pkg>` for a word of `PACKAGES` is non-empty and equals `MACHINE_ARCH`.
+    Not written when `PACKAGE_ARCH` already equals `MACHINE_ARCH` (both certain), or when
+    (a) is impossible (`SRC_URI_OVERRIDES_PACKAGE_ARCH` is `0`, or `SRC_URI` has no
+    `file://` word, or `FILESPATH` is certain and none of its absolute entries named after
+    `MACHINE` is a directory, an overlay file counting) and (b) is (no variable named
+    `PACKAGE_ARCH_*` anywhere, or none equal to `MACHINE_ARCH`). The opaque calls of the
+    function (`set_packagetriplet(d)`, `oe.license.*`, the fetcher) write no variable this
+    reads (`set_packagetriplet`: `PKGTRIPLETS`, `PKGMLTRIPLETS`; `lib/oe/license.py` has no
+    write).
+
+Every condition is decided from **certain** values only (no python, no undefined variable,
+no uncertain override decision, not in `python_vars`, an unset variable nothing may set):
+`DataStore::python_value`. While one name's writes are decided it is taken out of
+`python_vars`, which is sound: if some write to it happened, the first one would have read
+the static value (no earlier write), and every other value its condition read was certain,
+hence written by no anonymous python; the condition was then false. Names an event handler
+or a filter put in `python_vars` (`ReplayNotes::fixed_python_vars`) are never taken out.
+As before, a function that writes through names that cannot be read (`opaque`) gets a
+warning in the tools but does not flag other values. Since acc-unfollowed the proof is not
+used for a name a **computed-name value write** may reach: `d.setVar` / `appendVar` /
+`prependVar` / `delVar` / `renameVar` / `setVarFilter` whose first argument is not a string
+literal, in a function not proved to return at once, keeps every name possible, unless the
+argument is a local whose every assignment starts with a string literal (`task =
+"do_image_%s" % t`: only names starting `do_image_`) or the first parameter of a local
+`def` whose every call passes a literal (`base.bbclass`'s `appendVar(varname, ...)`).
+Flag writes (`setVarFlag(task, ...)`) change no value. On the three differentials the
+computed-name value writes are `image.bbclass`'s `d.setVar(task, ...)` (`do_image_*`) and
+`base.bbclass`'s wrapper; nothing anon.rs takes out is reached, and no count changed.
+
+### Anonymous python reproduced exactly (acc-anon-models)
+
+A few OE-core anonymous functions are not left unrun: their writes are reproduced
+(`eval::anonmodel`, `Replay::apply_anon_models`). Confirmed in BitBake 2.18.0 (yocto-kiss
+`6e260eb6ab`), 2.8.1 and 2.0.0 (`lib/bb/data_smart.py`, `lib/bb/parse/ast.py`, the same code
+on all three):
+
+- **When and in which order.** `ast.finalize` runs `runAnonFuncs(d)`: one
+  `better_exec` of `"<name>(d)"` for each name of `__BBANONFUNCS`, in parse order, after
+  `expandKeys` and the `RecipePostKeyExpansion` handlers and before `handleVirtRecipeProviders`.
+  A function reads the datastore as the functions before it left it; a later one cannot
+  change what it read.
+- **What a write stores.** `appendVar(var, value)` is `setVar(var + ":append", value,
+  ignore=True, parsing=True)` and `prependVar` the `:prepend` form: an entry of the
+  `:append` list like a `VAR:append = "..."` statement, so the text is joined without a
+  space and a `:remove` still applies when the value is read. `setVar(var, value)` from
+  anonymous python has no `parsing` in its `loginfo`, so it deletes `var`'s `:append`,
+  `:prepend` and `:remove` lists, deletes (`delVar`) every override variant of `var` whose
+  override is active, and drops `var` from `overridedata`, then stores the value
+  (`DataStore::rewrite`, which since acc-anon-models also deletes the active variants when
+  `OVERRIDES` is known). `setVar` of a name holding `${...}` stores that name literally
+  (`expandKeys` has already run): `python3`'s `d.setVar('ALLOW_EMPTY:${PN}-modules', '1')`
+  writes a variable no `getVar('ALLOW_EMPTY:python3-modules')` reads.
+- **A `def` the function calls.** BitBake executes a top-level `def` when it parses it
+  (`bb.methodpool.insert_method`), into one global context, so the definition in force at
+  `runAnonFuncs` is the last one parsed. A `def` writes what its body writes:
+  `update-alternatives.bbclass`'s `ua_extend_depends(d)` appends to `DEPENDS`, the glib
+  recipe's `find_meson_cross_files(d)` to `EXTRA_OEMESON`. Since acc-anon-models the replay
+  adds the literal writes of every `def` an anonymous function calls (directly or through
+  other `def`s, the last definition of each name) to that function's writes
+  (`Replay::def_call_writes`), so those values are flagged; before, the `glib-2.0`
+  `EXTRA_OEMESON` of Scarthgap and Kirkstone was unflagged and short of the
+  `--cross-file` words once `PACKAGECONFIG_CONFARGS` became certain.
+
+**Which functions, and what they compute.** A model applies only when the function's
+text is byte for byte one of the verified texts in `src/eval/anonmodel/` (copied from
+OE-core Wrynose `33a6bd6cc8`, Scarthgap `fc4316861b`, Kirkstone `9687b9409d`; `\r` and
+trailing blank lines aside), and the `def`s it calls are the verified texts too. Every
+input must be certain on a copy of the datastore where only names an *earlier* function
+that is not modelled may write count as written by python; a function that would raise,
+`bb.error` or `bb.fatal` is not modelled. Otherwise its writes stay flagged and
+`DataStore::flag_causes` says why (`its verified text is modelled, but not here: <why>`).
+
+| Function | Texts | Reproduced | Inputs that must be certain |
+|---|---|---|---|
+| `base.bbclass` `python ()`: the `PACKAGECONFIG` block | 3 (Wrynose; Scarthgap; Kirkstone; the block is the same in Scarthgap and Kirkstone) | `appendVar('DEPENDS' / 'RDEPENDS:${PN}' / 'RRECOMMENDS:${PN}' / 'PACKAGECONFIG_CONFARGS', ...)` through the local wrapper, as described under "Anonymous python writes that cannot happen", plus the wrapper's `expandFilter`: for a name containing `DEPENDS` (Wrynose: or starting with `RRECOMMENDS`) the words of `d.expand(" ".join(appends))` without `(...)` versions (`bb.utils.explode_deps`) get the `nativesdk-` prefix when the recipe inherits `nativesdk` or `cross-canadian`, the `-native` suffix when it inherits `native` (Wrynose: or `cross`), else the `MLPREFIX` prefix when that is not empty; `-native` words and words containing `-cross-` are kept, `virtual/x` becomes `virtual/<prefix>x<ext>`. Refused: more than six fields (`bb.error`), an invalid or active conflict (`bb.error` / `bb.fatal`), a flag `export` / `unexport`, a `??=` flag | `PACKAGECONFIG` and its flags (no anonymous python, uncertain file or reference effect may write them), and, when a list is not empty, the inherits above and `MLPREFIX`, `PN` |
+| `cmake.bbclass` `python()` | 1 | `OECMAKE_GENERATOR` containing `Unix Makefiles`: `OECMAKE_GENERATOR_ARGS = "-G '<g>' -DCMAKE_MAKE_PROGRAM=<MAKE>"`, `do_compile[progress] = "percent"`; containing `Ninja`: `DEPENDS:append " ninja-native"`, the `ninja` args, `do_compile[progress] = "outof:^\[(\d+)/(\d+)\]\s+"`; else `bb.fatal` (refused) | `OECMAKE_GENERATOR`, `MAKE` |
+| `update-alternatives.bbclass` `python __anonymous()` with `update_alternatives_enabled`, `ua_extend_depends` (and `gen_updatealternativesvardeps` on Scarthgap / Kirkstone, which writes only `<V>_VARDEPS` / `<V>_VARDEPS_<p>`) | 2 | nothing when the recipe inherits `native`, `cross`, `crosssdk` or `cross-canadian` or `TARGET_OS` is `mingw32`; else `DEPENDS:append " virtual/${MLPREFIX}update-alternatives"` unless `virtual/update-alternatives` is a **substring** of `PROVIDES` | the inherits, `TARGET_OS`, `PROVIDES` |
+| `packagegroup.bbclass` first `python ()` | 1 | unless `PACKAGEGROUP_DISABLE_COMPLEMENTARY` is `1`: `PACKAGES` set to each package followed by its `-dbg`, `-dev` (and `-ptest` when `DISTRO_FEATURES` contains `ptest`), package by package; `ALLOW_EMPTY:<pkg> = "1"` for each package of the (new) list | `PACKAGES`, `PACKAGEGROUP_DISABLE_COMPLEMENTARY`, `DISTRO_FEATURES` |
+| `kernel.bbclass` `python __anonymous()` | 3 | `STAGING_KERNEL_DIR` / `STAGING_KERNEL_BUILDDIR` = `os.path.join(WORKDIR, 'kernel-source' / 'kernel-build-artifacts')` when `KERNEL_PACKAGE_NAME` is not `kernel`; `KERNEL_IMAGETYPES` merged (`KERNEL_IMAGETYPE`, then `KERNEL_ALT_IMAGETYPE`, put first when not a word of it, `.strip()`); `KERNEL_IMAGETYPE_FOR_MAKE` (sorted set, `vmlinux.gz` as `vmlinux`) when empty; `PACKAGES:append " <kname>-image-<type.lower()>"` per type unless the recipe inherits `nopackages`. Not reproduced (still flagged): the per-image `FILES:`, `RDEPENDS:`, `PKG:`, `ALLOW_EMPTY:`, `pkg_postinst:` / `pkg_postrm:` writes, the flags. Refused: a `fitImage` type (`bb.error` on Wrynose), a non-ASCII type | those variables, `WORKDIR` when used |
+| `kernel-devicetree.bbclass` `python ()` | 1 | unless `nopackages`: `PACKAGES:append " ${KERNEL_PACKAGE_NAME}-devicetree"`, and `" ${KERNEL_PACKAGE_NAME}-image-zimage-bundle"` when `KERNEL_DEVICETREE_BUNDLE` is `1` (text unexpanded, as python passes it) | the inherit, `KERNEL_DEVICETREE_BUNDLE` |
+| the `python3` recipe's `python(){` (manifest) | 2 (Wrynose; Scarthgap = Kirkstone) | from `<THISDIR>/python3/python3-manifest.json`: `RPROVIDES:class-native`; per manifest key in file order (`object_pairs_hook=OrderedDict`) the `FILES:<pn>-<key>` appends of `files` and, when `INCLUDE_PYCS` is `1`, `cached` (Scarthgap / Kirkstone first `setVar` it to `''`), the `RDEPENDS:` / `RRECOMMENDS:` appends (`${PN}` words cut at their first `-`), `SUMMARY:` set; `PACKAGES` set to the new packages followed by the old. Not reproduced: the `ALLOW_EMPTY:${PN}-*` writes (literal names). Refused: no `# EOC` line, a non-ASCII header (`str.find` counts characters, `seek` bytes), a name repeated in an object, a field of another type than python iterates as text, `pgo` without `qemu-usermode` (`bb.fatal`) | `THISDIR`, `RPROVIDES`, `INCLUDE_PYCS`, `PACKAGES`, `PN`, `PACKAGECONFIG`, `MACHINE_FEATURES`; the file |
+
+The manifest is read from the layer (a fixed path next to the recipe, which BitBake itself
+records as a parse dependency with `bb.parse.mark_dependency`) and parsed with the rules of
+python's `json.loads` that matter here; its content is not pinned by a hash: the function
+text is what is verified, and it handles any manifest the same way. A manifest outside the
+workspace or one that cannot be read leaves the writes flagged.
+
+Rejected (each one or two values on the samples): the glib recipe's `find_meson_cross_files`
+(`os.path.exists` on the build host), `psplash`'s anonymous python (the fetcher:
+`bb.fetch2.Fetch(...).localpath`), `busybox.inc`'s `configmangle` function (one value per
+release; its `if "${OE_DEL}":` tests a python string literal, which `MethodNode.eval` passes
+to `bb.methodpool.insert_method` unexpanded, so the test is always true), OE-core's
+class-extension `map_dependencies` / `map_depends_variable` (Scarthgap / Kirkstone
+`native.bbclass`, `lib/oe/classextend.py`; flagged on the native variants anyway, see
+"Overrides" for their `OVERRIDES`).
+
+### References that cannot be followed exactly
+
+Checked in BitBake 2.18.0 (yocto-kiss), 2.8 (Scarthgap) and 2.0 (Kirkstone), the same code
+in all three, for acc-unfollowed (`kiss-image` `DEPENDS` was wrong and unflagged because
+`inherit_defer ${IMGCLASSES}` was dropped):
+
+- **`include` / `require`** (`ast.IncludeNode.eval` → `ConfHandler.include`): the argument
+  is expanded (`data.expand`, python run) and **split on whitespace**; each word is
+  included in order (`include_single_file`: the including file's directory, then `BBPATH`,
+  `bb.utils.which`). An empty argument includes nothing, for `require` too (zero words).
+  A word that names no file: `include` does nothing (`logger.debug2("CONF file '%s' not
+  found")`), `require` raises `ParseError("Could not include required file ...")`.
+- **`inherit`** (`BBHandler.inherit`): `d.expand(files).split()`, each word in order: a
+  word in `BB_DEFER_BBCLASSES` is deferred, else `classes-<type>/<w>.bbclass` then
+  `classes/<w>.bbclass` along `BBPATH`; not found is `ParseError("Could not inherit file
+  ...")`; a class in `__inherit_cache` is not read again. **`inherit_defer`**
+  (`InheritDeferredNode`) stores the text; `ast.finalize` expands and inherits it after the
+  recipe and its bbappends.
+- So a reference the replay cannot expand reads files BitBake does read (unless BitBake
+  fails), and they may set any variable, before or after (`:append`, `:remove`, an override
+  variant, a `?=` that then wins, anonymous python). A reference that is not found, closes a
+  cycle, uses a directive the release lacks, or another fatal error stops BitBake's parse:
+  there is no value to compare, and the reference stays a note.
+
+**sous-chef** (`Replay::follow_partial`, `ReplayNotes::ref_effects`,
+`DataStore::flag_causes`):
+
+- A reference whose argument holds python or undefined variables and is not covered below:
+  **every value is flagged**, with the cause `an inherit at <loc> could not be followed
+  (<why>); the files it would read may change any value, <name> included`. So is every
+  value after a reference followed with an uncertain value (`inherit_defer
+  toolchain/${TOOLCHAIN}` while `OVERRIDES` holds python): another value reads other files.
+  Measured on the three differentials with nothing narrowed (the two `bitbake.conf`
+  references below unresolved): every compared value flagged (Wrynose: 656 equal values all
+  flagged, `gmp-native` and `nativesdk-zlib` not evaluated because `PN` itself is flagged).
+- `bitbake.conf`'s multiconfig `require` resolves exactly once `BB_CURRENT_MC` is set as
+  BitBake sets it ("Multiconfig"): nothing on Wrynose, the empty
+  `conf/multiconfig/default.conf` on Kirkstone / Scarthgap.
+- **Partly followed** (the narrowing, all of it provable): the argument is expanded with a
+  hole for each `${@...}` that cannot be evaluated although only its own code stands in the
+  way (no uncertain substitution built it, it reads no value holding a hole;
+  `DataStore::expand_with_holes`), and nothing else in the text may be uncertain. Each hole
+  must have a known set of exact values (`pyexpr::candidates`): a list literal subscripted
+  by anything gives one of its elements (`['', 'populate_sdk_ext']['linux' in
+  d.getVar("SDK_OS")]`), `a if c else b`, `bb.utils.contains` / `contains_any` /
+  `oe.utils.conditional` with five positional arguments and `oe.utils.ifelse` with three
+  give one of their two value arguments (BitBake `lib/bb/utils.py`, OE-core
+  `lib/oe/utils.py`: no other return), python raising fails the expansion. A word without a
+  hole is read whatever the python gives, and is followed in order; a word with holes is one
+  of a known list of word lists, each read on a copy of the store (`Replay::probe`, with the
+  deferred inherits it adds), then dropped. The variables those files assign (with the
+  override conditions of each write), the names their anonymous python writes and the
+  effects of references inside them are recorded; a value is flagged when its base is one of
+  them and the write may apply (every element of its override condition is in a known
+  `OVERRIDES`, or `OVERRIDES` is uncertain). The cause: `an inherit_defer at <loc> could not
+  be followed exactly (python in IMGCLASSES); populate_sdk_ext, which it may read and
+  sous-chef did not, would change <name>`. A `:=` that expands a value so flagged is added
+  to the effect (its stored text would lose the flag). `bb.data.inherits_class` of a class
+  that may be read is not certain.
+- **The host's `os.uname()`**: `include conf/machine-sdk/${SDKMACHINE}.conf` with
+  `SDKMACHINE ??= "${BUILD_ARCH}"`, `BUILD_ARCH := "${@os.uname()[4]}"`. sous-chef never
+  reads `os.uname()` of the host it runs on. Since build-host, `sous-chef.toml
+  [build_host]` gives the build host's values (`arch`: `os.uname()[4]`, `os`:
+  `os.uname()[0].lower()`; "The build host from `sous-chef.toml`" below); what follows here
+  applies to a value `[build_host]` does not give. sous-chef takes `os.uname()[0]` and `[4]`
+  (with `.lower()`) to be one
+  path component without whitespace (on Linux: `Linux`, and the kernel's architecture name:
+  `x86_64`, `aarch64`, `armv7l`). **This is the one assumption about the host, not about
+  BitBake.** With it, an `include` / `require` word `<prefix><T><suffix>` reads, for each
+  `T`, the first file of that shape along the search path, or nothing: every such file the
+  replay can read is read on a copy, as above (OE-core's `conf/machine-sdk/*.conf`: plain
+  `SDK_ARCH`, `SDK_CC_ARCH`, `SDK_MACHINE_FEATURES`, `ABIEXTENSION:class-nativesdk`).
+
+  **The native and nativesdk `OVERRIDES` (acc-anon-models): kept uncertain.** There the
+  first two entries are `${@os.uname()[0].lower()}` (`TARGET_OS` = `BUILD_OS`) and
+  `${@d.getVar('TARGET_ARCH').replace("_", "-")}` (`TARGET_ARCH` = `BUILD_ARCH` =
+  `os.uname()[4]`), and `WORKDIR`, `S`, `B`, `T`, `FILESPATH` (`FILESOVERRIDES`) and every
+  path under them hold those values in their text. Three ways out were weighed:
+  - *Narrowing the override decisions* (no host value assumed). Not provable: BitBake's
+    selection loop (`getVarFlag`, `for o in self.overrides: ... elif a == o: match =
+    active[a]; del active[a]`) keeps, for each active variant, the **first** position its
+    override has in `OVERRIDES`, and the latest of those wins. An unknown entry before the
+    known ones that repeats a known name (`class-native`) moves that variant to the front,
+    so a second unknown entry naming another variant (`class-nativesdk`) would win. With
+    entries that may be any text, no decision that an unknown entry could touch is
+    certain; and a `:append:<o>` / `:remove:<o>` whose `<o>` is not a known entry applies
+    exactly when an unknown entry is `<o>`. A narrowing needs an assumption about the
+    host's values (that `os.uname()` gives no name the metadata uses as an override), which
+    is not BitBake behaviour; it was not made.
+  - *The server's own `os.uname()`*. The server may run on another host than the build (a
+    workspace read over the network, a container): a wrong value would be certain and
+    wrong. Not done.
+  - *Values set by the user* (`sous-chef.toml`). Exact when set, unchanged when not. Done
+    in build-host (below). Before it, measured on the recorded dumps with `BUILD_ARCH =
+    x86_64`, `BUILD_OS = linux` pinned
+    (a local experiment, not kept): flagged values Wrynose 30 to 7 (literal differs 5 to
+    2), Scarthgap 37 to 17 (7 to 5), Kirkstone 64 to 42 (5 to 5), and no new unflagged
+    difference once the class-extension writes below are flagged (before that fix the
+    Scarthgap / Kirkstone `nativesdk-zlib` `DEPENDS` came out unflagged and short of the
+    `nativesdk-` mapping).
+
+  **Class-extension writes of the older `ClassExtender`** (Scarthgap / Kirkstone
+  `lib/oe/classextend.py`, called from `nativesdk.bbclass`'s anonymous python and
+  `multilib.bbclass`): `map_variable(v)` and `map_regexp_variable(v)` `d.setVar(v, ...)`,
+  `map_depends_variable(v)` renames `v` to `v + "_NONML"` and sets `v` to
+  `${@oe.classextend.get_depends('<v>', d)}`, `rename_packages()` does the same for
+  `PACKAGES`. Since acc-anon-models the replay counts these as writes of `v` (and
+  `PACKAGES`), so they are flagged; before, only Wrynose's `set_filter` / `map_packagevars`
+  / `rename_package_variables` were seen: on the samples `nativesdk-zlib` `DEPENDS` was
+  flagged only through the host entries of `OVERRIDES`, and its `PROVIDES` (equal after
+  whitespace) not at all; it is flagged now.
+
+- **The build host from `sous-chef.toml`** (build-host). `[build_host] arch` and `os` are
+  what the host that runs BitBake reports; the python subset (`pyexpr`) evaluates exactly
+  `os.uname()[4]` to `arch` and `os.uname()[0].lower()` to `os`, and nothing else of `os`
+  (`os.uname()[0]` not lowered stays unevaluated: `os` gives the lowered name only, and
+  `uname -s` text such as `Linux` is lowered on load as python's `str.lower` does on ASCII).
+  A value not given stays as described above. BitBake computes these once, in the
+  `bitbake.conf` `:=` lines, in the BitBake server process (`os.uname()` of that host);
+  everything else that holds them reads `BUILD_ARCH` / `BUILD_OS` through ordinary
+  metadata, which the replay already follows. The host reads at parse time, checked in
+  `meta/conf/bitbake.conf` and `meta/classes*` of each release (Wrynose
+  `yocto-kiss/openembedded-core`, Scarthgap and Kirkstone `releases/<name>/openembedded-core`):
+
+  | Read | Where | Wrynose | Scarthgap | Kirkstone | Given by `[build_host]` |
+  |---|---|---|---|---|---|
+  | `os.uname()[4]` | `BUILD_ARCH :=`, `bitbake.conf` | 137 | 134 | 130 | yes, `arch` |
+  | `os.uname()[0].lower()` | `BUILD_OS :=`, `bitbake.conf` | 138 | 135 | 131 | yes, `os` |
+  | `time.strftime(..., time.gmtime())` | `DATE :=` / `TIME :=`, `bitbake.conf` | 203-204 | 200-201 | 196-197 | no: the clock, not a property a user can state |
+  | `sys.executable` | `PYTHON =`, `bitbake.conf` | 593 | 574 | 566 | no: the interpreter path of the BitBake process |
+  | `oe.utils.cpu_count()` (`len(os.sched_getaffinity(0))`, clamped) | `BB_NUMBER_THREADS`, `PARALLEL_MAKE`, `XZ_THREADS`, `ZSTD_THREADS ?=`, `bitbake.conf` | 863-876 | 867-880 | 854-867 | no: the affinity of the BitBake process, which `taskset` or a cgroup changes per run |
+  | `os.getuid()` | `HOST_USER_UID :=`, `insane.bbclass` | 1038 | 1099 | 960 | no: the user running BitBake; only QA reads it |
+  | `lsb_distro_identifier(d)` (`/etc/os-release` and friends) | `NATIVELSBSTRING`, `base.bbclass` `ConfigParsed` handler | yes | yes | yes | no: a handler sous-chef does not run (above) |
+
+  `platform.system()` (`sstate.bbclass`), `platform.uname()` (`buildstats.bbclass`),
+  `socket.gethostname()` (`icecc.bbclass`) and the `os.environ` reads are in task or event
+  code, not parse-time values. What becomes certain with `arch` / `os` given, checked on all
+  three releases (the same text): `BUILD_ARCH`, `BUILD_OS`, `BUILD_SYS`
+  (`${BUILD_ARCH}${BUILD_VENDOR}-${BUILD_OS}`), `SDKMACHINE ??= "${BUILD_ARCH}"` (so
+  `include conf/machine-sdk/${SDKMACHINE}.conf` reads one file exactly, and with it
+  `SDK_ARCH`), `SDK_OS = "${BUILD_OS}"` (`bitbake.conf` lines 177-178 / 826 on Wrynose,
+  174-175 / 830 on Scarthgap, 170-171 / 819 on Kirkstone), in native recipes `TARGET_ARCH` /
+  `TARGET_OS` / `HOST_ARCH` / `HOST_OS` / `PACKAGE_ARCH` (`native.bbclass`: `${BUILD_ARCH}` /
+  `${BUILD_OS}`, lines 14-36 on Wrynose and Scarthgap, 8-30 on Kirkstone), in nativesdk
+  recipes the same names through `${SDK_ARCH}` / `${SDK_OS}`, `TRANSLATED_TARGET_ARCH` (`d.getVar('TARGET_ARCH').replace("_",
+  "-")`, `x86-64`), the first two `OVERRIDES` entries and every value decided by them
+  (`WORKDIR`, `S`, `B`, `FILESPATH`, `CFLAGS`, override variants). Images' `IMGCLASSES`
+  word `['', 'populate_sdk_ext']['linux' in d.getVar("SDK_OS")]` evaluates, so
+  `populate_sdk_ext` is inherited as in BitBake. Measured (docs/differential.md, "After
+  build-host"): with `arch = "x86_64"`, `os = "linux"` (the recorded dumps' `BUILD_ARCH` /
+  `BUILD_OS`) no value became certain and different; flagged values went from 30 / 37 / 64
+  to 7 / 17 / 42 (Wrynose / Scarthgap / Kirkstone). A wrong `[build_host]` makes these
+  values certain and wrong: it must be what the BitBake host reports.
+
+- **A file the index does not hold**: the replay reads statements from the index, so an
+  `include` / `require` / `inherit` of a file that exists on disk (inside the workspace)
+  but is not indexed (a `.cfg`, any kind the index does not take) was a silent no-op for
+  `include`. It now flags every value ("... is not in the index").
+- **Names `expandKeys` cannot expand** (`ast.finalize` → `bb.data.expandKeys`: every key
+  with `${` is expanded and renamed when the expansion differs, `renameVar` onto the new
+  name): a key whose expansion holds python, or names a variable something may still set,
+  may be renamed onto any name its literal text allows, or onto an override or `:append`
+  of its base (`VAR:${X}` may become `VAR:append`); those values are flagged
+  (`ReplayNotes::renamable_keys`). A key that is incomplete only because a name is
+  certainly unset is not renamed by BitBake either (`d.expand` leaves `${X}`, the key does
+  not change): `RDEPENDS:${KERNEL_PACKAGE_NAME}-base` outside kernel recipes flags nothing.
+
+- **Event handlers run during the parse** (`addhandler`; `ast.finalize` fires
+  `RecipePreFinalise`, `RecipePreDeferredInherits`, `RecipePostKeyExpansion` and
+  `RecipeParsed` on the recipe's datastore; `bb.event.fire` calls a handler without
+  `eventmask` for every event): the replay emulates `base_eventhandler`'s
+  `RecipePreDeferredInherits` branch and the class-extension handlers ("Class-extended
+  variants"); any other such handler (OE-core's `find_intercepts`,
+  `allarch_package_arch_handler`, `devupstream_virtclass_handler`,
+  `mcextend_virtclass_handler`, a layer's own) now has the names it writes by literal
+  flagged, like anonymous python (`Replay::other_parse_handlers`). Handlers for
+  `ConfigParsed` (`base_eventhandler` sets `NATIVELSBSTRING`, `ORIGNATIVELSBSTRING`,
+  `BB_VERSION` there) are still neither run nor flagged.
+
+Measured after the narrowing (docs/differential.md): no value changed class on Wrynose
+or Scarthgap; on Kirkstone `core-image-minimal` `PACKAGES` is now "equal, but flagged"
+(`populate_sdk_base` / `populate_sdk_ext` behind the python of `IMGCLASSES`); `kiss-image`
+`DEPENDS` is followed into `image_types_wic` and flagged for its own python
+(`bb.utils.contains_any("BUILD_ARCH", ...)`, the host again).
 
 ### Legacy syntax
 
@@ -864,7 +1294,8 @@ an unparsed line, a function, `inherit`, `addtask`, `deltask`, `addhandler` or
 see); otherwise it is **data** when it is under a
 directory a recipe takes files from (`files/`, `<pn>/` or `<pn>-<pv>/` next to a `.bb` /
 `.bbappend` of that name, `FILESPATH`'s defaults) or under `files/`, `lib/`, `scripts/` or
-`wic/`; anything else stays metadata. A data file is indexed and marked
+`wic/`, or when it does not parse where no reference could reach it (below); anything else
+stays metadata. A data file is indexed and marked
 (`files.not_collected = 'data'`): `item` shows it with a note, `search` (every mode) and the
 file listings (`all_files`, `files_by_kind`, `files_in_layer`; lint's file list) leave it out
 unless `FileSet::ALL` is asked for, and the replay still reads it if an evaluation reaches it.
@@ -872,6 +1303,52 @@ The marks are recomputed with the edges, and with one file's edges on `refresh_f
 `conf/ccache.conf` (ccache's `key = value` syntax, unparsed lines for BitBake, referenced only
 through `CCACHE_CONFIGPATH`) is data since w6: `hygiene/parse-error` with `--all` on the
 live workspace went from 3 to 0 (422 before the data-file rule).
+
+Since lint-dynamic-data (checked in BitBake 2.18.0, `cooker.py` `collect_bbfiles`,
+`find_bbfiles`; `cookerdata.py` `parseConfigurationFiles` lines 435-450;
+`parse/parse_py/ConfHandler.py` `include_single_file`; OE-core `base.bbclass` line 75):
+
+- **A recipe's files directories are data whether BitBake collects the recipe or not.**
+  `collect_bbfiles` globs only the words of `BBFILES` and keeps only names ending in `.bb`
+  and `.bbappend` (anything else: "skipping %s: unknown file extension"); a
+  `BBFILES_DYNAMIC` entry `<collection>:<glob>` (or `!<collection>:<glob>`) is appended to
+  `BBFILES` only when its collection is in `BBFILE_COLLECTIONS` (absent, for `!`). So a
+  recipe under `dynamic-layers/<x>/` whose collection is absent is not parsed at all, and
+  nothing reads the files beside it as metadata: they are what its `FILESPATH`
+  (`${FILE_DIRNAME}/${BP}`, `${FILE_DIRNAME}/${BPN}`, `${FILE_DIRNAME}/files`, with
+  `FILESOVERRIDES` subdirectories) would fetch with `file://` if it were. Until
+  lint-dynamic-data `mark_data` took the recipe directories only from collected recipes,
+  so `meta-oe/dynamic-layers/meta-python/recipes-connectivity/lirc/lirc/lircd.conf` and
+  three other such files were linted as configuration: 369 `hygiene/parse-error` errors on
+  Scarthgap, 365 on Kirkstone, all false.
+- **`include` / `require` of a relative name** is searched in the including file's
+  directory first, then along `BBPATH` (`include_single_file`: `bbpath = dname + ":" +
+  BBPATH`, `bb.utils.which`), so a relative path with directories (`include sub/x.inc`) is
+  found below the includer too. sous-chef cannot expand a reference with no literal text
+  (`include ${@bb.utils.contains('PACKAGECONFIG', 'perl', 'perf-perl.inc', '', d)}` in
+  OE-core's `perf.bb`, `require ${QEMU_TFA_REQUIRE}` in meta-arm), so a file in or below
+  such a file's directory is never taken for data because it does not parse. The
+  `.conf` / `.inc` / `.bbclass` files the index leaves as metadata with no reference, no
+  metadata place and no data directory, measured before this rule: 2 on Scarthgap, 2 on
+  Kirkstone, 11 on Wrynose, all `.inc`, all parsing cleanly. 12 are reached by such a
+  reference in their own directory (`perf-perl.inc`; meta-arm's `*-secureboot.inc`,
+  `systemd-efi.inc`, `arm-ffa-transport.inc` through `require ${FFA_TRANSPORT_INCLUDE}`,
+  `libts-udev.inc`, `u-boot-uefi-http-boot.inc`, the two
+  `trusted-firmware-a-qemuarm*-secureboot.inc` through `require ${QEMU_TFA_REQUIRE}`);
+  meta-oe's `recipes-kernel/linux/linux.inc` (Scarthgap, Kirkstone) is for other layers to
+  `require recipes-kernel/linux/linux.inc` along `BBPATH`, and meta-arm's
+  `u-boot-uefi-capsule-update.inc` is named by nothing (`u-boot-uefi-secureboot.inc`
+  requires `u-boot-capsule-update.inc`).
+- **A file no reference can reach that does not parse is data**: outside `conf/` (which
+  has its own rule, above), a `.conf` with a line `ConfHandler.feeder` rejects, or an
+  `.inc` / `.bbclass` with an unparsed line, that is not at a layer root (a bare name is
+  searched along `BBPATH`) and not in or below the directory of a file with a reference
+  sous-chef cannot expand. It is a file of another tool, not BitBake metadata, and is not
+  linted. A file there that parses stays metadata (an `.inc` not yet required, which
+  `org/inc-unused` reports). Not covered: a file reached only by a reference with no
+  literal text that resolves along `BBPATH` into another directory, or only from a layer
+  outside the workspace (meta-oe's `linux.inc`), is taken for data when it has an unparsed
+  line (a missed error, never a false one).
 
 ## Layers
 
@@ -1049,6 +1526,15 @@ Checked against BitBake `master` 2026-11 (`lib/bb/cookerdata.py` `parseConfigura
   `oe.utils.prune_suffix(PN, SPECIAL_PKGSUFFIX)` (then `MLPREFIX` stripped);
   `FILE_DIRNAME` (bitbake.conf) and `THISDIR` (base.bbclass, "only works properly with
   immediate expansion") = `dirname(FILE)`. `BP = "${BPN}-${PV}"` is plain text.
+  **`PR`** on Kirkstone, Langdale and Mickledore is python too: `PR =
+  "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[2] or 'r0'}"` (part 2 of the file
+  name, BitBake 2.0 pads the parts with `None`); from Nanbield on `PR = "r0"` (OE-core
+  `bitbake.conf` on those branches). The replay computes it the same way, only for that exact
+  text (acc-releases).
+- **`FILE_LAYERNAME`** does not exist before BitBake 2.6 (`Feature::FileLayerName`):
+  BitBake 2.0's `_parse_recipe` sets only `__BBMULTICONFIG`, Kirkstone's `bitbake.conf` has
+  no `FILE_LAYERNAME` and its `OVERRIDES` no `layer-` entry; added by `7090a14b0` "cooker:
+  Add FILE_LAYERNAME variable" (branches `2.6` and later). From then on:
 - **`FILE_LAYERNAME`** is set with `setVar` before the recipe is parsed (so it beats
   OE-Core's `FILE_LAYERNAME ??= "config"`). Its value is the **collection name** (not the
   layer directory name) of the first `BBFILE_PATTERN_<c>` regex that matches the recipe path
@@ -1296,7 +1782,8 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
     `DEPENDS`, `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RREPLACES`, `PACKAGES`,
     `PACKAGES_DYNAMIC`, `PROVIDES` (`native_filter`) and renames `<VAR>:${PN}-x` package
     variables. Flagged, never computed; except (w11) the `PROVIDES` filter, computed on a
-    static value (see "Providers and versions").
+    static value (see "Providers and versions"), and (acc-helpers) the read filters and
+    `set_class_filter` below ("Class-extension read filters").
   - `nativesdk.bbclass`: plain assignments, replayed; `nativesdk_virtclass_handler` (the
     rename above, reproduced; `DISTRO_FEATURES` flagged); anonymous python (when `PN` starts
     with `nativesdk-`): `oe.classextend.ClassExtender` filters on `DEPENDS`,
@@ -1305,7 +1792,9 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
     `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RREPLACES`, `RCONFLICTS`, `PKG`),
     `LIBCEXTENSION` / `ABIEXTENSION`. Anonymous python is not run (it is opaque: it hands
     `d` to `ClassExtender`), so those values may differ and the tools warn; except (w12)
-    the `PROVIDES` filter, computed on a static value (see "Providers and versions").
+    the `PROVIDES` filter, computed on a static value (see "Providers and versions"), and
+    (acc-helpers) the `DEPENDS` / `PACKAGE_WRITE_DEPS` filters and the handler's
+    `set_class_filter` ("Class-extension read filters").
   - `multilib.bbclass`: `multilib_virtclass_handler` (`RecipePreFinalise`, when
     `BBEXTENDCURR == "multilib"`): skips (`SkipRecipe`) a recipe that provides
     `virtual/kernel`, inherits `module-base` or `kernel-fit-image`, or whose `BPN` is in
@@ -1323,6 +1812,60 @@ the release branches `2.0`, `2.6`, `2.8`, `2.10`, `2.12`, `2.16`, and OE-core Wr
     `INITSCRIPT_PACKAGES`, `USERADD_PACKAGES`, `SYSTEMD_PACKAGES`, `UPDATERCPN` and the
     `ALTERNATIVE_PRIORITY*` reset; flagged, except (w12) the `PROVIDES` filter (see
     "Providers and versions").
+
+#### Class-extension read filters (acc-helpers)
+
+BitBake 2.18 `data_smart.py`: `setVarFilter(var, expr)` stores `expr` under `var`;
+`getVarFlag(var, "_content", expand=True)` applies the filter of `var.split(":")[0]` to the
+expanded value after `:remove`, only when the value is not empty (`bb.filter.apply_filters`,
+an `eval` of the expression with `val` bound, cached by `(val, expr)`). So the filter acts on
+every read: `d.getVar`, `${VAR}` references (the expansion reads through `getVarFlag`),
+`bitbake -e`, the cache. The filter of `DEPENDS` is set before `handleVirtRecipeProviders`
+(`ast.finalize`: `RecipePreFinalise` handlers, `expandKeys`, anonymous python, then
+`handleVirtRecipeProviders`), which does `setVar("DEPENDS", " ".join(getVar("DEPENDS")
+.split()))` unconditionally, so the stored value is the filtered one and the next read
+filters it **again**: `suffix_filter_deps` sorts again after its renames (`nativesdk-zlib`:
+stored `chrpath-replacement-native virtual/nativesdk-compilerlibs gcc-crosssdk-x86_64-oesdk-linux
+virtual/nativesdk-libc`, printed `chrpath-replacement-native gcc-crosssdk-x86_64-oesdk-linux
+virtual/nativesdk-compilerlibs virtual/nativesdk-libc`, seen in the live dump), and
+`native_filter` of `binutils-cross-arm` gives `binutils-native-arm`, then
+`binutils-native-arm-native`.
+
+The OE-core Wrynose functions (`lib/oe/classextend.py`): `native_filter(val, pn, bpn,
+regex=False, selfref=True)` (each word of `bb.utils.explode_deps(val)`: with `regex` a
+`^...$` word gets `-native$` with `pn` replaced by `bpn` unless it ends with `-native$`; the
+word `pn` stays, or is dropped with `selfref=False`; `-cross-` becomes `-native-`; a word
+not ending with `-native` becomes `word.replace(pn, bpn) + "-native"`); `suffix_filter(val,
+extname, prefixes)` (`add_suffix` on each word); `suffix_filter_deps` (`add_suffix` on each
+name of `bb.utils.explode_dep_versions2(val)`, which **sorts** by name (default `sort=True`
+since BitBake 1.38, commit `39d6a30a2`), keeps version constraints, raises
+`VersionStringException` for `(` without an operator; a later name mapping to the same word
+replaces its constraints in place; joined by `join_deps(..., False)`).
+
+sous-chef (`eval::variant::VarFilter`, `ReplayNotes::filters`, `DataStore::var_filter`,
+applied by `overrides.rs` finalisation through `DataStore::apply_read_filter`): a filter is
+applied to a value that is certain; one that would raise flags the value; an uncertain value
+is shown unfiltered (it is flagged already). Installed only when the workspace's code is
+OE-core Wrynose's text, compared whole (`classfn::same_text`, constants in
+`src/eval/classfn.rs`); kirkstone and scarthgap handlers `setVar` the mapped values instead
+and are flagged as before:
+
+| Code (Wrynose `33a6bd6cc8`) | Reproduced | Still flagged |
+|---|---|---|
+| `native.bbclass` `native_virtclass_handler` (`RecipePreFinalise`, `PN` ending `-native`) | `set_class_filter` on `DISTRO_FEATURES` (below); with `"native" in BBCLASSEXTEND` and `BPN` known: `native_filter(val, pn, bpn, selfref=False)` on `DEPENDS`, `native_filter(val, pn, bpn)` on `PACKAGES`, `regex=True` on `PACKAGES_DYNAMIC`; `PROVIDES` as before (w11) | `RDEPENDS`, `RRECOMMENDS`, `RSUGGESTS`, `RPROVIDES`, `RREPLACES` (also renamed per package by `map_dependencies`, not reproduced) |
+| `nativesdk.bbclass` `nativesdk_virtclass_handler` | `set_class_filter` on `DISTRO_FEATURES`; `MLPREFIX`, `PN` as before | - |
+| `nativesdk.bbclass` anonymous python (`PN` starting `nativesdk-`) | `suffix_filter_deps(val, 'nativesdk', [])` on `DEPENDS`, `suffix_filter(val, 'nativesdk', [])` on `PACKAGE_WRITE_DEPS`, `PROVIDES` as before (w12) | `rename_package_variables` (`PACKAGES`, `PACKAGES_DYNAMIC`, per-package renames), `map_packagevars`, `LIBCEXTENSION`, `ABIEXTENSION` |
+
+`oe.utils.set_class_filter(var, features_var, filter_var, d)` (Wrynose `lib/oe/utils.py`):
+`defaults = d.getVar(var)`; each word holding `}` is cut out (`defaults.replace(word, "")`,
+with a `bb.warn`); `d.setVar(var, '${@oe.utils.class_filter_features("<defaults>",
+"<features_var>", "<filter_var>", d)}')`. Reproduced as that `setVar` (an
+`OpKind::EventHandler` rewrite) when the value is certain and holds no `"`, `\` or line
+break; `class_filter_features` is on the inline python allowlist ("Inline python evaluated
+statically"). On the live workspace `DISTRO_FEATURES` of the native and nativesdk variants is
+not certain at that point (their `OVERRIDES` hold `os.uname()` through `BUILD_OS` /
+`TARGET_ARCH`), so it stays flagged there, unless `sous-chef.toml [build_host]` gives both
+values.
 
 sous-chef (w10, `eval::variant`, `replay::recipe_pass` with `Replay::extend_variant`,
 `Replay::finalize`, `Replay::class_extend_handlers`): a target naming a variant (by name,
@@ -1346,9 +1889,36 @@ variant only by the evaluated `PN`. Only the words `native`, `nativesdk` and
 
 Read for x5 in BitBake **2.18.0** (`yocto-kiss/bitbake`, branch `2.18`) and, read-only from
 the same repository, the `2.0` (Kirkstone) and `2.8` (Scarthgap) branches; OE-core
-`wrynose`, `scarthgap` and `kirkstone`; kas **5.5**. Not checked against a running BitBake:
-the live workspace has no multiconfig and no BitBake was run for this (see "Not yet
-verified").
+`wrynose`, `scarthgap` and `kirkstone`; kas **5.5**. **Checked against a running BitBake
+on Scarthgap** (real-checks, 2026-11-20; BitBake 2.8.1, parse only): the release workspace
+with `BBMULTICONFIG = "musl"` and `<build>/conf/multiconfig/musl.conf` (`TCLIBC = "musl"`,
+`TMPDIR = "${TOPDIR}/tmp-musl"`), `bitbake -e` of zlib, curl, busybox, quilt-native,
+core-image-minimal and virtual/libc in both configurations, and `bitbake-getvar`
+(`tests/fixtures/outputs/live/differential-scarthgap-mc/`,
+`tests/fixtures/outputs/live/real-checks/multiconfig/`). Confirmed: `BB_CURRENT_MC` is
+`default` in the default configuration and `musl` in the other; the default
+configuration's include history has OE-core's empty `meta/conf/multiconfig/default.conf`
+right after `local.conf` and before the machine conf (the Scarthgap `require`); the
+multiconfig file is found in `<build>/conf/multiconfig/` through `BBPATH` (`TCLIBC`'s
+history in the musl dump: `set <build>/conf/multiconfig/musl.conf:2`, after
+`bitbake.conf:394`'s `??=`, as the static history has it); `TCLIBC`, `TMPDIR`, `WORKDIR`
+(`tmp-musl/work/core2-64-poky-linux-musl/...`), `TARGET_SYS`, `PREFERRED_PROVIDER_virtual/libc`
+(`musl`, from `tclibc-musl.inc`) and the provider `bitbake -e mc:musl:virtual/libc` chose
+(`musl_git.bb`) per configuration; the flag `do_install[mcdepends] = "${MCDEP}"` (with
+`MCDEP:pn-curl` set) is expanded per recipe (`bitbake-getvar -f mcdepends`: the entry for
+curl, empty for zlib) and is set in both configurations' curl alike (BitBake adds the
+dependency only in the one it names first). **New, seen**: `bitbake -e mc:<name>:<recipe>`
+prints `FILE_LAYERNAME` as `None`, so `OVERRIDES` holds a literal `layer-${FILE_LAYERNAME}`:
+`showEnvironment` (2.8 and 2.18 `cooker.py`) takes the recipe's file name from
+`buildTaskData`, which in a multiconfig is the virtual name `mc:<name>:<file>`, and
+`calc_bbfile_priority` matches no `BBFILE_PATTERN` against it (the same as for a
+`virtual:native:` variant). A build parses the real file name (`CookerParser`), and
+`bitbake-getvar -r mc:musl:curl FILE_LAYERNAME` (tinfoil) printed `core`. **Also seen**:
+the include history `bitbake -e mc:<name>:<recipe>` prints is the default
+configuration's (`showEnvironment` emits `self.data.inchistory`, not the multiconfig
+datastore's): it lists `multiconfig/default.conf`, not `musl.conf`, so the place of the
+multiconfig file cannot be read from it (the variable histories do show the file). Not
+checked: the rest of "Not yet verified".
 
 **Reading `BBMULTICONFIG`, and one parse per configuration** (`lib/bb/cookerdata.py`
 `CookerDataBuilder.parseBaseConfiguration`, the same on 2.0, 2.8 and 2.18):
@@ -1454,10 +2024,15 @@ directory: kas writes none.
   saying nothing of it was read. `machine` / `distro` arguments are pinned on top, as in the
   default configuration. The cache key includes the name, so each configuration is a
   configuration pass of its own. A target note names the configuration and the file.
-- The default configuration is replayed as before: **`BB_CURRENT_MC` is not set** there
-  (BitBake sets `""`, or `default` before 2.12), so the Wrynose `require` is a python
-  reference that is not followed and the Kirkstone / Scarthgap one an undefined reference
-  (OE-core's empty `default.conf` is not read).
+- The default configuration sets `BB_CURRENT_MC` as BitBake does (acc-unfollowed; before,
+  it was left unset and both forms of the `require` were unfollowed references): `""` from
+  BitBake 2.12 on, `default` before (`Feature::DefaultMcNamedDefault`). So the Wrynose
+  python `require` requires nothing (`include`/`require` split the expanded text on
+  whitespace and include each word, `ConfHandler.include`: an empty text includes nothing,
+  for `require` too), and the Kirkstone / Scarthgap one reads OE-core's empty
+  `conf/multiconfig/default.conf`. Both are resolved exactly. `mcdepends` still decides
+  `applies` against `""` for the default configuration: BitBake's task ids name it `""`
+  (`runqueue.py` `add_mc_dependencies`, `if mc == frommc`) whatever its `BB_CURRENT_MC`.
 - The workspace's configurations (`multiconfig::list`, shown by `status`): `BBMULTICONFIG`
   of the default configuration, split as BitBake does (uncertain when python, an
   unresolved name or an uncertain include may change it), each name with the first
@@ -1821,6 +2396,47 @@ reproduces it from the indexed statements:
   `add_tasks` and can call `bb.build.addtask` / `deltask`; `do_x[deps]` can also be set as a
   flag directly; neither is seen statically.
 
+### What a task runs
+
+Checked against BitBake 2.18 on yocto-kiss (`bitbake/lib/bb/build.py` `_exec_task`,
+`exec_func`, `exec_func_shell`, `_task_data`; `lib/bb/runqueue.py`), and against real task
+logs (var-taskfuncs, 2026-11):
+
+- `_exec_task(fn, task, d)` refuses a name without the `task` flag (`No such task`). It
+  copies the data (`_task_data`: `OVERRIDES` gets `task-<name>` in front, `_` in the name
+  becoming `-`, then `expandKeys`), reads `getVarFlag(task, 'prefuncs', expand=True)` and
+  `postfuncs` the same way, and runs `exec_func` on each prefunc (the expanded value split
+  on whitespace), then on the task, then on each postfunc. A failure stops the rest.
+- `[prefuncs]` / `[postfuncs]` are read only there: `exec_func(f)` called for a helper
+  (another task's prefunc, `bb.build.exec_func` from python) does not run `f`'s own lists.
+- `exec_func(func)`: every `[cleandirs]` entry (expanded) is removed and recreated first;
+  every `[dirs]` entry is created and the function runs in the last one; `[lockfiles]` are
+  held while it runs. A function with no value logs the warning `Function <f> doesn't
+  exist` and returns (the task goes on); an empty one returns silently. These flags are
+  read for each function separately, so a prefunc's own `[dirs]` apply to it.
+- `[noexec]` tasks: the runqueue does not call `_exec_task` at all, it fires the started
+  event and writes the stamp (`runqueue.py`, `noexec=True`): no prefuncs or postfuncs.
+- `[fakeroot]`: `exec_func_shell` reads it on the function being run, not on the task.
+- The lists are flags of the task, so the classes write them as `do_x[postfuncs] +=`
+  (`remove-libtool.bbclass`: `remove_libtool_la`; `systemd.bbclass`: `${RMINITDIR}`, which
+  is `rm_sysvinit_initddir` or `rm_systemd_unitdir` by `DISTRO_FEATURES`). Code that runs
+  at the end of parsing also writes them through computed task names: `sstate.bbclass`'s
+  anonymous python prepends `sstate_task_prefunc` and reorders `postfuncs` for each task in
+  `SSTATETASKS`; `staging.bbclass`'s `staging_taskhandler` (`RecipeTaskPreProcess`)
+  prepends `extend_recipe_sysroot` to `do_configure` and to every task whose `[depends]`
+  names `populate_sysroot` (on a target recipe `base.bbclass`'s anonymous python adds
+  `virtual/fakeroot-native:do_populate_sysroot` to `do_install[depends]`, so
+  `do_install` gets it); `patch.bbclass` adds `patch_task_postfunc` when
+  `PATCHTOOL = "git"` and `PATCH_COMMIT_FUNCTIONS = "1"`. None of these is run statically.
+- Observed: zlib's `log.do_install.1630924` (target, yocto-kiss) runs
+  `extend_recipe_sysroot`, then `do_install`, then `remove_libtool_la`, in that order, and
+  `temp/` holds a `run.<function>.<pid>` script for each.
+
+`var` on a task function (and `recipe show=tasks`, `funcs` column) lists the lists as the
+metadata sets them, and names the anonymous python and event handlers whose bodies may
+change them (`mcp/tools/taskfuncs.rs`); a write is dropped only when an enclosing `if` is
+proved false or its loop runs over a certain variable that does not hold the task.
+
 ### Runtime dependencies and recommendations
 
 What makes BitBake build a recipe for another one, read (y3-leftovers, 2026-11-19) in
@@ -1874,8 +2490,10 @@ and OE-core Wrynose `33a6bd6c` (`classes-global/base.bbclass`, `package.bbclass`
   variables) when `PN` ends with `-native` and `"native"` is a substring of
   `BBCLASSEXTEND`; every read of `DEPENDS`, the cache's included, gets the filtered words,
   so `python3-native`'s `expat` is `expat-native` (seen: `python3-native.do_prepare_recipe_sysroot
-  -> expat-native.do_populate_sysroot`). The evaluator does not compute this filter; `deps`
-  applies it to the words it lists.
+  -> expat-native.do_populate_sysroot`). Since acc-helpers the evaluator computes this
+  filter when the handler is OE-core's text ("Class-extension read filters"); `deps` lists the
+  evaluated `DEPENDS` and maps word by word, through the same filter, the words of an
+  uncertain `DEPENDS` and of the `PACKAGECONFIG` build fields.
 
 ## Build output
 
@@ -2092,7 +2710,39 @@ branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
   stamp has the `stamp-extra-info` suffix (`.<taskhash>.dogbonedark`, `MACHINE`) but its
   sigdata file has none; the noexec `do_build` has a stamp and no sigdata file. No change
   reached curl through a dependency's hash in this round (none of curl's dependencies
-  changed), so that case is still checked only on hand-written output.
+  changed); real-checks did that (next item).
+- **A change through a dependency's hash, confirmed on a real build** (real-checks,
+  2026-11-20; `tests/fixtures/outputs/live/real-checks/sigs/`): `CFLAGS:append:class-target
+  = " -O1"` in a scratch `zlib_%.bbappend`, curl rebuilt (only zlib's 8 and curl's 11 tasks
+  ran). `bitbake-diffsigs -c never -t curl do_configure` printed five nested `Hash for task
+  dependency` lines, `curl:do_prepare_recipe_sysroot` (the task that depends on
+  `zlib:do_populate_sysroot`: `do_prepare_recipe_sysroot[deptask] = "do_populate_sysroot"`,
+  OE-core `staging.bbclass`),
+  `zlib:do_populate_sysroot`, `zlib:do_install`, `zlib:do_compile`, `zlib:do_configure`,
+  then at 20 spaces `basehash changed` and `Variable CFLAGS value changed:` with the word
+  diff `"${TARGET_CFLAGS} -D_REENTRANT -fPIE {+-O1+}"` (the value with the `:append`
+  applied, unexpanded). `do_compile` one level more, `do_install` two. **The recursion hides
+  a task's own change**: `compare_sigfiles` (2.18 `siggen.py`, at the `recursecb` call)
+  does `output = [output[-1]] + recout; break` when a dependency's comparison is found, so
+  what it had found for the task itself (its `basehash`, its variables) is dropped. Seen:
+  `-t zlib do_compile` printed only `Hash for task dependency zlib:do_configure changed` and
+  that comparison, although zlib's `do_compile`, `do_install` and `do_populate_sysroot`
+  each had their own basehash changed (the sigdata files read with Python's
+  `compression.zstd`: `basehash c5321af4c3` -> `6fa9a314e7` for `do_compile`, `CFLAGS` in
+  each task's `varvals`, `sigdata-basehashes.out`); curl's tasks' basehashes were
+  unchanged. So the output says whether the task's own inputs changed only when no
+  dependency's hash changed. A `Taint ... changed` line is appended after that loop, so it
+  can follow a recursion at depth 0. Side observations: a `zlib_%.bbappend` applies to
+  `zlib-native` and `nativesdk-zlib` too (the bbappend matches the recipe file, and
+  `BBCLASSEXTEND` variants are parsed from it), so an unconditional `CFLAGS:append` changed
+  the signatures of most native recipes (a dry run wanted 83 sstate objects, 0 found); and
+  **a dry run (`bitbake -n`) is not free of side effects**: `RunQueueExecute.__init__` (2.18
+  `runqueue.py`) fires `StaleSetSceneTasks` for every setscene task whose stamps do not
+  match its current hash, with no `dry_run` check, and OE-core's
+  `sstate_eventhandler_stalesstate` (`sstate.bbclass`) uninstalls those tasks' outputs from
+  `TMPDIR` (`sstate_clean_manifest`, stamps removed: "Removing 11 stale sstate objects for
+  arch dogbonedark..."); the sstate cache is not touched, and the next real build restored
+  them from it.
 
 ### Package data
 
@@ -2241,6 +2891,13 @@ Checked 2026-11-17 against bitbake `master` (`lib/bb/main.py`, `lib/bb/cooker.py
 `scripts/lib/devtool/build.py`); the devtool positionals were also checked on OE-core
 `kirkstone` (`standard.py`), where they are the same.
 
+- **Older BitBake (acc-releases, 2026-11-19).** `bitbake-layers show-layers` on BitBake 2.0
+  prints the layer directory's basename in its first column (`bblayers/query.py`
+  `get_layer_name`: `os.path.basename(layerdir)`), on 2.8 and later the collection name.
+  BitBake 2.0 does not parse on python 3.14: `asyncrpc/serv.py` `serve_as_process` starts the
+  hash equivalence server through `multiprocessing`, whose default start method there
+  (`forkserver`) pickles the process target, a local function (`_pickle.PicklingError`);
+  with python 3.12 it parses. BitBake 2.8 parses on 3.14.
 - `bitbake` options: `-k` / `--continue` (`dest="halt"`, store_false: "Continue as much as
   possible after an error"), `-f` / `--force` ("Force the specified targets/task to run
   (invalidating any existing stamp file)"), `-c` / `--cmd` (the task, e.g. `compile`),
@@ -2719,6 +3376,9 @@ and must not be used to report an error. No row is marked *verify* at present.
 | `CveStatus` | OE-core's CVE check reads `CVE_STATUS[<id>]`, `CVE_CHECK_STATUSMAP`, `CVE_STATUS_GROUPS` (before: `CVE_CHECK_IGNORE` only) | 4.3 nanbield | (current) | OE-core `meta/lib/oe/cve_check.py`: `def decode_cve_status` on `nanbield`, `scarthgap`, `styhead`, `walnascar`, `whinlatter`, `wrynose`, absent on `kirkstone`, `langdale`, `mickledore` (`34f682a24b` "cve-check: add option to add additional patched CVEs", contained in `nanbield` and later) |
 | `CveStatusCpe` | a `CVE_STATUS` value may be `detail: cpe:vendor:product:description`, and the status counts only for a matching `CVE_PRODUCT` | 5.1 styhead | (current) | `decode_cve_status` compares `status_split[1].strip() == "cpe"` on `styhead` and later, not on `scarthgap` (`abca80a716` "cve-check: encode affected product/vendor in CVE_STATUS", contained in `styhead` and later) |
 | `CvePatchContentLines` | patch contents are read line by line (every id on a line starting with `CVE:`; a file-name id needs four or more digits after the year); before, `CVE:( CVE-\d{4}-\d+)+` anywhere | 5.2 walnascar | (current) | `def parse_cves_from_patch_contents` on `walnascar`, `whinlatter`, `wrynose`, not on `styhead` (`87c6da6816` "cve-check: Rework patch parsing", contained in `walnascar` and later) |
+| `FileLayerName` | BitBake sets `FILE_LAYERNAME` for a recipe before parsing it | 4.3 nanbield (BitBake 2.6) | (current) | BitBake `cookerdata.py` `_parse_recipe`: `bb_data.setVar("FILE_LAYERNAME", layername)` on branch `2.8`, absent on `2.0`; added by `7090a14b0` (contained in branches `2.6` and later, not `2.4`); `bitbake -e` on Kirkstone prints no `FILE_LAYERNAME` (acc-releases) |
+| `FeaturesBackfill` | OE-core's `base.bbclass` anonymous python calls `oe.utils.features_backfill` for `DISTRO_FEATURES` and `MACHINE_FEATURES`: every word of `<VAR>_BACKFILL` in neither `<VAR>` nor `<VAR>_BACKFILL_CONSIDERED` is appended (`d.appendVar`, i.e. `<VAR>:append`) | 4.0 kirkstone (floor) | 5.3 whinlatter | `base.bbclass` anonymous python on `kirkstone` (`classes/`), `scarthgap` and `whinlatter` (`classes-global/`), not on `wrynose`, which has `<VAR>_DEFAULTS` and `oe.utils.filter_default_features` in `bitbake.conf` (OE-core `159148f4de`, `3194d6868d`); `lib/oe/utils.py` `features_backfill` the same on kirkstone and scarthgap; `bitbake -e packagegroup-core-boot` on both: `append utils.py:133 [features_backfill] " rtc qemu-usermode"` (acc-releases) |
+| `DefaultMcNamedDefault` | The default configuration is named `default`: `parseConfigurationFiles(prefiles, postfiles, mc = "default")` sets `BB_CURRENT_MC = "default"`, so OE-core's `require conf/multiconfig/${BB_CURRENT_MC}.conf` reads its empty `meta/conf/multiconfig/default.conf`; later `BB_CURRENT_MC = ""` | 4.0 kirkstone (floor) | 5.1 styhead (BitBake 2.10) | BitBake `cookerdata.py` `parseConfigurationFiles(..., mc = "default")` on `kirkstone` (2.0) and `scarthgap` (2.8), `mc = ""` on Wrynose's 2.18; dropped by `0fa0d8d76` ("cooker/cache: Drop mc 'default' string value", first released in 2.12 / Walnascar); OE-core `bitbake.conf:817` (kirkstone) and `:828` (scarthgap) require the file, `:824` on Wrynose has the python form that requires nothing for `""` (acc-unfollowed) |
 | `AssignmentWhitespaceWarning` | BitBake warns about an assignment without whitespace on both sides of the operator ("has a lack of whitespace around the assignment") | 5.3 whinlatter (BitBake 2.16) | (current) | guide 5.3, "Space around equal assignment"; BitBake `24772dd2a` "parse/ConfHandler: Add warning for deprecated whitespace usage" in `ConfHandler.feeder` (the `whitespace` / `whitespace2` groups of `__config_regexp__`), on branch `2.16`, not `2.12` |
 
 Renames older than the floor (no `Feature`: every supported release rejects them):
@@ -2934,8 +3594,12 @@ in the live environment:
 
 - `${@python expression}` in values, apart from the pure helpers of "Inline python
   evaluated statically" (x1) reading certain values
-- anonymous python functions and event handlers
+- anonymous python functions and event handlers (since `acc-overflag` a write whose
+  condition is false on static values is known not to happen: "Anonymous python writes
+  that cannot happen")
 - `d.setVar` / `d.appendVar` inside classes (e.g. `PACKAGECONFIG` processing in `base.bbclass`)
+- side effects of inline python (`${@d.setVar(...)}`; BitBake runs a `:=` value's python
+  at once, even when a later `=` replaces it)
 - `inherit` / `require` whose argument depends on any of the above
 - **class-extended variants** (`BBCLASSEXTEND`): evaluated since w10 (see "Class-extended
   variants" under "Parse order"). What stays out: the filters and package-variable renames
@@ -3100,15 +3764,13 @@ These are reported, never silently guessed. Authoritative mode (M5) covers them.
 Statements above that rest on documentation, memory or the source alone, not on a check
 against BitBake's behaviour or output:
 
-- Multiconfig (x5, "Multiconfig"): all of it, from the BitBake 2.0 / 2.8 / 2.18, OE-core and
-  kas 5.5 source and fixture tests (`tests/multiconfig.rs`); the live workspace has no
-  multiconfig and BitBake was not run. A parse-only run on a workspace with two
-  multiconfigs (`bitbake -e mc:<name>:<recipe>` and `bitbake -e mc:<name>`, no task) would
-  confirm: the multiconfig file's place in the include history (after `conf/local.conf`,
-  before the machine conf); `BB_CURRENT_MC`; which `?=` wins between `local.conf`, the
-  multiconfig file and the machine conf; `MACHINE`, `TMPDIR`, a `PREFERRED_PROVIDER_*` and a
-  machine-overridden recipe variable per configuration; a task's expanded `mcdepends`; and
-  BitBake's errors for an unknown name and for a listed name without a file.
+- Multiconfig (x5, "Multiconfig"): checked on Scarthgap only (real-checks, one
+  multiconfig `musl` with `TCLIBC` and `TMPDIR`; see that section). Still from the source
+  alone: Kirkstone and Wrynose (the Wrynose python `require`, `BB_CURRENT_MC = ""`), two
+  or more multiconfigs, a multiconfig that sets `MACHINE` (so another machine conf), which
+  `?=` wins between `local.conf`, the multiconfig file and the machine conf, `bitbake -e
+  mc:<name>` (configuration only), and BitBake's errors for an unknown name and for a
+  listed name without a file.
 - kas: `layers` null and `{}`, the `KAS_*` overrides, what `kas shell -k` does (before the
   first checkout and with `{repo, file}` includes), the YAML 1.1 rules and `kas-container`
   were settled from the kas 5.5 and PyYAML 6.0.3 source (see "kas"), not by running kas

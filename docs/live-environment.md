@@ -401,6 +401,67 @@ layer found under `layers/`).
 
 The recorded files are in `tests/fixtures/outputs/live/` (see its `README.md`).
 
+## Release workspaces (Scarthgap, Kirkstone)
+
+Since acc-releases (2026-11-19) the live directory also holds one parse-only workspace per
+older supported release, for the multi-release differential (differential.md, "Other
+releases"). Create or check them with:
+
+```sh
+scripts/release-env.sh                 # both; or: scripts/release-env.sh kirkstone
+```
+
+```
+$SOUS_CHEF_LIVE/releases/
+├── scarthgap/
+│   ├── openembedded-core/   branch scarthgap   fc4316861becc9f0d41857b49f6438929ab4c291
+│   ├── bitbake/             branch 2.8         6b443060ee96a62efb94723c97f22b51c9b20507 (2.8.1)
+│   ├── meta-yocto/          branch scarthgap   34e15a437a792db6778fe1bf62617b307c7f9945
+│   ├── meta-openembedded/   branch scarthgap   2db6aece32c7f8ebf6015b468e1b4e21de072e3b (meta-oe only)
+│   └── build/               conf/ written by the script; tmp/ and cache/ from BitBake's parses
+└── kirkstone/
+    ├── openembedded-core/   branch kirkstone   9687b9409d3a1e121f0f04de856055764d0a392e
+    ├── bitbake/             branch 2.0         a9f09b9e2f187f07a6f6dfd1caa3fd2f3d564a8a (2.0.0)
+    ├── meta-yocto/          branch kirkstone   34e3c9a19b8b955116109a2e9528966db3fced37 (yocto-4.0.35)
+    ├── meta-openembedded/   branch kirkstone   ce8539c941f6fcbecaca4d16640ac105c0595589 (meta-oe only)
+    ├── python-bin/python3   symlink to uv's CPython 3.12.13 (~/.local/share/uv/python/...)
+    └── build/
+```
+
+- **Where the clones come from.** The yocto-kiss clones (`yocto-kiss/openembedded-core`,
+  `yocto-kiss/bitbake`) and the bitbake-setup clones (`layers/meta-yocto`,
+  `layers/meta-openembedded`) are full and already had every branch, so the script copies
+  the one branch it needs from them (`git init` + `git fetch <local clone>
+  refs/remotes/origin/<branch>`), with no network, and sets `origin` to upstream
+  (`git.openembedded.org`, `git.yoctoproject.org`). A pin missing locally is fetched from
+  upstream instead. The pins are the branch heads in those clones on 2026-11-19 (`PIN[...]`
+  in the script). BitBake's branch per release is OE-core's `meta/conf/sanity.conf`
+  `BB_MIN_VERSION` (2.8.1 / 1.53.1).
+- **The build directory** has a `bblayers.conf` with `BBPATH = "${TOPDIR}"` and the four
+  layers (`meta`, `meta-poky`, `meta-yocto-bsp`, `meta-oe`, by their real paths) and a
+  `local.conf` with `MACHINE = "qemux86-64"`, `DISTRO = "poky"`, `BB_NO_NETWORK = "1"` and
+  `SANITY_TESTED_DISTROS = ""` (this host is no tested distribution of either release). The
+  environment is OE-core's `oe-init-build-env <build>`, sourced from `openembedded-core/`
+  (which finds `../bitbake`); `scripts/differential.sh` does that (`init = oe:...` in
+  `tests/fixtures/differential/<release>.ws`) and drops `TMPDIR` and `NETRC_FILE`.
+- **Python.** BitBake 2.8 runs on the host's 3.14. BitBake 2.0 starts (`bitbake --version`)
+  but its first parse fails on 3.14: the hash equivalence server (`asyncrpc/serv.py`
+  `serve_as_process`) is started with `multiprocessing`, whose default start method on 3.14
+  is `forkserver`, and pickling the local function `run` fails (`_pickle.PicklingError`).
+  With the 3.12 interpreter first in `PATH` (`kirkstone.ws`: `path =
+  releases/kirkstone/python-bin`) it parses. Nothing was installed for this.
+- **Run something** (parse-only, one client per build directory):
+
+  ```sh
+  cd $SOUS_CHEF_LIVE/releases/kirkstone/openembedded-core
+  env -u TMPDIR PATH=$SOUS_CHEF_LIVE/releases/kirkstone/python-bin:$PATH \
+      bash -c '. ./oe-init-build-env ../build >/dev/null && bitbake -e zlib'
+  ```
+
+- **Cost**: 31 s for both from nothing, 637 MB after cloning, 931 MB after the differential
+  runs (BitBake's `tmp/` and `cache/`); no `downloads/` and no `tmp/work/` were created.
+  Delete with `rm -rf $SOUS_CHEF_LIVE/releases`.
+
 ## What the verification left
 
 `scratch/` (all of it from the live verification): `sous-chef*.toml` configurations, the

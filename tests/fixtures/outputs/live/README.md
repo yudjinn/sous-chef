@@ -55,6 +55,7 @@ Commands are run from `{{LIVE}}/yocto-kiss` with `KAS=../venv/bin/kas` and
 | `kas-build-conf/*` | the files `kas checkout $FILES` wrote: `build/conf/*` and `build/CACHEDIR.TAG` |
 | `bitbake-setup-build/bitbake-setup-init.out` | `bitbake-setup --setting default top-dir-prefix {{LIVE}} --setting default top-dir-name bitbake-builds init --non-interactive --source-overrides {{LIVE}}/bitbake-setup-sources.json {{LIVE}}/yocto-kiss/yocto-kiss.conf.json dogbonedark` (exit 1 at the `enable-fragment` step, the host tools failure, before they were installed; progress lines removed) |
 | `differential/summary.txt`, `classes.tsv`, `workspace.txt` | the differential test's report (`tests/differential.rs`, docs/differential.md): per-target table and totals, every compared value with its class, and the workspace-level comparisons |
+| `differential-scarthgap/`, `differential-kirkstone/` (same three files) | the same report on the release workspaces of `scripts/release-env.sh` (acc-releases, 2026-11-19; versions and commits in docs/differential.md, "Other releases") |
 | `bitbake-setup-build/init-build-env` | `{{LIVE}}/bitbake-builds/kiss-wrynose-dogbonedark/build/init-build-env`, as written by bitbake-setup |
 | `bitbake-setup-build/{bblayers,local}.conf`, `conf-summary.txt` | that build's `conf/` (`conf-notes.txt` and `templateconf.cfg` are empty; `site.conf` is a symlink to `../../../site.conf`) |
 | `bitbake-setup-build/site.conf` | `{{LIVE}}/bitbake-builds/site.conf` |
@@ -106,3 +107,7 @@ own INFO / ERROR lines are kept: they are part of what a kas-mode job prints.
 | `y3-leftovers/log.do_compile.1958029.trimmed` | that task's log, **trimmed** to lines 1-3 and 250-285 |
 | `y3-leftovers/run.do_compile.1958029` | that task's run file, whole |
 
+
+## real-checks: sigs through a dependency, multiconfig, live hooks (2026-11-20)
+
+Under `real-checks/`, with its own README listing every file.

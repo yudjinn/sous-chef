@@ -1,0 +1,4 @@
+NOTE: Starting bitbake server...
+basehash changed from befafd053abc82c589033591f0e7ddae77544f3281513755bbcea3569cef8568 to cd2687dfa4bd126c99e8e80084014fcbcbf1db20f218ae040b1d7e43aa1418b9
+Variable CFLAGS value changed:
+"${TARGET_CFLAGS} -D_REENTRANT -fPIE {+-O1+}"

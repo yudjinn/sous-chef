@@ -1,0 +1,12 @@
+2026-11-20T15:07:03+02:00	bitbake -e zlib	78.0 s	exit 0
+2026-11-20T15:07:10+02:00	bitbake -e curl	7.2 s	exit 0
+2026-11-20T15:07:17+02:00	bitbake -e busybox	6.6 s	exit 0
+2026-11-20T15:07:25+02:00	bitbake -e quilt-native	7.9 s	exit 0
+2026-11-20T15:07:37+02:00	bitbake -e core-image-minimal	12.4 s	exit 0
+2026-11-20T15:07:45+02:00	bitbake -e virtual/libc	7.7 s	exit 0
+2026-11-20T15:07:52+02:00	bitbake -e mc:musl:zlib	6.9 s	exit 0
+2026-11-20T15:07:59+02:00	bitbake -e mc:musl:curl	7.8 s	exit 0
+2026-11-20T15:08:06+02:00	bitbake -e mc:musl:busybox	6.8 s	exit 0
+2026-11-20T15:08:12+02:00	bitbake -e mc:musl:quilt-native	5.9 s	exit 0
+2026-11-20T15:08:19+02:00	bitbake -e mc:musl:core-image-minimal	6.5 s	exit 0
+2026-11-20T15:08:25+02:00	bitbake -e mc:musl:virtual/libc	5.8 s	exit 0

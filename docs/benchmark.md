@@ -15,6 +15,10 @@ Harness, tasks and reference facts: [bench/](../bench/README.md). Per-run number
 [bench/results/runs.tsv](../bench/results/runs.tsv); the tables below are
 [bench/results/tables.md](../bench/results/tables.md).
 
+A rerun on Sonnet 5.5 with the current code, tool search on, the `.gitignore` confound
+removed and two runs per cell is at the end of this page ("Rerun on Sonnet 5.5 with the
+current code").
+
 ## What was run
 
 | | |
@@ -446,3 +450,268 @@ tokens: Claude Code's built-in `cc-plugin-easel` plugin loaded in that session o
 of the other four), and it adds a prompt section. That session was set aside and run
 again; the repeat, without that plugin, is the row above. Five sessions in all, $0.0089
 reported.
+
+## Rerun on Sonnet 5.5 with the current code (2026-11-20)
+
+The pilot's 14 tasks again, with a larger model, the current sous-chef, tool search at
+Claude Code's default, the `.gitignore` confound removed and two sessions per task and
+condition. The pilot's numbers above are unchanged. Per-run numbers:
+[bench/results/rerun-runs.tsv](../bench/results/rerun-runs.tsv); full tables:
+[bench/results/rerun-tables.md](../bench/results/rerun-tables.md).
+
+### What was run
+
+| | |
+|---|---|
+| Date | 2026-11-20 |
+| Claude Code | 2.1.328 |
+| Model | `--model sonnet`, which every session reports as `claude-sonnet-5-5` |
+| sous-chef | release build of commit `2bd568c` (the rerun commits add only `bench/` and docs) |
+| Workspace | the pilot's: `{{LIVE}}/yocto-kiss`, Wrynose, MACHINE `dogbonedark`, DISTRO `kiss`; index of 1755 files, warm |
+| Sessions | 56 task sessions (14 tasks x 2 conditions x 2 runs), 4 overhead sessions ("Say ok.", 2 per condition), 4 probes (below) |
+| Limits | `--max-turns 25`, 300 s, `--max-budget-usd 3` per session; none reached (largest: 16 turns, 61.6 s, $0.16) |
+| Command | `python3 bench/run.py --model sonnet --tool-search --no-vcs-ignore --repeats 2 --max-budget-usd 3 --cost-cap 30 --overhead --run-dir {{LIVE}}/runs/bench-rerun` |
+
+Everything else is the pilot's setup ("The two conditions" above): the same prompts, system
+prompt append, `--setting-sources ''`, `--permission-mode dontAsk`,
+`--no-session-persistence`, deny and allow lists, `ENABLE_CLAUDEAI_MCP_SERVERS=false`, the
+parent's `CLAUDE_CODE_*` variables removed, `--strict-mcp-config` in A, `--plugin-dir
+plugin` in B, and a `PATH` wrapper that runs the release binary with `--config
+{{LIVE}}/runs/bench-rerun/sous-chef.toml` (`[bitbake] enabled = false`, the two kas files,
+the build directory). The differences:
+
+- **Model**: Sonnet 5.5 instead of Haiku 5.5.
+- **Tool search on** in both conditions: `--tools Read,Grep,Glob,Bash,Skill,ToolSearch`,
+  `ENABLE_TOOL_SEARCH` unset. The pilot left `ToolSearch` out, which loads every MCP tool
+  upfront. Here the six `alwaysLoad` tools are sent upfront and the other ten deferred
+  ("Plugin overhead after the definition cuts" above). `init` lists 6 tools in A and 22 in
+  B (6 built-in and 16 sous-chef) in every session, and one MCP server in B,
+  `plugin:sous-chef:sous-chef`, connected in all 28 B sessions. The built-in plugins were
+  the same four in every session (no `cc-plugin-easel`).
+- **16 read-only sous-chef tools allowed** in B, the pilot's 14 plus `sigs` and `pkgdata`;
+  `scaffold` and `bitbake` denied as before.
+- **The `.gitignore` confound removed** (next section).
+- **Two runs per cell**, run ids `-r1` and `-r2`, in the order r1 for every task, then r2.
+
+### The `.gitignore` confound, and what was changed
+
+`yocto-kiss/.gitignore` lists `bitbake/`, `openembedded-core/`, `build/` and `meta-*/`
+(with `!meta-kiss*/`). Claude Code's Grep runs ripgrep, which skips gitignored files, and
+has no setting to change that (code.claude.com/docs/en/tools-reference, "Grep tool
+behavior"); Glob does not honour `.gitignore` by default (same page, "Glob tool
+behavior"). The first probe, with the pilot's setup (condition A, Haiku: "call Grep once
+for `PACKAGECONFIG\[gnutls\]` with no path"), got `No files found`.
+
+The change, in both conditions (`bench/run.py --no-vcs-ignore`):
+
+- `USE_BUILTIN_RIPGREP=0`, so Claude Code runs the `rg` on `PATH` instead of its bundled
+  one;
+- `{{LIVE}}/runs/bench-rerun/rg-bin/rg` first on `PATH`: a wrapper that logs each call and
+  runs `/usr/bin/rg` (ripgrep 15.2.0) with `--no-ignore-vcs --ignore-file
+  {{LIVE}}/runs/bench-rerun/rg-ignore` before the arguments Claude Code passed;
+- `rg-ignore` holds `/build/*` and `!/build/conf/`: the build directory (14 GB, with
+  BitBake's output) stays out of searches as it was in the pilot, except `build/conf`,
+  which sous-chef reads too.
+
+Nothing was added to the workspace. With the wrapper the same probe returned the 8 files
+in `openembedded-core/meta`. The log has 325 calls over the run: Grep searches, Glob's file
+listings and the agents' own `rg` commands all went through it. Side effects: Glob, which
+Claude Code runs as `rg --files --no-ignore`, now also skips `build/*` except `build/conf`
+(`--no-ignore` does not cancel an explicit `--ignore-file`), where in the pilot it could
+list the build directory; and an `rg` command run through Bash behaves like Grep. Both
+conditions now search the same files: every layer in the checkout, `build/conf`, nothing
+else of `build/`.
+
+The probes: the ignore probe before the fix and with a first version of the wrapper
+(Haiku, $0.004 together), the final ignore probe (Haiku, $0.0005), and the pilot's
+containment probe on Sonnet with the new flags ($0.045): every access outside the
+workspace was denied, `build/conf/bblayers.conf` was read, `/tmp/x6-containment-test.txt`
+was not written.
+
+**The workspace during the run.** Another agent was rebuilding `curl` and `zlib` in the same
+build directory. Before the run, from 14:51 to 14:59, its kas configuration had added
+`../scratch/meta-scratch` to `build/conf/bblayers.conf` (the containment probe saw it); the
+run started after the file was back to the five layers, and a watcher hashed
+`bblayers.conf` and `local.conf` every 3 s from 15:00:04 to the end of the run: unchanged.
+The last BitBake server in `build/bitbake-cookerdaemon.log` started at 15:00:07 (the other
+agent's kas checkout) and exited at 15:00:13, as the first session started; none after.
+
+### Results
+
+Tokens are the pilot's sum (input + output + cache creation + cache read); cost is Claude
+Code's client-side estimate (`total_cost_usd`). Each cell is the mean of the two runs, with
+the two values (r1, r2) in brackets where they differ.
+
+| Task | Total A | Total B | A/B r1 / r2 | Turns A / B | Calls A / B | Score A | Score B |
+|---|---|---|---|---|---|---|---|
+| t01-curl-srcuri | 74,841 (64,658, 85,024) | 54,908 (54,330, 55,487) | 1.19 / 1.53 | 8 / 5 | 7 / 4 | 0.90 | 0.90 |
+| t02-providers | 142,946 (143,046, 142,846) | 65,704 (54,839, 76,570) | 2.61 / 1.87 | 15.5 / 6.5 | 14.5 / 5.5 | 1.00 | 0.90 |
+| t03-linux-kiss-appends | 50,180 (49,557, 50,803) | 90,594 (90,970, 90,217) | 0.54 / 0.56 | 11.5 / 10.5 | 10.5 / 9.5 | 0.75 | 1.00 |
+| t04-dropbear-classes | 95,206 (68,265, 122,147) | 47,305 (47,717, 46,893) | 1.43 / 2.60 | 13 / 4.5 | 12 / 3.5 | 0.95 (0.90, 1.00) | 0.90 |
+| t05-curl-deps | 89,175 (88,221, 90,129) | 83,568 (83,680, 83,456) | 1.05 / 1.08 | 13 / 9 | 12 / 8 | 0.80 | 0.80 |
+| t06-gnutls-search (control) | 34,330 (27,128, 41,533) | 30,182 (30,187, 30,178) | 0.90 / 1.38 | 3.5 / 2 | 2.5 / 1 | 1.00 | 1.00 |
+| t07-busybox-install | 136,094 (95,276, 176,913) | 100,548 (83,350, 117,746) | 1.14 / 1.50 | 13.5 / 11 | 12.5 / 10 | 0.60 | 0.80 (1.00, 0.60) |
+| t08-layers | 53,084 (65,607, 40,560) | 45,682 (45,726, 45,639) | 1.43 / 0.89 | 8 / 4 | 7 / 3 | 1.00 | 0.75 |
+| t09-lint-meta-kiss | 54,008 (53,788, 54,229) | 60,968 (52,024, 69,913) | 1.03 / 0.78 | 12.5 / 10.5 | 11.5 / 9.5 | 0.62 | 1.00 |
+| t10-linux-kiss-srcuri | 51,134 (51,095, 51,172) | 49,819 (50,374, 49,264) | 1.01 / 1.04 | 8 / 4.5 | 7 / 3.5 | 1.00 | 0.83 |
+| t11-distro-features | 98,552 (77,904, 119,201) | 80,368 (110,409, 50,326) | 0.71 / 2.37 | 11 / 7.5 | 10 / 6.5 | 0.88 | 1.00 |
+| t12-kiss-image-install | 85,404 (101,801, 69,007) | 40,198 (31,736, 48,660) | 3.21 / 1.42 | 10 / 3.5 | 9 / 2.5 | 1.00 | 1.00 |
+| t13-git-srcrevs (control) | 40,110 (33,816, 46,405) | 45,847 (45,791, 45,903) | 0.74 / 1.01 | 4 / 5 | 3 / 4 | 1.00 | 1.00 |
+| t14-u-boot-kiss | 65,680 (66,410, 64,951) | 56,826 (47,500, 66,151) | 1.40 / 0.98 | 9.5 / 5.5 | 8.5 / 4.5 | 0.38 | 0.75 |
+
+Wall time and cost per task, with their ranges: `bench/results/rerun-tables.md`. Sums over
+the 14 tasks, per run, and the mean of the two runs (score: mean over the tasks):
+
+| Measure | A r1 | A r2 | B r1 | B r2 | A mean | B mean | A / B |
+|---|---|---|---|---|---|---|---|
+| Total tokens | 986,572 | 1,154,920 | 828,633 | 876,403 | 1,070,746 | 852,518 | 1.26 |
+| Output tokens | 37,379 | 39,660 | 20,809 | 21,365 | 38,520 | 21,087 | 1.83 |
+| Turns | 135 | 147 | 91 | 87 | 141 | 89 | 1.58 |
+| Tool calls | 121 | 133 | 77 | 73 | 127 | 75 | 1.69 |
+| Wall time, s | 388 | 421 | 232 | 241 | 404 | 236 | 1.71 |
+| Reported cost, $ | 1.06 | 0.94 | 0.85 | 0.57 | 1.00 | 0.71 | 1.41 |
+| Score, mean | 0.84 | 0.85 | 0.92 | 0.89 | 0.85 | 0.90 | |
+| Answers with a wrong claim | 4 of 14 | 4 of 14 | 1 of 14 | 1 of 14 | | | |
+| Answers flagged overconfident | 0 | 0 | 0 | 0 | | | |
+
+- **Tokens.** A used 1.26 times B's tokens (sum of the means; 1.19 in r1, 1.32 in r2), the
+  same as the pilot's 1.28 with a different model and setup. Per task the ratio of the
+  means has a median of 1.16 and ranges from 0.55 (t03) to 2.18 (t02): B used fewer tokens
+  on 11 of 14 tasks. Below 1.0 in both runs: t03 only. Above 1.0 in both: t01, t02, t04,
+  t05, t07, t10, t12. Six tasks changed sides of 1.0 between the two runs (t06, t08, t09,
+  t11, t13, t14), and one cell moved by a factor of 2.2 between runs (t11 B: 110,409 and
+  50,326), so per-task ratios below about 1.5 are within what two runs of one cell show.
+- **Score.** B 0.90, A 0.85 (pilot: 0.83 and 0.60). The baseline's gain is mostly the
+  confound fix: the pilot's three A answers that could not find OE-core (t05 0.10, t06
+  -0.17, t11 0.12) are 0.80, 1.00 and 0.88 here. B scored higher on 5 tasks (t03, t07,
+  t09, t11, t14), equal on 5, lower on 4 (t02, t04, t08, t10, each by an omitted detail,
+  below). The two runs of a cell got the same score in 26 of 28 cells.
+- **Turns, calls, time, cost.** B took fewer turns and tool calls on 13 of 14 tasks (not
+  t13), 236 s against 404 s of wall time and $0.71 against $1.00 per run of the 14 tasks.
+- **Cache.** Cache reads are 84% of the A sessions' tokens and 85% of the B sessions'.
+
+### Wrong or overconfident answers
+
+No answer was flagged overconfident. Every answer with a wrong claim:
+
+**Baseline (8 answers)**
+
+- t07, both runs: missed both `do_install` postfuncs. r1: "The only extra function is
+  `do_install_ptest`"; r2: "there are no extra install functions".
+- t09, both runs: "`u-boot-kiss_git.bb` also has no `SUMMARY`" (it gets one from OE-core's
+  `u-boot.inc`). r1 also: "the default (systemd) ... is poky's default and not oe-core's,
+  which is `none`" (OE-core's `defaultsetup.conf` has `INIT_MANAGER ??= "systemd"`). Both
+  missed `u-boot-kiss`'s missing `PV` and `linux-kiss`'s missing `HOMEPAGE`.
+- t11 r1: final value without the second `sysvinit`, and "Only the first eight features are
+  listed in `kiss.conf`" (all nine are). t11 r2: "`sysvinit` appears once".
+- t14, both runs: listed the `u-boot-kiss_%.bbappend` files of meta-kiss-amd, -nxp and
+  -st as bbappends that apply (r1: "Yes, three of them"), with their machine-specific
+  `SRC_URI` appends in a table; those layers are not enabled. Neither run read
+  `bblayers.conf`.
+
+**sous-chef (2 answers)**
+
+- **t07 r2**: missed both postfuncs and said the inherited classes "don't change
+  `do_install` itself". The tool output that led there: `var` with `name=do_install
+  recipe=busybox` returned `final: function do_install, 1 piece in order:
+  meta:recipes-core/busybox/busybox.inc:225-375` and nothing about the task's
+  `[postfuncs]` flag. The r1 session asked `var` for `name=do_install[postfuncs]` and got
+  `" remove_libtool_la rm_systemd_unitdir"`, the right answer (score 1.00). A product bug:
+  `var` on a task function does not mention its `prefuncs` / `postfuncs` unless they are
+  asked for by name (or with `flags=true`). (Fixed after the rerun, var-taskfuncs: `var`
+  on a task function now lists its prefuncs and postfuncs with pointers, and `recipe
+  show=tasks` has them in a `funcs` column; mcp-tools.md has the busybox output.) The same session also called the tool by a
+  short name (`item`: "No such tool available") and tried to Read a path under a
+  non-existent `layers/` directory.
+- **t11 r1**: "BitBake de-duplicates the trailing `sysvinit`" (it does not). The raw value
+  it gave was right, and so was the tool's: `var DISTRO_FEATURES` printed `final:
+  "sysvinit ... ldconfig sysvinit ${@oe.utils.filter_default_features('DISTRO_FEATURES',
+  d)}"` with the python marked as not evaluated. The wrong claim is the model's, not a
+  tool output's.
+
+Omissions without a wrong claim, where B scored lower than A: t08, both B runs relayed the
+`layers` tool's five enabled layers and did not say that meta-kiss-amd, -nxp and -st exist
+but are not enabled (the pilot's B answer missed the same); t02, both B runs gave
+u-boot-kiss's version as `git` without the v2026.04 of its `SRCREV`; t10, both B runs took
+`KERNELORG_MIRROR` from the expanded URL instead of naming `bitbake.conf`; t04, both B runs
+listed the global `INHERIT` classes without the classes they inherit (and said so), where
+the A r2 answer expanded them. t14 B did not state the `SRCREV` in either run.
+
+The pilot's sous-chef failure on t09 is gone: both B runs relayed the `lint` findings
+(`linux-kiss` without `SUMMARY` and `HOMEPAGE`, `${SRCPV}` in `sl`, the `INSANE_SKIP` of
+`ldflags`, `u-boot-kiss` without `PV`) and scored 1.00, where both A runs read every file
+in the layer and scored 0.62.
+
+### What the agent used
+
+- **B, all 28 sessions**: `var` 43, `recipe` 26, `search` 23, `deps` 6, `ToolSearch` 6,
+  `item` 5, `layers` 5, `class` 2, `lint` 2; built-ins Read 17, Glob 6, Bash 6, Grep 3.
+  `ToolSearch` loaded a deferred tool before its first use each time one was needed (t05
+  `deps`, t08 `layers`, t09 `lint`, both runs). Never used: `overrides`, `slice`,
+  `status`, `log`, `diff`, `audit`, `sigs`, `pkgdata`; the `Skill` tool was not called.
+- **B used built-in tools** in 10 of 28 sessions and Read in 5, unlike the pilot's B (no
+  Read): t09 read 5 to 7 files after `lint` to look for more findings, t03 r1 read three
+  files, t07 r2 and t11 r2 one each.
+- **A, all 28 sessions**: Grep 84, Read 81, Glob 45, Bash 44. 22 A sessions and 3 B
+  sessions had one Bash command denied, nearly all compound commands (`cd ...;`, `for`
+  loops) and two `git` commands; the agents went on with Read and Grep.
+
+### Fixed overhead
+
+"Say ok.", two sessions per condition: A 10,525 tokens, B 14,219 tokens in all four,
+**3,694 tokens** more for the plugin with tool search on, the same as the Haiku
+measurement above.
+
+### Cost
+
+| | Sessions | Total tokens | Reported cost |
+|---|---|---|---|
+| Task sessions | 56 | 3,846,528 | $3.43 |
+| Overhead sessions | 4 | 49,488 | $0.035 |
+| Probes | 4 | 95,442 | $0.050 |
+| **All** | **64** | **3,991,458** | **$3.51** |
+
+The first four task sessions (t01 and t02, both conditions) cost $0.32, which projected
+about $4.50 for the 56; the cap was $30, so the run went ahead with two runs per cell.
+
+### Scoring and the rubric
+
+Scored as in the pilot: `bench/score.py blind` shuffled the 56 answers with the condition
+hidden (labels `S01`..`S56`, grouped by task), I marked every fact, then joined the key
+(`BENCH_RUN_DIR=... bench/score.py compute-repeats`). Blinding was imperfect for the same
+reason as before (B cites `layer:path:line` and the static evaluator). Marks:
+`{{LIVE}}/runs/bench-rerun/scoring/marks.json`.
+
+No reference fact was stale, and the rubric was used as it stands: before scoring I
+checked the facts that could have moved against the workspace files (curl 8.19.0 and its
+patches, the meta-kiss recipes and their `SRCREV`, `PV`, `SUMMARY`, `HOMEPAGE` and
+`INSANE_SKIP` lines, the dogbonedark machine file, `kiss.conf`), and sous-chef's changes
+since the pilot do not touch what the facts say about the workspace. Two judgement calls,
+applied to both conditions: an answer missing one item of a list fact (for example
+`virtual/update-alternatives` in t05, or `sanity` in t04) gets a half mark; an answer that
+says the postfuncs do not exist gets an absent mark with the claim quoted as wrong, while
+listing the unenabled layers' bbappends as applying (t14) is the opposite of the fact and
+is marked contradicted.
+
+### Workspace and isolation after the rerun
+
+- BitBake was switched off in sous-chef's configuration for every session (`[bitbake]
+  enabled = false`), `bitbake` and `scaffold` were denied by name, and `Bash(bitbake *)`,
+  `Bash(kas *)` and `Bash(git *)` were denied; no session ran `bitbake` or `kas` (every
+  call is in the transcripts).
+- Outside `build/`, the only files under `yocto-kiss` newer than the run's start marker
+  are the `.git` index, `HEAD` and `config` of `bitbake`, `meta-arm` and
+  `openembedded-core`, at 15:00:07: the other agent's kas checkout, before the first
+  session. In `build/`: `conf/bblayers.conf` and `conf/local.conf` (same content,
+  rewritten at 15:00:07), `bitbake-cookerdaemon.log` (last written at 15:00:13), `cache/`
+  and `sstate-cache/`, all from the other agent.
+- The sessions wrote only under `{{LIVE}}/runs/bench-rerun/` (transcripts, the sous-chef
+  index, the `rg` call log).
+
+### What the rerun does not show
+
+- **Two runs per cell** show how much a cell moves, not significance. Six of 14 tasks
+  changed sides of 1.0 between the two runs; the overall ratio was 1.19 and 1.32.
+- **Not a model comparison.** Haiku in the pilot and Sonnet here, with other changes in
+  between (tool search, the confound fix, the sous-chef version).
+- Read-only questions, one small workspace, self-scored, BitBake off: as in the pilot.

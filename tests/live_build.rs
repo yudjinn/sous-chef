@@ -3,6 +3,8 @@
 //! Every input is a recorded, path-scrubbed copy under `tests/fixtures/outputs/live/y1-build/`
 //! (see its README entry); nothing here needs BitBake or the live directory.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -723,4 +725,91 @@ fn real_compiler_error() {
     assert_eq!(d.meta.exit_code, Some(1));
     assert_eq!(d.meta.task.as_deref(), Some("do_compile"));
     assert_eq!(d.more, 0);
+}
+
+// ---------------------------------------------------------------------------------------
+// real-checks (2026-11-20): a change reaching curl through a dependency's hash.
+// `CFLAGS:append:class-target = " -O1"` in a scratch `zlib_%.bbappend`, curl rebuilt (only
+// zlib's and curl's tasks ran); `bitbake-diffsigs -c never -t <pn> <task>` recorded in
+// `tests/fixtures/outputs/live/real-checks/sigs/`.
+
+fn sample_rc(name: &str) -> String {
+    fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/outputs/live/real-checks")
+            .join(name),
+    )
+    .unwrap()
+}
+
+const ZLIB_CFLAGS_DIFF: &str = "\"${TARGET_CFLAGS} -D_REENTRANT -fPIE {+-O1+}\"";
+
+/// curl's `do_configure` re-ran through `do_prepare_recipe_sysroot` (the task that depends
+/// on `zlib:do_populate_sysroot`) and four zlib tasks down to zlib's `do_configure`, whose
+/// `CFLAGS` changed: a word diff, the word added `-O1`.
+#[test]
+fn real_diffsigs_through_a_dependency_hash() {
+    let d = sigs::parse(&sample_rc("sigs/diffsigs-curl-do_configure.out"), "");
+    assert_eq!(d.unknown, 0, "{d:?}");
+    assert!(!d.own_basehash_changed());
+    assert_eq!(d.max_depth(), 5);
+    let path: Vec<&str> = d.path().iter().map(|p| p.0).collect();
+    assert_eq!(
+        path,
+        [
+            "curl:do_prepare_recipe_sysroot",
+            "zlib:do_populate_sysroot",
+            "zlib:do_install",
+            "zlib:do_compile",
+            "zlib:do_configure"
+        ]
+    );
+    let causes = d.causes();
+    assert_eq!(causes.len(), 2, "{causes:?}");
+    assert!(causes.iter().all(|c| c.depth == 5));
+    assert!(matches!(causes[0].change, Change::BaseHash { .. }));
+    let Change::VarValue { var, diff, old, .. } = &causes[1].change else {
+        panic!("{causes:?}")
+    };
+    assert_eq!(var, "CFLAGS");
+    assert!(old.is_none());
+    assert_eq!(diff, &[ZLIB_CFLAGS_DIFF.to_string()]);
+    assert_eq!(
+        sigs::word_changes(diff),
+        (vec!["-O1".to_string()], Vec::<String>::new())
+    );
+    // The owner of the change is the innermost dependency: zlib.
+    let owner = causes[1].chain.last().map(|t| sigs::split_task(t));
+    assert_eq!(owner, Some((Some("zlib".into()), "do_configure".into())));
+
+    // do_compile: one more level, the same root cause.
+    let d = sigs::parse(&sample_rc("sigs/diffsigs-curl-do_compile.out"), "");
+    assert_eq!(d.unknown, 0, "{d:?}");
+    assert_eq!(d.max_depth(), 6);
+    assert_eq!(d.path()[0].0, "curl:do_configure");
+    assert_eq!(d.path().len(), 6);
+}
+
+/// zlib's own tasks: `do_configure` shows its basehash and `CFLAGS`; `do_compile` only
+/// "Hash for task dependency zlib:do_configure changed", although its own basehash changed
+/// too (the recorded sigdata files: `sigdata-basehashes.out`): `compare_sigfiles` replaces
+/// the task's own lines by the dependency's comparison. Nothing in the output says whether
+/// the task's own inputs changed.
+#[test]
+fn real_diffsigs_hide_a_tasks_own_change_behind_a_dependency() {
+    let d = sigs::parse(&sample_rc("sigs/diffsigs-zlib-do_configure.out"), "");
+    assert_eq!(d.unknown, 0, "{d:?}");
+    assert!(d.own_basehash_changed());
+    assert_eq!(d.max_depth(), 0);
+
+    let d = sigs::parse(&sample_rc("sigs/diffsigs-zlib-do_compile.out"), "");
+    assert_eq!(d.unknown, 0, "{d:?}");
+    assert!(!d.own_basehash_changed());
+    assert_eq!(d.path().len(), 1);
+    let base = sample_rc("sigs/sigdata-basehashes.out");
+    let compile = base
+        .split("\ndo_")
+        .find(|s| s.starts_with("compile\n"))
+        .unwrap();
+    assert!(compile.contains("own basehash changed: True"), "{compile}");
 }

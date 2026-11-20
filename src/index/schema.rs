@@ -199,7 +199,9 @@ pub const META_EDGES: &str = "edges";
 /// `inherit-context-1`: an `inherit` in a `classes/` class is resolved in both contexts
 /// (`edges.context`). `inc-context-1`: an `inherit` in an `.inc` is resolved in the
 /// contexts of the files that reach it; an `inherit` in a `.conf` gets no edge.
-pub const EDGES_VERSION: &str = "inc-context-1";
+/// `recipe-dirs-1`: the `<pn>/` directories of uncollected recipes hold data too, and an
+/// unreachable file that does not parse is data (lint-dynamic-data).
+pub const EDGES_VERSION: &str = "recipe-dirs-1";
 
 /// `edges.context`: found by the recipe-context class search (`classes-recipe/`, then
 /// `classes/`).

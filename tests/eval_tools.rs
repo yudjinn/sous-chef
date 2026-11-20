@@ -112,8 +112,12 @@ async fn var_flag_query() {
 #[tokio::test]
 async fn var_python_dependent() {
     let f = fixture();
+    // On qemux86 (the default) the anonymous python's `if d.getVar('MACHINE') == 'boardx':`
+    // is false, so its append cannot happen and the value is certain; on boardx it may.
     let out = var_ok(&f, vargs("EXTRA_OEMAKE", Some("app"), None)).await;
     insta::assert_snapshot!("var_extra_oemake_app", out);
+    let out = var_ok(&f, vargs("EXTRA_OEMAKE", Some("app"), Some("boardx"))).await;
+    insta::assert_snapshot!("var_extra_oemake_app_boardx", out);
 }
 
 #[tokio::test]

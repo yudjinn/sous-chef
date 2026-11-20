@@ -1,0 +1,12 @@
+python () {
+    packages = d.getVar('PACKAGES').split()
+    if d.getVar('PACKAGEGROUP_DISABLE_COMPLEMENTARY') != '1':
+        types = ['', '-dbg', '-dev']
+        if bb.utils.contains('DISTRO_FEATURES', 'ptest', True, False, d):
+            types.append('-ptest')
+        packages = [pkg + suffix for pkg in packages
+                    for suffix in types]
+        d.setVar('PACKAGES', ' '.join(packages))
+    for pkg in packages:
+        d.setVar('ALLOW_EMPTY:%s' % pkg, '1')
+}

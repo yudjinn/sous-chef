@@ -5,7 +5,7 @@ curl	PR	equal
 curl	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 curl	FILE_LAYERNAME	equal	
 curl	SRC_URI	equal	
-curl	DEPENDS	flagged	unevaluated_python
+curl	DEPENDS	equal	
 curl	RDEPENDS:curl	unset	
 curl	PACKAGECONFIG	equal	
 curl	PACKAGES	equal	
@@ -19,10 +19,10 @@ curl	WORKDIR	equal
 curl	LICENSE	equal	
 curl	INHERIT	equal	
 curl	PROVIDES	equal	
-curl	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+curl	EXTRA_OECONF	equal	
 curl	EXTRA_OECMAKE	unset	
 curl	CFLAGS	equal	
-curl	FILESPATH	flagged	unevaluated_python
+curl	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 curl	MACHINE	equal	
 curl	DISTRO	equal	
 curl	TMPDIR	equal	
@@ -46,7 +46,7 @@ sl	PR	equal
 sl	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 sl	FILE_LAYERNAME	equal	
 sl	SRC_URI	equal	
-sl	DEPENDS	flagged	unevaluated_python
+sl	DEPENDS	equal	
 sl	RDEPENDS:sl	unset	
 sl	PACKAGECONFIG	unset	
 sl	PACKAGES	equal	
@@ -63,7 +63,7 @@ sl	PROVIDES	equal
 sl	EXTRA_OECONF	equal	
 sl	EXTRA_OECMAKE	unset	
 sl	CFLAGS	equal	
-sl	FILESPATH	flagged	unevaluated_python
+sl	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 sl	MACHINE	equal	
 sl	DISTRO	equal	
 sl	TMPDIR	equal	
@@ -79,11 +79,11 @@ linux-kiss	PR	equal
 linux-kiss	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 linux-kiss	FILE_LAYERNAME	equal	
 linux-kiss	SRC_URI	equal	
-linux-kiss	DEPENDS	flagged	unevaluated_python
+linux-kiss	DEPENDS	equal	flagged: anonymous python at meta:classes-recipe/kernel-uimage.bbclass:9-27 may write DEPENDS
 linux-kiss	RDEPENDS:linux-kiss	unset	
 linux-kiss	PACKAGECONFIG	unset	
-linux-kiss	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:118 [__anon_168]; append kernel-devicetree.bbclass:10 [__anon_13]
-linux-kiss	FILES:linux-kiss	equal	
+linux-kiss	PACKAGES	equal	
+linux-kiss	FILES:linux-kiss	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:60-168 may write FILES:linux-kiss
 linux-kiss	OVERRIDES	equal	
 linux-kiss	MACHINEOVERRIDES	equal	
 linux-kiss	DISTROOVERRIDES	equal	
@@ -96,7 +96,7 @@ linux-kiss	PROVIDES	equal
 linux-kiss	EXTRA_OECONF	equal	
 linux-kiss	EXTRA_OECMAKE	unset	
 linux-kiss	CFLAGS	equal	
-linux-kiss	FILESPATH	flagged	unevaluated_python
+linux-kiss	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 linux-kiss	MACHINE	equal	
 linux-kiss	DISTRO	equal	
 linux-kiss	TMPDIR	equal	
@@ -109,7 +109,7 @@ u-boot-kiss	PR	equal
 u-boot-kiss	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 u-boot-kiss	FILE_LAYERNAME	equal	
 u-boot-kiss	SRC_URI	equal	
-u-boot-kiss	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:508 [appendVar]
+u-boot-kiss	DEPENDS	equal	flagged: anonymous python at meta:classes-recipe/uboot-sign.bbclass:120-125 may write DEPENDS
 u-boot-kiss	RDEPENDS:u-boot-kiss	equal	
 u-boot-kiss	PACKAGECONFIG	equal	
 u-boot-kiss	PACKAGES	equal	
@@ -126,7 +126,7 @@ u-boot-kiss	PROVIDES	equal
 u-boot-kiss	EXTRA_OECONF	equal	
 u-boot-kiss	EXTRA_OECMAKE	unset	
 u-boot-kiss	CFLAGS	equal	
-u-boot-kiss	FILESPATH	flagged	unevaluated_python
+u-boot-kiss	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 u-boot-kiss	MACHINE	equal	
 u-boot-kiss	DISTRO	equal	
 u-boot-kiss	TMPDIR	equal	
@@ -147,7 +147,7 @@ u-boot-kiss	SECTION	equal
 u-boot-kiss	SRCREV	equal	
 u-boot-kiss	SUMMARY	equal	
 u-boot-kiss	SYSROOT_DIRS	equal	
-u-boot-kiss	UBOOT_ARCH_DIR	flagged	unevaluated_python
+u-boot-kiss	UBOOT_ARCH_DIR	equal	
 u-boot-kiss	UBOOT_INITIAL_ENV	equal	
 u-boot-kiss	UBOOT_LOCALVERSION	equal	
 kiss-image	PN	equal	
@@ -156,7 +156,7 @@ kiss-image	PR	equal
 kiss-image	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 kiss-image	FILE_LAYERNAME	equal	
 kiss-image	SRC_URI	equal	
-kiss-image	DEPENDS	flagged-literal-differs	unevaluated_python
+kiss-image	DEPENDS	flagged	unevaluated_python
 kiss-image	RDEPENDS:kiss-image	unset	
 kiss-image	PACKAGECONFIG	unset	
 kiss-image	PACKAGES	equal	
@@ -173,7 +173,7 @@ kiss-image	PROVIDES	equal
 kiss-image	EXTRA_OECONF	equal	
 kiss-image	EXTRA_OECMAKE	unset	
 kiss-image	CFLAGS	equal	
-kiss-image	FILESPATH	flagged	unevaluated_python
+kiss-image	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 kiss-image	MACHINE	equal	
 kiss-image	DISTRO	equal	
 kiss-image	TMPDIR	equal	
@@ -186,10 +186,10 @@ packagegroup-core-boot	PR	equal
 packagegroup-core-boot	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 packagegroup-core-boot	FILE_LAYERNAME	equal	
 packagegroup-core-boot	SRC_URI	equal	
-packagegroup-core-boot	DEPENDS	flagged	unevaluated_python
+packagegroup-core-boot	DEPENDS	equal	
 packagegroup-core-boot	RDEPENDS:packagegroup-core-boot	equal	
 packagegroup-core-boot	PACKAGECONFIG	unset	
-packagegroup-core-boot	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set packagegroup.bbclass:39 [__anon_42]
+packagegroup-core-boot	PACKAGES	equal	
 packagegroup-core-boot	FILES:packagegroup-core-boot	equal	
 packagegroup-core-boot	OVERRIDES	equal	
 packagegroup-core-boot	MACHINEOVERRIDES	equal	
@@ -203,7 +203,7 @@ packagegroup-core-boot	PROVIDES	equal
 packagegroup-core-boot	EXTRA_OECONF	equal	
 packagegroup-core-boot	EXTRA_OECMAKE	unset	
 packagegroup-core-boot	CFLAGS	equal	
-packagegroup-core-boot	FILESPATH	flagged	unevaluated_python
+packagegroup-core-boot	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 packagegroup-core-boot	MACHINE	equal	
 packagegroup-core-boot	DISTRO	equal	
 packagegroup-core-boot	TMPDIR	equal	
@@ -219,7 +219,7 @@ zlib	PR	equal
 zlib	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 zlib	FILE_LAYERNAME	equal	
 zlib	SRC_URI	equal	
-zlib	DEPENDS	flagged	unevaluated_python
+zlib	DEPENDS	equal	
 zlib	RDEPENDS:zlib	unset	
 zlib	PACKAGECONFIG	unset	
 zlib	PACKAGES	equal	
@@ -236,7 +236,7 @@ zlib	PROVIDES	equal
 zlib	EXTRA_OECONF	equal	
 zlib	EXTRA_OECMAKE	unset	
 zlib	CFLAGS	equal	
-zlib	FILESPATH	flagged	unevaluated_python
+zlib	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 zlib	MACHINE	equal	
 zlib	DISTRO	equal	
 zlib	TMPDIR	equal	
@@ -257,7 +257,7 @@ openssl	PR	equal
 openssl	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 openssl	FILE_LAYERNAME	equal	
 openssl	SRC_URI	equal	
-openssl	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+openssl	DEPENDS	equal	
 openssl	RDEPENDS:openssl	unset	
 openssl	PACKAGECONFIG	equal	
 openssl	PACKAGES	equal	
@@ -274,7 +274,7 @@ openssl	PROVIDES	equal
 openssl	EXTRA_OECONF	equal	
 openssl	EXTRA_OECMAKE	unset	
 openssl	CFLAGS	equal	
-openssl	FILESPATH	flagged	unevaluated_python
+openssl	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 openssl	MACHINE	equal	
 openssl	DISTRO	equal	
 openssl	TMPDIR	equal	
@@ -309,7 +309,7 @@ busybox	PR	equal
 busybox	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 busybox	FILE_LAYERNAME	equal	
 busybox	SRC_URI	equal	
-busybox	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+busybox	DEPENDS	equal	flagged: anonymous python at meta:classes-recipe/systemd.bbclass:20-27 may write DEPENDS
 busybox	RDEPENDS:busybox	equal	
 busybox	PACKAGECONFIG	unset	
 busybox	PACKAGES	equal	
@@ -326,7 +326,7 @@ busybox	PROVIDES	equal
 busybox	EXTRA_OECONF	equal	
 busybox	EXTRA_OECMAKE	unset	
 busybox	CFLAGS	equal	
-busybox	FILESPATH	flagged	unevaluated_python
+busybox	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 busybox	MACHINE	equal	
 busybox	DISTRO	equal	
 busybox	TMPDIR	equal	
@@ -375,7 +375,7 @@ dropbear	PR	equal
 dropbear	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 dropbear	FILE_LAYERNAME	equal	
 dropbear	SRC_URI	equal	
-dropbear	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+dropbear	DEPENDS	equal	flagged: anonymous python at meta:classes-recipe/systemd.bbclass:20-27 may write DEPENDS
 dropbear	RDEPENDS:dropbear	unset	
 dropbear	PACKAGECONFIG	equal	
 dropbear	PACKAGES	equal	
@@ -389,10 +389,10 @@ dropbear	WORKDIR	equal
 dropbear	LICENSE	equal	
 dropbear	INHERIT	equal	
 dropbear	PROVIDES	equal	
-dropbear	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+dropbear	EXTRA_OECONF	equal	
 dropbear	EXTRA_OECMAKE	unset	
 dropbear	CFLAGS	equal	
-dropbear	FILESPATH	flagged	unevaluated_python
+dropbear	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 dropbear	MACHINE	equal	
 dropbear	DISTRO	equal	
 dropbear	TMPDIR	equal	
@@ -423,7 +423,7 @@ ncurses	PR	equal
 ncurses	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 ncurses	FILE_LAYERNAME	equal	
 ncurses	SRC_URI	equal	
-ncurses	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+ncurses	DEPENDS	equal	
 ncurses	RDEPENDS:ncurses	unset	
 ncurses	PACKAGECONFIG	unset	
 ncurses	PACKAGES	equal	
@@ -440,7 +440,7 @@ ncurses	PROVIDES	equal
 ncurses	EXTRA_OECONF	equal	
 ncurses	EXTRA_OECMAKE	unset	
 ncurses	CFLAGS	equal	
-ncurses	FILESPATH	flagged	unevaluated_python
+ncurses	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 ncurses	MACHINE	equal	
 ncurses	DISTRO	equal	
 ncurses	TMPDIR	equal	
@@ -481,7 +481,7 @@ dbus	PR	equal
 dbus	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 dbus	FILE_LAYERNAME	equal	
 dbus	SRC_URI	equal	
-dbus	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:508 [appendVar]
+dbus	DEPENDS	equal	flagged: anonymous python at meta:classes-recipe/systemd.bbclass:20-27 may write DEPENDS
 dbus	RDEPENDS:dbus	equal	
 dbus	PACKAGECONFIG	equal	
 dbus	PACKAGES	equal	
@@ -495,10 +495,10 @@ dbus	WORKDIR	equal
 dbus	LICENSE	equal	
 dbus	INHERIT	equal	
 dbus	PROVIDES	equal	
-dbus	EXTRA_OECONF	flagged	unevaluated_python
+dbus	EXTRA_OECONF	equal	
 dbus	EXTRA_OECMAKE	unset	
 dbus	CFLAGS	equal	
-dbus	FILESPATH	flagged	unevaluated_python
+dbus	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 dbus	MACHINE	equal	
 dbus	DISTRO	equal	
 dbus	TMPDIR	equal	
@@ -507,7 +507,7 @@ dbus	CONFFILES:dbus	equal
 dbus	CVE_PRODUCT	equal	
 dbus	DEBIANNAME:dbus	equal	
 dbus	DESCRIPTION	equal	
-dbus	EXTRA_OEMESON	flagged-literal-differs	unevaluated_python
+dbus	EXTRA_OEMESON	equal	
 dbus	FILES:dbus-common	equal	
 dbus	FILES:dbus-tools	equal	
 dbus	FILES:dbus-lib	equal	
@@ -528,7 +528,7 @@ systemd-boot	PR	equal
 systemd-boot	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 systemd-boot	FILE_LAYERNAME	equal	
 systemd-boot	SRC_URI	equal	
-systemd-boot	DEPENDS	flagged	unevaluated_python
+systemd-boot	DEPENDS	equal	
 systemd-boot	RDEPENDS:systemd-boot	equal	
 systemd-boot	PACKAGECONFIG	unset	
 systemd-boot	PACKAGES	equal	
@@ -542,10 +542,10 @@ systemd-boot	WORKDIR	equal
 systemd-boot	LICENSE	equal	
 systemd-boot	INHERIT	equal	
 systemd-boot	PROVIDES	equal	
-systemd-boot	EXTRA_OECONF	flagged	unevaluated_python
+systemd-boot	EXTRA_OECONF	equal	
 systemd-boot	EXTRA_OECMAKE	unset	
 systemd-boot	CFLAGS	equal	
-systemd-boot	FILESPATH	flagged	unevaluated_python
+systemd-boot	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 systemd-boot	MACHINE	equal	
 systemd-boot	DISTRO	equal	
 systemd-boot	TMPDIR	equal	
@@ -556,7 +556,7 @@ systemd-boot	EFI_LD	equal
 systemd-boot	EXTRA_OEMESON	equal	
 systemd-boot	FILESEXTRAPATHS	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 systemd-boot	HOMEPAGE	equal	
-systemd-boot	LDFLAGS	flagged	unevaluated_python
+systemd-boot	LDFLAGS	equal	
 systemd-boot	LIC_FILES_CHKSUM	equal	
 systemd-boot	MESON_CROSS_FILE	equal	
 systemd-boot	MESON_TARGET	equal	
@@ -571,8 +571,8 @@ util-linux	PV	equal
 util-linux	PR	equal	
 util-linux	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 util-linux	FILE_LAYERNAME	equal	
-util-linux	SRC_URI	flagged	unevaluated_python
-util-linux	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+util-linux	SRC_URI	equal	
+util-linux	DEPENDS	equal	flagged: anonymous python at meta:classes-recipe/systemd.bbclass:20-27 may write DEPENDS
 util-linux	RDEPENDS:util-linux	equal	
 util-linux	PACKAGECONFIG	equal	
 util-linux	PACKAGES	equal	
@@ -586,10 +586,10 @@ util-linux	WORKDIR	equal
 util-linux	LICENSE	equal	
 util-linux	INHERIT	equal	
 util-linux	PROVIDES	equal	
-util-linux	EXTRA_OECONF	flagged	unevaluated_python
+util-linux	EXTRA_OECONF	equal	
 util-linux	EXTRA_OECMAKE	unset	
 util-linux	CFLAGS	equal	
-util-linux	FILESPATH	flagged	unevaluated_python
+util-linux	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 util-linux	MACHINE	equal	
 util-linux	DISTRO	equal	
 util-linux	TMPDIR	equal	
@@ -645,7 +645,7 @@ util-linux	LICENSE:util-linux-wall	equal
 util-linux	LICENSE:util-linux-whereis	equal	
 util-linux	LICENSE:util-linux-write	equal	
 util-linux	LIC_FILES_CHKSUM	equal	
-util-linux	MAJOR_VERSION	flagged	unevaluated_python
+util-linux	MAJOR_VERSION	equal	
 util-linux	PACKAGESPLITFUNCS	equal	
 util-linux	PACKAGES_DYNAMIC	equal	
 util-linux	PACKAGE_PREPROCESS_FUNCS	equal	
@@ -670,26 +670,26 @@ gmp-native	PN	equal
 gmp-native	PV	equal	
 gmp-native	PR	equal	
 gmp-native	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
-gmp-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+gmp-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 gmp-native	SRC_URI	equal	
-gmp-native	DEPENDS	flagged	unevaluated_python
+gmp-native	DEPENDS	equal	
 gmp-native	RDEPENDS:gmp-native	unset	
 gmp-native	PACKAGECONFIG	equal	
-gmp-native	PACKAGES	flagged-literal-differs	unevaluated_python
-gmp-native	FILES:gmp-native	flagged	unevaluated_python
-gmp-native	OVERRIDES	flagged-literal-differs	unevaluated_python
+gmp-native	PACKAGES	equal	
+gmp-native	FILES:gmp-native	equal	
+gmp-native	OVERRIDES	gap:variant-layername	via ${FILE_LAYERNAME}: bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 gmp-native	MACHINEOVERRIDES	equal	
 gmp-native	DISTROOVERRIDES	equal	
-gmp-native	S	flagged	unevaluated_python
-gmp-native	B	flagged	unevaluated_python
-gmp-native	WORKDIR	flagged	unevaluated_python
+gmp-native	S	equal	
+gmp-native	B	equal	
+gmp-native	WORKDIR	equal	
 gmp-native	LICENSE	equal	
 gmp-native	INHERIT	equal	
 gmp-native	PROVIDES	equal	
-gmp-native	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+gmp-native	EXTRA_OECONF	equal	
 gmp-native	EXTRA_OECMAKE	unset	
-gmp-native	CFLAGS	flagged	unevaluated_python
-gmp-native	FILESPATH	flagged	unevaluated_python
+gmp-native	CFLAGS	equal	
+gmp-native	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 gmp-native	MACHINE	equal	
 gmp-native	DISTRO	equal	
 gmp-native	TMPDIR	equal	
@@ -708,39 +708,39 @@ nativesdk-zlib	PN	equal
 nativesdk-zlib	PV	equal	
 nativesdk-zlib	PR	equal	
 nativesdk-zlib	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
-nativesdk-zlib	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+nativesdk-zlib	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 nativesdk-zlib	SRC_URI	equal	
-nativesdk-zlib	DEPENDS	flagged-literal-differs	unevaluated_python
+nativesdk-zlib	DEPENDS	equal	
 nativesdk-zlib	RDEPENDS:nativesdk-zlib	unset	
 nativesdk-zlib	PACKAGECONFIG	unset	
-nativesdk-zlib	PACKAGES	flagged	unevaluated_python
-nativesdk-zlib	FILES:nativesdk-zlib	flagged	unevaluated_python
-nativesdk-zlib	OVERRIDES	flagged-literal-differs	unevaluated_python
+nativesdk-zlib	PACKAGES	equal-ws	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write PACKAGES
+nativesdk-zlib	FILES:nativesdk-zlib	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write FILES:nativesdk-zlib
+nativesdk-zlib	OVERRIDES	gap:variant-layername	via ${FILE_LAYERNAME}: bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 nativesdk-zlib	MACHINEOVERRIDES	equal	
 nativesdk-zlib	DISTROOVERRIDES	equal	
-nativesdk-zlib	S	flagged	unevaluated_python
-nativesdk-zlib	B	flagged	unevaluated_python
-nativesdk-zlib	WORKDIR	flagged	unevaluated_python
-nativesdk-zlib	LICENSE	equal	
+nativesdk-zlib	S	equal	
+nativesdk-zlib	B	equal	
+nativesdk-zlib	WORKDIR	equal	
+nativesdk-zlib	LICENSE	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write LICENSE
 nativesdk-zlib	INHERIT	equal	
 nativesdk-zlib	PROVIDES	equal	
 nativesdk-zlib	EXTRA_OECONF	equal	
 nativesdk-zlib	EXTRA_OECMAKE	unset	
-nativesdk-zlib	CFLAGS	flagged	unevaluated_python
-nativesdk-zlib	FILESPATH	flagged	unevaluated_python
+nativesdk-zlib	CFLAGS	equal	
+nativesdk-zlib	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 nativesdk-zlib	MACHINE	equal	
 nativesdk-zlib	DISTRO	equal	
 nativesdk-zlib	TMPDIR	equal	
 nativesdk-zlib	BBCLASSEXTEND	equal	
 nativesdk-zlib	CVE_PRODUCT	equal	
-nativesdk-zlib	DESCRIPTION	equal	
+nativesdk-zlib	DESCRIPTION	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write DESCRIPTION
 nativesdk-zlib	HOMEPAGE	equal	
 nativesdk-zlib	LDFLAGS	equal	
 nativesdk-zlib	LIC_FILES_CHKSUM	equal	
 nativesdk-zlib	PREMIRRORS	equal	
-nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	
-nativesdk-zlib	SECTION	equal	
-nativesdk-zlib	SUMMARY	equal	
+nativesdk-zlib	RDEPENDS:nativesdk-zlib-ptest	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write RDEPENDS:nativesdk-zlib-ptest
+nativesdk-zlib	SECTION	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write SECTION
+nativesdk-zlib	SUMMARY	equal	flagged: anonymous python at meta:classes-recipe/nativesdk.bbclass:86-105 may write SUMMARY
 nativesdk-zlib	UPSTREAM_CHECK_URI	equal	
 quilt-native	PN	equal	
 quilt-native	PV	equal	
@@ -748,24 +748,24 @@ quilt-native	PR	equal
 quilt-native	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 quilt-native	FILE_LAYERNAME	equal	
 quilt-native	SRC_URI	equal	
-quilt-native	DEPENDS	flagged	unevaluated_python
+quilt-native	DEPENDS	equal	
 quilt-native	RDEPENDS:quilt-native	equal	
 quilt-native	PACKAGECONFIG	unset	
-quilt-native	PACKAGES	flagged	unevaluated_python
-quilt-native	FILES:quilt-native	flagged	unevaluated_python
-quilt-native	OVERRIDES	flagged	unevaluated_python
+quilt-native	PACKAGES	equal	
+quilt-native	FILES:quilt-native	equal	
+quilt-native	OVERRIDES	equal	
 quilt-native	MACHINEOVERRIDES	equal	
 quilt-native	DISTROOVERRIDES	equal	
-quilt-native	S	flagged	unevaluated_python
-quilt-native	B	flagged	unevaluated_python
-quilt-native	WORKDIR	flagged	unevaluated_python
+quilt-native	S	equal	
+quilt-native	B	equal	
+quilt-native	WORKDIR	equal	
 quilt-native	LICENSE	equal	
 quilt-native	INHERIT	equal	
 quilt-native	PROVIDES	equal	
 quilt-native	EXTRA_OECONF	equal	
 quilt-native	EXTRA_OECMAKE	unset	
-quilt-native	CFLAGS	flagged	unevaluated_python
-quilt-native	FILESPATH	flagged	unevaluated_python
+quilt-native	CFLAGS	equal	
+quilt-native	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 quilt-native	MACHINE	equal	
 quilt-native	DISTRO	equal	
 quilt-native	TMPDIR	equal	
@@ -773,11 +773,11 @@ quilt-native	CACHED_CONFIGUREVARS	equal
 quilt-native	CLEANBROKEN	equal	
 quilt-native	DESCRIPTION	equal	
 quilt-native	FILES	equal	
-quilt-native	FILES:quilt-native-doc	flagged	unevaluated_python
+quilt-native	FILES:quilt-native-doc	equal	
 quilt-native	HOMEPAGE	equal	
 quilt-native	INHIBIT_AUTOTOOLS_DEPS	equal	
 quilt-native	LIC_FILES_CHKSUM	equal	
-quilt-native	PACKAGE_WRITE_DEPS	flagged	unevaluated_python
+quilt-native	PACKAGE_WRITE_DEPS	equal	
 quilt-native	PATCHTOOL	equal	
 quilt-native	RDEPENDS:quilt-native-ptest	equal	
 quilt-native	SECTION	equal	
@@ -788,7 +788,7 @@ expat	PR	equal
 expat	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 expat	FILE_LAYERNAME	equal	
 expat	SRC_URI	equal	
-expat	DEPENDS	flagged	unevaluated_python
+expat	DEPENDS	equal	
 expat	RDEPENDS:expat	unset	
 expat	PACKAGECONFIG	unset	
 expat	PACKAGES	equal	
@@ -805,7 +805,7 @@ expat	PROVIDES	equal
 expat	EXTRA_OECONF	equal	
 expat	EXTRA_OECMAKE	equal	
 expat	CFLAGS	equal	
-expat	FILESPATH	flagged	unevaluated_python
+expat	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 expat	MACHINE	equal	
 expat	DISTRO	equal	
 expat	TMPDIR	equal	
@@ -825,8 +825,8 @@ glib-2.0	PV	equal
 glib-2.0	PR	equal	
 glib-2.0	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 glib-2.0	FILE_LAYERNAME	equal	
-glib-2.0	SRC_URI	flagged	unevaluated_python
-glib-2.0	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:508 [appendVar]
+glib-2.0	SRC_URI	equal	
+glib-2.0	DEPENDS	equal	
 glib-2.0	RDEPENDS:glib-2.0	unset	
 glib-2.0	PACKAGECONFIG	equal	
 glib-2.0	PACKAGES	equal	
@@ -840,10 +840,10 @@ glib-2.0	WORKDIR	equal
 glib-2.0	LICENSE	equal	
 glib-2.0	INHERIT	equal	
 glib-2.0	PROVIDES	equal	
-glib-2.0	EXTRA_OECONF	flagged	unevaluated_python
+glib-2.0	EXTRA_OECONF	equal	
 glib-2.0	EXTRA_OECMAKE	unset	
 glib-2.0	CFLAGS	equal	
-glib-2.0	FILESPATH	flagged	unevaluated_python
+glib-2.0	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 glib-2.0	MACHINE	equal	
 glib-2.0	DISTRO	equal	
 glib-2.0	TMPDIR	equal	
@@ -881,7 +881,7 @@ base-files	PR	equal
 base-files	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 base-files	FILE_LAYERNAME	equal	
 base-files	SRC_URI	equal	
-base-files	DEPENDS	flagged	unevaluated_python
+base-files	DEPENDS	equal	
 base-files	RDEPENDS:base-files	unset	
 base-files	PACKAGECONFIG	unset	
 base-files	PACKAGES	equal	
@@ -898,7 +898,7 @@ base-files	PROVIDES	equal
 base-files	EXTRA_OECONF	equal	
 base-files	EXTRA_OECMAKE	unset	
 base-files	CFLAGS	equal	
-base-files	FILESPATH	flagged	unevaluated_python
+base-files	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 base-files	MACHINE	equal	
 base-files	DISTRO	equal	
 base-files	TMPDIR	equal	
@@ -930,10 +930,10 @@ python3	PR	equal
 python3	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 python3	FILE_LAYERNAME	equal	
 python3	SRC_URI	equal	
-python3	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:508 [appendVar]; append update-alternatives.bbclass:78 [ua_extend_depends]
+python3	DEPENDS	equal	
 python3	RDEPENDS:python3	unset	
 python3	PACKAGECONFIG	equal	
-python3	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: set python3_3.14.10.bb:429 [__anon_436]
+python3	PACKAGES	equal	
 python3	FILES:python3	equal	
 python3	OVERRIDES	equal	
 python3	MACHINEOVERRIDES	equal	
@@ -944,10 +944,10 @@ python3	WORKDIR	equal
 python3	LICENSE	equal	
 python3	INHERIT	equal	
 python3	PROVIDES	equal	
-python3	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+python3	EXTRA_OECONF	equal	
 python3	EXTRA_OECMAKE	unset	
 python3	CFLAGS	equal	
-python3	FILESPATH	flagged	unevaluated_python
+python3	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 python3	MACHINE	equal	
 python3	DISTRO	equal	
 python3	TMPDIR	equal	
@@ -961,9 +961,9 @@ python3	DESCRIPTION	equal
 python3	DEV_PKG_DEPENDENCY	equal	
 python3	EXTRANATIVEPATH	equal	
 python3	EXTRA_OEMAKE	equal	
-python3	FILES:python3-pydoc	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:412 [__anon_436]
-python3	FILES:python3-idle	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]; append python3_3.14.10.bb:407 [__anon_436]
-python3	FILES:python3-tkinter	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:407 [__anon_436]
+python3	FILES:python3-pydoc	equal	
+python3	FILES:python3-idle	equal	
+python3	FILES:python3-tkinter	equal	
 python3	FILES	equal	
 python3	FILES:python3-misc	equal	
 python3	FILES:python3-man	equal	
@@ -977,13 +977,14 @@ python3	MULTILIB_SUFFIX	equal
 python3	PACKAGE_PREPROCESS_FUNCS	equal	
 python3	PYTHON_MAJMIN	equal	
 python3	RDEPENDS	unset	
-python3	RDEPENDS:python3-idle	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:418 [__anon_436]
+python3	RDEPENDS:python3-idle	equal	
 python3	RDEPENDS:python3-misc	equal	
-python3	RDEPENDS:python3-modules	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:418 [__anon_436]; append python3_3.14.10.bb:418 [__anon_436]; append python3_3.14.10.bb:418 [__anon_436]; append python3_3.14.10.bb:418 [__anon_436]; append python3_3.14.10.b...
+python3	RDEPENDS:python3-modules	equal	
 python3	RDEPENDS:python3-ptest	equal	
-python3	RDEPENDS:python3-pydoc	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:418 [__anon_436]
-python3	RDEPENDS:python3-tests	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:418 [__anon_436]; append python3_3.14.10.bb:418 [__anon_436]
-python3	RDEPENDS:python3-tkinter	flagged-literal-differs	unevaluated_python; bitbake python ops: append python3_3.14.10.bb:418 [__anon_436]
+python3	RDEPENDS:python3-pydoc	equal	
+python3	RDEPENDS:python3-tests	equal	
+python3	RDEPENDS:python3-tkinter	equal	
+python3	RPROVIDES	unset	
 python3	RPROVIDES:python3-modules	equal	
 python3	RPROVIDES:python3-venv	equal	
 python3	RRECOMMENDS:python3-core	unset	
@@ -1003,7 +1004,7 @@ bash	PR	equal
 bash	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 bash	FILE_LAYERNAME	equal	
 bash	SRC_URI	equal	
-bash	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append update-alternatives.bbclass:78 [ua_extend_depends]
+bash	DEPENDS	equal	
 bash	RDEPENDS:bash	equal	
 bash	PACKAGECONFIG	unset	
 bash	PACKAGES	equal	
@@ -1017,10 +1018,10 @@ bash	WORKDIR	equal
 bash	LICENSE	equal	
 bash	INHERIT	equal	
 bash	PROVIDES	equal	
-bash	EXTRA_OECONF	flagged	unevaluated_python
+bash	EXTRA_OECONF	equal	
 bash	EXTRA_OECMAKE	unset	
 bash	CFLAGS	equal	
-bash	FILESPATH	flagged	unevaluated_python
+bash	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 bash	MACHINE	equal	
 bash	DISTRO	equal	
 bash	TMPDIR	equal	
@@ -1047,7 +1048,7 @@ opencsd	PR	equal
 opencsd	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 opencsd	FILE_LAYERNAME	equal	
 opencsd	SRC_URI	equal	
-opencsd	DEPENDS	flagged	unevaluated_python
+opencsd	DEPENDS	equal	
 opencsd	RDEPENDS:opencsd	unset	
 opencsd	PACKAGECONFIG	unset	
 opencsd	PACKAGES	equal	
@@ -1064,7 +1065,7 @@ opencsd	PROVIDES	equal
 opencsd	EXTRA_OECONF	equal	
 opencsd	EXTRA_OECMAKE	unset	
 opencsd	CFLAGS	equal	
-opencsd	FILESPATH	flagged	unevaluated_python
+opencsd	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 opencsd	MACHINE	equal	
 opencsd	DISTRO	equal	
 opencsd	TMPDIR	equal	
@@ -1081,11 +1082,11 @@ virtual/kernel	PR	equal
 virtual/kernel	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 virtual/kernel	FILE_LAYERNAME	equal	
 virtual/kernel	SRC_URI	equal	
-virtual/kernel	DEPENDS	flagged	unevaluated_python
+virtual/kernel	DEPENDS	equal	flagged: anonymous python at meta:classes-recipe/kernel-uimage.bbclass:9-27 may write DEPENDS
 virtual/kernel	RDEPENDS:linux-kiss	unset	
 virtual/kernel	PACKAGECONFIG	unset	
-virtual/kernel	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:118 [__anon_168]; append kernel-devicetree.bbclass:10 [__anon_13]
-virtual/kernel	FILES:linux-kiss	equal	
+virtual/kernel	PACKAGES	equal	
+virtual/kernel	FILES:linux-kiss	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:60-168 may write FILES:linux-kiss
 virtual/kernel	OVERRIDES	equal	
 virtual/kernel	MACHINEOVERRIDES	equal	
 virtual/kernel	DISTROOVERRIDES	equal	
@@ -1098,7 +1099,7 @@ virtual/kernel	PROVIDES	equal
 virtual/kernel	EXTRA_OECONF	equal	
 virtual/kernel	EXTRA_OECMAKE	unset	
 virtual/kernel	CFLAGS	equal	
-virtual/kernel	FILESPATH	flagged	unevaluated_python
+virtual/kernel	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 virtual/kernel	MACHINE	equal	
 virtual/kernel	DISTRO	equal	
 virtual/kernel	TMPDIR	equal	
@@ -1111,7 +1112,7 @@ virtual/bootloader	PR	equal
 virtual/bootloader	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 virtual/bootloader	FILE_LAYERNAME	equal	
 virtual/bootloader	SRC_URI	equal	
-virtual/bootloader	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:508 [appendVar]
+virtual/bootloader	DEPENDS	equal	flagged: anonymous python at meta:classes-recipe/uboot-sign.bbclass:120-125 may write DEPENDS
 virtual/bootloader	RDEPENDS:u-boot-kiss	equal	
 virtual/bootloader	PACKAGECONFIG	equal	
 virtual/bootloader	PACKAGES	equal	
@@ -1128,7 +1129,7 @@ virtual/bootloader	PROVIDES	equal
 virtual/bootloader	EXTRA_OECONF	equal	
 virtual/bootloader	EXTRA_OECMAKE	unset	
 virtual/bootloader	CFLAGS	equal	
-virtual/bootloader	FILESPATH	flagged	unevaluated_python
+virtual/bootloader	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 virtual/bootloader	MACHINE	equal	
 virtual/bootloader	DISTRO	equal	
 virtual/bootloader	TMPDIR	equal	
@@ -1149,7 +1150,7 @@ virtual/bootloader	SECTION	equal
 virtual/bootloader	SRCREV	equal	
 virtual/bootloader	SUMMARY	equal	
 virtual/bootloader	SYSROOT_DIRS	equal	
-virtual/bootloader	UBOOT_ARCH_DIR	flagged	unevaluated_python
+virtual/bootloader	UBOOT_ARCH_DIR	equal	
 virtual/bootloader	UBOOT_INITIAL_ENV	equal	
 virtual/bootloader	UBOOT_LOCALVERSION	equal	
 curl@default	PN	equal	
@@ -1158,7 +1159,7 @@ curl@default	PR	equal
 curl@default	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 curl@default	FILE_LAYERNAME	equal	
 curl@default	SRC_URI	equal	
-curl@default	DEPENDS	flagged	unevaluated_python
+curl@default	DEPENDS	equal	
 curl@default	RDEPENDS:curl	unset	
 curl@default	PACKAGECONFIG	equal	
 curl@default	PACKAGES	equal	
@@ -1172,10 +1173,10 @@ curl@default	WORKDIR	equal
 curl@default	LICENSE	equal	
 curl@default	INHERIT	equal	
 curl@default	PROVIDES	equal	
-curl@default	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+curl@default	EXTRA_OECONF	equal	
 curl@default	EXTRA_OECMAKE	unset	
 curl@default	CFLAGS	equal	
-curl@default	FILESPATH	flagged	unevaluated_python
+curl@default	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 curl@default	MACHINE	equal	
 curl@default	DISTRO	equal	
 curl@default	TMPDIR	equal	
@@ -1199,7 +1200,7 @@ sl@default	PR	equal
 sl@default	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 sl@default	FILE_LAYERNAME	equal	
 sl@default	SRC_URI	equal	
-sl@default	DEPENDS	flagged	unevaluated_python
+sl@default	DEPENDS	equal	
 sl@default	RDEPENDS:sl	unset	
 sl@default	PACKAGECONFIG	unset	
 sl@default	PACKAGES	equal	
@@ -1216,7 +1217,7 @@ sl@default	PROVIDES	equal
 sl@default	EXTRA_OECONF	equal	
 sl@default	EXTRA_OECMAKE	unset	
 sl@default	CFLAGS	equal	
-sl@default	FILESPATH	flagged	unevaluated_python
+sl@default	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 sl@default	MACHINE	equal	
 sl@default	DISTRO	equal	
 sl@default	TMPDIR	equal	
@@ -1232,11 +1233,11 @@ virtual/kernel@default	PR	equal
 virtual/kernel@default	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 virtual/kernel@default	FILE_LAYERNAME	equal	
 virtual/kernel@default	SRC_URI	equal	
-virtual/kernel@default	DEPENDS	flagged	unevaluated_python
+virtual/kernel@default	DEPENDS	equal	flagged: anonymous python at meta:classes-recipe/kernel-uimage.bbclass:9-27 may write DEPENDS
 virtual/kernel@default	RDEPENDS:linux-kiss	unset	
 virtual/kernel@default	PACKAGECONFIG	unset	
-virtual/kernel@default	PACKAGES	flagged-literal-differs	unevaluated_python; bitbake python ops: append kernel.bbclass:118 [__anon_168]; append kernel-devicetree.bbclass:10 [__anon_13]
-virtual/kernel@default	FILES:linux-kiss	equal	
+virtual/kernel@default	PACKAGES	equal	
+virtual/kernel@default	FILES:linux-kiss	equal	flagged: anonymous python at meta:classes-recipe/kernel.bbclass:60-168 may write FILES:linux-kiss
 virtual/kernel@default	OVERRIDES	equal	
 virtual/kernel@default	MACHINEOVERRIDES	equal	
 virtual/kernel@default	DISTROOVERRIDES	equal	
@@ -1249,7 +1250,7 @@ virtual/kernel@default	PROVIDES	equal
 virtual/kernel@default	EXTRA_OECONF	equal	
 virtual/kernel@default	EXTRA_OECMAKE	unset	
 virtual/kernel@default	CFLAGS	equal	
-virtual/kernel@default	FILESPATH	flagged	unevaluated_python
+virtual/kernel@default	FILESPATH	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
 virtual/kernel@default	MACHINE	equal	
 virtual/kernel@default	DISTRO	equal	
 virtual/kernel@default	TMPDIR	equal	

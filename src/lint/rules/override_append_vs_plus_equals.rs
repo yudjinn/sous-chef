@@ -5,8 +5,9 @@
 //! right: it survives a later `=`). Reported: an unconditional `VAR:append` (no override
 //! before or after the keyword, no flag) after a plain `VAR = ` / `VAR := ` in the same
 //! file, when no later statement of the file assigns `VAR` again or is an `inherit` /
-//! `require` / `include` (which may assign it; then `:append` is what keeps the text) and no
-//! `unset VAR` comes in between. A bbappend that sets `VAR =` later would also drop a `+=`;
+//! `require` / `include` (which may assign it; then `:append` is what keeps the text), no
+//! statement of the file assigns an override variant `VAR:<o>` (which replaces `VAR` and
+//! its `+=` text but still gets the `:append`), and no `unset VAR` comes in between. A bbappend that sets `VAR =` later would also drop a `+=`;
 //! that is why this is only info. The suggestion is `+=` when the
 //! appended text starts with a space (it adds one) and `.=` otherwise.
 
@@ -112,6 +113,12 @@ impl Rule for OverrideAppendVsPlusEquals {
             }) {
                 continue;
             }
+            // An override variant of VAR anywhere in the file (`SRC_URI:class-devupstream =`
+            // with `BBCLASSEXTEND = "devupstream:target"`): it replaces VAR, `+=` text with
+            // it, while `:append` still applies there (OE-core lttng-modules: lint-precision).
+            if stmts.iter().any(|t| sets_variant(t, base)) {
+                continue;
+            }
             let (op, text) = if value.starts_with(char::is_whitespace) {
                 ("+=", value.trim_start())
             } else {
@@ -151,6 +158,14 @@ fn last_plain_set_before(stmts: &[Statement], base: &str) -> Option<u32> {
         }
     }
     None
+}
+
+/// Whether `s` assigns a conditional variant `VAR:<override>` (no flag): the first
+/// override is no `append` / `prepend` / `remove`.
+fn sets_variant(s: &Statement, base: &str) -> bool {
+    matches!(&s.kind, StatementKind::Assign { var, .. }
+        if !var.legacy_syntax && var.base == base && var.flag.is_none()
+            && var.overrides.first().is_some_and(|o| !matches!(o.as_str(), "append" | "prepend" | "remove")))
 }
 
 /// Whether `s` gives `VAR` (no override, no flag) a value with a parse-time operator.

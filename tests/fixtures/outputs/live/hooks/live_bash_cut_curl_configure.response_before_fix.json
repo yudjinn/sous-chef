@@ -1,0 +1,14 @@
+{
+ "hookSpecificOutput": {
+  "hookEventName": "PostToolUse",
+  "updatedToolOutput": {
+   "interrupted": false,
+   "isImage": false,
+   "noOutputExpected": false,
+   "persistedOutputPath": "{{HOME}}/.claude/projects/-home-{{USER}}-Development-sous-chef-live-runs-real-checks-hooks-ws/81e9de00-fc15-4674-8abf-22b99788a0de/tool-results/b6mb7zedj.txt",
+   "persistedOutputSize": 33946,
+   "stderr": "",
+   "stdout": "sous-chef: bitbake output (345 lines, 29999 bytes) stored as h:b16e05df55; the full text is there, read it with the slice tool.\nfield\tvalue\nrecipe\tcurl-8.19.0-r0\ntask\tdo_configure\nexit\t1\nerror (error, line 32)\tconfigure failed\ncontext\tERROR: Execution of '{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_conf...\ncontext\tERROR: Logfile of failure stored in: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/...\nhandle\th:b16e05df55\nslice handle=h:b16e05df55 failures=true | grep=RE | lines=32-34\n"
+  }
+ }
+}

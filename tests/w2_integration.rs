@@ -1,6 +1,8 @@
 //! Wave 2 integration: the pieces that streams wrote against each other's stubs, checked
 //! once they were connected.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 mod common;
 
 use common::{fixture_path, fixture_ws};

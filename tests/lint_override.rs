@@ -368,11 +368,13 @@ fn plus_equals_with_override_ignores_the_fixture_workspace_idiom() {
 fn remove_in_recipe() {
     let env = Env::new();
     let r = &OverrideRemoveInRecipe;
-    assert_eq!(lines(&env, r, "bad.bb"), [(3, W), (4, W)]);
+    // Info everywhere since 2026-11-20 (user decision; warning in recipes, includes and
+    // classes before): docs/lint-rules.md, "Measured precision".
+    assert_eq!(lines(&env, r, "bad.bb"), [(3, I), (4, I)]);
     assert_eq!(lines(&env, r, "bad.bbappend"), [(2, I)]);
     assert_eq!(lines(&env, r, "good.bb"), []);
     // A class is like a recipe; configuration (a .conf, or an .inc under conf/) is like a
-    // bbappend.
+    // bbappend (the message says so).
     let text = fixture("remove-in-recipe", "bad.bb");
     let sev = |path: &str| -> Vec<Severity> {
         check_at(&env, r, &text, path)
@@ -380,10 +382,110 @@ fn remove_in_recipe() {
             .map(|f| f.severity)
             .collect()
     };
-    assert_eq!(sev("classes-recipe/x.bbclass"), [W, W]);
-    assert_eq!(sev("recipes-x/x/x.inc"), [W, W]);
-    assert_eq!(sev("conf/machine/include/x.inc"), [I, I]);
-    assert_eq!(sev("conf/distro/x.conf"), [I, I]);
+    let msg = |path: &str| -> Vec<String> {
+        check_at(&env, r, &text, path)
+            .into_iter()
+            .map(|f| f.message)
+            .collect()
+    };
+    for path in ["classes-recipe/x.bbclass", "recipes-x/x/x.inc"] {
+        assert_eq!(sev(path), [I, I], "{path}");
+        assert!(
+            msg(path).iter().all(|m| m.contains("cannot be undone")),
+            "{path}"
+        );
+    }
+    for path in ["conf/machine/include/x.inc", "conf/distro/x.conf"] {
+        assert_eq!(sev(path), [I, I], "{path}");
+        assert!(
+            msg(path).iter().all(|m| m.contains("acceptable here")),
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn remove_in_recipe_advice_depends_on_where_the_value_is_set() {
+    // lint-precision true-but-unhelpful findings (tests/fixtures/lint-precision/labels.tsv):
+    // "leave the item out of the value" is impossible for CFLAGS, which configuration sets.
+    let env = Env::new();
+    let r = &OverrideRemoveInRecipe;
+    assert_eq!(lines(&env, r, "precision.bb"), [(4, I), (7, I)]);
+    let m = messages(&env, r, "precision.bb");
+    assert!(
+        m[0].ends_with(
+            "CFLAGS is not set in this file, so if a bbappend may need the item back, remove \
+             it through a variable the bbappend can change (`CFLAGS:remove = \"${MY_REMOVALS}\"`)"
+        ),
+        "{}",
+        m[0]
+    );
+    assert!(
+        m[1].contains("leave the item out of the value instead"),
+        "{}",
+        m[1]
+    );
+}
+
+#[test]
+fn remove_in_recipe_is_info_and_lint_severity_in_sous_chef_toml_raises_it() {
+    // Lowered to info on 2026-11-20 (user decision); a project that wants the old warning
+    // writes `[lint.severity]` in sous-chef.toml, which then applies to every finding of
+    // the rule, bbappends included.
+    let (_tmp, root) = temp_ws();
+    let bad = fixture("remove-in-recipe", "bad.bb");
+    let dir = root.join("meta-mine/recipes-app/rm");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("rm_1.0.bb"), &bad).unwrap();
+    fs::write(
+        dir.join("rm_%.bbappend"),
+        fixture("remove-in-recipe", "bad.bbappend"),
+    )
+    .unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let run = |fail_on: &str| -> (Option<i32>, Vec<String>) {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sous-chef"))
+            .args(["lint", "meta-mine", "--rule", "override/remove-in-recipe"])
+            .args(["--fail-on", fail_on])
+            .current_dir(&root)
+            .env("XDG_CACHE_HOME", cache.path())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        let rows = stdout
+            .lines()
+            .filter(|l| l.contains("\toverride/remove-in-recipe\t"))
+            .map(|l| l.split('\t').take(3).collect::<Vec<_>>().join(" "))
+            .collect();
+        (out.status.code(), rows)
+    };
+    let (code, rows) = run("warning");
+    assert_eq!(code, Some(0), "{rows:?}");
+    assert_eq!(
+        rows,
+        [
+            "info override/remove-in-recipe meta-mine:recipes-app/rm/rm_%.bbappend:2",
+            "info override/remove-in-recipe meta-mine:recipes-app/rm/rm_1.0.bb:3",
+            "info override/remove-in-recipe meta-mine:recipes-app/rm/rm_1.0.bb:4",
+        ]
+    );
+    let toml = root.join("sous-chef.toml");
+    let text = fs::read_to_string(&toml).unwrap();
+    fs::write(
+        &toml,
+        format!("{text}\n[lint.severity]\n\"override/remove-in-recipe\" = \"warning\"\n"),
+    )
+    .unwrap();
+    let (code, rows) = run("warning");
+    assert_eq!(code, Some(1), "{rows:?}");
+    assert_eq!(
+        rows,
+        [
+            "warning override/remove-in-recipe meta-mine:recipes-app/rm/rm_%.bbappend:2",
+            "warning override/remove-in-recipe meta-mine:recipes-app/rm/rm_1.0.bb:3",
+            "warning override/remove-in-recipe meta-mine:recipes-app/rm/rm_1.0.bb:4",
+        ]
+    );
 }
 
 #[test]
@@ -510,7 +612,7 @@ fn missing_package_is_not_reported_for_recipes_without_packages() {
     let env = no_packages_env(false);
     let got = missing_package_in_images(&env);
     assert!(!got.iter().any(|g| g.starts_with("good-")), "{got:?}");
-    assert!(got.contains(&"shared.inc:2".to_string()), "{got:?}");
+    assert!(got.iter().any(|i| i == "shared.inc:2"), "{got:?}");
 }
 
 #[test]
@@ -523,6 +625,16 @@ fn append_vs_plus_equals() {
     assert!(m[1].ends_with("write `EXTRA_OEMAKE .= \"B\"`"), "{}", m[1]);
     assert_eq!(lines(&env, r, "good.bb"), []);
     assert_eq!(lines(&env, r, "good.bbappend"), []);
+}
+
+#[test]
+fn append_vs_plus_equals_keeps_append_when_a_variant_replaces_the_variable() {
+    // lint-precision false positive (tests/fixtures/lint-precision/labels.tsv): lttng-modules
+    // keeps `SRC_URI:append` for its devupstream variant; DEPENDS beside it still fires.
+    let env = Env::new();
+    let r = &OverrideAppendVsPlusEquals;
+    assert_eq!(lines(&env, r, "precision-devupstream.bb"), [(16, I)]);
+    assert_eq!(lines(&env, r, "bad.bb"), [(3, I), (5, I)]);
 }
 
 #[test]
@@ -560,6 +672,25 @@ fn plus_equals_on_default() {
         ),
         []
     );
+}
+
+#[test]
+fn plus_equals_on_default_an_empty_default_is_not_lost() {
+    // lint-precision false positives (tests/fixtures/lint-precision/labels.tsv): every
+    // finding of the rule on the three live workspaces was a `?= ""` default.
+    let env = Env::with(&[(
+        "meta-core/classes-recipe/kernelish.bbclass",
+        "KERNEL_EXTRA_ARGS ?= \"\"\nKERNEL_OTHER_ARGS ?= \"-j1\"\n".to_string(),
+    )]);
+    let r = &OverridePlusEqualsOnDefault;
+    assert_eq!(
+        lines(&env, r, "precision-empty-default.conf"),
+        [(9, W), (11, W)]
+    );
+    let m = messages(&env, r, "precision-empty-default.conf");
+    assert!(m[1].contains("kernelish.bbclass:2"), "{}", m[1]);
+    // The true positives of the rule's own fixture still fire.
+    assert_eq!(lines(&env, r, "bad.conf"), [(2, W), (3, W), (5, W)]);
 }
 
 #[test]
@@ -759,6 +890,29 @@ fn dead_on_the_real_datastore() {
         rows(&recipe_findings(&env, "deadgood", &OverrideDead)),
         [] as [&str; 0]
     );
+}
+
+#[test]
+fn dead_names_a_misspelt_operation() {
+    // lint-precision true positive (tests/fixtures/lint-precision/labels.tsv): `aapend` is
+    // `append` misspelt; the message says so instead of "fix the name or remove the line".
+    let env = recipe_env("dead", "precision", "deadtypo");
+    let got = recipe_findings(&env, "deadtypo", &OverrideDead);
+    assert_eq!(
+        rows(&got),
+        [
+            "warning meta-mine:recipes-app/deadtypo/deadtypo_1.0.bb:4",
+            "warning meta-mine:recipes-app/deadtypo/deadtypo_1.0.bb:7",
+        ]
+    );
+    assert!(
+        got[0].message.contains("looks like a misspelt `:append`")
+            && got[0].message.ends_with("write `:append`"),
+        "{}",
+        got[0].message
+    );
+    assert!(got[1].message.contains("(`boardx`?)"), "{}", got[1].message);
+    assert!(got.iter().all(|f| !f.message.contains("  ")), "{:#?}", got);
 }
 
 #[test]

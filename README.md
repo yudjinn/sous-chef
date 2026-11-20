@@ -92,42 +92,63 @@ estimated at 4 bytes each.
   values, logs, diffs and reports go under a handle read with `slice`.
 - These are per-question measurements.
 
-**Whole tasks.** A pilot ran 14 read-only questions about the same workspace as real Claude
-Code sessions (Claude Code 2.1.327, Haiku 5.5, one session per task and condition), with
-and without the plugin ([docs/benchmark.md](docs/benchmark.md)). Without sous-chef the
-sessions used 1.28 times the tokens (1,919,410 against 1,505,217), 199 against 128 turns,
-and scored 0.60 against 0.83 on the reference facts. Per task the ratio ranged from 0.23 to
-2.52: sous-chef used fewer tokens on 8 tasks and more on 6, among them a simple search
-(4.3 times more). The plugin added 9,356 tokens to every session's context in the pilot
-(its sessions loaded every tool definition upfront). Since then the `tools/list` payload
-was cut from 31.5 KB to 14.1 KB and the six core tools are marked for upfront loading under
-Claude Code's tool search (docs/mcp-tools.md, "Context cost"); re-measured the same way
-("Say ok.", Claude Code 2.1.327, Haiku 5.5, one session per condition), the plugin now adds
-3,694 tokens with tool search on, Claude Code's default (six tools upfront, ten deferred),
-and 5,693 with it off as in the pilot (docs/benchmark.md, "Plugin overhead after the
-definition cuts"). One run per cell
-is a pilot: single tasks moved by up to a factor of 2.3 between two runs. Part of the score
-gap comes from the workspace itself: its `.gitignore` lists the upstream layers, and Claude
-Code's Grep and Glob honour it, so three baseline sessions did not find OE-core at all.
+**Whole tasks.** 14 read-only questions about the same workspace were run as real Claude
+Code sessions with and without the plugin ([docs/benchmark.md](docs/benchmark.md), "Rerun
+on Sonnet 5.5 with the current code": Claude Code 2.1.328, Sonnet 5.5, tool search on in
+both conditions, two sessions per task and condition, the same files searchable in both).
+Without sous-chef the sessions used 1.26 times the tokens (1,070,746 against 852,518 per
+run of the 14 tasks; 1.19 and 1.32 in the two runs), 141 against 89 turns, 404 s against
+236 s and $1.00 against $0.71 reported, and scored 0.85 against 0.90 on the reference
+facts; 8 of 28 baseline answers and 2 of 28 sous-chef answers made a wrong claim. Per task
+the ratio ranged from 0.55 to 2.18: sous-chef used fewer tokens on 11 tasks and more on 3,
+and six tasks changed sides between the two runs. The plugin adds 3,694 tokens to every
+session's context with tool search on, Claude Code's default (six tools upfront, ten
+deferred), and 5,693 with it off (docs/benchmark.md, "Plugin overhead after the definition
+cuts"). The earlier pilot (Haiku 5.5, one run per cell, tool search off, the workspace's
+`.gitignore` hiding OE-core from the baseline's Grep) measured 1.28 times the tokens and
+scores of 0.60 against 0.83.
 
 ### Accuracy
 
-Static answers were compared with `bitbake -e` on the same workspace (yocto-kiss, Wrynose,
-MACHINE `dogbonedark`, DISTRO `kiss`; 23 recipes and two `BBCLASSEXTEND` variants;
-[docs/differential.md](docs/differential.md); re-measured for x7-cleanup on the same dumps):
+Static answers were compared with `bitbake -e` on the same workspace: on Wrynose, yocto-kiss
+(MACHINE `dogbonedark`, DISTRO `kiss`; 23 recipes and two `BBCLASSEXTEND` variants), and on
+Scarthgap and Kirkstone, OE-core, meta-yocto and meta-oe (MACHINE `qemux86-64`, DISTRO
+`poky`; 28 targets each, 5 of them from meta-oe), plus a second configuration (`musl`
+multiconfig) on Scarthgap ([docs/differential.md](docs/differential.md)). The first three
+rows were measured with `[build_host]` set to the build host's `x86_64` / `linux`; the
+multiconfig row without it:
 
-| Values compared | Equal to BitBake | Differ, and flagged | Documented gap | Differ without a flag |
-|---|---|---|---|---|
-| 1090 | 950 (87%) | 109 | 31 | 0 |
+| Release | Values compared | Equal to BitBake | Differ, and flagged | Documented gap | Differ without a flag |
+|---|---|---|---|---|---|
+| Wrynose (6.0) | 1090 | 1023 (94%) | 9 | 58 | 0 |
+| Scarthgap (5.0) | 1186 | 1159 (98%) | 22 | 5 | 0 |
+| Kirkstone (4.0) | 1145 | 1097 (96%) | 47 | 1 | 0 |
+| Scarthgap, `mc:musl` and default | 659 | 600 (91%) | 46 | 13 | 0 |
 
-(Before x1 evaluated the allowlisted python helpers: 702 equal, 357 flagged.)
+"Differ without a flag" is the number that matters: a value sous-chef gives as certain has
+never been wrong in these comparisons. A flagged value says why (`note: uncertain: ...`:
+the python it did not run, the reference it could not follow, the anonymous function that
+may write it); for those, `var` with `authoritative: true` asks BitBake. Native and
+nativesdk variants become exact when `[build_host]` is set in `sous-chef.toml`: their
+`OVERRIDES` hold values BitBake takes from the build host (`os.uname()`), and without the
+setting the flagged values were 30, 37 and 64 (Wrynose, Scarthgap, Kirkstone) instead of 7,
+17 and 42, with no value certain and wrong either way. The Wrynose gaps are paths BitBake spells through
+bitbake-setup's symlinked `layers/` directory and sous-chef through the symlink's target
+(the same files), and `FILE_LAYERNAME`, which `bitbake -e` of a variant or of
+`mc:<name>:<recipe>` shows as unset although a build sets it. Each release was measured with
+one machine and one distro; functions and variable flags were not compared.
 
-A flagged value carries `depends on python, not evaluated` or names an unresolved
-reference; for those, `var` with `authoritative: true` asks BitBake. The 31 gaps are 29
-paths that BitBake spells through bitbake-setup's symlinked `layers/` directory and
-sous-chef through the symlink's target (the same files), and 2 `FILE_LAYERNAME` values of a
-variant, which `bitbake -e <variant>` shows differently from a build. The measurement covers one
-machine, one distro and one release; functions and variable flags were not compared.
+(History: the first measurement, before python helpers were evaluated, had 702 of 1090
+equal on Wrynose; the first Scarthgap and Kirkstone runs found 2 and 31 values that differed
+without a flag, all fixed.)
+
+Lint was measured too: a stratified random sample of 150 findings from `lint --all` over the
+three releases, each checked against the BitBake and OE-core source. 15 were false
+positives; 13 are fixed, so 99% of the sampled findings that remain are correct, and a test
+re-checks the labelled sample ([docs/lint-rules.md](docs/lint-rules.md), "Measured
+precision"). Many correct findings on upstream layers are still noise for those layers
+(OE-core does some things on purpose that a product layer should not), which is why
+upstream layers are only linted with `--all`.
 
 ### Speed
 
@@ -155,29 +176,70 @@ network connection itself (a BitBake build it starts may fetch, as any build doe
 
 ### Install
 
-**The binary.** Needs a recent stable Rust toolchain (the crate uses edition 2024). SQLite
-is bundled.
+Two parts: the `sous-chef` binary, and (for Claude Code) the plugin that runs it. The plugin
+does not contain or download the binary; it runs `sous-chef` by name, so install the binary
+first, into a directory on the `PATH` Claude Code is started with. Use the same version for
+both. Releases and their notes: [GitHub releases](https://github.com/yudjinn/sous-chef/releases)
+and [CHANGELOG.md](CHANGELOG.md).
+
+**The binary, from a release.** Each release has a tarball per target,
+`sous-chef-<tag>-<target>.tar.gz` (the binary, `LICENSE` and `README.md`), for
+`x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` (glibc 2.35 or newer) and
+`x86_64-apple-darwin` and `aarch64-apple-darwin`, and a `SHA256SUMS` file:
 
 ```sh
-cargo install --path .        # installs sous-chef into ~/.cargo/bin
+tag=v0.1.0 target=x86_64-unknown-linux-gnu    # or aarch64-unknown-linux-gnu, aarch64-apple-darwin, x86_64-apple-darwin
+base=https://github.com/yudjinn/sous-chef/releases/download/$tag
+curl -fLO "$base/sous-chef-$tag-$target.tar.gz" -fLO "$base/SHA256SUMS"
+sha256sum --ignore-missing -c SHA256SUMS         # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
+tar -xzf "sous-chef-$tag-$target.tar.gz"
+mkdir -p ~/.local/bin && install "sous-chef-$tag-$target/sous-chef" ~/.local/bin/
+sous-chef --version                              # sous-chef 0.1.0
+```
+
+The macOS binaries are not signed or notarized. A tarball fetched with `curl` carries no
+quarantine attribute, so the binary runs; one downloaded with a browser may be stopped by
+Gatekeeper, and `xattr -d com.apple.quarantine ~/.local/bin/sous-chef` clears it.
+
+**The binary, from source.** Needs Rust 1.89 or newer (edition 2024; the repository pins
+the toolchain it is tested with in `rust-toolchain.toml`) and a C compiler (SQLite is
+bundled and compiled in). `cargo install` puts it in `~/.cargo/bin`:
+
+```sh
+# A release, pinned to the commit its tag points at; the full hash:
+#   git ls-remote https://github.com/yudjinn/sous-chef 'refs/tags/v0.1.0^{}'
+cargo install --locked --git https://github.com/yudjinn/sous-chef --rev <full commit hash> sous-chef
+cargo install --path .        # from a clone
 sous-chef --version
 ```
 
-The plugin and the MCP configurations below run `sous-chef` by name, so `~/.cargo/bin`
-(or wherever the binary is) must be on the `PATH` Claude Code sees.
+The plugin and the MCP configurations below run `sous-chef` by name, so `~/.local/bin`,
+`~/.cargo/bin` (or wherever the binary is) must be on the `PATH` Claude Code sees. A
+binary elsewhere: put a symlink to it in a directory on `PATH`.
 
 **The Claude Code plugin.** [`plugin/`](plugin/) bundles the MCP server, the hooks and a
-skill for working on layers. It is also a one-plugin marketplace, so it installs from a
-clone:
+skill for working on layers. The repository is a plugin marketplace
+([`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json)) named `sous-chef`
+with this one plugin. Add it pinned to the release whose binary you installed, then install
+the plugin:
 
 ```sh
-claude plugin marketplace add ./plugin
+claude plugin marketplace add yudjinn/sous-chef#v0.1.0
 claude plugin install sous-chef@sous-chef
 ```
 
-(Inside a session: `/plugin marketplace add ./plugin`, then `/plugin install
-sous-chef@sous-chef`.) The plugin is read in place from `plugin/`, so a `git pull` updates
-it. To try it for one session without installing: `claude --plugin-dir ./plugin`.
+(Inside a session: `/plugin marketplace add yudjinn/sous-chef#v0.1.0`, then `/plugin
+install sous-chef@sous-chef`, then `/reload-plugins`.) `claude plugin list` shows
+`sous-chef@sous-chef` with version 0.1.0. To move to a later release, install its binary,
+then `claude plugin marketplace remove sous-chef` and add the marketplace again with the
+new tag (removing the marketplace uninstalls the plugin; install it again). Without `#tag`
+the marketplace follows the repository's default branch, which may need a newer binary than
+the one released.
+
+From a clone, register the clone itself; it is read in place, so a `git pull` updates the
+plugin: `claude plugin marketplace add ./` (in the repository root), then `claude plugin
+install sous-chef@sous-chef`. To try the plugin for one session without installing:
+`claude --plugin-dir ./plugin`.
 
 Start Claude Code in the project directory (the one with `sous-chef.toml`, or the build
 directory's parent): the plugin starts the server there (`$CLAUDE_PROJECT_DIR`). `/mcp`
@@ -454,6 +516,10 @@ init_script = "poky/oe-init-build-env"  # sourced before any bitbake command; de
 release = "scarthgap"                 # default: detected from the core layer
 kas = ["kas/base.yml", "kas/board.yml"]  # a kas project's files, in kas's order; default: detected
 
+[build_host]                          # the machine that runs BitBake; default: not set
+arch = "x86_64"                       # `uname -m` there (os.uname()[4], BUILD_ARCH)
+os = "linux"                          # `uname -s` there, lowered (BUILD_OS)
+
 [bitbake]
 enabled = true                        # false: never run BitBake
 allow_destructive = false             # allow cleansstate, cleanall, devtool reset, devtool finish
@@ -463,7 +529,7 @@ pass_env = []                         # TMPDIR: pass it to BitBake after all (by
 disable = ["style/variable-order"]    # rule ids or groups; default: none
 
 [lint.severity]                       # rule id or group to info, warning or error
-"override/remove-in-recipe" = "info"
+"override/remove-in-recipe" = "warning"  # info by default since 2026-11-20
 
 [output]
 budget_tokens = 600                   # default output budget of every tool
@@ -479,7 +545,8 @@ max_age_days = 14                     # drop handles older than this (1 to 3650)
 ```
 
 The flags `--build-dir` and `--layer` replace `build_dir` and `layers`. A `[handles]` value
-out of range, or a `pass_env` name other than `TMPDIR`, is a configuration error; a server whose configuration does not load still
+out of range, a `pass_env` name other than `TMPDIR`, or a `[build_host]` value that is not
+one word (letters, digits, `_ . + -`), is a configuration error; a server whose configuration does not load still
 starts, and every tool and `status` report the error. Details: "Configuration" in
 [docs/architecture.md](docs/architecture.md).
 
@@ -488,6 +555,15 @@ BitBake that is the build output directory, and kas (or a passthrough list) woul
 sous-chef's temporary directory to it, moving the whole build there. `MACHINE`, `DISTRO`,
 `DL_DIR`, `SSTATE_DIR` and the rest of BitBake's passthrough variables reach it as usual.
 `status` says when a `TMPDIR` was set and withheld.
+
+`[build_host]` gives what BitBake reads from the host it runs on at parse time
+(`BUILD_ARCH := "${@os.uname()[4]}"`, `BUILD_OS := "${@os.uname()[0].lower()}"` in
+OE-core's `bitbake.conf`). sous-chef never reads them from its own host, which may not be
+the build host. Unset, those values and everything built from them (`BUILD_SYS`,
+`SDKMACHINE`, and the `OVERRIDES`, `WORKDIR`, `S` and override decisions of every native
+and nativesdk recipe) are flagged uncertain; set, they are exact, and a wrong value makes
+them certain and wrong, so give what `uname -m` and `uname -s` print on the machine that
+runs BitBake. `status` shows the setting.
 
 ### Tools
 

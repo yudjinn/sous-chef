@@ -20,5 +20,6 @@ pub mod search;
 pub mod sigs;
 pub mod slice;
 pub mod status;
+pub mod taskfuncs;
 pub mod var;
 pub mod var_authoritative;

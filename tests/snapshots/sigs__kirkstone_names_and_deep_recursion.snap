@@ -3,10 +3,11 @@ source: tests/sigs.rs
 expression: mask(&out)
 ---
 kind	item	detail	loc
-task	hello:do_configure	re-ran: its own inputs did not change; a dependency's did, by way of hello/hello_1.1.bb:do_patch -> hello/hello_1.1.bb:do_unpack -> hello/hello_1.1.bb:do_fetch	-
+task	hello:do_configure	re-ran: a dependency's hash changed, by way of hello/hello_1.1.bb:do_patch -> hello/hello_1.1.bb:do_unpack -> hello/hello_1.1.bb:do_fetch	-
+cause	SRC_URI (hello)	value changed: "https://example.org/releases/hello-${PV}.tar.gz file://hello.patch {+file://mine.patch+}"	meta-mine:recipes-core/hello/hello_1.1.bbappend:4
+cause	mine.patch (hello)	dependency on the file's checksum added	-
 via	hello/hello_1.1.bb:do_patch	hash aaaaaaaaaa -> bbbbbbbbbb	-
 via	hello/hello_1.1.bb:do_unpack	hash cccccccccc -> dddddddddd	-
 via	hello/hello_1.1.bb:do_fetch	hash eeeeeeeeee -> ffffffffff	-
-cause	SRC_URI (hello)	value changed: "https://example.org/releases/hello-${PV}.tar.gz file://hello.patch {+file://mine.patch+}"	meta-mine:recipes-core/hello/hello_1.1.bbappend:4
-cause	mine.patch (hello)	dependency on the file's checksum added	-
+note: bitbake-diffsigs shows a changed dependency's comparison instead of the task's own, so a change of the task's own inputs would not be listed
 note: from `bitbake-diffsigs -c never -t hello do_configure` (BitBake's own comparison; nothing was built); full output h:HANDLE (988 bytes): slice handle=h:HANDLE

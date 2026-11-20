@@ -514,19 +514,27 @@ fn recipe_target_covers_bb_includes_and_appends() {
         .map(|f| format!("{}:{}", f.loc.layer, f.loc.path.display()))
         .collect();
     assert!(
-        files.contains(&"meta-core:recipes-core/hello/hello_1.1.bb".to_string()),
+        files
+            .iter()
+            .any(|i| i == "meta-core:recipes-core/hello/hello_1.1.bb"),
         "{files:?}"
     );
     assert!(
-        files.contains(&"meta-core:recipes-core/hello/hello.inc".to_string()),
+        files
+            .iter()
+            .any(|i| i == "meta-core:recipes-core/hello/hello.inc"),
         "{files:?}"
     );
     assert!(
-        files.contains(&"meta-mine:recipes-core/hello/hello_1.1.bbappend".to_string()),
+        files
+            .iter()
+            .any(|i| i == "meta-mine:recipes-core/hello/hello_1.1.bbappend"),
         "{files:?}"
     );
     assert!(
-        files.contains(&"meta-vendor:recipes-core/hello/hello_%.bbappend".to_string()),
+        files
+            .iter()
+            .any(|i| i == "meta-vendor:recipes-core/hello/hello_%.bbappend"),
         "{files:?}"
     );
     assert!(!files.iter().any(|f| f.ends_with(".bbclass")), "{files:?}");
@@ -1032,7 +1040,7 @@ fn recipe_scope_uses_the_evaluator_seam() {
         .map(|f| f.loc.path.display().to_string())
         .collect();
     assert!(
-        files.contains(&"recipes-core/hello/hello_1.0.bb".to_string()),
+        files.iter().any(|i| i == "recipes-core/hello/hello_1.0.bb"),
         "{files:?}"
     );
     assert!(files.iter().all(|f| f.ends_with(".bb")), "{files:?}");

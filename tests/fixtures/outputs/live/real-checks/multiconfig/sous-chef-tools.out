@@ -1,0 +1,159 @@
+sous-chef: serving 18 tools on stdio for 4 layers
+=== 15:13:44 status {} (4236 ms)
+field	value
+version	0.1.0
+state	ready
+work_dir	{{LIVE}}/runs/real-checks
+build_dir	{{LIVE}}/releases/scarthgap/build
+config	ok
+release	scarthgap (LAYERSERIES_CORENAMES)
+layers	4
+layer	meta priority=5 writable=false {{LIVE}}/releases/scarthgap/openembedded-core/meta
+layer	meta-poky priority=5 writable=false {{LIVE}}/releases/scarthgap/meta-yocto/meta-poky
+layer	meta-yocto-bsp priority=5 writable=false {{LIVE}}/releases/scarthgap/meta-yocto/meta-yocto-bsp
+layer	meta-oe priority=5 writable=false {{LIVE}}/releases/scarthgap/meta-openembedded/meta-oe
+multiconfigs	BBMULTICONFIG = "musl" (build:conf/local.conf:11)
+multiconfig	musl build:conf/multiconfig/musl.conf:1
+multiconfig_present	default meta:conf/multiconfig/default.conf:1 (not in BBMULTICONFIG)
+files	bb=1890 bbappend=11 bbclass=234 conf=124 inc=361
+index	{{LIVE}}/runs/real-checks/cache/sous-chef/900d65734e85a760/index.sqlite
+index_age	0s
+refresh	scanned 2620, reindexed 2620, removed 0 in 4078 ms
+bitbake	disabled in sous-chef.toml
+job	none
+handles	0 stored, 0.0 MB; limits 500.0 MB, 14 days ([handles] in sous-chef.toml)
+reindexed 2620 files: meta:classes/archiver.bbclass, meta:classes/buildhistory.bbclass, meta:classes/buildstats-summary.bbclass, meta:classes/ccache.bbclass, meta:classes/ccmake.bbclass, +2615 more
+=== 15:13:44 var {"name": "TCLIBC", "recipe": "curl", "mc": "musl"} (174 ms)
+status	op	override	loc	snippet
+shadowed	??=	-	meta:conf/bitbake.conf:394	TCLIBC ??= "glibc"
+applied	=	-	build:conf/multiconfig/musl.conf:2	TCLIBC = "musl"
+final: "musl"
+note: multiconfig musl: the configuration parsed again with BB_CURRENT_MC = "musl", conf/multiconfig/musl.conf (build:conf/multiconfig/musl.conf) read where conf/bitbake.conf requires it
+note: 5 anonymous python functions were not run (none changes TCLIBC by name)
+
+=== 15:13:44 var {"name": "TCLIBC", "recipe": "mc:musl:curl"} (156 ms)
+status	op	override	loc	snippet
+shadowed	??=	-	meta:conf/bitbake.conf:394	TCLIBC ??= "glibc"
+applied	=	-	build:conf/multiconfig/musl.conf:2	TCLIBC = "musl"
+final: "musl"
+note: multiconfig musl: the configuration parsed again with BB_CURRENT_MC = "musl", conf/multiconfig/musl.conf (build:conf/multiconfig/musl.conf) read where conf/bitbake.conf requires it
+note: 5 anonymous python functions were not run (none changes TCLIBC by name)
+
+=== 15:13:44 var {"name": "TCLIBC", "recipe": "curl"} (77 ms)
+status	op	override	loc	snippet
+applied	??=	-	meta:conf/bitbake.conf:394	TCLIBC ??= "glibc"
+final: "glibc"
+note: 5 anonymous python functions were not run (none changes TCLIBC by name)
+
+=== 15:13:44 var {"name": "WORKDIR", "recipe": "mc:musl:zlib"} (71 ms)
+status	op	override	loc	snippet
+applied	=	-	meta:conf/bitbake.conf:407	WORKDIR = "${BASE_WORKDIR}/${MULTIMACH_TARGET_SYS}/${PN}/${PV}"
+final: "{{LIVE}}/releases/scarthgap/build/tmp-musl/work/core2-64-poky-linux-musl/zlib/1.3.1"
+note: python evaluated statically (pure helpers, exact): `bb.utils.contains('TUNE_FEATURES', 'mx32', 'x32', '', d)`
+note: multiconfig musl: the configuration parsed again with BB_CURRENT_MC = "musl", conf/multiconfig/musl.conf (build:conf/multiconfig/musl.conf) read where conf/bitbake.conf requires it
+note: 4 anonymous python functions were not run (none changes WORKDIR by name)
+
+=== 15:13:45 var {"name": "FILE_LAYERNAME", "recipe": "mc:musl:curl"} (76 ms)
+status	op	override	loc	snippet
+shadowed	??=	-	meta:conf/bitbake.conf:812	FILE_LAYERNAME ??= "config"
+final: "core"
+note: multiconfig musl: the configuration parsed again with BB_CURRENT_MC = "musl", conf/multiconfig/musl.conf (build:conf/multiconfig/musl.conf) read where conf/bitbake.conf requires it
+note: 5 anonymous python functions were not run (none changes FILE_LAYERNAME by name)
+
+=== 15:13:45 var {"name": "PREFERRED_PROVIDER_virtual/libc", "mc": "musl"} (58 ms)
+status	op	override	loc	snippet
+applied	?=	-	meta:conf/distro/include/tclibc-musl.inc:9	PREFERRED_PROVIDER_virtual/libc ?= "musl"
+final: "musl"
+note: multiconfig musl: the configuration parsed again with BB_CURRENT_MC = "musl", conf/multiconfig/musl.conf (build:conf/multiconfig/musl.conf) read where conf/bitbake.conf requires it
+note: 4 anonymous python functions were not run (none changes PREFERRED_PROVIDER_virtual/libc by name)
+note: global configuration only (no recipe)
+
+=== 15:13:45 var {"name": "BBMULTICONFIG"} (49 ms)
+status	op	override	loc	snippet
+applied	=	-	build:conf/local.conf:11	BBMULTICONFIG = "musl"
+final: "musl"
+note: 4 anonymous python functions were not run (none changes BBMULTICONFIG by name)
+note: global configuration only (no recipe)
+
+=== 15:13:45 recipe {"name": "mc:musl:zlib"} (93 ms)
+field	value	loc
+recipe	zlib 1.3.1	meta:recipes-core/zlib/zlib_1.3.1.bb
+layer	meta (priority 5)	-
+version	1.3.1 (preferred by layer priority and version)	meta:recipes-core/zlib/zlib_1.3.1.bb
+inherit	ptest	meta:recipes-core/zlib/zlib_1.3.1.bb:27
+SUMMARY	Zlib Compression Library	meta:recipes-core/zlib/zlib_1.3.1.bb:1
+LICENSE	Zlib	meta:recipes-core/zlib/zlib_1.3.1.bb:6
+SRC_URI	4 entries from 1 applied operation	-
+DEPENDS	3 entries from 2 applied operations	-
+note: key values are evaluated for MACHINE=qemux86-64 DISTRO=poky (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated); use var for the full history
+note: multiconfig musl: the configuration parsed again with BB_CURRENT_MC = "musl", conf/multiconfig/musl.conf (build:conf/multiconfig/musl.conf) read where conf/bitbake.conf requires it
+warning: anonymous python changes variables through computed names; any key value may differ
+
+=== 15:13:45 recipe {"name": "busybox", "mc": "musl"} (98 ms)
+field	value	loc
+recipe	busybox 1.36.1	meta:recipes-core/busybox/busybox_1.36.1.bb
+layer	meta (priority 5)	-
+version	1.36.1 (preferred by layer priority and version)	meta:recipes-core/busybox/busybox_1.36.1.bb
+bbappend	meta-poky (priority 5)	meta-poky:recipes-core/busybox/busybox_%.bbappend
+inherit	cml1	meta:recipes-core/busybox/busybox.inc:56
+inherit	terminal	meta:classes-recipe/cml1.bbclass:25
+inherit	systemd	meta:recipes-core/busybox/busybox.inc:56
+inherit	update-rc.d	meta:recipes-core/busybox/busybox.inc:56
+inherit	ptest	meta:recipes-core/busybox/busybox.inc:56
+inherit	update-alternatives	meta:recipes-core/busybox/busybox.inc:364
+SUMMARY	Tiny versions of many common UNIX utilities in a single small executable	meta:recipes-core/busybox/busybox.inc:1
+LICENSE	GPL-2.0-only & bzip2-1.0.4	meta:recipes-core/busybox/busybox.inc:10
+SRC_URI	66 entries from 2 applied operations; 1 inactive operation (override not active)	-
+DEPENDS	7 entries from 4 applied operations	-
+note: key values are evaluated for MACHINE=qemux86-64 DISTRO=poky (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated); use var for the full history
+note: multiconfig musl: the configuration parsed again with BB_CURRENT_MC = "musl", conf/multiconfig/musl.conf (build:conf/multiconfig/musl.conf) read where conf/bitbake.conf requires it
+warning: anonymous python changes variables through computed names; any key value may differ
+
+=== 15:13:45 deps {"recipe": "virtual/libc", "kind": "providers", "mc": "musl"} (180 ms)
+name	version	status	loc
+musl	git (preferred by layer priority and version)	selected by PREFERRED_PROVIDER_virtual/libc	meta:recipes-core/musl/musl_git.bb:23
+glibc	2.39 (PREFERRED_VERSION_glibc = "2.39%")	not selected	meta:recipes-core/glibc/glibc.inc:10
+newlib	git (preferred by layer priority and version)	not selected	meta:recipes-core/newlib/newlib_git.bb:3
+PREFERRED_PROVIDER_virtual/libc	musl	applied	meta:conf/distro/include/tclibc-musl.inc:9
+PREFERRED_VERSION_glibc	2.39%	applied	meta:conf/distro/include/tcmode-default.inc:54
+note: candidates are recipes whose PN or static PROVIDES names it (index), confirmed by evaluating each; a PROVIDES that needs expansion to name it is not found
+note: multiconfig musl: the configuration parsed again with BB_CURRENT_MC = "musl", conf/multiconfig/musl.conf (build:conf/multiconfig/musl.conf) read where conf/bitbake.conf requires it
+
+=== 15:13:45 deps {"recipe": "virtual/libc", "kind": "providers"} (115 ms)
+name	version	status	loc
+glibc	2.39 (PREFERRED_VERSION_glibc = "2.39%")	selected by PREFERRED_PROVIDER_virtual/libc	meta:recipes-core/glibc/glibc.inc:10
+musl	git (preferred by layer priority and version)	not selected	meta:recipes-core/musl/musl_git.bb:23
+newlib	git (preferred by layer priority and version)	not selected	meta:recipes-core/newlib/newlib_git.bb:3
+PREFERRED_PROVIDER_virtual/libc	glibc	applied	meta:conf/distro/include/tclibc-glibc.inc:13
+PREFERRED_VERSION_glibc	2.39%	applied	meta:conf/distro/include/tcmode-default.inc:54
+note: candidates are recipes whose PN or static PROVIDES names it (index), confirmed by evaluating each; a PROVIDES that needs expansion to name it is not found
+
+=== 15:13:45 deps {"recipe": "curl", "kind": "mcdepends"} (68 ms)
+task	from	to	recipe	dep_task	status	loc
+do_install	(default)	musl	zlib	do_populate_sysroot	applies here	build:conf/local.conf:14
+note: evaluated in multiconfig default; the dependencies are listed, not followed: the recipe each names is resolved by BitBake with the providers of the `to` configuration (evaluate it with mc=<to>)
+note: 5 anonymous python functions were not run (none changes DEPENDS by name)
+
+=== 15:13:45 deps {"recipe": "mc:musl:curl", "kind": "mcdepends"} (76 ms)
+task	from	to	recipe	dep_task	status	loc
+do_install	(default)	musl	zlib	do_populate_sysroot	not in this configuration (BitBake adds it only when building in (default))	build:conf/local.conf:14
+note: evaluated in multiconfig musl; the dependencies are listed, not followed: the recipe each names is resolved by BitBake with the providers of the `to` configuration (evaluate it with mc=<to>)
+note: multiconfig musl: the configuration parsed again with BB_CURRENT_MC = "musl", conf/multiconfig/musl.conf (build:conf/multiconfig/musl.conf) read where conf/bitbake.conf requires it
+note: 5 anonymous python functions were not run (none changes DEPENDS by name)
+
+=== 15:13:45 deps {"recipe": "zlib", "kind": "mcdepends"} (63 ms)
+task	from	to	recipe	dep_task	status	loc
+note: no task of this recipe has an mcdepends flag (tasks added by anonymous python are not seen)
+note: evaluated in multiconfig default; the dependencies are listed, not followed: the recipe each names is resolved by BitBake with the providers of the `to` configuration (evaluate it with mc=<to>)
+note: anonymous python at meta:classes-global/base.bbclass:410-703 does not write DEPENDS here: no PACKAGECONFIG flag gives the list an item, so the wrapper returns at once
+note: 4 anonymous python functions were not run (none changes DEPENDS by name)
+
+=== 15:13:45 var {"name": "do_install[mcdepends]", "recipe": "curl"} (68 ms)
+status	op	override	loc	snippet
+applied	=	[mcdepends]	build:conf/local.conf:14	do_install[mcdepends] = "${MCDEP_REALCHECKS}"
+final[mcdepends]: "mc::musl:zlib:do_populate_sysroot"
+note: 5 anonymous python functions were not run (none changes do_install by name)
+
+=== 15:13:45 var {"name": "nope", "mc": "nope"} (50 ms)
+[isError]
+var: not found: multiconfig nope; known: musl; use `search` (mode=name) or `layers` to find the right name

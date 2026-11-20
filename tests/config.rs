@@ -82,6 +82,10 @@ writable_layers = ["meta-mycompany"]
 init_script = "poky/oe-init-build-env"
 release = "scarthgap"
 
+[build_host]
+arch = "aarch64"
+os = "Linux"
+
 [bitbake]
 enabled = false
 allow_destructive = true
@@ -113,6 +117,10 @@ max_age_days = 7
             init_script: Some(dir.join("poky/oe-init-build-env")),
             release: Some("scarthgap".into()),
             kas: Vec::new(),
+            build_host: sous_chef::config::BuildHost {
+                arch: Some("aarch64".into()),
+                os: Some("linux".into()),
+            },
             bitbake: sous_chef::config::BitbakeConfig {
                 enabled: false,
                 allow_destructive: true,
@@ -461,4 +469,75 @@ fn pass_env_takes_only_stripped_names() {
         &origin,
     ));
     assert!(msg.contains("passenv") && msg.contains(":2:"), "{msg}");
+}
+
+/// build-host: `[build_host] arch / os`, the build host's `os.uname()[4]` and
+/// `os.uname()[0].lower()`. Unset by default; each value one word; `os` lowered.
+#[test]
+fn build_host_values_are_read_checked_and_lowered() {
+    use sous_chef::config::BuildHost;
+    let origin = PathBuf::from("/x/sous-chef.toml");
+    let cfg = Config::from_toml("", &origin).unwrap();
+    assert_eq!(cfg.build_host, BuildHost::default());
+    assert!(cfg.build_host.is_empty());
+    assert_eq!(cfg.build_host.describe(), None);
+
+    let cfg =
+        Config::from_toml("[build_host]\narch = \"x86_64\"\nos = \"linux\"\n", &origin).unwrap();
+    assert_eq!(cfg.build_host.arch.as_deref(), Some("x86_64"));
+    assert_eq!(cfg.build_host.os.as_deref(), Some("linux"));
+    assert_eq!(
+        cfg.build_host.describe().as_deref(),
+        Some("arch = \"x86_64\", os = \"linux\"")
+    );
+    // `uname -s` as printed: lowered, as `os.uname()[0].lower()` does.
+    let cfg = Config::from_toml("[build_host]\nos = \"Linux\"\n", &origin).unwrap();
+    assert_eq!(cfg.build_host.os.as_deref(), Some("linux"));
+    assert_eq!(cfg.build_host.arch, None);
+    // Either alone is accepted; real `uname -m` values pass.
+    for arch in ["aarch64", "armv7l", "i686", "ppc64le", "riscv64", "s390x"] {
+        let text = format!("[build_host]\narch = \"{arch}\"\n");
+        let cfg = Config::from_toml(&text, &origin).unwrap();
+        assert_eq!(cfg.build_host.arch.as_deref(), Some(arch));
+        assert_eq!(cfg.build_host.os, None);
+    }
+
+    // Not one word: refused with the key, the value and what to give.
+    for bad in [
+        "",
+        "x86 64",
+        "Power Macintosh",
+        " x86_64",
+        "x86_64\n",
+        "a/b",
+        "${X}",
+        "é",
+    ] {
+        let text = format!("[build_host]\narch = {bad:?}\n");
+        let msg = config_err(Config::from_toml(&text, &origin));
+        assert!(
+            msg.contains("/x/sous-chef.toml")
+                && msg.contains(&format!("build_host.arch = {bad:?} is not one word"))
+                && msg.contains("uname -m"),
+            "{msg}"
+        );
+    }
+    let msg = config_err(Config::from_toml(
+        "[build_host]\narch = \"x 1\"\nos = \"GNU Linux\"\n",
+        &origin,
+    ));
+    assert!(
+        msg.contains("build_host.arch")
+            && msg.contains("build_host.os")
+            && msg.contains("uname -s"),
+        "{msg}"
+    );
+    // A misspelt key or a value that is not a string: errors with the line.
+    let msg = config_err(Config::from_toml(
+        "[build_host]\nmachine = \"x86_64\"\n",
+        &origin,
+    ));
+    assert!(msg.contains("machine") && msg.contains(":2:"), "{msg}");
+    let msg = config_err(Config::from_toml("[build_host]\narch = 64\n", &origin));
+    assert!(msg.contains(":2:"), "{msg}");
 }

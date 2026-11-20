@@ -321,7 +321,7 @@ fn overrides_and_values_per_machine() {
     // An app recipe in meta-mine gets layer-mine.
     let a = eval(&fx, &target(Some("app"), None));
     assert_eq!(a.value("FILE_LAYERNAME").unwrap().text, "mine");
-    assert!(a.overrides().contains(&"layer-mine".to_string()));
+    assert!(a.overrides().iter().any(|i| i == "layer-mine"));
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn configuration_only() {
     assert_eq!(ds.value("DISTRO").unwrap().text, "testdistro");
     // No recipe: PN is unknown, and the static result says so.
     let ov = ds.value("OVERRIDES").unwrap();
-    assert!(ov.unresolved.contains(&"PN".to_string()), "{ov:?}");
+    assert!(ov.unresolved.iter().any(|i| i == "PN"), "{ov:?}");
 }
 
 #[test]
@@ -474,9 +474,28 @@ fn python_values_are_flagged() {
         let g = ds.value("APP_GREETING").unwrap();
         assert!(!g.unevaluated_python, "{g:?}");
         assert_eq!(g.text, if machine == "boardx" { "hi" } else { "hello" });
-        // Still flagged: anonymous python appends to it.
+        // Anonymous python appends to it under `if d.getVar('MACHINE') == 'boardx':`:
+        // flagged on boardx; on qemux86 the condition is false, so the write cannot happen
+        // and the value is certain (eval::anon).
         let m = ds.value("EXTRA_OEMAKE").unwrap();
-        assert!(m.unevaluated_python);
+        assert_eq!(
+            m.unevaluated_python,
+            machine == "boardx",
+            "{machine}: {m:?}"
+        );
+        assert_eq!(
+            ds.replay().python_vars.contains("EXTRA_OEMAKE"),
+            machine == "boardx"
+        );
+        if machine == "qemux86" {
+            let w = &ds.replay().no_writes;
+            assert_eq!(w.len(), 1, "{w:?}");
+            assert_eq!(w[0].name, "EXTRA_OEMAKE");
+            assert!(
+                w[0].why[0].1.contains("`d.getVar('MACHINE') == 'boardx'`"),
+                "{w:?}"
+            );
+        }
         assert!(ds.value("FILESPATH").unwrap().unevaluated_python);
         assert!(!ds.value("SRC_URI").unwrap().unevaluated_python);
         assert!(!ds.value("LICENSE").unwrap().unevaluated_python);
@@ -490,7 +509,6 @@ fn python_values_are_flagged() {
         assert_eq!(anon[0].sets, ["EXTRA_OEMAKE"]);
         assert!(!anon[0].opaque);
         assert!(anon[0].name.starts_with("__anon_16_"));
-        assert!(ds.replay().python_vars.contains("EXTRA_OEMAKE"));
         assert_eq!(ds.raw_flag(&anon[0].name, "python").as_deref(), Some("1"));
     }
 }

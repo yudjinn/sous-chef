@@ -229,6 +229,27 @@ fn host_path_bad_and_good() {
     );
 }
 
+#[test]
+fn host_path_strings_compared_in_a_test_are_text() {
+    // lint-precision false positives (tests/fixtures/lint-precision/labels.tsv): a quoted
+    // path compared with `!=` in `[ ]`; the true positives beside them still fire.
+    let found = check(
+        &HygieneHostPath,
+        "host-path",
+        "precision-compare.bb",
+        "x_1.0.bb",
+        &[],
+    );
+    assert_eq!(lines(&found), [21, 22], "{found:#?}");
+    assert!(
+        found.iter().all(|f| f.2.contains("`/usr/lib`")),
+        "{found:#?}"
+    );
+    // The rule's own bad fixture is unchanged.
+    let bad = check(&HygieneHostPath, "host-path", "bad.bb", "x_1.0.bb", &[]);
+    assert_eq!(lines(&bad), [4, 5, 6, 7, 11], "{bad:#?}");
+}
+
 // ---------------------------------------------------------------------------------------
 // hygiene/tabs
 
@@ -906,6 +927,35 @@ fn git_pv_bad_and_good() {
         ],
         with_oe_pv,
     );
+    // meta-mine claims kirkstone scarthgap wrynose: on kirkstone package.bbclass adds no
+    // source revision to PKGV, `${SRCPV}` in PV does (acc-releases).
+    let got = w.lint("hygiene/git-pv", bad);
+    assert_eq!(
+        got,
+        [(
+            "info hygiene/git-pv meta-mine:recipes-test/x/x_git.bb:1".to_string(),
+            "`x_git.bb` sets no PV, so BitBake takes it from the file name: PV is `git`, with \
+             no version number and no source revision (on kirkstone only `${SRCPV}` in PV \
+             puts the revision in the package version), so a new SRCREV gives packages of the \
+             same version; set `PV = \"<version>+git${SRCPV}\"`"
+                .to_string()
+        )]
+    );
+    assert_eq!(w.lint("hygiene/git-pv", good), []);
+}
+
+#[test]
+fn git_pv_for_a_layer_that_claims_only_nanbield_and_later() {
+    let bad = "meta-mine/recipes-test/x/x_git.bb";
+    let w = ws_with(&[(&format!("{GP}/bad_git.bb"), bad)], |root| {
+        with_oe_pv(root);
+        let conf = root.join("meta-mine/conf/layer.conf");
+        let text = fs::read_to_string(&conf).unwrap().replace(
+            "LAYERSERIES_COMPAT_mine = \"kirkstone scarthgap wrynose\"",
+            "LAYERSERIES_COMPAT_mine = \"scarthgap wrynose\"",
+        );
+        fs::write(conf, text).unwrap();
+    });
     let got = w.lint("hygiene/git-pv", bad);
     assert_eq!(
         got,
@@ -917,7 +967,6 @@ fn git_pv_bad_and_good() {
                 .to_string()
         )]
     );
-    assert_eq!(w.lint("hygiene/git-pv", good), []);
 }
 
 #[test]

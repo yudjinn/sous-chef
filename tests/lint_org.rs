@@ -212,6 +212,25 @@ fn recipe_path() {
 }
 
 #[test]
+fn recipe_path_no_version_when_a_required_file_sets_pv() {
+    // lint-precision false positive (tests/fixtures/lint-precision/labels.tsv): "PV defaults
+    // to 1.0" for colord-native.bb, whose colord.inc sets PV; a recipe that does not set PV
+    // is still reported.
+    let found = env("recipe-path", &["precision-layer"]).lint(&OrgRecipePath, "precision-layer");
+    assert_eq!(
+        rows(&found),
+        ["info precision-layer:recipes-support/colord/colord-utils.bb:1"],
+        "{}",
+        messages(&found)
+    );
+    assert!(
+        found[0].message.contains("has no version"),
+        "{}",
+        found[0].message
+    );
+}
+
+#[test]
 fn duplicate_versions() {
     let found = bad_and_good(&OrgDuplicateVersions, "duplicate-versions", &[]);
     assert_eq!(
@@ -228,6 +247,44 @@ fn duplicate_versions() {
         found[0].message
     );
     assert!(found[0].message.contains("into dup.inc"));
+}
+
+#[test]
+fn duplicate_versions_leaves_out_uncollected_and_same_version_files() {
+    // lint-precision false positives (tests/fixtures/lint-precision/labels.tsv): meta-oe's
+    // android-tools-conf and its dynamic-layers/selinux copy (version 1.0 both, the copy not
+    // collected); the dup recipes of two versions beside them still fire.
+    let env = env("duplicate-versions", &["precision-layer"]);
+    let found = env.lint(&OrgDuplicateVersions, "precision-layer");
+    assert_eq!(
+        rows(&found),
+        ["info precision-layer:recipes-app/dup/dup_2.0.bb:1"],
+        "{}",
+        messages(&found)
+    );
+    // Also when both files are collected: the same version is no other version.
+    let both = env_with(
+        "duplicate-versions",
+        &["precision-layer"],
+        &[],
+        Some("wrynose"),
+        |root| {
+            let conf = root.join("precision-layer/conf/layer.conf");
+            let text = fs::read_to_string(&conf).unwrap().replace(
+                "${LAYERDIR}/recipes-*/*/*.bbappend\"",
+                "${LAYERDIR}/recipes-*/*/*.bbappend \\\n            \
+                 ${LAYERDIR}/dynamic-layers/*/recipes-*/*/*.bb\"",
+            );
+            fs::write(conf, text).unwrap();
+        },
+    );
+    let found = both.lint(&OrgDuplicateVersions, "precision-layer");
+    assert_eq!(
+        rows(&found),
+        ["info precision-layer:recipes-app/dup/dup_2.0.bb:1"],
+        "{}",
+        messages(&found)
+    );
 }
 
 #[test]
@@ -288,6 +345,16 @@ fn class_location() {
     assert!(
         m.contains("move it to classes-recipe/ (recipes inherit it)"),
         "{m}"
+    );
+    // lint-precision (tests/fixtures/lint-precision/labels.tsv): a class nothing uses may be
+    // meant for both contexts, as OE-core's archiver and externalsrc are; the message keeps
+    // classes/ open instead of saying "move it".
+    assert!(
+        found[2]
+            .message
+            .contains("nothing in the workspace inherits it, so keep it in classes/ if it is meant for both INHERIT and recipes"),
+        "{}",
+        found[2].message
     );
 
     // A layer that also claims kirkstone keeps classes/: kirkstone searches nothing else.
@@ -739,6 +806,35 @@ fn inc_has_version_data() {
 }
 
 #[test]
+fn inc_has_version_data_an_inc_that_sets_pv_needs_two_versions_of_one_recipe() {
+    // lint-precision false positive (tests/fixtures/lint-precision/labels.tsv): OE-core's
+    // common-clang.inc sets the PV of clang, lld, llvm-project-source, one version each
+    // (file-name versions git and none); v.inc of v 1.0 and 2.0 still fires, and so does
+    // links.inc, which sets no PV and is shared by links 2.25 and links-x11 2.22.
+    let found = env("inc-has-version-data", &["precision-layer"])
+        .lint(&OrgIncHasVersionData, "precision-layer");
+    assert_eq!(
+        rows(&found),
+        [
+            "warning precision-layer:recipes-app/v/v.inc:3",
+            "warning precision-layer:recipes-app/v/v.inc:4",
+            "warning precision-layer:recipes-app/v/v.inc:5",
+            "info precision-layer:recipes-app/v/v.inc:6",
+            "info precision-layer:recipes-support/links/links.inc:5",
+        ],
+        "{}",
+        messages(&found)
+    );
+    assert!(
+        found[4]
+            .message
+            .contains("shared by links, links-x11 2.22 and 2.25"),
+        "{}",
+        found[4].message
+    );
+}
+
+#[test]
 fn include_must_exist() {
     let found = bad_and_good(&OrgIncludeMustExist, "include-must-exist", &[]);
     assert_eq!(
@@ -789,6 +885,28 @@ fn class_recipe_specific() {
             .contains("replaces the value bad-layer:recipes-app/r/r_1.0.bb:1 sets before `inherit fetchy`; write `FETCHY_MODE ?=`"),
         "{}",
         found[2].message
+    );
+}
+
+#[test]
+fn class_recipe_specific_same_value_is_not_lost() {
+    // lint-precision false positives (tests/fixtures/lint-precision/labels.tsv): the recipe
+    // sets what the class sets (pypi's SECTION, cross-canadian's EXCLUDE_FROM_WORLD); a
+    // recipe's own S is still reported.
+    let found = env("class-recipe-specific", &["precision-layer"])
+        .lint(&OrgClassRecipeSpecific, "precision-layer");
+    assert_eq!(
+        rows(&found),
+        ["warning precision-layer:classes/pypiish.bbclass:5"],
+        "{}",
+        messages(&found)
+    );
+    assert!(
+        found[0]
+            .message
+            .contains("precision-layer:recipes-app/other/other_1.0.bb:4"),
+        "{}",
+        found[0].message
     );
 }
 

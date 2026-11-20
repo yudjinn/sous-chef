@@ -26,7 +26,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::recipe;
+use super::{recipe, taskfuncs};
 use crate::error::{Error, Result};
 use crate::eval::datastore::full_name;
 use crate::eval::{self, DataStore, OpKind, OpStatus, Target, UnsetRecord, VarOp};
@@ -89,7 +89,6 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
         args.mc.as_deref(),
     )?;
     let ds = eval::evaluate(&index, &ctx.workspace, &target)?;
-    drop(index);
 
     let mut t = Table::new(&["status", "op", "override", "loc", "snippet"]);
     let mut python = 0usize;
@@ -107,6 +106,18 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     } else {
         name.clone()
     };
+    // A task function: what BitBake runs with it (`taskfuncs`).
+    let task_run = if flag.is_none() && runs_as_task(&ds, &lookup) {
+        let added = if ds.tasks().contains(&lookup) {
+            recipe::addtask_locs(&index, &ds, &lookup)?
+        } else {
+            Vec::new()
+        };
+        Some(task_notes(ctx, &ds, &lookup, &added))
+    } else {
+        None
+    };
+    drop(index);
 
     let mut finals: Vec<String> = Vec::new();
     match &flag {
@@ -138,8 +149,14 @@ pub async fn run(ctx: &Ctx, args: Args) -> Result<String> {
     for f in &finals {
         t.note(f);
     }
+    for n in task_run.iter().flatten() {
+        t.note(n);
+    }
     if flag.is_none() && !ds.is_function(&lookup) {
         for n in python_eval_notes(&ds.python_log(&lookup)) {
+            t.note(&n);
+        }
+        for n in uncertain_notes(&ds, &lookup) {
             t.note(&n);
         }
     }
@@ -186,14 +203,25 @@ pub fn python_eval_notes(log: &eval::overrides::PythonLog) -> Vec<String> {
         1 => "; OVERRIDES, which decides its override variants, needed 1 more".into(),
         n => format!("; OVERRIDES, which decides its override variants, needed {n} more"),
     };
+    // `os.uname()` is evaluated only from `sous-chef.toml [build_host]`: say so.
+    let host = log
+        .own
+        .iter()
+        .chain(&log.overrides)
+        .any(|e| e.evaluated && e.code.contains("os.uname("));
+    let host = if host {
+        "; os.uname() from sous-chef.toml [build_host]"
+    } else {
+        ""
+    };
     if !done.is_empty() {
         out.push(format!(
-            "note: python evaluated statically (pure helpers, exact): {}{in_ovr}",
+            "note: python evaluated statically (pure helpers, exact): {}{in_ovr}{host}",
             list(&done)
         ));
     } else if ovr > 0 {
         out.push(format!(
-            "note: OVERRIDES, which decides its override variants, has python evaluated statically (pure helpers, exact): {}",
+            "note: OVERRIDES, which decides its override variants, has python evaluated statically (pure helpers, exact): {}{host}",
             list(&log.overrides.iter().filter(|e| e.evaluated).collect::<Vec<_>>())
         ));
     }
@@ -218,6 +246,39 @@ pub fn python_eval_notes(log: &eval::overrides::PythonLog) -> Vec<String> {
             "note: python not evaluated: `{}`: {}{more}",
             eval::pyexpr::short(&first.code),
             first.why.as_deref().unwrap_or("")
+        ));
+    }
+    out
+}
+
+/// At most this many `uncertain:` lines per value; the rest are counted.
+pub const MAX_CAUSE_NOTES: usize = 3;
+
+/// Why a flagged value may be wrong (`DataStore::flag_causes`): one `note: uncertain: ...`
+/// line per cause, at most [`MAX_CAUSE_NOTES`], then how many more. Nothing for a value
+/// that is not flagged.
+pub fn uncertain_notes(ds: &DataStore, name: &str) -> Vec<String> {
+    // Anonymous python that writes the variable itself by name has its own warning
+    // ([`replay_notes`]): not repeated.
+    let base = name.split(':').next().unwrap_or(name);
+    let warned: Vec<String> = naming_functions(ds, base)
+        .iter()
+        .map(|a| format!("anonymous python at {} may write {name}", a.loc))
+        .collect();
+    let causes: Vec<String> = ds
+        .flag_causes(name)
+        .into_iter()
+        .filter(|c| !warned.contains(c))
+        .collect();
+    let mut out: Vec<String> = causes
+        .iter()
+        .take(MAX_CAUSE_NOTES)
+        .map(|c| format!("note: uncertain: {c}"))
+        .collect();
+    if causes.len() > MAX_CAUSE_NOTES {
+        out.push(format!(
+            "note: uncertain: +{} more causes",
+            causes.len() - MAX_CAUSE_NOTES
         ));
     }
     out
@@ -305,12 +366,15 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
     if let Some(v) = notes.var_notes.get(&base) {
         out.extend(v.iter().cloned());
     }
-    let opaque: Vec<&eval::AnonPython> = notes.anonymous.iter().filter(|a| a.opaque).collect();
-    let naming: Vec<&eval::AnonPython> = notes
+    // A function proved to return at once writes nothing; a name whose writes were all
+    // proved not to happen is not changed here (`ReplayNotes::no_writes`).
+    let live: Vec<&eval::AnonPython> = notes
         .anonymous
         .iter()
-        .filter(|a| !a.opaque && a.sets.iter().any(|s| s.split(':').next() == Some(&base)))
+        .filter(|a| a.returns_early.is_none())
         .collect();
+    let opaque: Vec<&eval::AnonPython> = live.iter().copied().filter(|a| a.opaque).collect();
+    let naming = naming_functions(ds, &base);
     for a in &opaque {
         out.push(format!(
             "warning: anonymous python at {} changes variables through computed names or hands d to other code; it is not run, so any value, this one included, may differ",
@@ -322,6 +386,18 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
             "warning: anonymous python at {} changes {base}; it is not run, so the value shown is the one before it",
             a.loc
         ));
+    }
+    for w in notes
+        .no_writes
+        .iter()
+        .filter(|w| w.name.split(':').next() == Some(&base))
+    {
+        for (at, why) in &w.why {
+            out.push(format!(
+                "note: anonymous python at {at} does not write {} here: {why}",
+                w.name
+            ));
+        }
     }
     let other = notes.anonymous.len() - opaque.len() - naming.len();
     if other > 0 {
@@ -337,7 +413,7 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
     if !notes.references.is_empty() {
         let n = notes.references.len();
         out.push(format!(
-            "note: {n} include/inherit {} not followed (python, undefined variables or missing files); values from those files are missing",
+            "note: {n} include/inherit {} not followed (python, undefined variables or missing files); every value the files they would read may change is flagged (a missing file or a cycle stops BitBake itself)",
             if n == 1 { "reference was" } else { "references were" }
         ));
     }
@@ -356,11 +432,46 @@ pub fn replay_notes(ds: &DataStore, name: &str) -> Vec<String> {
             )
         };
         out.push(format!(
-            "note: `{} {}`{at} was followed as {:?}, but {why}; values its files set are flagged",
+            "note: `{} {}`{at} was followed as {:?}, but {why}; another value would read other files, so every value is flagged",
             u.kind, u.text, u.expanded
         ));
     }
+    // References followed only for the words certain whatever the python gives, whose
+    // unread files write this variable.
+    for e in notes
+        .ref_effects
+        .iter()
+        .filter(|e| e.vars.as_ref().is_some_and(|m| m.contains_key(&base)))
+    {
+        let at = e
+            .loc
+            .as_ref()
+            .map(|l| format!(" at {l}"))
+            .unwrap_or_default();
+        out.push(format!(
+            "note: `{} {}`{at} was followed for the words it reads whatever its python gives; it may also read {}, which sous-chef did not read: the values they change are flagged",
+            e.kind,
+            e.text,
+            e.not_read.join(", ")
+        ));
+    }
     out
+}
+
+/// The anonymous functions [`replay_notes`] warns about by name for `base`: not opaque,
+/// not proved to return at once, and writing a name of `base` that is still in
+/// `python_vars` (not proved unwritten).
+fn naming_functions<'a>(ds: &'a DataStore, base: &str) -> Vec<&'a eval::AnonPython> {
+    let notes = ds.replay();
+    notes
+        .anonymous
+        .iter()
+        .filter(|a| a.returns_early.is_none() && !a.opaque)
+        .filter(|a| {
+            a.writes()
+                .any(|e| e.split(':').next() == Some(base) && notes.python_vars.contains(e))
+        })
+        .collect()
 }
 
 /// The target notes of a multiconfig evaluation (`eval::multiconfig`: which configuration,
@@ -434,6 +545,82 @@ fn is_function_op(ds: &DataStore, op: &VarOp) -> bool {
                 .parse::<Loc>()
                 .is_ok()
         })
+}
+
+// ---- what a task runs ----
+
+/// `name` is a function that is a task (`addtask`) or has `[prefuncs]` / `[postfuncs]`.
+fn runs_as_task(ds: &DataStore, name: &str) -> bool {
+    ds.is_function(name)
+        && (ds.tasks().iter().any(|t| t == name)
+            || taskfuncs::RUN_FLAGS
+                .iter()
+                .any(|f| ds.raw_flag(name, f).is_some()))
+}
+
+/// The lines `var` adds for a task function (`taskfuncs`): that it is a task and the run
+/// order, each prefunc and postfunc with where it is defined and the flag operation that
+/// added it, the flags that change how it runs, and the functions not run that may change
+/// the lists (at most [`taskfuncs::MAX_WRITER_NOTES`]). `added`: its `addtask` statements.
+fn task_notes(ctx: &Ctx, ds: &DataStore, name: &str, added: &[Loc]) -> Vec<String> {
+    let mut out = Vec::new();
+    let is_task = ds.tasks().iter().any(|t| t == name);
+    if is_task {
+        let at = match added.split_first() {
+            Some((first, [])) => format!(" (addtask at {first})"),
+            Some((first, rest)) => format!(" (addtask at {first}, +{} more)", rest.len()),
+            None => String::new(),
+        };
+        let noexec = ds
+            .flag(name, "noexec")
+            .is_some_and(|v| v.text.trim() == "1");
+        if noexec {
+            out.push(format!(
+                "task: {name}{at} has [noexec] \"1\": BitBake does not run it or its [prefuncs] / [postfuncs], it only writes the stamp"
+            ));
+        } else {
+            out.push(format!(
+                "task: {name}{at} runs its [prefuncs], then {name}, then its [postfuncs]"
+            ));
+        }
+    } else {
+        out.push(format!(
+            "note: {name} is not a task (no addtask): its [prefuncs] / [postfuncs] run only when it runs as a task, not when another function calls it"
+        ));
+    }
+    for flag in taskfuncs::RUN_FLAGS {
+        let one = flag.trim_end_matches('s');
+        match taskfuncs::flag_funcs(ds, name, flag) {
+            None => out.push(format!("{flag}: none set")),
+            Some(ff) => {
+                if let Some(why) = &ff.uncertain {
+                    out.push(format!("{flag}: uncertain: {why}"));
+                }
+                for f in &ff.funcs {
+                    let from = match (&f.set_op, &f.set_at) {
+                        (Some(op), Some(at)) => format!(" (by [{flag}] {op} at {at})"),
+                        _ => String::new(),
+                    };
+                    out.push(format!("{one}: {} {}{from}", f.name, f.defined));
+                }
+            }
+        }
+    }
+    let flags = taskfuncs::run_flags(ds, name);
+    if !flags.is_empty() {
+        out.push(format!("flags: {}", flags.join("; ")));
+    }
+    let writers = taskfuncs::may_write(&ctx.workspace, ds, name);
+    for w in writers.iter().take(taskfuncs::MAX_WRITER_NOTES) {
+        out.push(w.note(name));
+    }
+    if writers.len() > taskfuncs::MAX_WRITER_NOTES {
+        out.push(format!(
+            "note: not run: +{} more functions may change {name}[prefuncs] / [postfuncs]",
+            writers.len() - taskfuncs::MAX_WRITER_NOTES
+        ));
+    }
+    out
 }
 
 // ---- rows ----

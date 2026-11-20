@@ -341,7 +341,7 @@ pub fn resolve_selected_variant_in(
 
 /// The evaluation target of a recipe file, or of its class-extended variant
 /// (`virtual:<word>:<layer>:<path>`, see `eval::variant`).
-pub use views::task_names;
+pub use views::{addtask_locs, task_names};
 
 pub fn eval_label(recipe: &RecipeRow, variant: Option<&ClassExtend>) -> String {
     match variant {
@@ -1004,7 +1004,7 @@ mod views {
         if !notes.references.is_empty() {
             let n = notes.references.len();
             t.note(&format!(
-                "note: {n} include/inherit {} not followed (python, undefined variables or missing files); values from those files are missing",
+                "note: {n} include/inherit {} not followed (python, undefined variables or missing files); every value the files they would read may change is flagged (a missing file or a cycle stops BitBake itself)",
                 if n == 1 { "reference was" } else { "references were" }
             ));
         }
@@ -1712,8 +1712,35 @@ mod views {
         Ok(order)
     }
 
+    /// The `addtask` statements that add `task` (`do_` prefixed), in parse order, since the
+    /// last `deltask` that removed it: the same events as [`tasks`]. Empty when no
+    /// `addtask` adds it (or a later `deltask` removed it).
+    pub fn addtask_locs(index: &Index, ds: &DataStore, task: &str) -> Result<Vec<Loc>> {
+        let mut out: Vec<Loc> = Vec::new();
+        for e in task_events(index, ds)? {
+            match e {
+                Event::Add { name, loc, .. } => {
+                    if prefixed(&name) == task {
+                        out.push(loc);
+                    }
+                }
+                Event::Del { names, .. } => {
+                    if ds
+                        .expand(&names)
+                        .text
+                        .split_whitespace()
+                        .any(|n| prefixed(n) == task)
+                    {
+                        out.clear();
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     pub fn tasks(index: &Index, ds: &DataStore) -> Result<Table> {
-        let mut t = Table::new(&["task", "state", "after", "pieces", "loc"]);
+        let mut t = Table::new(&["task", "state", "after", "pieces", "funcs", "loc"]);
         // bb.build.addtask / deltask over __BBTASKS and the deps flags.
         let mut order: Vec<String> = Vec::new();
         let mut deps: HashMap<String, Vec<String>> = HashMap::new();
@@ -1820,13 +1847,15 @@ mod views {
                     after.join(" ")
                 },
                 &pieces(ds, task),
+                &crate::mcp::tools::taskfuncs::cell(ds, task),
                 &loc,
             ]);
         }
         for (task, loc) in &deleted {
-            t.row(&[task, "deleted", "-", "-", &loc.to_string()]);
+            t.row(&[task, "deleted", "-", "-", "-", &loc.to_string()]);
         }
         t.note("note: order from the addtask / deltask statements in parse order (the index: configuration classes, recipe, includes and classes, bbappends, deferred inherits; the replay does not run them); dependencies first");
+        t.note("note: funcs: the [prefuncs] (pre) and [postfuncs] (post) BitBake runs before and after the task, as set in the metadata; anonymous python and event handlers may add more (var name=<task> lists those and where each function is defined)");
         t.note("note: not accounted for: tasks added or deleted by anonymous python (bb.build.addtask / deltask), do_x[deps] set directly, and dependencies on other recipes' tasks ([depends], [deptask], [rdeptask], [recrdeptask])");
         for task in &sorted {
             if let Some((op, _)) = ds.flag_history(task, "deps").into_iter().last() {

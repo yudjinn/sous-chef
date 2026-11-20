@@ -14,7 +14,8 @@
 //! configuration file and global class. A `?=` in a recipe, bbappend, recipe class or
 //! non-configuration `.inc` is always parsed after every `.conf`. A `?=` later in the same
 //! file is after by line. When the order cannot be told (a `.conf` the configuration does
-//! not reach, compared with another such file), nothing is reported.
+//! not reach, compared with another such file), nothing is reported. A `?=` whose value is
+//! empty or blank is no default that can be lost.
 
 use crate::eval::{self, DataStore, VarOp};
 use crate::index::query::{self, StatementFilter, StatementRow};
@@ -189,16 +190,18 @@ impl Rule for OverridePlusEqualsOnDefault {
     }
 }
 
-/// Every `{base} ?= ...` on the plain name: in this file (from its parse, so a file the
+/// Every `{base} ?= ...` on the plain name with a value that is not empty (losing
+/// `VAR ?= ""`, as OE-core's `bitbake.conf` writes `DISTRO_EXTRA_RDEPENDS ?= ""`, loses
+/// nothing: lint-precision): in this file (from its parse, so a file the
 /// index does not hold counts too) and in the other files of the workspace (index).
 fn defaults_of(cx: &LintContext<'_>, file: &ParsedFile, base: &str) -> Vec<Loc> {
     let mut out: Vec<Loc> = file
         .statements
         .iter()
         .filter(|s| {
-            matches!(&s.kind, StatementKind::Assign { var, op: AssignOp::Default, .. }
+            matches!(&s.kind, StatementKind::Assign { var, op: AssignOp::Default, value, .. }
                 if var.base == base && var.overrides.is_empty() && var.flag.is_none()
-                    && !var.legacy_syntax)
+                    && !var.legacy_syntax && !value.trim().is_empty())
         })
         .map(|s| Loc {
             lines: LineSpan::line(s.span.start),
@@ -218,6 +221,7 @@ fn defaults_of(cx: &LintContext<'_>, file: &ParsedFile, base: &str) -> Vec<Loc> 
                     && r.overrides.is_empty()
                     && r.flag.is_none()
                     && !r.legacy
+                    && r.value.as_deref().is_some_and(|v| !v.trim().is_empty())
                     && !(r.loc.layer == cx.loc.layer && r.loc.path == cx.loc.path)
             })
             .map(|r| Loc {

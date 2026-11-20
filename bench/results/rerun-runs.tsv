@@ -1,0 +1,57 @@
+run_id	task	cond	model	total	input	output	cache_creation	cache_read	cost_usd	num_turns	tool_calls	sous_chef_calls	builtin_calls	builtin_after_sc	tool_errors	permission_denials	wall_s	score	facts	wrong	overconfident	calls
+t01-curl-srcuri-A-r1	t01-curl-srcuri	A	claude-sonnet-5-5	64658	10	2009	7405	55234	0.055253399999999994	7	6	0	6		0	0	27.2	0.9	PPPPH	0	False	Glob Glob Bash Bash Bash Bash
+t01-curl-srcuri-A-r2	t01-curl-srcuri	A	claude-sonnet-5-5	85024	12	2739	5405	76868	0.0567208	9	8	0	8		1	1	37.6	0.9	PPPPH	0	False	Glob Glob Bash Bash Bash Bash Grep Glob
+t01-curl-srcuri-B-r1	t01-curl-srcuri	B	claude-sonnet-5-5	54330	6	1442	21964	30918	0.1053798	5	4	4	0	0	0	0	16.4	0.9	PPPPH	0	False	var recipe recipe search
+t01-curl-srcuri-B-r2	t01-curl-srcuri	B	claude-sonnet-5-5	55487	6	1587	8700	45194	0.0552014	5	4	4	0	0	0	0	12.1	0.9	PPPPH	0	False	var recipe recipe var
+t02-providers-A-r1	t02-providers	A	claude-sonnet-5-5	143046	18	3329	13297	126402	0.0991542	16	15	0	15		1	1	36.3	1.0	PPPPP	0	False	Grep Glob Bash Read Read Grep Glob Grep Read Read Grep Grep Read Grep Read
+t02-providers-A-r2	t02-providers	A	claude-sonnet-5-5	142846	18	3362	7352	132114	0.07627540000000001	15	14	0	14		1	1	37.4	1.0	PPPPP	0	False	Grep Glob Read Grep Bash Bash Read Read Grep Grep Grep Grep Grep Grep
+t02-providers-B-r1	t02-providers	B	claude-sonnet-5-5	54839	6	1132	10689	43012	0.0583892	6	5	5	0	0	0	0	14.3	0.9	PPPPH	0	False	var var search recipe recipe
+t02-providers-B-r2	t02-providers	B	claude-sonnet-5-5	76570	8	1403	7174	67985	0.0495405	7	6	6	0	0	0	0	13.9	0.9	PPPPH	0	False	var var search recipe recipe var
+t03-linux-kiss-appends-A-r1	t03-linux-kiss-appends	A	claude-sonnet-5-5	49557	8	2214	6842	40493	0.0535733	11	10	0	10		1	1	21.3	0.75	HPHP	0	False	Glob Glob Bash Read Read Read Read Read Read Grep
+t03-linux-kiss-appends-A-r2	t03-linux-kiss-appends	A	claude-sonnet-5-5	50803	8	2430	4277	44088	0.04583280000000001	12	11	0	11		1	1	19.7	0.75	HPHP	0	False	Glob Glob Bash Read Read Read Read Read Read Grep Grep
+t03-linux-kiss-appends-B-r1	t03-linux-kiss-appends	B	claude-sonnet-5-5	90970	10	2240	10991	77729	0.07415690000000001	12	11	5	6	6	2	1	31.1	1.0	PPPP	0	False	recipe recipe var Glob item Bash layers Read Read Read Glob
+t03-linux-kiss-appends-B-r2	t03-linux-kiss-appends	B	claude-sonnet-5-5	90217	10	2275	6212	81720	0.055790000000000006	9	8	5	3	3	1	1	19.5	1.0	PPPP	0	False	recipe recipe var Bash Bash Glob var search
+t04-dropbear-classes-A-r1	t04-dropbear-classes	A	claude-sonnet-5-5	68265	10	3625	9740	54890	0.08071899999999999	11	10	0	10		1	1	35.3	0.9	PPPPH	0	False	Glob Grep Grep Read Grep Bash Grep Grep Grep Read
+t04-dropbear-classes-A-r2	t04-dropbear-classes	A	claude-sonnet-5-5	122147	16	4430	8984	108717	0.09113970000000002	15	14	0	14		1	1	31.4	1.0	PPPPP	0	False	Glob Bash Grep Grep Glob Grep Grep Grep Grep Glob Glob Grep Grep Grep
+t04-dropbear-classes-B-r1	t04-dropbear-classes	B	claude-sonnet-5-5	47717	6	1035	7658	39018	0.0448958	5	4	4	0	0	0	0	14.2	0.9	PPPPH	0	False	recipe var class var
+t04-dropbear-classes-B-r2	t04-dropbear-classes	B	claude-sonnet-5-5	46893	6	883	2690	43314	0.0239334	4	3	3	0	0	0	0	11.6	0.9	PPPPH	0	False	recipe var class
+t05-curl-deps-A-r1	t05-curl-deps	A	claude-sonnet-5-5	88221	10	4564	16092	67555	0.1167835	13	12	0	12		1	1	38.0	0.8	PHPPH	0	False	Glob Glob Bash Bash Bash Bash Grep Grep Grep Grep Grep Grep
+t05-curl-deps-A-r2	t05-curl-deps	A	claude-sonnet-5-5	90129	10	4148	14183	71788	0.10541080000000001	13	12	0	12		1	1	37.7	0.8	PHPPH	0	False	Glob Glob Bash Read Read Read Grep Bash Glob Grep Grep Bash
+t05-curl-deps-B-r1	t05-curl-deps	B	claude-sonnet-5-5	83680	8	2381	16920	64371	0.0979431	9	8	7	1	0	0	0	22.8	0.8	PHHPP	0	False	ToolSearch recipe var deps deps var deps var
+t05-curl-deps-B-r2	t05-curl-deps	B	claude-sonnet-5-5	83456	8	2135	10355	70958	0.0698818	9	8	7	1	0	0	0	23.5	0.8	PHPPH	0	False	ToolSearch recipe var deps deps var deps var
+t06-gnutls-search-A-r1	t06-gnutls-search	A	claude-sonnet-5-5	27128	4	1489	8061	17574	0.0488994	3	2	0	2		0	0	18.1	1.0	PPP	0	False	Grep Bash
+t06-gnutls-search-A-r2	t06-gnutls-search	A	claude-sonnet-5-5	41533	6	1676	4524	35327	0.0384007	4	3	0	3		0	0	17.6	1.0	PPP	0	False	Grep Glob Bash
+t06-gnutls-search-B-r1	t06-gnutls-search	B	claude-sonnet-5-5	30187	4	774	5188	24221	0.0309221	2	1	1	0	0	0	0	8.1	1.0	PPP	0	False	search
+t06-gnutls-search-B-r2	t06-gnutls-search	B	claude-sonnet-5-5	30178	4	761	923	28490	0.014159000000000001	2	1	1	0	0	0	0	12.2	1.0	PPP	0	False	search
+t07-busybox-install-A-r1	t07-busybox-install	A	claude-sonnet-5-5	95276	12	3673	17206	74385	0.11301649999999999	12	11	0	11		1	1	32.3	0.6	PPPAA	1	False	Glob Bash Bash Grep Grep Glob Read Grep Read Read Grep
+t07-busybox-install-A-r2	t07-busybox-install	A	claude-sonnet-5-5	176913	14	4202	25724	146973	0.1596413	15	14	0	14		1	1	61.6	0.6	PPPAA	1	False	Glob Glob Grep Glob Grep Read Read Bash Bash Read Grep Grep Grep Grep
+t07-busybox-install-B-r1	t07-busybox-install	B	claude-sonnet-5-5	83350	8	2804	16383	64155	0.1000035	11	10	10	0	0	0	0	28.4	1.0	PPPPP	0	False	recipe search item search var recipe var var var search
+t07-busybox-install-B-r2	t07-busybox-install	B	claude-sonnet-5-5	117746	12	3008	10933	103793	0.0842153	11	10	8	2	2	2	0	31.9	0.6	PPPAA	1	False	recipe var item recipe Read search item var var var
+t08-layers-A-r1	t08-layers	A	claude-sonnet-5-5	65607	10	1952	10430	53215	0.0665815	12	11	0	11		1	1	21.8	1.0	PPPP	0	False	Bash Glob Glob Glob Read Read Read Read Read Read Read
+t08-layers-A-r2	t08-layers	A	claude-sonnet-5-5	40560	6	824	4181	35549	0.0285309	4	3	0	3		0	0	11.4	1.0	PPPP	0	False	Bash Grep Bash
+t08-layers-B-r1	t08-layers	B	claude-sonnet-5-5	45726	6	738	6189	38793	0.036027300000000005	4	3	2	1	0	0	0	15.3	0.75	PPPA	0	False	ToolSearch layers layers
+t08-layers-B-r2	t08-layers	B	claude-sonnet-5-5	45639	6	649	1626	43358	0.0173418	4	3	2	1	0	0	0	10.7	0.75	PPPA	0	False	ToolSearch layers layers
+t09-lint-meta-kiss-A-r1	t09-lint-meta-kiss	A	claude-sonnet-5-5	53788	8	4849	8614	40317	0.08699370000000001	12	11	0	11		1	1	43.6	0.62	HPAP	2	False	Bash Glob Read Read Read Read Read Read Read Read Read
+t09-lint-meta-kiss-A-r2	t09-lint-meta-kiss	A	claude-sonnet-5-5	54229	8	4391	6036	43794	0.0724494	13	12	0	12		1	1	39.5	0.62	HPAP	1	False	Bash Glob Read Read Read Read Read Read Read Read Read Read
+t09-lint-meta-kiss-B-r1	t09-lint-meta-kiss	B	claude-sonnet-5-5	52024	6	2411	9914	39693	0.0677473	11	10	1	9	7	0	0	20.6	1.0	PPPP	0	False	ToolSearch Glob lint Read Read Read Read Read Read Read
+t09-lint-meta-kiss-B-r2	t09-lint-meta-kiss	B	claude-sonnet-5-5	69913	8	2741	5700	61464	0.056372399999999996	10	9	1	8	6	1	1	34.5	1.0	PPPP	0	False	ToolSearch Bash lint Bash Read Read Read Read Read
+t10-linux-kiss-srcuri-A-r1	t10-linux-kiss-srcuri	A	claude-sonnet-5-5	51095	8	1755	8150	41182	0.0542842	8	7	0	7		1	1	22.1	1.0	PPP	0	False	Grep Glob Bash Read Read Grep Grep
+t10-linux-kiss-srcuri-A-r2	t10-linux-kiss-srcuri	A	claude-sonnet-5-5	51172	8	1846	4613	44705	0.0413985	8	7	0	7		1	1	17.2	1.0	PPP	0	False	Grep Glob Bash Read Read Grep Grep
+t10-linux-kiss-srcuri-B-r1	t10-linux-kiss-srcuri	B	claude-sonnet-5-5	50374	6	1078	8707	40583	0.049678299999999995	5	4	4	0	0	0	0	11.2	0.83	PHP	0	False	recipe var var var
+t10-linux-kiss-srcuri-B-r2	t10-linux-kiss-srcuri	B	claude-sonnet-5-5	49264	6	938	3459	44861	0.027714100000000002	4	3	3	0	0	0	0	13.6	0.83	PHP	0	False	recipe var var
+t11-distro-features-A-r1	t11-distro-features	A	claude-sonnet-5-5	77904	8	2259	16304	59333	0.09375529999999999	7	6	0	6		0	0	22.3	0.88	PPPH	1	False	Grep Glob Read Bash Grep Bash
+t11-distro-features-A-r2	t11-distro-features	A	claude-sonnet-5-5	119201	14	3748	14250	101189	0.1046269	15	14	0	14		1	1	42.5	0.88	PPPH	1	False	Grep Bash Read Grep Grep Grep Grep Read Grep Grep Read Grep Grep Grep
+t11-distro-features-B-r1	t11-distro-features	B	claude-sonnet-5-5	110409	12	2067	10398	97932	0.07207920000000001	9	8	6	2	2	0	0	20.1	1.0	PPPP	1	False	var var item search search search Grep Grep
+t11-distro-features-B-r2	t11-distro-features	B	claude-sonnet-5-5	50326	6	1425	4178	44717	0.035445700000000004	6	5	4	1	1	0	0	18.1	1.0	PPPP	0	False	var var var search Read
+t12-kiss-image-install-A-r1	t12-kiss-image-install	A	claude-sonnet-5-5	101801	10	2416	17541	81834	0.1025274	10	9	0	9		1	1	25.9	1.0	PPPP	0	False	Grep Glob Read Bash Grep Read Glob Read Grep
+t12-kiss-image-install-A-r2	t12-kiss-image-install	A	claude-sonnet-5-5	69007	10	2326	5737	60934	0.0523214	10	9	0	9		1	1	23.9	1.0	PPPP	0	False	Grep Glob Read Bash Read Grep Glob Read Read
+t12-kiss-image-install-B-r1	t12-kiss-image-install	B	claude-sonnet-5-5	31736	4	854	6634	24244	0.0375084	3	2	2	0	0	0	0	7.1	1.0	PPPP	0	False	var recipe
+t12-kiss-image-install-B-r2	t12-kiss-image-install	B	claude-sonnet-5-5	48660	6	1019	3588	44047	0.0289587	4	3	3	0	0	0	0	9.7	1.0	PPPP	0	False	var var recipe
+t13-git-srcrevs-A-r1	t13-git-srcrevs	A	claude-sonnet-5-5	33816	6	789	4366	28655	0.0282315	3	2	0	2		0	0	10.6	1.0	PPP	0	False	Grep Bash
+t13-git-srcrevs-A-r2	t13-git-srcrevs	A	claude-sonnet-5-5	46405	8	1160	1508	43729	0.022020900000000003	5	4	0	4		1	1	13.0	1.0	PPP	0	False	Grep Bash Grep Glob
+t13-git-srcrevs-B-r1	t13-git-srcrevs	B	claude-sonnet-5-5	45791	6	1037	5497	39251	0.036295100000000004	5	4	3	1	1	0	0	14.8	1.0	PPP	0	False	search search search Glob
+t13-git-srcrevs-B-r2	t13-git-srcrevs	B	claude-sonnet-5-5	45903	6	1066	1298	43533	0.0202173	5	4	3	1	1	0	0	14.3	1.0	PPP	0	False	search search search Bash
+t14-u-boot-kiss-A-r1	t14-u-boot-kiss	A	claude-sonnet-5-5	66410	10	2456	8468	55476	0.0639996	10	9	0	9		1	1	32.7	0.38	HPCP	1	False	Glob Glob Bash Read Read Read Read Grep Grep
+t14-u-boot-kiss-A-r2	t14-u-boot-kiss	A	claude-sonnet-5-5	64951	10	2378	4627	57936	0.0481016	9	8	0	8		1	1	30.1	0.38	HPCP	1	False	Glob Glob Bash Read Read Read Read Grep
+t14-u-boot-kiss-B-r1	t14-u-boot-kiss	B	claude-sonnet-5-5	47500	6	816	6400	40278	0.0377998	4	3	3	0	0	0	0	7.1	0.75	PPPA	0	False	var recipe search
+t14-u-boot-kiss-B-r2	t14-u-boot-kiss	B	claude-sonnet-5-5	66151	8	1475	3519	61149	0.0349569	7	6	4	2	2	0	0	15.7	0.75	PPPA	0	False	var recipe search Glob Grep search

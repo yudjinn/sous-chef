@@ -13,14 +13,21 @@
 //! - the name `d` (the datastore, only as an argument or for `d.getVar` / `d.getVarFlag` /
 //!   `d.expand`);
 //! - calls to the allowlisted helpers ([`Func`]), with positional and keyword arguments as
-//!   their python signatures accept them, and to `len` and `bool` (positional only);
+//!   their python signatures accept them, and to `len`, `bool` and `int` (positional only;
+//!   `int` of an integer, a boolean or a plain decimal string);
+//! - `<`, `<=`, `>`, `>=` between integers (booleans included), one per comparison;
 //! - `a + b` (strings, lists), `a if c else b`, `and` / `or` / `not`, one `==` / `!=` / `in`
 //!   / `not in` per comparison, `-` before an integer literal, `fmt % args` with `%s`, `%d`
 //!   and `%%` only;
-//! - a subscript `x[i]` of a list by an integer or a boolean (`['', 'x'][cond]`);
+//! - a subscript `x[i]` of a list by an integer or a boolean (`['', 'x'][cond]`), and a
+//!   slice `x[a:b]` (no step) of a list or a string, bounds integers, booleans or `None`;
 //! - the string methods `split()` / `split(sep)`, `strip()` / `strip(chars)`,
 //!   `replace(old, new)`, `startswith(s)`, `endswith(s)`, `lower()`, `upper()` (ASCII text
-//!   only), `sep.join(list)`.
+//!   only), `sep.join(list)`;
+//! - exactly `os.uname()[4]` and `os.uname()[0].lower()` (OE-core's `BUILD_ARCH` /
+//!   `BUILD_OS`), whose values come from `sous-chef.toml [build_host]` ([`Env::host`]);
+//!   not given there, they stop with [`Stop::Uncertain`] naming the key. The host
+//!   sous-chef runs on is never read.
 //!
 //! A python error (an `AttributeError` on `None`, an `IndexError`, a `ValueError` in
 //! `to_boolean`) is never reproduced: evaluation stops with [`Stop::Unsupported`], since BitBake
@@ -30,6 +37,8 @@
 //! source, are in `docs/bitbake-semantics.md` ("Inline python evaluated statically").
 
 use std::cmp::Ordering;
+
+use super::classfn::ClassFn;
 
 /// Maximum nesting of the parser (brackets, calls, operators).
 const MAX_NESTING: usize = 64;
@@ -52,6 +61,61 @@ pub trait Env {
     fn get_var_flag(&mut self, name: &str, flag: &str) -> Result<Option<String>, Stop>;
     /// `d.expand(text)`.
     fn expand(&mut self, text: &str) -> Result<String, Stop>;
+    /// `Ok` when the class function `f` may be called: the definition of its name in force
+    /// is the verified one ([`super::classfn`]). By default no definition is known.
+    fn class_fn(&mut self, f: ClassFn) -> Result<(), Stop> {
+        Err(unsupported(format!(
+            "{} is a class function whose definition is not known here",
+            f.name()
+        )))
+    }
+    /// `bb.data.inherits_class(klass, d)`, when certain.
+    fn inherits_class(&mut self, _klass: &str) -> Result<bool, Stop> {
+        Err(unsupported("bb.data.inherits_class here"))
+    }
+    /// What the build host's `os.uname()` gives for `read`: only from `sous-chef.toml
+    /// [build_host]`, never from the host sous-chef runs on. By default not known.
+    fn host(&mut self, read: HostRead) -> Result<String, Stop> {
+        Err(host_unknown(read))
+    }
+}
+
+/// A read of the build host's `os.uname()` the subset knows (OE-core `bitbake.conf`,
+/// Kirkstone to Wrynose: `BUILD_ARCH := "${@os.uname()[4]}"`,
+/// `BUILD_OS := "${@os.uname()[0].lower()}"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostRead {
+    /// `os.uname()[4]`: the machine (`uname -m`), `[build_host] arch`.
+    Arch,
+    /// `os.uname()[0].lower()`: the system name lowered, `[build_host] os`.
+    OsLower,
+}
+
+impl HostRead {
+    /// The code as written.
+    pub fn code(self) -> &'static str {
+        match self {
+            HostRead::Arch => "os.uname()[4]",
+            HostRead::OsLower => "os.uname()[0].lower()",
+        }
+    }
+
+    /// The `[build_host]` key that gives it.
+    pub fn key(self) -> &'static str {
+        match self {
+            HostRead::Arch => "arch",
+            HostRead::OsLower => "os",
+        }
+    }
+}
+
+/// Why a host read is not evaluated when `[build_host]` does not give it.
+pub fn host_unknown(read: HostRead) -> Stop {
+    Stop::Uncertain(format!(
+        "{} is the build host's, which sous-chef does not read; give [build_host] {} in sous-chef.toml",
+        read.code(),
+        read.key()
+    ))
 }
 
 /// A python value of the subset.
@@ -68,7 +132,7 @@ pub enum PyVal {
 
 impl PyVal {
     /// Python truth value.
-    fn truthy(&self) -> Result<bool, Stop> {
+    pub(crate) fn truthy(&self) -> Result<bool, Stop> {
         Ok(match self {
             PyVal::None => false,
             PyVal::Bool(b) => *b,
@@ -289,6 +353,8 @@ fn tokenize(code: &str) -> Result<Vec<Tok>, Stop> {
         let op: &'static str = match two.as_str() {
             "==" => "==",
             "!=" => "!=",
+            "<=" => "<=",
+            ">=" => ">=",
             _ => match ch {
                 '(' => "(",
                 ')' => ")",
@@ -300,6 +366,9 @@ fn tokenize(code: &str) -> Result<Vec<Tok>, Stop> {
                 '-' => "-",
                 '%' => "%",
                 '=' => "=",
+                ':' => ":",
+                '<' => "<",
+                '>' => ">",
                 _ => return Err(unsupported(format!("`{ch}`"))),
             },
         };
@@ -333,11 +402,16 @@ pub enum Func {
     OeVartrue,
     OeSetDifference,
     OeFilterDefaultFeatures,
+    OeClassFilterFeatures,
     DGetVar,
     DGetVarFlag,
     DExpand,
     Len,
     Bool,
+    /// `int(x)` of an integer, a boolean or a decimal string.
+    Int,
+    /// A function a class defines with `def` ([`super::classfn`]).
+    Class(ClassFn),
 }
 
 impl Func {
@@ -365,6 +439,7 @@ impl Func {
             "vartrue" => Func::OeVartrue,
             "set_difference" => Func::OeSetDifference,
             "filter_default_features" => Func::OeFilterDefaultFeatures,
+            "class_filter_features" => Func::OeClassFilterFeatures,
             _ => return None,
         })
     }
@@ -425,6 +500,12 @@ impl Func {
             ],
             Func::OeSetDifference => &[("variable1", None), ("variable2", None), ("d", None)],
             Func::OeFilterDefaultFeatures => &[("varname", None), ("d", None)],
+            Func::OeClassFilterFeatures => &[
+                ("defaults", None),
+                ("features_var", None),
+                ("filter_var", None),
+                ("d", None),
+            ],
             // `getVar(self, var, expand=True, noweakdefault=False, parsing=False)`: only the
             // first two are accepted.
             Func::DGetVar => &[("var", None), ("expand", Some(D::True))],
@@ -435,6 +516,18 @@ impl Func {
             // Positional-only in python: an empty name never matches a keyword.
             Func::Len => &[("", None)],
             Func::Bool => &[("", Some(D::False))],
+            Func::Int => &[("", None)],
+            Func::Class(ClassFn::BaseSetFilespath) => &[("path", None), ("d", None)],
+            Func::Class(ClassFn::GnomeVerdir) => &[("v", None)],
+            Func::Class(ClassFn::MapKernelArch | ClassFn::MapUbootArch) => {
+                &[("a", None), ("d", None)]
+            }
+            Func::Class(
+                ClassFn::GetAutotoolsDep
+                | ClassFn::GetBaseDep
+                | ClassFn::GettextDependencies
+                | ClassFn::GettextOeconf,
+            ) => &[("d", None)],
         }
     }
 
@@ -457,11 +550,14 @@ impl Func {
             Func::OeVartrue => "oe.utils.vartrue",
             Func::OeSetDifference => "oe.utils.set_difference",
             Func::OeFilterDefaultFeatures => "oe.utils.filter_default_features",
+            Func::OeClassFilterFeatures => "oe.utils.class_filter_features",
             Func::DGetVar => "d.getVar",
             Func::DGetVarFlag => "d.getVarFlag",
             Func::DExpand => "d.expand",
             Func::Len => "len",
             Func::Bool => "bool",
+            Func::Int => "int",
+            Func::Class(f) => f.name(),
         }
     }
 }
@@ -523,6 +619,10 @@ enum CmpOp {
     Ne,
     In,
     NotIn,
+    Lt,
+    Le,
+    Gt,
+    Ge,
 }
 
 /// A parsed expression of the subset.
@@ -532,6 +632,8 @@ pub struct Expr(Node);
 #[derive(Debug, Clone, PartialEq)]
 enum Node {
     Lit(PyVal),
+    /// `os.uname()[4]` or `os.uname()[0].lower()` ([`Env::host`]).
+    Host(HostRead),
     List(Vec<Node>),
     Call {
         func: Func,
@@ -544,6 +646,8 @@ enum Node {
         args: Vec<Node>,
     },
     Index(Box<Node>, Box<Node>),
+    /// `x[start:stop]` (no step); a missing bound is `None`.
+    Slice(Box<Node>, Option<Box<Node>>, Option<Box<Node>>),
     /// `fmt % args`.
     Format(Box<Node>, Box<Node>),
     /// A tuple: only the right operand of `%`.
@@ -572,7 +676,7 @@ impl Expr {
 impl Node {
     fn funcs(&self, out: &mut Vec<Func>) {
         match self {
-            Node::Lit(_) => {}
+            Node::Lit(_) | Node::Host(_) => {}
             Node::List(v) | Node::Tuple(v) => v.iter().for_each(|n| n.funcs(out)),
             Node::Call { func, args, kwargs } => {
                 if !out.contains(func) {
@@ -596,6 +700,12 @@ impl Node {
             Node::Cmp(_, a, b) => {
                 a.funcs(out);
                 b.funcs(out);
+            }
+            Node::Slice(a, lo, hi) => {
+                a.funcs(out);
+                for b in [lo, hi].into_iter().flatten() {
+                    b.funcs(out);
+                }
             }
             Node::Not(a) => a.funcs(out),
             Node::IfElse { body, cond, orelse } => {
@@ -747,6 +857,10 @@ impl Parser {
             Some(Tok::Op("==")) => CmpOp::Eq,
             Some(Tok::Op("!=")) => CmpOp::Ne,
             Some(Tok::Name(n)) if n == "in" => CmpOp::In,
+            Some(Tok::Op("<")) => CmpOp::Lt,
+            Some(Tok::Op("<=")) => CmpOp::Le,
+            Some(Tok::Op(">")) => CmpOp::Gt,
+            Some(Tok::Op(">=")) => CmpOp::Ge,
             Some(Tok::Name(n))
                 if n == "not" && matches!(self.peek_at(1), Some(Tok::Name(m)) if m == "in") =>
             {
@@ -938,6 +1052,7 @@ impl Parser {
                     "None" => Ok(Node::Lit(PyVal::None)),
                     "len" if self.is_op("(") => self.call(Func::Len),
                     "bool" if self.is_op("(") => self.call(Func::Bool),
+                    "int" if self.is_op("(") => self.call(Func::Int),
                     "d" => {
                         if self.is_op(".") {
                             self.pos += 1;
@@ -950,6 +1065,7 @@ impl Parser {
                             Ok(Node::Lit(PyVal::D))
                         }
                     }
+                    "os" => self.host_read(),
                     "bb" | "oe" => {
                         self.eat_op(".")?;
                         let module = self.name()?;
@@ -970,10 +1086,52 @@ impl Parser {
                         })?;
                         self.call(func)
                     }
-                    _ => Err(unsupported(format!("the name `{n}`"))),
+                    _ => match ClassFn::from_name(&n) {
+                        Some(f) if self.is_op("(") => self.call(Func::Class(f)),
+                        _ => Err(unsupported(format!("the name `{n}`"))),
+                    },
                 }
             }
             Tok::Op(o) => Err(unsupported(format!("`{o}`"))),
+        }
+    }
+
+    /// After the name `os`: exactly `.uname()[4]` or `.uname()[0].lower()` ([`HostRead`]).
+    /// `os.uname()[0]` not lowered is refused: `[build_host] os` gives the lowered name only,
+    /// its case is not known. Any other `os.` name or `uname()` field is outside the subset.
+    fn host_read(&mut self) -> Result<Node, Stop> {
+        self.eat_op(".")?;
+        let f = self.name()?;
+        if f != "uname" {
+            return Err(unsupported(format!("os.{f} is not on the allowlist")));
+        }
+        self.eat_op("(")?;
+        self.eat_op(")")?;
+        let field = match (self.peek(), self.peek_at(1), self.peek_at(2)) {
+            (Some(Tok::Op("[")), Some(Tok::Int(i)), Some(Tok::Op("]"))) => *i,
+            _ => {
+                return Err(unsupported(
+                    "os.uname() other than os.uname()[4] or os.uname()[0].lower()",
+                ));
+            }
+        };
+        self.pos += 3;
+        match field {
+            4 => Ok(Node::Host(HostRead::Arch)),
+            0 if self.is_op(".")
+                && matches!(self.peek_at(1), Some(Tok::Name(n)) if n == "lower")
+                && matches!(self.peek_at(2), Some(Tok::Op("(")))
+                && matches!(self.peek_at(3), Some(Tok::Op(")"))) =>
+            {
+                self.pos += 4;
+                Ok(Node::Host(HostRead::OsLower))
+            }
+            0 => Err(unsupported(
+                "os.uname()[0] not lowered (its case is not known; [build_host] os gives os.uname()[0].lower())",
+            )),
+            i => Err(unsupported(format!(
+                "os.uname()[{i}] (only [4] and [0].lower() can be given in [build_host])"
+            ))),
         }
     }
 
@@ -1000,9 +1158,31 @@ impl Parser {
                 };
             } else if self.is_op("[") {
                 self.pos += 1;
-                let i = self.expr()?;
+                let lo = if self.is_op(":") {
+                    None
+                } else {
+                    Some(self.expr()?)
+                };
+                if self.is_op(":") {
+                    // `x[a:b]`; a step (`x[a:b:c]`) is not in the subset.
+                    self.pos += 1;
+                    let hi = if self.is_op("]") {
+                        None
+                    } else {
+                        Some(Box::new(self.expr()?))
+                    };
+                    if !self.is_op("]") {
+                        return Err(unsupported("a slice with a step, or a tuple index"));
+                    }
+                    self.pos += 1;
+                    n = Node::Slice(Box::new(n), lo.map(Box::new), hi);
+                    continue;
+                }
+                let Some(i) = lo else {
+                    return Err(unsupported("an empty subscript"));
+                };
                 if !self.is_op("]") {
-                    return Err(unsupported("a slice or a tuple index"));
+                    return Err(unsupported("a tuple index"));
                 }
                 self.pos += 1;
                 n = Node::Index(Box::new(n), Box::new(i));
@@ -1023,9 +1203,79 @@ pub fn eval(e: &Expr, env: &mut dyn Env) -> Result<PyVal, Stop> {
     eval_node(&e.0, env)
 }
 
+/// Most possible values [`candidates`] lists.
+const MAX_CANDIDATES: usize = 16;
+
+/// The values `str()` of `e` may take when `e` cannot be evaluated, each one exact: `None`
+/// unless every way the expression can end is a sub-expression that evaluates exactly. What
+/// python guarantees, whatever the unknown part is (python never reaches a value other than
+/// these: it returns one of them or raises, and a raise fails BitBake's expansion):
+///
+/// - `[a, b, ...][i]`, a list literal subscripted by anything: one of the elements (or an
+///   `IndexError` / `TypeError`);
+/// - `a if c else b`: `a` or `b`;
+/// - `bb.utils.contains(var, items, a, b, d)`, `bb.utils.contains_any(...)` and
+///   `oe.utils.conditional(var, value, a, b, d)` with five positional arguments: `a` or `b`
+///   (BitBake 2.18 `lib/bb/utils.py`, OE-core `lib/oe/utils.py`: every path returns
+///   `truevalue` or `falsevalue`);
+/// - `oe.utils.ifelse(c, a, b)` with three positional arguments: `a` or `b`.
+///
+/// An expression that evaluates is its one value.
+pub fn candidates(e: &Expr, env: &mut dyn Env) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    node_candidates(&e.0, env, &mut out, 0)?;
+    Some(out)
+}
+
+fn node_candidates(n: &Node, env: &mut dyn Env, out: &mut Vec<String>, depth: usize) -> Option<()> {
+    if depth > MAX_NESTING {
+        return None;
+    }
+    if let Ok(v) = eval_node(n, env) {
+        let t = to_text(&v).ok()?;
+        if !out.contains(&t) {
+            out.push(t);
+        }
+        return (out.len() <= MAX_CANDIDATES).then_some(());
+    }
+    match n {
+        Node::Index(base, _) => {
+            let Node::List(items) = &**base else {
+                return None;
+            };
+            for i in items {
+                node_candidates(i, env, out, depth + 1)?;
+            }
+            Some(())
+        }
+        Node::IfElse { body, orelse, .. } => {
+            node_candidates(body, env, out, depth + 1)?;
+            node_candidates(orelse, env, out, depth + 1)
+        }
+        Node::Call { func, args, kwargs }
+            if matches!(
+                func,
+                Func::BbContains | Func::BbContainsAny | Func::OeConditional
+            ) && args.len() == 5
+                && kwargs.is_empty() =>
+        {
+            node_candidates(&args[2], env, out, depth + 1)?;
+            node_candidates(&args[3], env, out, depth + 1)
+        }
+        Node::Call { func, args, kwargs }
+            if *func == Func::OeIfelse && args.len() == 3 && kwargs.is_empty() =>
+        {
+            node_candidates(&args[1], env, out, depth + 1)?;
+            node_candidates(&args[2], env, out, depth + 1)
+        }
+        _ => None,
+    }
+}
+
 fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
     match n {
         Node::Lit(v) => Ok(v.clone()),
+        Node::Host(h) => env.host(*h).map(PyVal::Str),
         Node::List(items) => Ok(PyVal::List(
             items
                 .iter()
@@ -1074,6 +1324,15 @@ fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
                 CmpOp::Ne => !py_eq(&a, &b)?,
                 CmpOp::In => py_in(&a, &b)?,
                 CmpOp::NotIn => !py_in(&a, &b)?,
+                CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge => {
+                    let o = int_order(&a, &b)?;
+                    match op {
+                        CmpOp::Lt => o.is_lt(),
+                        CmpOp::Le => o.is_le(),
+                        CmpOp::Gt => o.is_gt(),
+                        _ => o.is_ge(),
+                    }
+                }
             };
             Ok(PyVal::Bool(r))
         }
@@ -1121,6 +1380,36 @@ fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
             }
             Ok(items[k as usize].clone())
         }
+        Node::Slice(base, lo, hi) => {
+            let base = eval_node(base, env)?;
+            let mut bound = |b: &Option<Box<Node>>| -> Result<Option<i128>, Stop> {
+                match b {
+                    None => Ok(None),
+                    Some(n) => match eval_node(n, env)? {
+                        PyVal::None => Ok(None),
+                        PyVal::Int(i) => Ok(Some(i)),
+                        PyVal::Bool(b) => Ok(Some(i128::from(b))),
+                        other => Err(unsupported(format!(
+                            "a slice bound of {} (a TypeError)",
+                            other.type_name()
+                        ))),
+                    },
+                }
+            };
+            let (lo, hi) = (bound(lo)?, bound(hi)?);
+            match base {
+                PyVal::List(items) => {
+                    let (a, b) = slice_range(items.len(), lo, hi);
+                    Ok(PyVal::List(items[a..b].to_vec()))
+                }
+                PyVal::Str(s) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let (a, b) = slice_range(chars.len(), lo, hi);
+                    Ok(PyVal::Str(chars[a..b].iter().collect()))
+                }
+                other => Err(unsupported(format!("a slice of {}", other.type_name()))),
+            }
+        }
         Node::Method { recv, method, args } => {
             let recv = eval_node(recv, env)?;
             let args: Vec<PyVal> = args
@@ -1142,6 +1431,20 @@ fn eval_node(n: &Node, env: &mut dyn Env) -> Result<PyVal, Stop> {
             call(*func, bound, env)
         }
     }
+}
+
+/// The index range python's `seq[lo:hi]` (step 1) takes from a sequence of `len` items: a
+/// missing bound is the start / the end, a negative one counts from the end, and both are
+/// clamped to `0..=len` (CPython `PySlice_AdjustIndices`); an empty range when `lo >= hi`.
+fn slice_range(len: usize, lo: Option<i128>, hi: Option<i128>) -> (usize, usize) {
+    let n = len as i128;
+    let adjust = |b: i128| {
+        let b = if b < 0 { b + n } else { b };
+        b.clamp(0, n) as usize
+    };
+    let a = lo.map_or(0, adjust);
+    let b = hi.map_or(len, adjust);
+    (a, b.max(a))
 }
 
 /// `fmt % args` (python's printf-style formatting) for the conversions `%s` (`str()`), `%d`
@@ -1283,6 +1586,20 @@ fn py_eq(a: &PyVal, b: &PyVal) -> Result<bool, Stop> {
         }
         _ => false,
     })
+}
+
+/// The order of two integers (booleans count as 0 and 1) for `<`, `<=`, `>`, `>=`; other
+/// operand types are not reproduced.
+fn int_order(a: &PyVal, b: &PyVal) -> Result<Ordering, Stop> {
+    let n = |v: &PyVal| match v {
+        PyVal::Int(i) => Ok(*i),
+        PyVal::Bool(b) => Ok(i128::from(*b)),
+        other => Err(unsupported(format!(
+            "an order comparison of {}",
+            other.type_name()
+        ))),
+    };
+    Ok(n(a)?.cmp(&n(b)?))
 }
 
 /// Python `a in b`.
@@ -1592,6 +1909,27 @@ fn call(func: Func, a: Vec<PyVal>, env: &mut dyn Env) -> Result<PyVal, Stop> {
                 &PyVal::Str(format!("{n}_OPTED_OUT")),
             )
         }
+        Func::OeClassFilterFeatures => {
+            // `features = set(d.getVar(features_var).split())`; `filtered =
+            // set(bb.utils.filter_string(defaults, d.getVar(filter_var)).split())`;
+            // `" ".join(sorted(features | filtered))`.
+            let fv = get_var(env, &a[1])?;
+            let mut words = py_split_ws(want_str(&fv, "the features value")?);
+            let defaults = want_str(&a[0], "the defaults")?;
+            if !defaults.is_empty() {
+                // `filter_string(val, checkvalues)`: `set(checkvalues)` of `None` raises.
+                let check = get_var(env, &a[2])?;
+                let check = py_split_ws(want_str(&check, "the filter value")?);
+                words.extend(
+                    py_split_ws(defaults)
+                        .into_iter()
+                        .filter(|w| check.contains(w)),
+                );
+            }
+            words.sort();
+            words.dedup();
+            Ok(PyVal::Str(words.join(" ")))
+        }
         Func::DGetVar => {
             if !a[1].truthy()? {
                 return Err(unsupported("d.getVar with expand=False"));
@@ -1617,11 +1955,259 @@ fn call(func: Func, a: Vec<PyVal>, env: &mut dyn Env) -> Result<PyVal, Stop> {
             Ok(PyVal::Str(env.expand(s)?))
         }
         Func::Bool => Ok(PyVal::Bool(a[0].truthy()?)),
+        Func::Int => match &a[0] {
+            PyVal::Int(i) => Ok(PyVal::Int(*i)),
+            PyVal::Bool(b) => Ok(PyVal::Int(i128::from(*b))),
+            // Python also takes surrounding whitespace, `_` between digits and non-ASCII
+            // digits; only the plain form is reproduced.
+            PyVal::Str(t) => {
+                let digits = t.strip_prefix(['+', '-']).unwrap_or(t);
+                if digits.is_empty()
+                    || digits.len() > 30
+                    || !digits.bytes().all(|b| b.is_ascii_digit())
+                {
+                    return Err(unsupported("int() of that text"));
+                }
+                t.parse::<i128>()
+                    .map(PyVal::Int)
+                    .map_err(|_| unsupported("int() of that text"))
+            }
+            other => Err(unsupported(format!("int() of {}", other.type_name()))),
+        },
+        Func::Class(f) => {
+            env.class_fn(f)?;
+            class_call(f, &a, env)
+        }
         Func::Len => match &a[0] {
             PyVal::Str(s) => Ok(PyVal::Int(s.chars().count() as i128)),
             PyVal::List(l) => Ok(PyVal::Int(l.len() as i128)),
             other => Err(unsupported(format!("len() of {}", other.type_name()))),
         },
+    }
+}
+
+/// `d.getVar(name)` as a python truth value.
+fn var_truthy(env: &mut dyn Env, name: &str) -> Result<bool, Stop> {
+    get_var(env, &PyVal::Str(name.into()))?.truthy()
+}
+
+/// `oe.utils.inherits(d, klass)` with one class: `bb.data.inherits_class(klass, d)`.
+fn inherits(env: &mut dyn Env, klass: &str) -> Result<bool, Stop> {
+    env.inherits_class(klass)
+}
+
+/// `posixpath.join(a, b)`: `b` when it is absolute, else `a` and `b` with one `/` between
+/// them unless `a` is empty or ends with `/`.
+fn path_join(a: &str, b: &str) -> String {
+    if b.starts_with('/') {
+        b.to_string()
+    } else if a.is_empty() || a.ends_with('/') {
+        format!("{a}{b}")
+    } else {
+        format!("{a}/{b}")
+    }
+}
+
+/// The architecture argument of `map_kernel_arch` / `map_uboot_arch`: a string without a
+/// newline (where python's `.` and `$` would read it otherwise).
+fn arch_arg(v: &PyVal) -> Result<&str, Stop> {
+    let a = want_str(v, "the architecture")?;
+    if a.contains('\n') {
+        return Err(unsupported("an architecture holding a newline"));
+    }
+    Ok(a)
+}
+
+/// The class functions of [`super::classfn`], each as its verified definition runs (the
+/// definitions are quoted there): the same reads in the same order, so a read that is not
+/// certain stops the evaluation where python would have needed it.
+fn class_call(f: ClassFn, a: &[PyVal], env: &mut dyn Env) -> Result<PyVal, Stop> {
+    let s = |t: &str| Ok(PyVal::Str(t.to_string()));
+    match f {
+        ClassFn::BaseSetFilespath => {
+            let PyVal::List(path) = &a[0] else {
+                return Err(unsupported(format!(
+                    "base_set_filespath of a path that is {}",
+                    a[0].type_name()
+                )));
+            };
+            let mut path: Vec<String> = path
+                .iter()
+                .map(|p| want_str(p, "a path element").map(str::to_string))
+                .collect::<Result<_, _>>()?;
+            let extra = match get_var(env, &PyVal::Str("FILESEXTRAPATHS".into()))? {
+                PyVal::Str(t) => t,
+                _ => String::new(),
+            };
+            let extra = extra.replace("__default:", "");
+            if !extra.is_empty() {
+                let mut p: Vec<String> = extra.split(':').map(str::to_string).collect();
+                p.extend(path);
+                path = p;
+            }
+            let ov = match get_var(env, &PyVal::Str("FILESOVERRIDES".into()))? {
+                PyVal::Str(t) => t,
+                _ => String::new(),
+            };
+            let overrides = format!(":{ov}");
+            let mut out: Vec<String> = Vec::new();
+            for o in overrides.split(':').rev() {
+                for p in path.iter().filter(|p| !p.is_empty()) {
+                    out.push(path_join(p, o));
+                }
+            }
+            Ok(PyVal::Str(out.join(":")))
+        }
+        ClassFn::GetAutotoolsDep => {
+            if var_truthy(env, "INHIBIT_AUTOTOOLS_DEPS")? {
+                return s("");
+            }
+            let pn = get_var(env, &PyVal::Str("PN".into()))?;
+            let PyVal::Str(pn) = pn else {
+                // `None in [...]` is false, then `None.endswith` raises.
+                return Err(unsupported(
+                    "get_autotools_dep with PN unset (an AttributeError)",
+                ));
+            };
+            if pn == "autoconf-native" || pn == "automake-native" {
+                return s("");
+            }
+            let mut deps = String::from("autoconf-native automake-native ");
+            if pn != "libtool" && pn != "libtool-native" && !pn.ends_with("libtool-cross") {
+                deps.push_str("libtool-native ");
+                if !inherits(env, "native")?
+                    && !inherits(env, "nativesdk")?
+                    && !inherits(env, "cross")?
+                    && !var_truthy(env, "INHIBIT_DEFAULT_DEPS")?
+                {
+                    deps.push_str("libtool-cross ");
+                }
+            }
+            Ok(PyVal::Str(deps))
+        }
+        ClassFn::GetBaseDep => {
+            // `d.getVar('INHIBIT_DEFAULT_DEPS', False)`: the unexpanded value. Unset when the
+            // expanded one is unset, and not empty when the expanded one is not (expansion
+            // and `:remove` only act on a value that is there); an empty expanded value says
+            // nothing about the unexpanded text, so that case is not evaluated.
+            match get_var(env, &PyVal::Str("INHIBIT_DEFAULT_DEPS".into()))? {
+                PyVal::Str(t) if t.is_empty() => Err(unsupported(
+                    "get_base_dep reads the unexpanded INHIBIT_DEFAULT_DEPS, whose expanded value is empty",
+                )),
+                PyVal::Str(_) => s(""),
+                _ => s("${BASE_DEFAULT_DEPS}"),
+            }
+        }
+        ClassFn::GettextDependencies => {
+            if var_truthy(env, "INHIBIT_DEFAULT_DEPS")? && !inherits(env, "cross-canadian")? {
+                return s("");
+            }
+            let nls = get_var(env, &PyVal::Str("USE_NLS".into()))?;
+            if py_eq(&nls, &PyVal::Str("no".into()))? {
+                return s("gettext-minimal-native");
+            }
+            s("gettext-native")
+        }
+        ClassFn::GettextOeconf => {
+            let nls = get_var(env, &PyVal::Str("USE_NLS".into()))?;
+            if py_eq(&nls, &PyVal::Str("no".into()))? {
+                return s("--disable-nls");
+            }
+            if var_truthy(env, "INHIBIT_DEFAULT_DEPS")? && !inherits(env, "cross-canadian")? {
+                return s("--disable-nls");
+            }
+            s("--enable-nls")
+        }
+        ClassFn::MapKernelArch => {
+            let valid = get_var(env, &PyVal::Str("valid_archs".into()))?;
+            let valid = py_split_ws(want_str(&valid, "valid_archs")?);
+            let a = arch_arg(&a[0])?;
+            let c: Vec<char> = a.chars().collect();
+            let opt = |s: &str, p: &str| s.strip_prefix(p).unwrap_or(s).to_string();
+            // `(i.86|athlon|x86.64)$` and the other patterns, as `re.match` reads them
+            // (anchored at the start; `$` at the end, `a` holding no newline).
+            let x86 = (c.len() == 4 && c[0] == 'i' && c[2] == '8' && c[3] == '6')
+                || a == "athlon"
+                || (c.len() == 6 && a.starts_with("x86") && c[4] == '6' && c[5] == '4');
+            let mips = a.strip_prefix("mips").is_some_and(|r| {
+                let r = opt(r, "isa");
+                let r = if r.starts_with("32") || r.starts_with("64") {
+                    r[2..].to_string()
+                } else {
+                    r
+                };
+                opt(&opt(&r, "r6"), "el").is_empty()
+            });
+            let riscv = a.strip_prefix("riscv").is_some_and(|r| {
+                let r = if r.starts_with("32") || r.starts_with("64") {
+                    &r[2..]
+                } else {
+                    r
+                };
+                r.is_empty() || r == "eb"
+            });
+            let out = if x86 {
+                "x86"
+            } else if a == "arceb" {
+                "arc"
+            } else if a == "armeb" {
+                "arm"
+            } else if ["aarch64", "aarch64_be", "aarch64_ilp32", "aarch64_be_ilp32"].contains(&a) {
+                "arm64"
+            } else if ["loongarch32", "loongarch64", "loongarch"].contains(&a) {
+                "loongarch"
+            } else if mips {
+                "mips"
+            } else if a.starts_with("mcf") {
+                "m68k"
+            } else if riscv {
+                "riscv"
+            } else if a.starts_with("ppc") || a.starts_with("powerpc") {
+                "powerpc"
+            } else if a == "sh3" || a == "sh4" {
+                "sh"
+            } else if a.starts_with("bfin") {
+                "blackfin"
+            } else if a.starts_with("microblazeeb") || a.starts_with("microblazeel") {
+                "microblaze"
+            } else if valid.iter().any(|v| v == a) {
+                a
+            } else {
+                let os = get_var(env, &PyVal::Str("TARGET_OS".into()))?;
+                if !want_str(&os, "TARGET_OS")?.starts_with("linux") {
+                    a
+                } else {
+                    // `bb.error(...)`, then `None`: an error BitBake reports.
+                    return Err(unsupported(
+                        "map_kernel_arch reports an error for this architecture",
+                    ));
+                }
+            };
+            Ok(PyVal::Str(out.to_string()))
+        }
+        ClassFn::MapUbootArch => {
+            let a = arch_arg(&a[0])?;
+            let c: Vec<char> = a.chars().collect();
+            Ok(PyVal::Str(
+                if a.starts_with("ppc") || a.starts_with("powerpc") {
+                    "ppc".into()
+                } else if c.len() == 4 && c[0] == 'i' && c[2] == '8' && c[3] == '6' {
+                    "x86".into()
+                } else {
+                    a.to_string()
+                },
+            ))
+        }
+        ClassFn::GnomeVerdir => {
+            let v = want_str(&a[0], "the version")?;
+            let parts: Vec<&str> = v.split('.').collect();
+            let head = parts[..parts.len() - 1].join(".");
+            Ok(PyVal::Str(if head.is_empty() {
+                v.to_string()
+            } else {
+                head
+            }))
+        }
     }
 }
 
@@ -1833,6 +2419,12 @@ mod tests {
         flags: HashMap<(String, String), String>,
         uncertain: Vec<String>,
         reads: Vec<String>,
+        /// The class functions whose verified definition is in force.
+        defined: Vec<ClassFn>,
+        /// `__inherit_cache` as class names; `None`: not certain.
+        inherits: Option<Vec<String>>,
+        /// `[build_host]` arch and os.
+        host: (Option<String>, Option<String>),
     }
 
     impl Env for Vars {
@@ -1852,6 +2444,81 @@ mod tests {
         fn expand(&mut self, text: &str) -> Result<String, Stop> {
             Ok(text.replace("${A}", "a"))
         }
+        fn class_fn(&mut self, f: ClassFn) -> Result<(), Stop> {
+            if self.defined.contains(&f) {
+                Ok(())
+            } else {
+                Err(Stop::Unsupported(format!("{} not defined", f.name())))
+            }
+        }
+        fn inherits_class(&mut self, klass: &str) -> Result<bool, Stop> {
+            self.reads.push(format!("inherits {klass}"));
+            match &self.inherits {
+                Some(i) => Ok(i.iter().any(|c| c == klass)),
+                None => Err(Stop::Uncertain("inherits".into())),
+            }
+        }
+        fn host(&mut self, read: HostRead) -> Result<String, Stop> {
+            match read {
+                HostRead::Arch => self.host.0.clone(),
+                HostRead::OsLower => self.host.1.clone(),
+            }
+            .ok_or_else(|| host_unknown(read))
+        }
+    }
+
+    /// build-host: `os.uname()[4]` and `os.uname()[0].lower()` (OE-core `bitbake.conf`'s
+    /// `BUILD_ARCH` / `BUILD_OS`) evaluate to `[build_host]` when it gives them, and stay
+    /// unevaluated (uncertain, naming the key) when not. No other `os` read parses.
+    #[test]
+    fn host_reads_come_from_build_host_only() {
+        let mut e = env(&[("TARGET_ARCH", "x86_64")]);
+        for code in ["os.uname()[4]", "os.uname()[0].lower()"] {
+            let r = run(code, &mut e);
+            assert!(
+                matches!(&r, Err(Stop::Uncertain(w)) if w.contains("give [build_host]")),
+                "{code}: {r:?}"
+            );
+        }
+        e.host = (Some("x86_64".into()), Some("linux".into()));
+        assert_eq!(run("os.uname()[4]", &mut e).unwrap(), "x86_64");
+        assert_eq!(run(" os.uname()[0].lower() ", &mut e).unwrap(), "linux");
+        assert_eq!(
+            run("os.uname()[4].replace('_', '-')", &mut e).unwrap(),
+            "x86-64"
+        );
+        assert_eq!(
+            run("os.uname()[0].lower().upper()", &mut e).unwrap(),
+            "LINUX"
+        );
+        assert_eq!(
+            run("'linux' in os.uname()[0].lower()", &mut e).unwrap(),
+            "True"
+        );
+        // Not given by `[build_host]`, or not `os.uname()` at all: outside the subset.
+        for code in [
+            "os.uname()[0]",
+            "os.uname()[1]",
+            "os.uname()[2]",
+            "os.uname()",
+            "os.uname()[-1]",
+            "os.uname().machine",
+            "os.uname()[4:]",
+            "os.getcwd()",
+            "os.getuid()",
+            "os.environ",
+            "os",
+        ] {
+            let r = run(code, &mut e);
+            assert!(matches!(r, Err(Stop::Unsupported(_))), "{code}: {r:?}");
+        }
+        // Only arch given: os stays unknown.
+        e.host = (Some("aarch64".into()), None);
+        assert_eq!(run("os.uname()[4]", &mut e).unwrap(), "aarch64");
+        assert!(matches!(
+            run("os.uname()[0].lower()", &mut e),
+            Err(Stop::Uncertain(_))
+        ));
     }
 
     fn env(pairs: &[(&str, &str)]) -> Vars {
@@ -1878,6 +2545,55 @@ mod tests {
 
     fn not_evaluated(code: &str, pairs: &[(&str, &str)]) {
         assert!(run(code, &mut env(pairs)).is_err(), "{code} was evaluated");
+    }
+
+    fn cands(code: &str, e: &mut Vars) -> Option<Vec<String>> {
+        candidates(&parse(code).ok()?, e)
+    }
+
+    #[test]
+    fn candidates_of_expressions_that_cannot_be_evaluated() {
+        let mut e = env(&[("IMAGE_FSTYPES", "wic")]);
+        e.uncertain.push("SDK_OS".into());
+        // OE-core image.bbclass's IMGCLASSES word: a list indexed by a boolean.
+        assert_eq!(
+            cands(
+                r#"['', 'populate_sdk_ext']['linux' in d.getVar("SDK_OS")]"#,
+                &mut e
+            ),
+            Some(vec!["".to_string(), "populate_sdk_ext".to_string()])
+        );
+        assert_eq!(
+            cands("'a' if d.getVar('SDK_OS') else 'b'", &mut e),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(
+            cands("bb.utils.contains('SDK_OS', 'linux', 'x', '', d)", &mut e),
+            Some(vec!["x".to_string(), "".to_string()])
+        );
+        assert_eq!(
+            cands("oe.utils.ifelse(d.getVar('SDK_OS'), 'y', 'n')", &mut e),
+            Some(vec!["y".to_string(), "n".to_string()])
+        );
+        // Evaluable: its one value.
+        assert_eq!(
+            cands(
+                "bb.utils.contains_any('IMAGE_FSTYPES', 'live iso', 'image-live', '', d)",
+                &mut e
+            ),
+            Some(vec!["".to_string()])
+        );
+        // A result that is not a literal of the expression: not known.
+        assert_eq!(cands("d.getVar('SDK_OS')", &mut e), None);
+        assert_eq!(
+            cands(
+                "[d.getVar('SDK_OS'), 'x'][d.getVar('SDK_OS') == 'a']",
+                &mut e
+            ),
+            None
+        );
+        // Outside the subset altogether.
+        assert_eq!(cands("os.uname()[4]", &mut e), None);
     }
 
     #[test]
@@ -1946,6 +2662,355 @@ mod tests {
         assert_eq!(ok("bb.utils.contains('X', 'a', 'y', 'n', d,)", v), "y");
     }
 
+    fn classes(pairs: &[(&str, &str)], inherits: &[&str]) -> Vars {
+        Vars {
+            defined: crate::eval::classfn::ALL.to_vec(),
+            inherits: Some(inherits.iter().map(|s| s.to_string()).collect()),
+            ..env(pairs)
+        }
+    }
+
+    fn class_ok(code: &str, pairs: &[(&str, &str)], inherits: &[&str]) -> String {
+        match run(code, &mut classes(pairs, inherits)) {
+            Ok(s) => s,
+            Err(e) => panic!("{code}: {e:?}"),
+        }
+    }
+
+    /// The class functions of `classfn.rs`; every expected value is what the verified
+    /// definition (OE-core Wrynose `33a6bd6cc8`, executed by python 3 with a datastore
+    /// stub returning these values and `inherits_class` answering from the list) returns.
+    #[test]
+    fn class_functions() {
+        let p = r#"["/m/r/zlib-1.3", "/m/r/zlib", "/m/r/files"]"#;
+        let call = format!("base_set_filespath({p}, d)");
+        assert_eq!(
+            class_ok(&call, &[("FILESOVERRIDES", "arm:dogbonedark:kiss")], &[]),
+            "/m/r/zlib-1.3/kiss:/m/r/zlib/kiss:/m/r/files/kiss:/m/r/zlib-1.3/dogbonedark:/m/r/zlib/dogbonedark:/m/r/files/dogbonedark:/m/r/zlib-1.3/arm:/m/r/zlib/arm:/m/r/files/arm:/m/r/zlib-1.3/:/m/r/zlib/:/m/r/files/"
+        );
+        assert_eq!(
+            class_ok(
+                &call,
+                &[
+                    ("FILESOVERRIDES", "arm:dogbonedark:kiss"),
+                    ("FILESEXTRAPATHS", "/l/a/files:__default:")
+                ],
+                &[]
+            ),
+            "/l/a/files/kiss:/m/r/zlib-1.3/kiss:/m/r/zlib/kiss:/m/r/files/kiss:/l/a/files/dogbonedark:/m/r/zlib-1.3/dogbonedark:/m/r/zlib/dogbonedark:/m/r/files/dogbonedark:/l/a/files/arm:/m/r/zlib-1.3/arm:/m/r/zlib/arm:/m/r/files/arm:/l/a/files/:/m/r/zlib-1.3/:/m/r/zlib/:/m/r/files/"
+        );
+        assert_eq!(
+            class_ok(&call, &[], &[]),
+            "/m/r/zlib-1.3/:/m/r/zlib/:/m/r/files/:/m/r/zlib-1.3/:/m/r/zlib/:/m/r/files/"
+        );
+        assert_eq!(
+            class_ok(
+                r#"base_set_filespath(["/a/", "", "b"], d)"#,
+                &[("FILESOVERRIDES", "::/abs:x")],
+                &[]
+            ),
+            "/a/x:b/x:/abs:/abs:/a/:b/:/a/:b/:/a/:b/"
+        );
+        // A string path iterates its characters in python; not reproduced.
+        assert!(run(r#"base_set_filespath("/a", d)"#, &mut classes(&[], &[])).is_err());
+
+        let auto = "get_autotools_dep(d)";
+        let all = "autoconf-native automake-native libtool-native libtool-cross ";
+        assert_eq!(class_ok(auto, &[("PN", "curl")], &[]), all);
+        assert_eq!(
+            class_ok(auto, &[("PN", "curl"), ("INHIBIT_DEFAULT_DEPS", "1")], &[]),
+            "autoconf-native automake-native libtool-native "
+        );
+        assert_eq!(
+            class_ok(auto, &[("PN", "gmp-native")], &["native"]),
+            "autoconf-native automake-native libtool-native "
+        );
+        assert_eq!(
+            class_ok(auto, &[("PN", "libtool-native")], &["native"]),
+            "autoconf-native automake-native "
+        );
+        assert_eq!(
+            class_ok(auto, &[("PN", "gcc-libtool-cross")], &[]),
+            "autoconf-native automake-native "
+        );
+        assert_eq!(class_ok(auto, &[("PN", "automake-native")], &[]), "");
+        assert_eq!(
+            class_ok(auto, &[("PN", "x"), ("INHIBIT_AUTOTOOLS_DEPS", "1")], &[]),
+            ""
+        );
+        assert_eq!(
+            class_ok(auto, &[("PN", "x"), ("INHIBIT_AUTOTOOLS_DEPS", "")], &[]),
+            all
+        );
+        // PN unset: python raises.
+        assert!(run(auto, &mut classes(&[], &[])).is_err());
+        // inherits_class not certain: stops, but only where python asks.
+        let mut e = Vars {
+            inherits: None,
+            ..classes(&[("PN", "curl")], &[])
+        };
+        assert!(matches!(run(auto, &mut e), Err(Stop::Uncertain(_))));
+        let mut e = Vars {
+            inherits: None,
+            ..classes(&[("PN", "libtool-native")], &[])
+        };
+        assert_eq!(
+            run(auto, &mut e),
+            Ok("autoconf-native automake-native ".into())
+        );
+
+        assert_eq!(
+            class_ok("get_base_dep(d)", &[], &[]),
+            "${BASE_DEFAULT_DEPS}"
+        );
+        assert_eq!(
+            class_ok("get_base_dep(d)", &[("INHIBIT_DEFAULT_DEPS", "1")], &[]),
+            ""
+        );
+        // The unexpanded value is read; an empty expanded value does not tell it.
+        assert!(
+            run(
+                "get_base_dep(d)",
+                &mut classes(&[("INHIBIT_DEFAULT_DEPS", "")], &[])
+            )
+            .is_err()
+        );
+
+        let gd = "gettext_dependencies(d)";
+        assert_eq!(class_ok(gd, &[], &[]), "gettext-native");
+        assert_eq!(
+            class_ok(gd, &[("USE_NLS", "no")], &[]),
+            "gettext-minimal-native"
+        );
+        assert_eq!(class_ok(gd, &[("INHIBIT_DEFAULT_DEPS", "1")], &[]), "");
+        assert_eq!(
+            class_ok(
+                gd,
+                &[("INHIBIT_DEFAULT_DEPS", "1"), ("USE_NLS", "no")],
+                &["cross-canadian"]
+            ),
+            "gettext-minimal-native"
+        );
+        let go = "gettext_oeconf(d)";
+        assert_eq!(class_ok(go, &[("USE_NLS", "yes")], &[]), "--enable-nls");
+        assert_eq!(
+            class_ok(go, &[("USE_NLS", "no"), ("INHIBIT_DEFAULT_DEPS", "1")], &[]),
+            "--disable-nls"
+        );
+        assert_eq!(
+            class_ok(go, &[("INHIBIT_DEFAULT_DEPS", "1")], &[]),
+            "--disable-nls"
+        );
+        assert_eq!(
+            class_ok(go, &[("INHIBIT_DEFAULT_DEPS", "1")], &["cross-canadian"]),
+            "--enable-nls"
+        );
+
+        for (v, want) in [
+            ("2.88.4", "2.88"),
+            ("48", "48"),
+            ("", ""),
+            ("1.", "1"),
+            (".5", ".5"),
+        ] {
+            assert_eq!(class_ok(&format!("gnome_verdir({v:?})"), &[], &[]), want);
+        }
+        assert!(run("gnome_verdir(None)", &mut classes(&[], &[])).is_err());
+        assert!(run("gnome_verdir('1', d)", &mut classes(&[], &[])).is_err());
+        assert!(run("get_base_dep()", &mut classes(&[], &[])).is_err());
+
+        // Without the verified definition in force nothing is evaluated.
+        for code in [
+            auto,
+            "get_base_dep(d)",
+            gd,
+            go,
+            "gnome_verdir('1.2')",
+            call.as_str(),
+        ] {
+            not_evaluated(code, &[("PN", "curl")]);
+        }
+        // A class function is not a value: not called, not evaluated.
+        not_evaluated("get_base_dep", &[]);
+    }
+
+    /// `oe.utils.class_filter_features` (OE-core Wrynose `lib/oe/utils.py`, with
+    /// `bb.utils.filter_string`), the expression `set_class_filter` writes.
+    #[test]
+    fn oe_class_filter_features() {
+        let v = &[
+            ("F", "acl x11 ipv6 xattr"),
+            (
+                "FILTER",
+                "api-documentation debuginfod opencl opengl wayland",
+            ),
+        ];
+        assert_eq!(
+            ok(
+                "oe.utils.class_filter_features(\"sysvinit ipv4 ipv6 wayland opengl\", \"F\", \"FILTER\", d)",
+                v
+            ),
+            "acl ipv6 opengl wayland x11 xattr"
+        );
+        // Empty defaults: filter_string returns '' before reading its argument.
+        assert_eq!(
+            ok("oe.utils.class_filter_features('', 'F', 'UNSET', d)", v),
+            "acl ipv6 x11 xattr"
+        );
+        // d.getVar(features_var).split() of None, set(None): python raises.
+        not_evaluated(
+            "oe.utils.class_filter_features('a', 'UNSET', 'FILTER', d)",
+            v,
+        );
+        not_evaluated("oe.utils.class_filter_features('a', 'F', 'UNSET', d)", v);
+    }
+
+    /// `map_kernel_arch` and `map_uboot_arch` (OE-core Wrynose `kernel-arch.bbclass`): the
+    /// expected values are what the verified definitions return in python 3 (`None`: the
+    /// definition calls `bb.error` and returns `None`, which is not evaluated).
+    #[test]
+    fn kernel_arch_mappings() {
+        const VALID: &str = "alpha cris ia64 i386 x86 m68knommu m68k ppc powerpc powerpc64 ppc64 sparc sparc64 arm aarch64 m32r mips sh sh64 um h8300 parisc s390 v850 avr32 blackfin loongarch64 microblaze nios2 arc riscv xtensa";
+        let vars = [("valid_archs", VALID), ("TARGET_OS", "linux-gnueabi")];
+        let kernel: &[(&str, Option<&str>)] = &[
+            ("i686", Some("x86")),
+            ("i386", Some("x86")),
+            ("ix86", Some("x86")),
+            ("athlon", Some("x86")),
+            ("x86_64", Some("x86")),
+            ("x86-64", Some("x86")),
+            ("x8664", None),
+            ("arceb", Some("arc")),
+            ("armeb", Some("arm")),
+            ("arm", Some("arm")),
+            ("aarch64", Some("arm64")),
+            ("aarch64_be", Some("arm64")),
+            ("aarch64_ilp32", Some("arm64")),
+            ("aarch64_be_ilp32", Some("arm64")),
+            ("loongarch64", Some("loongarch")),
+            ("loongarch", Some("loongarch")),
+            ("loongarch16", None),
+            ("mips", Some("mips")),
+            ("mipsel", Some("mips")),
+            ("mips64el", Some("mips")),
+            ("mipsisa32r6el", Some("mips")),
+            ("mipsisa64r6", Some("mips")),
+            ("mipsr6el", Some("mips")),
+            ("mips32el", Some("mips")),
+            ("mipsx", None),
+            ("mcf5441x", Some("m68k")),
+            ("riscv64", Some("riscv")),
+            ("riscv32eb", Some("riscv")),
+            ("riscveb", Some("riscv")),
+            ("riscv128", None),
+            ("powerpc64le", Some("powerpc")),
+            ("ppc64", Some("powerpc")),
+            ("powerpc", Some("powerpc")),
+            ("sh3", Some("sh")),
+            ("sh4", Some("sh")),
+            ("sh2", None),
+            ("bfin", Some("blackfin")),
+            ("microblazeel", Some("microblaze")),
+            ("microblazee", None),
+            ("microblaze", Some("microblaze")),
+            ("sparc", Some("sparc")),
+            ("xtensa", Some("xtensa")),
+            ("or1k", None),
+        ];
+        for (a, want) in kernel {
+            let r = run(
+                &format!("map_kernel_arch('{a}', d)"),
+                &mut classes(&vars, &[]),
+            );
+            assert_eq!(r.ok().as_deref(), *want, "{a}");
+        }
+        // Outside linux the architecture is returned as it is.
+        let elf = [("valid_archs", VALID), ("TARGET_OS", "elf")];
+        assert_eq!(class_ok("map_kernel_arch('or1k', d)", &elf, &[]), "or1k");
+        // valid_archs is read first: unset, python raises.
+        assert!(run("map_kernel_arch('arm', d)", &mut classes(&[], &[])).is_err());
+        for (a, want) in [
+            ("i686", "x86"),
+            ("ix86", "x86"),
+            ("athlon", "athlon"),
+            ("x86_64", "x86_64"),
+            ("arm", "arm"),
+            ("aarch64", "aarch64"),
+            ("powerpc64le", "ppc"),
+            ("ppc64", "ppc"),
+            ("powerpc", "ppc"),
+            ("i3866", "i3866"),
+        ] {
+            assert_eq!(
+                class_ok(&format!("map_uboot_arch('{a}', d)"), &[], &[]),
+                want,
+                "{a}"
+            );
+        }
+        assert!(run("map_uboot_arch('i\\n86', d)", &mut classes(&[], &[])).is_err());
+    }
+
+    /// `int()` and the order comparisons of integers, as OE-core kirkstone / scarthgap
+    /// `bitbake.conf` write `EXTENDPE` (`['','${PE}_'][int(d.getVar('PE') or 0) > 0]`); the
+    /// expected values are python 3's.
+    #[test]
+    fn int_and_order_comparisons() {
+        let v = &[
+            ("PE", "2"),
+            ("Z", "0"),
+            ("N", "-3"),
+            ("W", " 1"),
+            ("U", "1_0"),
+        ];
+        assert_eq!(ok("['','2_'][int(d.getVar('PE') or 0) > 0]", v), "2_");
+        assert_eq!(ok("['','x_'][int(d.getVar('UNSET') or 0) > 0]", v), "");
+        assert_eq!(ok("['','x_'][int(d.getVar('Z') or 0) > 0]", v), "");
+        assert_eq!(ok("int(d.getVar('N')) < 0", v), "True");
+        assert_eq!(ok("int('+7') >= 7", v), "True");
+        assert_eq!(ok("int('007') <= 6", v), "False");
+        assert_eq!(ok("True > 0", v), "True");
+        assert_eq!(ok("int(True)", v), "1");
+        // Accepted by python, not reproduced: surrounding whitespace, `_`; raises: None,
+        // other text. Strings are not ordered here, nor chains.
+        for code in [
+            "int(d.getVar('W'))",
+            "int(d.getVar('U'))",
+            "int(d.getVar('UNSET'))",
+            "int('x')",
+            "int('')",
+            "int('1', 16)",
+            "'a' < 'b'",
+            "1 < 2 < 3",
+            "None > 0",
+        ] {
+            not_evaluated(code, v);
+        }
+    }
+
+    /// Slices with step 1, as `util-linux.inc` (`'.'.join(d.getVar('PV').split('.')[0:2])`)
+    /// and `systemd-boot` (`" ".join(d.getVar('LD').split()[1:])`) write them; the expected
+    /// values are python 3's.
+    #[test]
+    fn slices() {
+        let v = &[("PV", "2.41.3"), ("LD", "arm-linux-ld --sysroot=/x -m elf")];
+        assert_eq!(ok("'.'.join(d.getVar('PV').split('.')[0:2])", v), "2.41");
+        assert_eq!(
+            ok(" \" \".join(d.getVar('LD').split()[1:])", v),
+            "--sysroot=/x -m elf"
+        );
+        assert_eq!(ok("'abcdef'[-2:]", v), "ef");
+        assert_eq!(ok("'abcdef'[:-10]", v), "");
+        assert_eq!(ok("'abcdef'[4:2]", v), "");
+        assert_eq!(ok("'abc'[True:]", v), "bc");
+        assert_eq!(ok("'abc'[None:2]", v), "ab");
+        assert_eq!(ok("'-'.join(['a', 'b', 'c'][-100:100])", v), "a-b-c");
+        assert_eq!(ok("'.'.join('6'.split('.')[:-1]) or '6'", v), "6");
+        assert_eq!(ok("'.'.join(d.getVar('PV').split('.')[:])", v), "2.41.3");
+        // str() of a list is not reproduced, slicing or not.
+        not_evaluated("d.getVar('PV').split('.')[0:2]", v);
+        not_evaluated("d.getVar('UNSET')[0:2]", v);
+    }
+
     #[test]
     fn rejects_everything_else() {
         let v = &[("X", "a b c")];
@@ -1999,8 +3064,14 @@ mod tests {
             "('a', 'b')",
             "()",
             "{'a': 1}",
-            "d.getVar('X')[0:2]",
             "'abc'[0]",
+            "'abc'[::2]",
+            "'abc'[0:2:1]",
+            "'abc'[:]['x']",
+            "'abc'[0, 1]",
+            "'abc'[]",
+            "'abc'['a':]",
+            "d.getVar('X')[0:1.5]",
             "d.getVar('X').split(',', 1)",
             "d.getVar('X').rsplit()",
             "d.getVar('X').format()",

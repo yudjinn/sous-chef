@@ -1,0 +1,15 @@
+<persisted-output>
+Output too large (33.2KB). Full output saved to: {{HOME}}/.claude/projects/-home-{{USER}}-Development-sous-chef-live-runs-real-checks-hooks-ws/81e9de00-fc15-4674-8abf-22b99788a0de/tool-results/b6mb7zedj.txt
+
+Preview (first 2KB):
+sous-chef: bitbake output (345 lines, 29999 bytes) stored as h:b16e05df55; the full text is there, read it with the slice tool.
+field	value
+recipe	curl-8.19.0-r0
+task	do_configure
+exit	1
+error (error, line 32)	configure failed
+context	ERROR: Execution of '{{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/temp/run.do_conf...
+context	ERROR: Logfile of failure stored in: {{LIVE}}/yocto-kiss/build/tmp/work/armv7at2hf-neon-oe-linux-gnueabi/curl/8.19.0/...
+handle	h:b16e05df55
+slice handle=h:b16e05df55 failures=true | grep=RE | lines=32-34
+</persisted-output>

@@ -17,7 +17,9 @@
 //! reads, and the replacement ends with the `slice` hint. Bash output is never the text an
 //! Edit works on, so the "annotations are additions" rule does not apply to it. The
 //! replacement keeps every other field of `tool_response` as it was (`interrupted`,
-//! `isImage` and any others), puts the digest in `stdout` and empties `stderr`. If Claude
+//! `isImage` and any others) except `persistedOutputPath` / `persistedOutputSize` (a large
+//! output's saved copy, read back for the digest: [`persisted_output`]), puts the digest in
+//! `stdout` and empties `stderr`. If Claude
 //! Code rejects the replacement the original output stays: it fails safe.
 //!
 //! The digest's `function` row is mapped to the metadata as the `log` tool maps it, with
@@ -208,6 +210,35 @@ fn kas_runs_bitbake(words: &[&str], segment: &str) -> bool {
     }
 }
 
+/// `tool_response` fields of a Bash output Claude Code saved to a file because it was large
+/// (seen live, Claude Code 2.1.328; not in the hooks reference): the file and the whole
+/// output's size. `stdout` then holds only the start.
+pub const PERSISTED_PATH: &str = "persistedOutputPath";
+pub const PERSISTED_SIZE: &str = "persistedOutputSize";
+
+/// Largest saved output read back.
+const PERSISTED_MAX: u64 = 64 * 1024 * 1024;
+
+/// The whole output from `persistedOutputPath`, when the response names an absolute regular
+/// file of at most [`PERSISTED_MAX`] bytes that is larger than the `stdout` it came with
+/// (`stdout_len`). Anything else (no field, no file, unreadable): `None`, and the cut
+/// `stdout` is used.
+pub fn persisted_output(
+    resp: &serde_json::Map<String, Value>,
+    stdout_len: usize,
+) -> Option<String> {
+    let path = Path::new(resp.get(PERSISTED_PATH)?.as_str()?);
+    if !path.is_absolute() {
+        return None;
+    }
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > PERSISTED_MAX || meta.len() as usize <= stdout_len {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// stdout, then stderr (on a new line) when there is any.
 fn combined(stdout: &str, stderr: &str) -> String {
     if stderr.is_empty() {
@@ -303,6 +334,11 @@ impl Handler for BashDigest {
         }
         let stdout = resp.get("stdout").and_then(Value::as_str).unwrap_or("");
         let stderr = resp.get("stderr").and_then(Value::as_str).unwrap_or("");
+        // A large output reaches the hook cut (live, Claude Code 2.1.328: the first 29 999
+        // of 33 946 bytes, with `persistedOutputPath` and `persistedOutputSize`); the whole
+        // output is in that file, so the digest is made from it.
+        let full = persisted_output(resp, stdout.len());
+        let stdout = full.as_deref().unwrap_or(stdout);
         if stdout.len() + stderr.len() <= MIN_BYTES {
             return Ok(None);
         }
@@ -360,6 +396,10 @@ impl Handler for BashDigest {
                 Value::String(summary(&text, &handle, digest, !stderr.is_empty())),
             );
             obj.insert("stderr".into(), Value::String(String::new()));
+            // Kept, these make Claude Code show the digest as the preview of an output "too
+            // large" saved to that file (seen live); the digest is small, so they go.
+            obj.remove(PERSISTED_PATH);
+            obj.remove(PERSISTED_SIZE);
         }
         cx.note(format!("stored {} bytes as {handle}", text.len()));
         Ok(Some(Response {
@@ -372,6 +412,32 @@ impl Handler for BashDigest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persisted_output_is_read_only_when_it_is_the_larger_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("out.txt");
+        std::fs::write(&f, "0123456789").unwrap();
+        let resp = |p: &str| {
+            let mut m = serde_json::Map::new();
+            m.insert(PERSISTED_PATH.into(), Value::String(p.into()));
+            m
+        };
+        let abs = f.display().to_string();
+        assert_eq!(
+            persisted_output(&resp(&abs), 4).as_deref(),
+            Some("0123456789")
+        );
+        // Not larger than what came with it, relative, missing, a directory: not read.
+        assert_eq!(persisted_output(&resp(&abs), 10), None);
+        assert_eq!(persisted_output(&resp("out.txt"), 4), None);
+        assert_eq!(persisted_output(&resp(&format!("{abs}.gone")), 4), None);
+        assert_eq!(
+            persisted_output(&resp(&dir.path().display().to_string()), 0),
+            None
+        );
+        assert_eq!(persisted_output(&serde_json::Map::new(), 0), None);
+    }
 
     #[test]
     fn commands_that_run_bitbake() {

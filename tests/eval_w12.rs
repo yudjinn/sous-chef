@@ -196,8 +196,20 @@ fn the_nativesdk_variant_provides_what_suffix_filter_makes_of_provides() {
         "{:?}",
         provides_notes(&ds)
     );
-    // The anonymous python's other filters stay flagged.
-    assert!(ds.value("DEPENDS").unwrap().unevaluated_python);
+    // acc-helpers: the anonymous python is OE-core's text, so its DEPENDS filter
+    // (suffix_filter_deps) is installed too: DEPENDS (unset here, so "" after
+    // handleVirtRecipeProviders) is certain; what rename_package_variables does to PACKAGES
+    // stays flagged.
+    let d = ds.value("DEPENDS").unwrap();
+    assert!(!d.unevaluated_python, "{d:?}");
+    assert!(
+        ds.replay().var_notes["DEPENDS"]
+            .iter()
+            .any(|n| n.contains("suffix_filter_deps(val, 'nativesdk', [])")),
+        "{:?}",
+        ds.replay().var_notes
+    );
+    assert!(ds.value("PACKAGES").unwrap().unevaluated_python);
     // The base recipe is not filtered (its PN does not start with nativesdk-).
     let base = eval(&fx, "libfoo");
     let p = base.value("PROVIDES").unwrap();

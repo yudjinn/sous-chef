@@ -614,8 +614,16 @@ fn inheritors_through_a_bbappend_and_a_class() {
         .iter()
         .map(|u| lp(&u.file))
         .collect();
-    assert!(via_class.contains(&"meta-mine:classes-recipe/wrapper.bbclass".to_string()));
-    assert!(via_class.contains(&"meta-mine:recipes-app/app/app_0.1.bb".to_string()));
+    assert!(
+        via_class
+            .iter()
+            .any(|i| i == "meta-mine:classes-recipe/wrapper.bbclass")
+    );
+    assert!(
+        via_class
+            .iter()
+            .any(|i| i == "meta-mine:recipes-app/app/app_0.1.bb")
+    );
 }
 
 #[test]

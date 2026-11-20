@@ -68,14 +68,51 @@ pub fn escape_property(s: &str) -> String {
     escape_data(s).replace(':', "%3A").replace(',', "%2C")
 }
 
+/// GitHub Actions shows at most this many annotations of each type (error, warning,
+/// notice) per step, and 50 per job; the rest are dropped silently (actions/toolkit,
+/// docs/problem-matchers.md, "Limitations"). Every command stays in the step's log.
+pub const ANNOTATIONS_PER_TYPE: usize = 10;
+
+/// The notice printed before the findings when some will not be shown as annotations:
+/// `None` when every type has at most [`ANNOTATIONS_PER_TYPE`] findings.
+pub fn annotation_overflow(findings: &[super::Finding]) -> Option<String> {
+    let count = |s: Severity| findings.iter().filter(|f| f.severity == s).count();
+    let over: Vec<String> = [
+        (Severity::Error, "error"),
+        (Severity::Warning, "warning"),
+        (Severity::Info, "notice"),
+    ]
+    .iter()
+    .filter_map(|&(s, name)| {
+        let n = count(s);
+        (n > ANNOTATIONS_PER_TYPE).then(|| format!("{n} {name}s"))
+    })
+    .collect();
+    if over.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "::notice title={}::{}\n",
+        escape_property("sous-chef lint"),
+        escape_data(&format!(
+            "{} findings: {}; GitHub shows {ANNOTATIONS_PER_TYPE} annotations of each type per \
+             step (50 per job), so some are only in this step's log. Use --format sarif for \
+             code scanning, or a baseline to report only new findings.",
+            findings.len(),
+            over.join(", ")
+        ))
+    ))
+}
+
 /// One workflow command per finding: `::error` / `::warning` / `::notice` (info) with
-/// `file` (relative to the repository root), `line`, `endLine` and `title` (the rule id).
+/// `file` (relative to the repository root), `line`, `endLine` and `title` (the rule id),
+/// after the [`annotation_overflow`] notice when there is one.
 pub fn annotations(
     ws: &Workspace,
     paths: &sarif::RepoPaths,
     findings: &[super::Finding],
 ) -> String {
-    let mut out = String::new();
+    let mut out = annotation_overflow(findings).unwrap_or_default();
     for f in findings {
         let cmd = match f.severity {
             Severity::Error => "error",
@@ -181,8 +218,24 @@ pub fn dispatch(
         OutputFormat::Sarif | OutputFormat::Github => {
             let paths = sarif::RepoPaths::new(&cfg.work_dir);
             let text = if format == OutputFormat::Sarif {
+                // Fingerprints of every finding (occurrence numbers count them all), then
+                // at most GitHub's limit of results, the most severe.
                 let fps = baseline::fingerprints(ws, &report.findings);
-                let mut t = sarif::render(ws, cfg, &paths, &report.findings, &fps);
+                let sev: Vec<Severity> = report.findings.iter().map(|f| f.severity).collect();
+                let keep = sarif::keep_most_severe(&sev, sarif::MAX_RESULTS);
+                if keep.len() < report.findings.len() {
+                    report.notes.push(format!(
+                        "SARIF: {} of {} findings written, the most severe (GitHub code \
+                         scanning rejects more than {} results per run)",
+                        keep.len(),
+                        report.findings.len(),
+                        sarif::MAX_RESULTS
+                    ));
+                }
+                let findings: Vec<super::Finding> =
+                    keep.iter().map(|&i| report.findings[i].clone()).collect();
+                let fps: Vec<String> = keep.iter().map(|&i| fps[i].clone()).collect();
+                let mut t = sarif::render(ws, cfg, &paths, &findings, &fps);
                 t.push('\n');
                 t
             } else {

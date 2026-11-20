@@ -3,8 +3,10 @@
 //! recorded output. The recorded outputs (`tests/fixtures/outputs/sigs/`) are hand-written
 //! from the format of BitBake's `compare_sigfiles` (`lib/bb/siggen.py`, BitBake 2.18; the
 //! messages are the same on 2.0 and 2.8) and `bin/bitbake-diffsigs` (recursion indented
-//! by four spaces), not recorded from a build: the live workspace has no two signatures of
-//! one task to compare.
+//! by four spaces), not recorded from a build. The real outputs of the live builds are in
+//! `tests/fixtures/outputs/live/` (y1-build: a change of curl's own inputs, checked in
+//! `tests/live_build.rs`; real-checks: a change reaching curl through zlib, also replayed
+//! through the tool here).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod common;
@@ -43,7 +45,13 @@ impl DiffSigs for Fake {
             let mut cmd = tokio::process::Command::new(fixture("fakebb/bin/bitbake-diffsigs"));
             cmd.args(args).env("FAKEBB_EXIT", self.exit.to_string());
             if let Some(o) = self.stdout {
-                cmd.env("FAKEBB_OUTPUT", fixture(&format!("outputs/sigs/{o}")));
+                // A recorded live output is named by its path under `outputs/`.
+                let rel = if o.starts_with("live/") {
+                    format!("outputs/{o}")
+                } else {
+                    format!("outputs/sigs/{o}")
+                };
+                cmd.env("FAKEBB_OUTPUT", fixture(&rel));
             }
             if let Some(e) = self.stderr {
                 let text = std::fs::read_to_string(fixture(&format!("outputs/sigs/{e}"))).unwrap();
@@ -83,7 +91,10 @@ struct Fx {
 }
 
 fn ctx() -> Fx {
-    let config = common::fixture_config();
+    ctx_with(common::fixture_config())
+}
+
+fn ctx_with(config: sous_chef::config::Config) -> Fx {
     let cache = tempfile::tempdir().unwrap();
     let workspace = Workspace::discover(&config).unwrap();
     let mut index = Index::open_in(cache.path(), &workspace).unwrap();
@@ -299,4 +310,92 @@ fn stamp_signature_files_are_counted() {
     let found =
         sous_chef::bitbake::sigs::stamp_sigfiles(&root.join("build"), "curl", "do_fetch", |_| true);
     assert_eq!(found.len(), 2, "{found:?}");
+}
+
+/// The real `bitbake-diffsigs -t curl do_configure` of real-checks (2026-11-20): curl
+/// re-ran because zlib's `CFLAGS` changed (`CFLAGS:append:class-target = " -O1"` in a
+/// scratch `zlib_%.bbappend`), five dependencies down. Replayed on a copy of the fixture
+/// workspace with a zlib recipe and that bbappend: the chain as BitBake printed it, the
+/// cause attributed to zlib and pointed at the bbappend's line, and no claim that curl's
+/// own inputs did not change (BitBake's output cannot say: zlib's do_compile, whose own
+/// basehash changed, printed only its dependency).
+#[tokio::test]
+async fn real_change_through_a_dependency_points_at_the_dependencys_bbappend() {
+    let (_tmp, root) = common::temp_ws();
+    let zlib = root.join("meta-core/recipes-core/zlib");
+    std::fs::create_dir_all(&zlib).unwrap();
+    std::fs::write(
+        zlib.join("zlib_1.3.2.bb"),
+        concat!(
+            "SUMMARY = \"Zlib Compression Library\"\n",
+            "LICENSE = \"Zlib\"\n",
+            "CFLAGS += \"-D_REENTRANT -fPIE\"\n",
+            "BBCLASSEXTEND = \"native nativesdk\"\n"
+        ),
+    )
+    .unwrap();
+    let app = root.join("meta-mine/recipes-core/zlib");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::copy(
+        fixture("outputs/live/real-checks/sigs/zlib_%.bbappend.txt"),
+        app.join("zlib_%.bbappend"),
+    )
+    .unwrap();
+    let f = ctx_with(common::ws_config(&root));
+    let fake = Fake {
+        stdout: Some("live/real-checks/sigs/diffsigs-curl-do_configure.out"),
+        stderr: None,
+        exit: 0,
+        expect_args: t_args("curl", "do_configure"),
+    };
+    let mut a = task_args("curl", "configure");
+    a.budget_tokens = Some(2000);
+    let out = sigs::run_with(&f.ctx, a, Some(&fake), None).await.unwrap();
+    assert!(
+        out.contains(concat!(
+            "task\tcurl:do_configure\tre-ran: a dependency's hash changed, by way of ",
+            "curl:do_prepare_recipe_sysroot -> zlib:do_populate_sysroot -> zlib:do_install ",
+            "-> zlib:do_compile -> zlib:do_configure\t-"
+        )),
+        "{out}"
+    );
+    assert!(!out.contains("its own inputs did not change"), "{out}");
+    assert!(
+        out.contains("via\tzlib:do_configure\thash 5df8f861e8 -> c54a2de5c5\t-"),
+        "{out}"
+    );
+    assert_eq!(out.matches("\nvia\t").count(), 5, "{out}");
+    assert!(
+        out.contains(concat!(
+            "cause\tCFLAGS (zlib)\tvalue changed: \"${TARGET_CFLAGS} -D_REENTRANT -fPIE {+-O1+}\"",
+            "\tmeta-mine:recipes-core/zlib/zlib_%.bbappend:3"
+        )),
+        "{out}"
+    );
+    assert!(
+        out.contains("note: bitbake-diffsigs shows a changed dependency's comparison instead of the task's own"),
+        "{out}"
+    );
+    assert!(!out.contains("not recognised"), "{out}");
+
+    // curl's do_install, seven dependencies deep, at the default budget: the cause comes
+    // before the path, so a budget cut drops `via` rows, never the cause (live, with the
+    // path first, the cause was the row cut).
+    let fake = Fake {
+        stdout: Some("live/real-checks/sigs/diffsigs-curl-do_install.out"),
+        stderr: None,
+        exit: 0,
+        expect_args: t_args("curl", "do_install"),
+    };
+    let out = sigs::run_with(&f.ctx, task_args("curl", "install"), Some(&fake), None)
+        .await
+        .unwrap();
+    assert!(
+        out.contains("by way of curl:do_compile -> curl:do_configure -> "),
+        "{out}"
+    );
+    let cause = out.find("\ncause\tCFLAGS (zlib)\t").expect(&out);
+    let via = out.find("\nvia\t").expect(&out);
+    assert!(cause < via, "{out}");
+    assert!(out.contains("zlib_%.bbappend:3"), "{out}");
 }

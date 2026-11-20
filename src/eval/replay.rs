@@ -78,11 +78,14 @@ use regex::Regex;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use super::anon::{self, Guard, NoWrite};
+use super::anonmodel::{self, Applied, Model};
+use super::classfn::{self, ClassDef, ClassFn};
 use super::datastore::{Content, OpKind, Var, base_of, full_name, split_keyword};
 use super::expand::has_python;
 use super::license;
 use super::skips;
-use super::variant::ClassExtend;
+use super::variant::{ClassExtend, VarFilter};
 use super::{DataStore, FileVisit, OpStatus, Overlay, Target, VarOp};
 use crate::error::{Error, Result};
 use crate::index::query::{self, FileRow, StatementFilter, StatementRow};
@@ -115,12 +118,27 @@ pub struct ReplayNotes {
     /// `BB_RECIPE_VIRTUAL_PROVIDERS` rewrite of `DEPENDS`.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub var_notes: BTreeMap<String, Vec<String>>,
+    /// `sous-chef.toml [build_host]` (`Workspace::build_host`): what python's
+    /// `os.uname()[4]` / `os.uname()[0].lower()` evaluate to; empty: not known.
+    #[serde(skip_serializing_if = "crate::config::BuildHost::is_empty")]
+    pub build_host: crate::config::BuildHost,
     /// Anonymous python functions, in parse order (configuration classes included: BitBake
     /// runs those for every recipe too).
     pub anonymous: Vec<AnonPython>,
     /// Base names of variables that anonymous python changes by a literal name; their
-    /// values carry `unevaluated_python`.
+    /// values carry `unevaluated_python`. A name whose every write is proved not to happen
+    /// on this recipe is taken out at finalisation and listed in
+    /// [`ReplayNotes::no_writes`] (`eval::anon`).
     pub python_vars: BTreeSet<String>,
+    /// Names of [`ReplayNotes::python_vars`] that came from something other than an
+    /// anonymous function's write (an event handler not run, a filter not computed): never
+    /// taken out.
+    #[serde(skip)]
+    pub(crate) fixed_python_vars: BTreeSet<String>,
+    /// Names anonymous python writes, but not on this recipe: every write to them was
+    /// proved not to happen (`eval::anon`), so they are not in `python_vars`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub no_writes: Vec<NoWrite>,
     /// Base names of variables a statement the replay could not apply would have set
     /// (`MACHINE` and `DISTRO` when the `addfragments` list cannot be expanded), with the
     /// names that stood in the way; their values carry those names in `unresolved`.
@@ -140,17 +158,36 @@ pub struct ReplayNotes {
     /// their values carry `unevaluated_python` when the reference's value did.
     #[serde(skip_serializing_if = "BTreeSet::is_empty")]
     pub uncertain_vars: BTreeSet<String>,
+    /// References the replay could not follow, or not exactly, that BitBake follows: what
+    /// the files they would read may change. Every value they may change is flagged
+    /// (`DataStore::flag_causes` names the reference).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ref_effects: Vec<RefEffect>,
     /// Names with `${...}` that `expand_keys` could not expand (python or undefined
     /// variables); they stay under their written name.
     pub incomplete_keys: Vec<String>,
+    /// The [`ReplayNotes::incomplete_keys`] BitBake may rename after all: their expansion
+    /// holds python, or a name something may still set. (A name that is certainly unset
+    /// stays `${X}` in BitBake's `d.expand` too, and `expandKeys` renames only a key whose
+    /// expansion differs.) A value they may be renamed onto is flagged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub renamable_keys: Vec<String>,
     /// Paths probed for an `include` / `require` / `include_all` that held no file (absolute,
     /// normalised): a file created there would have been read. See [`super::Overlay`].
     #[serde(skip)]
     pub(crate) probed_missing: BTreeSet<PathBuf>,
+    /// The configuration evaluated: its multiconfig name, `""` for the default one (whose
+    /// `BB_CURRENT_MC` is `default` before BitBake 2.12, while BitBake's task ids still use
+    /// `""`, `runqueue.py` `add_mc_dependencies`).
+    #[serde(skip)]
+    pub(crate) config_name: String,
     /// `__BBTASKS`: the tasks `addtask` added and `deltask` did not remove, in order (see
     /// [`DataStore::tasks`]).
     #[serde(skip)]
     pub(crate) tasks: Vec<String>,
+    /// `addhandler` names, with the statement, in parse order.
+    #[serde(skip)]
+    pub(crate) handlers: Vec<(String, Loc)>,
     /// The `BBCLASSEXTEND` word of a class-extended variant (see [`super::variant`]);
     /// `None` for the base recipe and the configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -175,6 +212,29 @@ pub struct ReplayNotes {
     /// datastore copy (`multi_finalize`'s `safe_d`) carries it. Taken by finalisation.
     #[serde(skip)]
     pub(crate) nativesdk_anon: Option<(Loc, bool)>,
+    /// That anonymous python is OE-core Wrynose's text ([`classfn::NATIVESDK_ANONYMOUS`]):
+    /// its `DEPENDS` and `PACKAGE_WRITE_DEPS` filters are installed with the `PROVIDES` one.
+    #[serde(skip)]
+    pub(crate) nativesdk_anon_verified: bool,
+    /// For each allowlisted class function name ([`super::classfn`]), the last `def` of it
+    /// the parse executed (BitBake runs a `def` when it parses it, into one global python
+    /// context, so the last one wins).
+    #[serde(skip)]
+    pub(crate) class_defs: BTreeMap<String, ClassDef>,
+    /// For each `def` a modelled anonymous function calls ([`anonmodel::DEFS`]), the last
+    /// definition the parse executed and whether it is the verified text.
+    #[serde(skip)]
+    pub(crate) model_defs: BTreeMap<String, (Loc, bool)>,
+    /// Every top-level `def` the parse executed, by name: the last one (BitBake's global
+    /// method pool keeps the last). Anonymous python that calls one writes what it writes
+    /// ([`Replay::def_call_writes`]).
+    #[serde(skip)]
+    pub(crate) def_locs: BTreeMap<String, Loc>,
+    /// The read filters class-extension code installed (`d.setVarFilter`), by variable base
+    /// name, with where: applied by finalisation to every read of a certain value (see
+    /// [`super::variant::VarFilter`]).
+    #[serde(skip)]
+    pub(crate) filters: BTreeMap<String, (VarFilter, Loc)>,
 }
 
 /// One anonymous python function.
@@ -191,6 +251,38 @@ pub struct AnonPython {
     /// It also changes variables through a computed name, or passes `d` to other code, so
     /// its effect is not known even by name.
     pub opaque: bool,
+    /// Proved to return at once on this recipe (why), so it writes nothing (`eval::anon`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub returns_early: Option<String>,
+    /// The `python_vars` entries it contributes, each with the condition of known OE-core
+    /// code its writes are under (`None`: unconditional, as far as the replay knows).
+    #[serde(skip)]
+    pub(crate) entries: Vec<(String, Option<Guard>)>,
+    /// The conditions of its leading `if <cond>: return` statements.
+    #[serde(skip)]
+    pub(crate) early_returns: Vec<String>,
+    /// Its value writes through a computed name (`d.setVar(task, ...)`): for each, the
+    /// literal prefix every name it can write starts with, `None` when not known
+    /// ([`computed_value_writes`]). A name one of them may write is never taken out of
+    /// `python_vars` by `eval::anon`.
+    #[serde(skip)]
+    pub(crate) computed_writes: Vec<Option<String>>,
+    /// Its text is a verified one whose writes the replay reproduces ([`anonmodel`]), with
+    /// the indices of the [`AnonPython::entries`] the model covers.
+    #[serde(skip)]
+    pub(crate) model: Option<(Model, Vec<usize>)>,
+    /// What the model did on this recipe (set by finalisation).
+    #[serde(skip)]
+    pub(crate) model_applied: Option<Applied>,
+}
+
+impl AnonPython {
+    /// The names it writes, as recorded in [`ReplayNotes::python_vars`] (a base name for a
+    /// literal write, the full expanded name for a write through a local wrapper, the
+    /// variables of `PACKAGEVARS` for `rename_package_variables`).
+    pub fn writes(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|(e, _)| e.as_str())
+    }
 }
 
 /// A reference statement the replay did not follow.
@@ -225,6 +317,72 @@ pub struct UncertainRef {
     /// Unresolved names the expansion carried that are still unset after the file was
     /// read (a name the file itself sets, `TCOVERRIDE` for `toolchain/gcc`, is dropped).
     pub unresolved: Vec<String>,
+}
+
+/// What a reference the replay could not follow exactly may change: BitBake reads files
+/// there that the replay did not (see [`ReplayNotes::ref_effects`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RefEffect {
+    /// The statement (`None` as for [`RefIssue::loc`]).
+    pub loc: Option<Loc>,
+    pub via: Vec<Loc>,
+    /// `include`, `require`, `include_all`, `inherit`, `inherit_defer`, `INHERIT`,
+    /// `addfragments`, `BBCLASSEXTEND`.
+    pub kind: String,
+    /// The argument as written.
+    pub text: String,
+    /// Why it was not followed exactly (`python in IMGCLASSES`).
+    pub why: String,
+    /// The classes (an inherit) or files (an include) it may read that were not read; empty
+    /// when they are not known.
+    pub not_read: Vec<String>,
+    /// The variables those may change, by base name, with the override conditions of each
+    /// write (an empty list: unconditional); `None`: any variable.
+    pub vars: Option<BTreeMap<String, Vec<Vec<String>>>>,
+}
+
+impl RefEffect {
+    /// The cause line for a value of `name` it may change.
+    pub fn cause(&self, name: &str) -> String {
+        let article = if self
+            .kind
+            .chars()
+            .next()
+            .is_some_and(|c| "aeiouAEIOU".contains(c))
+        {
+            "an"
+        } else {
+            "a"
+        };
+        let at = self
+            .loc
+            .as_ref()
+            .map(|l| format!(" at {l}"))
+            .unwrap_or_default();
+        match &self.vars {
+            None => format!(
+                "{article} {}{at} could not be followed ({}); the files it would read may change any value, {name} included",
+                self.kind, self.why
+            ),
+            Some(_) => {
+                const MAX: usize = 4;
+                let mut list = self
+                    .not_read
+                    .iter()
+                    .take(MAX)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if self.not_read.len() > MAX {
+                    list.push_str(&format!(" (+{} more)", self.not_read.len() - MAX));
+                }
+                format!(
+                    "{article} {}{at} could not be followed exactly ({}); {list}, which it may read and sous-chef did not, would change {name}",
+                    self.kind, self.why
+                )
+            }
+        }
+    }
 }
 
 /// Why a reference was not followed.
@@ -271,6 +429,104 @@ struct Taint {
     unresolved: Vec<String>,
     /// Base names the files read under it changed.
     bases: BTreeSet<String>,
+    /// The same writes with the override conditions of each (as written, `append` /
+    /// `prepend` / `remove` included).
+    writes: Vec<(String, Vec<String>)>,
+}
+
+/// How a reference reads its words (see `Replay::follow_partial`).
+enum RefMode<'s> {
+    Inherit {
+        deferred: bool,
+    },
+    Include {
+        st: &'s StatementRow,
+        from: &'s Path,
+        mode: &'s str,
+    },
+}
+
+/// One whitespace-separated word of a reference argument expanded with holes.
+enum Piece {
+    /// Read whatever the python gives.
+    Certain(String),
+    /// One of these word lists (python whose possible values are known exactly).
+    Maybe(Vec<Vec<String>>),
+    /// `<prefix><T><suffix>`, `T` a host value: one path component, no whitespace.
+    Pattern(String, String),
+}
+
+/// A piece of a word expanded with holes.
+enum Seg {
+    Text(String),
+    Hole(usize),
+}
+
+/// What files read on a copy of the store changed (`Replay::probe`).
+#[derive(Debug, Default)]
+struct ProbeResult {
+    /// Base name -> the override conditions of each write.
+    writes: BTreeMap<String, Vec<Vec<String>>>,
+    /// Something in them may change any variable.
+    unbounded: bool,
+}
+
+impl ProbeResult {
+    fn add(&mut self, base: String, overrides: Vec<String>) {
+        let e = self.writes.entry(base).or_default();
+        if !e.contains(&overrides) {
+            e.push(overrides);
+        }
+    }
+
+    fn merge(&mut self, other: ProbeResult) {
+        self.unbounded |= other.unbounded;
+        for (b, conds) in other.writes {
+            for c in conds {
+                self.add(b.clone(), c);
+            }
+        }
+    }
+}
+
+/// Most combinations of hole values one word may take before `follow_partial` gives up.
+const MAX_COMBINATIONS: usize = 64;
+
+/// `os.uname()[0]` or `os.uname()[4]` (optionally `.lower()`): the host's system name or
+/// machine (`BUILD_OS`, `BUILD_ARCH`), which sous-chef evaluates only from `sous-chef.toml
+/// [build_host]` (then this is never met: the python evaluates). Taken to be one
+/// token without whitespace or `/`: Linux reports `Linux` and the kernel's architecture
+/// name (`x86_64`, `aarch64`, `armv7l`). This is a property of the host, not of BitBake
+/// (docs/bitbake-semantics.md, "References that cannot be followed exactly").
+fn host_token(code: &str) -> bool {
+    static RE: LazyLock<Option<Regex>> =
+        LazyLock::new(|| Regex::new(r"^os\.uname\(\)\[(0|4)\](\.lower\(\))?$").ok());
+    RE.as_ref().is_some_and(|re| re.is_match(code.trim()))
+}
+
+/// The text and hole pieces of a word expanded with holes (`expand::hole`), `None` if a
+/// hole marker is malformed.
+fn hole_segments(word: &str, holes: usize) -> Option<Vec<Seg>> {
+    let hole_char = super::expand::HOLE;
+    let mut out = Vec::new();
+    for (k, part) in word.split(hole_char).enumerate() {
+        if k % 2 == 0 {
+            if !part.is_empty() {
+                out.push(Seg::Text(part.to_string()));
+            }
+        } else {
+            let i: usize = part.parse().ok()?;
+            if i >= holes {
+                return None;
+            }
+            out.push(Seg::Hole(i));
+        }
+    }
+    // An odd number of markers leaves the last text unclosed.
+    word.matches(hole_char)
+        .count()
+        .is_multiple_of(2)
+        .then_some(out)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -348,12 +604,14 @@ pub struct ConfigCache {
     passes: AtomicU64,
 }
 
+/// Index file, workspace key, machine, distro, multiconfig, `[build_host]`.
 type CacheKey = (
     PathBuf,
     String,
     Option<String>,
     Option<String>,
     Option<String>,
+    crate::config::BuildHost,
 );
 
 #[derive(Debug)]
@@ -602,6 +860,7 @@ fn cached_configuration(
         target.machine.clone(),
         target.distro.clone(),
         target.mc.clone(),
+        ws.build_host.clone(),
     );
     if let Some(e) = cache.lock().get(&key)
         && e.fingerprint == files.fingerprint(e.ds.files())
@@ -793,9 +1052,16 @@ fn config_pass(
     }
     // A multiconfig pass: `parseConfigurationFiles(..., mc)` sets BB_CURRENT_MC on a fresh
     // copy of the base datastore before any file is read (eval::multiconfig).
-    if let Some(mc) = &target.mc {
-        put(&mut r.ds, "BB_CURRENT_MC", mc);
-    }
+    // The default configuration has a name too: `""` from BitBake 2.12 on, `default` before
+    // (`parseConfigurationFiles(..., mc = "default")`), so OE-core's multiconfig `require` in
+    // `bitbake.conf` resolves exactly (nothing, or the empty `conf/multiconfig/default.conf`).
+    let mc = match &target.mc {
+        Some(mc) => mc.as_str(),
+        None if ws.release.release.has(Feature::DefaultMcNamedDefault) => "default",
+        None => "",
+    };
+    put(&mut r.ds, "BB_CURRENT_MC", mc);
+    Arc::make_mut(&mut r.ds.notes).config_name = target.mc.clone().unwrap_or_default();
 
     // bblayers.conf; TOPDIR is its build directory. BBPATH starts as the build directory:
     // OE-core's build environment exports `BBPATH=$BUILDDIR` (scripts/oe-buildenv-internal)
@@ -967,7 +1233,10 @@ fn recipe_pass(
             what: format!("layer of {recipe_loc}"),
         })?;
     let layername = file_layername(&r.ds, ws, &abs, &recipe.layer);
-    if let Some(l) = &layername {
+    // BitBake before 2.6 (Kirkstone) sets no FILE_LAYERNAME ([`Feature::FileLayerName`]).
+    if let Some(l) = &layername
+        && ws.release.release.has(Feature::FileLayerName)
+    {
         put(&mut r.ds, "FILE_LAYERNAME", l);
     }
     let not_collected = query::not_collected(index, recipe.id)?;
@@ -1655,6 +1924,7 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
         let notes = Arc::make_mut(&mut ds.notes);
         if list.unevaluated_python {
             notes.python_vars.insert(DEPENDS.to_string());
+            notes.fixed_python_vars.insert(DEPENDS.to_string());
         }
         let e = notes
             .unresolved_vars
@@ -1731,7 +2001,11 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
         // `setVar("DEPENDS", " ".join(newdeps))` all the same: the words joined with single
         // spaces. Done when that changes the text and the value is certain (an uncertain
         // value is flagged anyway, and its words may not be the ones BitBake splits).
-        if text != deps.text && !python && unresolved.is_empty() {
+        // With a read filter on DEPENDS the store holds the filtered words from now on and
+        // the next read filters them again, which can change their order
+        // (`suffix_filter_deps` sorts): stored even when the text is the same.
+        let filtered = ds.var_filter(DEPENDS).is_some();
+        if (text != deps.text || filtered) && !python && unresolved.is_empty() {
             ds.rewrite(
                 DEPENDS,
                 text,
@@ -1756,6 +2030,7 @@ fn virtual_recipe_providers(ds: &mut DataStore, recipe: &Loc) {
     let notes = Arc::make_mut(&mut ds.notes);
     if python {
         notes.python_vars.insert(DEPENDS.to_string());
+        notes.fixed_python_vars.insert(DEPENDS.to_string());
     }
     if !unresolved.is_empty() {
         let e = notes
@@ -2042,12 +2317,35 @@ const SPECIAL_PKGSUFFIX: &[&str] = &[
 ];
 
 /// Variables computed from `FILE` in the recipe pass, in dependency order.
-const COMPUTED: &[&str] = &["PN", "PV", "BPN", "BP", "FILE_DIRNAME", "THISDIR"];
+const COMPUTED: &[&str] = &["PN", "PV", "PR", "BPN", "BP", "FILE_DIRNAME", "THISDIR"];
+
+/// OE-core's `PR` in `bitbake.conf` on the branches `kirkstone`, `langdale` and
+/// `mickledore` (`nanbield` and later: `PR = "r0"`).
+const PR_FROM_FILE: &str = "${@bb.parse.vars_from_file(d.getVar('FILE', False),d)[2] or 'r0'}";
+
+/// The third `_` part of a `.bb` / `.bbappend` name (`bb.parse.vars_from_file(...)[2]`,
+/// BitBake 2.0 `lib/bb/parse/__init__.py`), when not empty.
+fn pr_from_file(file: &str) -> Option<String> {
+    let p = Path::new(file);
+    let ext = p.extension().and_then(|e| e.to_str());
+    if !matches!(ext, Some("bb") | Some("bbappend")) {
+        return None;
+    }
+    let parts: Vec<&str> = p.file_stem()?.to_str()?.split('_').collect();
+    if parts.len() > 3 {
+        return None;
+    }
+    parts
+        .get(2)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
 
 /// Assignments to these names make the computed values be looked at again.
 const COMPUTED_INPUTS: &[&str] = &[
     "PN",
     "PV",
+    "PR",
     "BPN",
     "BP",
     "FILE_DIRNAME",
@@ -2136,6 +2434,10 @@ impl<'a> Replay<'a> {
         recipe_pass: bool,
         pins: Vec<(&'static str, String)>,
     ) -> Replay<'a> {
+        let mut ds = ds;
+        if ds.notes.build_host != ws.build_host {
+            Arc::make_mut(&mut ds.notes).build_host = ws.build_host.clone();
+        }
         Replay {
             index,
             ws,
@@ -2282,9 +2584,20 @@ impl<'a> Replay<'a> {
                 // OE-Core's BP is plain text; python here is somebody else's.
                 continue;
             }
+            // PR: only OE-core's own expression (Kirkstone to Mickledore `bitbake.conf`;
+            // `PR = "r0"` from Nanbield on), never set when absent.
+            if name == "PR"
+                && !(ours
+                    || content
+                        .as_ref()
+                        .is_some_and(|c| c.text.trim() == PR_FROM_FILE))
+            {
+                continue;
+            }
             let text = match name {
                 "PN" => pn.clone().unwrap_or_else(|| "defaultpkgname".into()),
                 "PV" => pv.clone().unwrap_or_else(|| "1.0".into()),
+                "PR" => pr_from_file(&file).unwrap_or_else(|| "r0".into()),
                 "BPN" => self.prune_suffix(),
                 "BP" => "${BPN}-${PV}".to_string(),
                 _ => Path::new(&file)
@@ -2341,7 +2654,7 @@ impl<'a> Replay<'a> {
             }
             "unset" => {
                 if let Some(n) = &st.name {
-                    self.tainted(n);
+                    self.tainted(n, &[]);
                     self.ds
                         .unset(n, st.flag.as_deref(), st.loc.clone(), via.to_vec());
                     self.after_write(n, &[], st.flag.as_deref(), true);
@@ -2352,6 +2665,27 @@ impl<'a> Replay<'a> {
                 if let Some(n) = &st.name {
                     put_flag(&mut self.ds, n, "func", "1");
                     put_flag(&mut self.ds, n, "python", "1");
+                    if ClassFn::from_name(n).is_some() {
+                        let verified = self.body_text(&st.loc).and_then(|t| classfn::verify(n, &t));
+                        Arc::make_mut(&mut self.ds.notes).class_defs.insert(
+                            n.clone(),
+                            ClassDef {
+                                loc: st.loc.clone(),
+                                verified,
+                            },
+                        );
+                    }
+                    Arc::make_mut(&mut self.ds.notes)
+                        .def_locs
+                        .insert(n.clone(), st.loc.clone());
+                    if anonmodel::is_model_def(n) {
+                        let verified = self
+                            .body_text(&st.loc)
+                            .is_some_and(|t| anonmodel::def_verified(n, &t));
+                        Arc::make_mut(&mut self.ds.notes)
+                            .model_defs
+                            .insert(n.clone(), (st.loc.clone(), verified));
+                    }
                 }
             }
             "inherit" => {
@@ -2416,7 +2750,13 @@ impl<'a> Replay<'a> {
                     notes.tasks.retain(|x| *x != t);
                 }
             }
-            // addhandler: handler bookkeeping, not values.
+            "addhandler" => {
+                let names = st.name.clone().unwrap_or_default();
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                for h in names.split_whitespace() {
+                    notes.handlers.push((h.to_string(), st.loc.clone()));
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -2436,7 +2776,11 @@ impl<'a> Replay<'a> {
             legacy_syntax: st.legacy,
         };
         let name = full_name(&var);
-        self.tainted(base);
+        self.tainted(base, &st.overrides);
+        if op == AssignOp::Immediate && !st.legacy {
+            self.immediate_through_effects(base, &st.overrides, st.value.as_deref().unwrap_or(""));
+            self.host_note(base, &st.loc, st.value.as_deref().unwrap_or(""));
+        }
         let exported = is_exported(st);
         let overrides = var.overrides.clone();
         let flag = var.flag.clone();
@@ -2464,9 +2808,75 @@ impl<'a> Replay<'a> {
         self.after_write(base, &overrides, flag.as_deref(), before != after);
     }
 
+    /// A `:=` whose text reads the build host's `os.uname()` (`BUILD_ARCH := "${@os.uname()[4]}"`)
+    /// stores the value `[build_host]` gives, if it gives it: a note on the variable says so,
+    /// since the stored text no longer shows the python. Nothing when `[build_host]` is
+    /// empty (the python stays in the text, flagged, and the flag's cause names the key).
+    fn host_note(&mut self, base: &str, loc: &Loc, value: &str) {
+        let host = &self.ds.notes.build_host;
+        let Some(desc) = host.describe() else {
+            return;
+        };
+        let used: Vec<&str> = [
+            (super::pyexpr::HostRead::Arch, host.arch.is_some()),
+            (super::pyexpr::HostRead::OsLower, host.os.is_some()),
+        ]
+        .into_iter()
+        .filter(|(r, given)| *given && value.contains(r.code()))
+        .map(|(r, _)| r.code())
+        .collect();
+        if used.is_empty() {
+            return;
+        }
+        let line = format!(
+            "note: {} in the := at {loc} is the build host's, taken from sous-chef.toml [build_host] ({desc}), not read from any host",
+            used.join(" and ")
+        );
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        let e = notes
+            .var_notes
+            .entry(base_of(base).to_string())
+            .or_default();
+        if !e.contains(&line) {
+            e.push(line);
+        }
+    }
+
+    /// A `:=` stores its value expanded now, so a flag that comes from a reference effect
+    /// (a variable it references may be changed by files the replay did not read) would be
+    /// lost with it: the name is added to those effects' variables instead.
+    fn immediate_through_effects(&mut self, base: &str, overrides: &[String], value: &str) {
+        if !self.ds.notes.ref_effects.iter().any(|e| e.vars.is_some()) {
+            return;
+        }
+        let with = self.ds.expand(value);
+        if super::expand::certain(&with) {
+            return;
+        }
+        let saved = std::mem::take(&mut Arc::make_mut(&mut self.ds.notes).ref_effects);
+        self.ds.ovr_cache = OnceLock::new();
+        let without = self.ds.expand(value);
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        notes.ref_effects = saved;
+        self.ds.ovr_cache = OnceLock::new();
+        if !super::expand::certain(&without) {
+            return;
+        }
+        let b = base_of(base).to_string();
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        for e in notes.ref_effects.iter_mut() {
+            if let Some(m) = e.vars.as_mut() {
+                let conds = m.entry(b.clone()).or_default();
+                if !conds.iter().any(|c| c.as_slice() == overrides) {
+                    conds.push(overrides.to_vec());
+                }
+            }
+        }
+    }
+
     /// Records that the file being read under an uncertain reference changes `base` (a
     /// name with `${...}` is recorded as its expanded base).
-    fn tainted(&mut self, base: &str) {
+    fn tainted(&mut self, base: &str, overrides: &[String]) {
         if self.taint.is_empty() {
             return;
         }
@@ -2476,7 +2886,8 @@ impl<'a> Replay<'a> {
             base_of(base).to_string()
         };
         if let Some(t) = self.taint.last_mut() {
-            t.bases.insert(b);
+            t.bases.insert(b.clone());
+            t.writes.push((b, overrides.to_vec()));
         }
     }
 
@@ -2573,16 +2984,38 @@ impl<'a> Replay<'a> {
             Some(b) => python_writes(b),
             None => (Vec::new(), true),
         };
+        // The conditions the writes are under that may be decided at finalisation.
+        let conds = body.as_deref().map(anon::analyse).unwrap_or_default();
+        let guard_of = |s: &str, wrapper: bool| {
+            conds
+                .guarded
+                .iter()
+                .find(|(n, g)| n == s && matches!(g, Guard::PackageconfigList { .. }) == wrapper)
+                .map(|(_, g)| g.clone())
+        };
+        let model = body.as_deref().and_then(anonmodel::recognise);
+        let mut cover: Vec<usize> = Vec::new();
         let mut bases = Vec::new();
+        let mut entries: Vec<(String, Option<Guard>)> = Vec::new();
         for s in &sets {
             let e = self.ds.expand(s);
-            bases.push(base_of(&e.text).to_string());
+            let b = base_of(&e.text).to_string();
+            if model.is_some_and(|m| m.covers(anonmodel::Source::Literal(s))) {
+                cover.push(entries.len());
+            }
+            entries.push((b.clone(), guard_of(s, false)));
+            bases.push(b);
         }
         // Names written through a local wrapper (`appendVar('PACKAGECONFIG_CONFARGS', ...)`
         // in base.bbclass): recorded under their full expanded name.
         let mut sets = sets;
         for s in body.as_deref().map(wrapper_writes).unwrap_or_default() {
-            bases.push(self.ds.expand(&s).text);
+            let e = self.ds.expand(&s).text;
+            if model.is_some_and(|m| m.covers(anonmodel::Source::Wrapper(&s))) {
+                cover.push(entries.len());
+            }
+            entries.push((e.clone(), guard_of(&s, true)));
+            bases.push(e);
             if !sets.contains(&s) {
                 sets.push(s);
             }
@@ -2594,7 +3027,10 @@ impl<'a> Replay<'a> {
             .is_some_and(|b| b.contains(".rename_package_variables("))
             && let Some(v) = self.ds.value("PACKAGEVARS")
         {
-            bases.extend(pwords::known_words(&v.text).into_iter().map(str::to_string));
+            for w in pwords::known_words(&v.text) {
+                entries.push((w.to_string(), None));
+                bases.push(w.to_string());
+            }
         }
         // nativesdk.bbclass's `set_filter("PROVIDES", ...)`: BitBake applies the filter when
         // the value is read, so finalisation computes it (`apply_provides_filter`) or flags
@@ -2606,12 +3042,25 @@ impl<'a> Replay<'a> {
             .is_some_and(|f| f == "nativesdk.bbclass")
             .then(|| body.as_deref().and_then(nativesdk_provides_filter))
             .flatten();
+        // The whole function is OE-core Wrynose's: its DEPENDS and PACKAGE_WRITE_DEPS
+        // filters are installed when it runs, like the PROVIDES one.
+        let verified = sdk.is_some()
+            && body
+                .as_deref()
+                .is_some_and(|b| classfn::same_text(b, classfn::NATIVESDK_ANONYMOUS));
+        let model = if sdk.is_some() { None } else { model };
         if sdk.is_some() {
-            bases.retain(|b| b != "PROVIDES");
+            // PROVIDES, and with the verified function DEPENDS / PACKAGE_WRITE_DEPS, are
+            // modelled as read filters, not as writes: drop them from both lists.
+            let modelled =
+                |b: &str| b == "PROVIDES" || (verified && NATIVESDK_FILTERED.contains(&b));
+            bases.retain(|b| !modelled(b));
+            entries.retain(|(b, _)| !modelled(b));
         }
         let notes = Arc::make_mut(&mut self.ds.notes);
         if let Some(guard) = sdk {
             notes.nativesdk_anon = Some((st.loc.clone(), guard));
+            notes.nativesdk_anon_verified = verified;
         }
         notes.python_vars.extend(bases);
         notes.anonymous.push(AnonPython {
@@ -2620,6 +3069,15 @@ impl<'a> Replay<'a> {
             name,
             sets,
             opaque,
+            returns_early: None,
+            entries,
+            early_returns: conds.early_returns,
+            computed_writes: body
+                .as_deref()
+                .map(computed_value_writes)
+                .unwrap_or_else(|| vec![None]),
+            model: model.map(|m| (m, cover)),
+            model_applied: None,
         });
         self.ds.ovr_cache = OnceLock::new();
     }
@@ -2691,6 +3149,35 @@ impl<'a> Replay<'a> {
         text: &str,
         problem: RefProblem,
     ) {
+        // A reference whose argument holds python or undefined variables: BitBake reads
+        // files here that the replay does not know, and they may set any variable. (A file
+        // that is not found, a cycle, a directive the release lacks or another fatal error
+        // stops BitBake's parse: it gives no value to compare with.)
+        let why = match &problem {
+            RefProblem::Python => Some(self.ref_why(text)),
+            RefProblem::Undefined(names) => Some(format!(
+                "undefined variable{} {}",
+                if names.len() == 1 { "" } else { "s" },
+                names.join(", ")
+            )),
+            _ => None,
+        };
+        if let Some(why) = why
+            && kind != "virtual_provider"
+        {
+            Arc::make_mut(&mut self.ds.notes)
+                .ref_effects
+                .push(RefEffect {
+                    loc: loc.cloned(),
+                    via: via.to_vec(),
+                    kind: kind.to_string(),
+                    text: text.to_string(),
+                    why,
+                    not_read: Vec::new(),
+                    vars: None,
+                });
+            self.ds.ovr_cache = OnceLock::new();
+        }
         Arc::make_mut(&mut self.ds.notes).references.push(RefIssue {
             loc: loc.cloned(),
             via: via.to_vec(),
@@ -2732,6 +3219,7 @@ impl<'a> Replay<'a> {
             python: e.unevaluated_python,
             unresolved: e.unresolved.clone(),
             bases: BTreeSet::new(),
+            writes: Vec::new(),
         });
         Some((e.text, taint))
     }
@@ -2765,6 +3253,7 @@ impl<'a> Replay<'a> {
             // names are unset there too).
             if let Some(outer) = self.taint.last_mut() {
                 outer.bases.extend(t.bases);
+                outer.writes.extend(t.writes);
             }
             return r;
         }
@@ -2782,6 +3271,20 @@ impl<'a> Replay<'a> {
                 }
             }
         }
+        // The value it was followed with may be wrong, and another value would read other
+        // files: what those change is not known.
+        notes.ref_effects.push(RefEffect {
+            loc: t.loc.clone(),
+            via: t.via.clone(),
+            kind: t.kind.clone(),
+            text: t.text.clone(),
+            why: format!(
+                "followed as `{}`, a value that is not certain",
+                t.expanded.trim()
+            ),
+            not_read: Vec::new(),
+            vars: None,
+        });
         notes.uncertain_references.push(UncertainRef {
             loc: t.loc,
             via: t.via,
@@ -2794,9 +3297,348 @@ impl<'a> Replay<'a> {
         // An outer uncertain reference covers what this one changed too.
         if let Some(outer) = self.taint.last_mut() {
             outer.bases.extend(t.bases);
+            outer.writes.extend(t.writes);
         }
         self.ds.ovr_cache = OnceLock::new();
         r
+    }
+
+    /// Why a reference argument is not certain, short: the first variable it references
+    /// whose value is not (`python in IMGCLASSES`), else its own python.
+    fn ref_why(&self, text: &str) -> String {
+        for n in super::expand::var_refs(text) {
+            if let Some(v) = self.ds.value(&n) {
+                if v.unevaluated_python {
+                    return format!("python in {n}");
+                }
+                if !v.unresolved.is_empty() {
+                    return format!("{n} uses undefined {}", v.unresolved.join(", "));
+                }
+            }
+        }
+        "python in its argument".to_string()
+    }
+
+    /// Follows an `inherit` / `inherit_defer` / `include` / `require` whose argument holds
+    /// python the replay cannot evaluate, as far as BitBake's behaviour is known exactly
+    /// (docs/bitbake-semantics.md, "References that cannot be followed exactly"):
+    ///
+    /// - the argument is expanded with a hole for each such `${@...}`
+    ///   (`DataStore::expand_with_holes`): nothing else in it may be uncertain;
+    /// - each hole has a known set of exact values (`pyexpr::candidates`: `['', 'x'][c]`,
+    ///   `a if c else b`, `bb.utils.contains(..., a, b, d)`), or is the host's
+    ///   `os.uname()[i]`, one path component without whitespace (an `include` /
+    ///   `require` word only);
+    /// - BitBake splits the expanded text on whitespace and reads each word in order
+    ///   (`BBHandler.inherit`, `ConfHandler.include`), so a word without a hole is read
+    ///   whatever the python gives, and is followed; a word with holes is one of a known
+    ///   list of word lists (or files matching a pattern), which are read on a copy of the
+    ///   store to learn what they change, then dropped: the reference's effect
+    ///   ([`RefEffect`]) flags those variables.
+    ///
+    /// `false` (nothing done) when any of this does not hold; the caller then records the
+    /// reference as not followed, which flags every value.
+    fn follow_partial(
+        &mut self,
+        text: &str,
+        loc: Option<&Loc>,
+        via: &[Loc],
+        kind: &str,
+        mode: &RefMode<'_>,
+    ) -> Result<bool> {
+        if matches!(
+            mode,
+            RefMode::Include {
+                mode: "include_all",
+                ..
+            }
+        ) {
+            return Ok(false);
+        }
+        let Some((htext, codes)) = self.ds.expand_with_holes(text) else {
+            return Ok(false);
+        };
+        if codes.is_empty() {
+            return Ok(false);
+        }
+        let mut vals: Vec<Option<Vec<String>>> = Vec::with_capacity(codes.len());
+        for c in &codes {
+            if host_token(c) {
+                vals.push(None);
+            } else {
+                match self.ds.python_candidates(c) {
+                    Some(v) => vals.push(Some(v)),
+                    None => return Ok(false),
+                }
+            }
+        }
+        let is_include = matches!(mode, RefMode::Include { .. });
+        let mut pieces: Vec<Piece> = Vec::new();
+        for tok in htext.split_whitespace() {
+            let Some(segs) = hole_segments(tok, codes.len()) else {
+                return Ok(false);
+            };
+            let holes: Vec<usize> = segs
+                .iter()
+                .filter_map(|s| match s {
+                    Seg::Hole(i) => Some(*i),
+                    Seg::Text(_) => None,
+                })
+                .collect();
+            if holes.is_empty() {
+                pieces.push(Piece::Certain(tok.to_string()));
+                continue;
+            }
+            if holes.iter().any(|i| vals[*i].is_none()) {
+                // A host value: one path component, in an include / require word.
+                let (true, [Seg::Text(pre), Seg::Hole(_), Seg::Text(post)]) =
+                    (is_include, segs.as_slice())
+                else {
+                    return Ok(false);
+                };
+                pieces.push(Piece::Pattern(pre.clone(), post.clone()));
+                continue;
+            }
+            // Every combination of the holes' values, as words.
+            let mut combos: Vec<String> = vec![String::new()];
+            for s in &segs {
+                let opts: Vec<String> = match s {
+                    Seg::Text(t) => vec![t.clone()],
+                    Seg::Hole(i) => vals[*i].clone().unwrap_or_default(),
+                };
+                let mut next = Vec::with_capacity(combos.len() * opts.len());
+                for c in &combos {
+                    for o in &opts {
+                        next.push(format!("{c}{o}"));
+                    }
+                }
+                if next.len() > MAX_COMBINATIONS {
+                    return Ok(false);
+                }
+                combos = next;
+            }
+            let mut alts: Vec<Vec<String>> = Vec::new();
+            for c in combos {
+                let words: Vec<String> = c.split_whitespace().map(str::to_string).collect();
+                if !alts.contains(&words) {
+                    alts.push(words);
+                }
+            }
+            match alts.as_slice() {
+                [one] => pieces.extend(one.iter().cloned().map(Piece::Certain)),
+                _ => pieces.push(Piece::Maybe(alts)),
+            }
+        }
+        let why = self.ref_why(text);
+        let mut child_via = via.to_vec();
+        if let Some(l) = loc {
+            child_via.push(l.clone());
+        }
+        for p in pieces {
+            match p {
+                Piece::Certain(w) => self.follow_word(mode, text, loc, via, kind, &w)?,
+                Piece::Maybe(alts) => {
+                    let mut names: Vec<String> = Vec::new();
+                    let mut acc = ProbeResult::default();
+                    for alt in alts.iter().filter(|a| !a.is_empty()) {
+                        for w in alt {
+                            if !names.contains(w) {
+                                names.push(w.clone());
+                            }
+                        }
+                        let r = self.probe(|r| {
+                            for w in alt {
+                                r.follow_word(mode, text, loc, via, kind, w)?;
+                            }
+                            Ok(())
+                        })?;
+                        acc.merge(r);
+                    }
+                    self.push_effect(loc, via, kind, text, &why, names, acc);
+                }
+                Piece::Pattern(pre, post) => {
+                    let from = match mode {
+                        RefMode::Include { from, .. } => *from,
+                        RefMode::Inherit { .. } => continue,
+                    };
+                    let mut names = Vec::new();
+                    let mut acc = ProbeResult::default();
+                    for (rel, abs) in self.pattern_files(&pre, &post, from) {
+                        names.push(rel);
+                        let cv = child_via.clone();
+                        let r = self.probe(|r| {
+                            let kind = FileKind::from_path(&abs).unwrap_or(FileKind::Include);
+                            r.visit(&abs, kind, cv, true)
+                        })?;
+                        acc.merge(r);
+                    }
+                    self.push_effect(loc, via, kind, text, &why, names, acc);
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    /// Follows one word of an inherit or include, as the reference would.
+    fn follow_word(
+        &mut self,
+        mode: &RefMode<'_>,
+        text: &str,
+        loc: Option<&Loc>,
+        via: &[Loc],
+        kind: &str,
+        word: &str,
+    ) -> Result<()> {
+        match mode {
+            RefMode::Inherit { deferred } => {
+                self.inherit_words(text, loc, via, *deferred, kind, word)
+            }
+            RefMode::Include { st, from, mode } => {
+                self.include_words(st, via, from, mode, text, word)
+            }
+        }
+    }
+
+    /// Reads what `f` reads on a copy of the store and returns what it changed (assignments,
+    /// with their override conditions; names its anonymous python writes; the effects of
+    /// references inside it); the store, the files being parsed and the rest of the replay
+    /// state are put back afterwards. Deferred inherits the files add are read too (BitBake
+    /// reads them at finalisation).
+    fn probe(&mut self, f: impl FnOnce(&mut Self) -> Result<()>) -> Result<ProbeResult> {
+        let saved = self.ds.fork();
+        let saved_kas = self.kas_local.clone();
+        let saved_filter = self.provides_filter.clone();
+        let depth = self.stack.len();
+        let anon0 = self.ds.notes.anonymous.len();
+        let eff0 = self.ds.notes.ref_effects.len();
+        let def0 = self.ds.notes.deferred.len();
+        self.taint.push(Taint {
+            loc: None,
+            via: Vec::new(),
+            kind: String::new(),
+            text: String::new(),
+            expanded: String::new(),
+            python: false,
+            unresolved: Vec::new(),
+            bases: BTreeSet::new(),
+            writes: Vec::new(),
+        });
+        let mut r = f(self);
+        while r.is_ok() && self.ds.notes.deferred.len() > def0 {
+            let d = Arc::make_mut(&mut self.ds.notes).deferred.remove(def0);
+            r = self.inherit(&d.text, d.loc.as_ref(), &d.via, true, "inherit_defer");
+        }
+        let t = self.taint.pop();
+        let mut out = ProbeResult::default();
+        if let Some(t) = t {
+            for (b, o) in t.writes {
+                out.add(b, o);
+            }
+        }
+        let notes = &self.ds.notes;
+        for a in notes.anonymous.iter().skip(anon0) {
+            for w in a.writes() {
+                out.add(base_of(w).to_string(), Vec::new());
+            }
+        }
+        for e in notes.ref_effects.iter().skip(eff0) {
+            match &e.vars {
+                None => out.unbounded = true,
+                Some(m) => {
+                    for (b, conds) in m {
+                        for c in conds {
+                            out.add(b.clone(), c.clone());
+                        }
+                    }
+                }
+            }
+        }
+        self.ds = saved;
+        self.kas_local = saved_kas;
+        self.provides_filter = saved_filter;
+        self.stack.truncate(depth);
+        r.map(|_| out)
+    }
+
+    /// Records the effect of a word the replay did not read (`names`: the classes or files).
+    #[allow(clippy::too_many_arguments)]
+    fn push_effect(
+        &mut self,
+        loc: Option<&Loc>,
+        via: &[Loc],
+        kind: &str,
+        text: &str,
+        why: &str,
+        names: Vec<String>,
+        r: ProbeResult,
+    ) {
+        if names.is_empty() {
+            return;
+        }
+        Arc::make_mut(&mut self.ds.notes)
+            .ref_effects
+            .push(RefEffect {
+                loc: loc.cloned(),
+                via: via.to_vec(),
+                kind: kind.to_string(),
+                text: text.to_string(),
+                why: why.to_string(),
+                not_read: names,
+                vars: (!r.unbounded).then_some(r.writes),
+            });
+        self.ds.ovr_cache = OnceLock::new();
+    }
+
+    /// The files `<prefix><T><suffix>` an include / require from `from` may read, `T` one
+    /// path component without whitespace: for each `T`, the first match along the search
+    /// path (`ConfHandler.include_single_file`: the including file's directory, then
+    /// `BBPATH`), as `(relative path, absolute path)`.
+    fn pattern_files(&mut self, prefix: &str, suffix: &str, from: &Path) -> Vec<(String, PathBuf)> {
+        let Ok(re) = Regex::new(&format!(
+            r"^{}([^/\s]*){}$",
+            regex::escape(prefix),
+            regex::escape(suffix)
+        )) else {
+            return Vec::new();
+        };
+        // The relative paths of that shape among the files the replay can read (the last
+        // components of each), then each one resolved as the include would.
+        let parts = format!("{prefix}{suffix}").matches('/').count() + 1;
+        let mut known: Vec<PathBuf> = self.files.by_abs.keys().cloned().collect();
+        if let Some(o) = self.overlay {
+            known.extend(o.paths().map(Path::to_path_buf));
+        }
+        let mut rels: BTreeSet<String> = BTreeSet::new();
+        for f in &known {
+            let comps: Vec<String> = f
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .collect();
+            if Path::new(prefix).is_absolute() {
+                let whole = f.to_string_lossy().to_string();
+                if re.is_match(&whole) {
+                    rels.insert(whole);
+                }
+                continue;
+            }
+            if comps.len() < parts {
+                continue;
+            }
+            let rel = comps[comps.len() - parts..].join("/");
+            if re.is_match(&rel) {
+                rels.insert(rel);
+            }
+        }
+        let ws = self.ws;
+        let mut out = Vec::new();
+        for rel in rels {
+            if let Some(abs) = self.resolver().find_in_bbpath(ws, &rel, from)
+                && self.exists(&abs)
+            {
+                out.push((rel, abs));
+            }
+        }
+        out
     }
 
     /// `BBPATH` as the store has it now (absolute entries, canonical when they exist);
@@ -2855,6 +3697,16 @@ impl<'a> Replay<'a> {
         if let Some(words) = super::multiconfig::oe_require_words(&text, &self.ds) {
             return self.include_words(st, via, from, &mode, &text, &words);
         }
+        if has_python(&self.ds.expand(&text).text) {
+            let m = RefMode::Include {
+                st,
+                from,
+                mode: &mode,
+            };
+            if self.follow_partial(&text, Some(&st.loc), via, &mode, &m)? {
+                return Ok(());
+            }
+        }
         let Some((expanded, taint)) = self.expand_ref(&text, Some(&st.loc), via, &mode) else {
             return Ok(());
         };
@@ -2902,6 +3754,14 @@ impl<'a> Replay<'a> {
                     .collect()
             };
             self.record_probed(&mode, &word, from, &targets);
+            if targets.is_empty() && mode != "include_all" {
+                // A file BitBake would read that the index does not have.
+                let disk = Resolver::with_bbpath(self.bbpath()).find_in_bbpath(ws, &word, from);
+                if let Some(p) = disk {
+                    self.unindexed(Some(&st.loc), via, &mode, &text, &p);
+                    continue;
+                }
+            }
             if targets.is_empty() && mode == "require" {
                 self.issue(
                     Some(&st.loc),
@@ -2920,6 +3780,23 @@ impl<'a> Replay<'a> {
             }
         }
         Ok(())
+    }
+
+    /// A file BitBake reads here exists on disk but is not in the index, so the replay has
+    /// no statements for it: it may change any value.
+    fn unindexed(&mut self, loc: Option<&Loc>, via: &[Loc], kind: &str, text: &str, p: &Path) {
+        Arc::make_mut(&mut self.ds.notes)
+            .ref_effects
+            .push(RefEffect {
+                loc: loc.cloned(),
+                via: via.to_vec(),
+                kind: kind.to_string(),
+                text: text.to_string(),
+                why: format!("{} is not in the index", p.display()),
+                not_read: vec![p.display().to_string()],
+                vars: None,
+            });
+        self.ds.ovr_cache = OnceLock::new();
     }
 
     /// Records the candidate paths an include of `word` looked at and found empty, in the
@@ -3273,6 +4150,11 @@ impl<'a> Replay<'a> {
         deferred: bool,
         kind: &str,
     ) -> Result<()> {
+        if has_python(&self.ds.expand(text).text)
+            && self.follow_partial(text, loc, via, kind, &RefMode::Inherit { deferred })?
+        {
+            return Ok(());
+        }
         let Some((expanded, taint)) = self.expand_ref(text, loc, via, kind) else {
             return Ok(());
         };
@@ -3311,6 +4193,10 @@ impl<'a> Replay<'a> {
             let ws = self.ws;
             let global = self.global;
             let Some(f) = self.resolver().find_class(ws, word, global) else {
+                if let Some(p) = Resolver::with_bbpath(self.bbpath()).find_class(ws, word, global) {
+                    self.unindexed(loc, via, kind, text, &p);
+                    continue;
+                }
                 self.issue(loc, via, kind, text, RefProblem::NotFound(word.to_string()));
                 continue;
             };
@@ -3360,6 +4246,10 @@ impl<'a> Replay<'a> {
 /// Variables OE-core's `native_virtclass_handler` (`classes-recipe/native.bbclass`, Wrynose
 /// `33a6bd6c`) filters with `d.setVarFilter` (`native_filter`) when `BBCLASSEXTEND` contains
 /// `native`; it also renames `<VAR>:<pkg>` package variables of `RDEPENDS` and the others.
+/// The filters of `nativesdk.bbclass`'s anonymous python besides `PROVIDES`
+/// (`clsextend.set_filter(var, deps)`), with `deps`.
+const NATIVESDK_FILTERED: &[&str] = &["DEPENDS", "PACKAGE_WRITE_DEPS"];
+
 const NATIVE_FILTERED: &[&str] = &[
     "DEPENDS",
     "RDEPENDS",
@@ -3428,12 +4318,29 @@ impl Replay<'_> {
         }
         self.run_deferred()?;
         self.class_extend_handlers(recipe);
+        self.other_parse_handlers();
         let incomplete = self.ds.expand_keys();
-        Arc::make_mut(&mut self.ds.notes).incomplete_keys = incomplete;
+        let renamable: Vec<String> = incomplete
+            .iter()
+            .filter(|k| self.ds.key_may_expand(k))
+            .cloned()
+            .collect();
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        notes.incomplete_keys = incomplete;
+        notes.renamable_keys = renamable;
         self.multilib_postkeyexp(recipe);
         // (BitBake runs anonymous python here, which the replay does not, except for the
-        // PROVIDES filter nativesdk.bbclass's installs.)
+        // features backfill of base.bbclass and the PROVIDES filter nativesdk.bbclass's
+        // installs.)
+        self.features_backfill();
         self.nativesdk_anonymous_filter();
+        // What the `def` functions anonymous python calls write by name.
+        self.def_call_writes();
+        // Writes of anonymous python whose conditions are false here do not happen.
+        self.resolve_anonymous_writes();
+        // The writes of the verified functions the replay models, in the order BitBake
+        // runs them (after the proofs, which therefore never read a modelled value).
+        self.apply_anon_models();
         if self.ws.release.release.has(Feature::RecipeVirtualProviders) {
             virtual_recipe_providers(&mut self.ds, recipe);
         }
@@ -3445,6 +4352,253 @@ impl Replay<'_> {
             Arc::make_mut(&mut self.ds.notes).target_notes.extend(skip);
         }
         Ok(())
+    }
+
+    /// Takes out of `python_vars` the names whose anonymous-python writes are all proved not
+    /// to happen on this recipe, and marks the functions that return at once
+    /// (`eval::anon`). A path counts as a directory when it is one on disk or holds an
+    /// overlay file.
+    fn resolve_anonymous_writes(&mut self) {
+        let overlay = self.overlay;
+        let is_dir = |p: &Path| {
+            p.is_dir() || overlay.is_some_and(|o| o.paths().any(|f| f.starts_with(p) && f != p))
+        };
+        anon::resolve(&mut self.ds, &is_dir);
+        let returns: Vec<Option<String>> = self
+            .ds
+            .notes
+            .anonymous
+            .iter()
+            .map(|a| {
+                a.early_returns
+                    .iter()
+                    .find_map(|c| anon::early_return_taken(&self.ds, c))
+            })
+            .collect();
+        if returns.iter().any(Option::is_some) {
+            let notes = Arc::make_mut(&mut self.ds.notes);
+            for (a, r) in notes.anonymous.iter_mut().zip(returns) {
+                a.returns_early = r;
+            }
+        }
+    }
+
+    /// The variables the `def` functions an anonymous function calls (directly, or through
+    /// other `def`s) write by a literal name (`find_meson_cross_files(d)` in OE-core's glib
+    /// recipe appends to `EXTRA_OEMESON`; `ua_extend_depends(d)` to `DEPENDS`): added to the
+    /// function's entries, so they are flagged like its own writes. The definition in force
+    /// is the last one the parse executed, as in BitBake's method pool; what the function
+    /// writes through other code (`oe.*` modules, computed names) stays under the opaque
+    /// warning, as before.
+    fn def_call_writes(&mut self) {
+        const MAX_DEFS: usize = 64;
+        if self.ds.notes.def_locs.is_empty() {
+            return;
+        }
+        let defs = self.ds.notes.def_locs.clone();
+        let mut def_texts: HashMap<String, Option<String>> = HashMap::new();
+        let n = self.ds.notes.anonymous.len();
+        for i in 0..n {
+            let loc = self.ds.notes.anonymous[i].loc.clone();
+            let Some(body) = self.body_text(&loc) else {
+                continue;
+            };
+            // (the def called from the anonymous function, a name written)
+            let mut found: Vec<(String, String)> = Vec::new();
+            let mut todo: Vec<(String, String)> = called_names(&body)
+                .into_iter()
+                .filter(|f| defs.contains_key(f))
+                .map(|f| (f.clone(), f))
+                .collect();
+            let mut seen: BTreeSet<String> = BTreeSet::new();
+            while let Some((root, f)) = todo.pop() {
+                if seen.len() >= MAX_DEFS || !seen.insert(f.clone()) {
+                    continue;
+                }
+                let text = match def_texts.get(&f) {
+                    Some(t) => t.clone(),
+                    None => {
+                        let t = defs.get(&f).and_then(|l| self.body_text(l));
+                        def_texts.insert(f.clone(), t.clone());
+                        t
+                    }
+                };
+                let Some(text) = text else { continue };
+                for s in python_writes(&text).0 {
+                    found.push((root.clone(), s));
+                }
+                for g in called_names(&text) {
+                    if defs.contains_key(&g) && !seen.contains(&g) {
+                        todo.push((root.clone(), g));
+                    }
+                }
+            }
+            if found.is_empty() {
+                continue;
+            }
+            let model = self.ds.notes.anonymous[i].model.as_ref().map(|(m, _)| *m);
+            let mut add: Vec<(String, bool)> = Vec::new();
+            for (root, s) in found {
+                let b = base_of(&self.ds.expand(&s).text).to_string();
+                let covered = model.is_some_and(|m| m.covers(anonmodel::Source::DefCall(&root)));
+                add.push((b, covered));
+            }
+            let notes = Arc::make_mut(&mut self.ds.notes);
+            let a = &mut notes.anonymous[i];
+            for (b, covered) in add {
+                if covered && let Some((_, cover)) = a.model.as_mut() {
+                    cover.push(a.entries.len());
+                }
+                a.entries.push((b.clone(), None));
+                if !a.sets.contains(&b) {
+                    a.sets.push(b.clone());
+                }
+                notes.python_vars.insert(b);
+            }
+        }
+        self.ds.ovr_cache = OnceLock::new();
+    }
+
+    /// The anonymous functions with a model ([`anonmodel`]), in order. Each runs on a copy of
+    /// the datastore where only the names earlier functions may still write count as
+    /// written by python (a later function cannot change what an earlier one reads); its
+    /// writes are applied to the datastore and the entries it covers are dropped. A name
+    /// leaves `python_vars` when no other entry, and no handler or filter, still has it.
+    fn apply_anon_models(&mut self) {
+        let n = self.ds.notes.anonymous.len();
+        if !self.ds.notes.anonymous.iter().any(|a| a.model.is_some()) {
+            return;
+        }
+        let ws = self.ws;
+        let read_file = |p: &Path| -> Option<String> {
+            let abs = ws.confine(p).ok()?;
+            fs::read_to_string(abs).ok()
+        };
+        for i in 0..n {
+            let Some((model, cover)) = self.ds.notes.anonymous[i].model.clone() else {
+                continue;
+            };
+            if self.ds.notes.anonymous[i].returns_early.is_some() {
+                continue;
+            }
+            // The names functions `i..` contribute, and those earlier ones still may write.
+            let notes = &self.ds.notes;
+            let later: BTreeSet<String> = notes.anonymous[i..]
+                .iter()
+                .flat_map(|a| a.entries.iter().map(|(e, _)| e.clone()))
+                .collect();
+            let earlier: BTreeSet<String> = notes.anonymous[..i]
+                .iter()
+                .filter(|a| a.returns_early.is_none())
+                .flat_map(|a| a.entries.iter().map(|(e, _)| e.clone()))
+                .collect();
+            let mut trial = self.ds.fork();
+            {
+                let tn = Arc::make_mut(&mut trial.notes);
+                let fixed = tn.fixed_python_vars.clone();
+                tn.python_vars
+                    .retain(|v| !later.contains(v) || earlier.contains(v) || fixed.contains(v));
+            }
+            trial.ovr_cache = OnceLock::new();
+            let ctx = anonmodel::Ctx {
+                ds: &trial,
+                read_file: &read_file,
+            };
+            let result = anonmodel::run(model, &ctx);
+            let loc = self.ds.notes.anonymous[i].loc.clone();
+            let applied = match result {
+                Ok(writes) => {
+                    let mut names: BTreeSet<String> = BTreeSet::new();
+                    for w in writes {
+                        names.insert(base_of(write_name(&w)).to_string());
+                        self.apply_model_write(w, &loc);
+                    }
+                    let notes = Arc::make_mut(&mut self.ds.notes);
+                    let a = &mut notes.anonymous[i];
+                    let mut covered: Vec<String> = Vec::new();
+                    for idx in cover.iter().rev() {
+                        if *idx < a.entries.len() {
+                            covered.push(a.entries.remove(*idx).0);
+                        }
+                    }
+                    // A covered name leaves `python_vars` unless something else has it.
+                    let still: BTreeSet<String> = notes
+                        .anonymous
+                        .iter()
+                        .flat_map(|a| a.entries.iter().map(|(e, _)| e.clone()))
+                        .collect();
+                    for c in &covered {
+                        if !still.contains(c) && !notes.fixed_python_vars.contains(c) {
+                            notes.python_vars.remove(c);
+                        }
+                    }
+                    covered.sort();
+                    covered.dedup();
+                    let what = if names.is_empty() {
+                        "it writes nothing here".to_string()
+                    } else {
+                        format!(
+                            "its writes to {} are reproduced",
+                            names.into_iter().collect::<Vec<_>>().join(", ")
+                        )
+                    };
+                    for c in &covered {
+                        let line = format!(
+                            "note: anonymous python at {loc} is OE-core's verified text ({}), whose writes sous-chef reproduces: {what}",
+                            model.name()
+                        );
+                        let e = notes.var_notes.entry(base_of(c).to_string()).or_default();
+                        if !e.contains(&line) {
+                            e.push(line);
+                        }
+                    }
+                    Applied::Done
+                }
+                Err(why) => Applied::Refused(why),
+            };
+            Arc::make_mut(&mut self.ds.notes).anonymous[i].model_applied = Some(applied);
+            self.ds.ovr_cache = OnceLock::new();
+        }
+    }
+
+    /// One write of a model, as BitBake's datastore method stores it (see [`anonmodel`]).
+    fn apply_model_write(&mut self, w: anonmodel::Write, loc: &Loc) {
+        let var_ref = |name: &str, extra: Option<&str>, flag: Option<String>| {
+            let mut parts = name.split(':');
+            let base = parts.next().unwrap_or(name).to_string();
+            let mut overrides: Vec<String> = parts.map(str::to_string).collect();
+            if let Some(x) = extra {
+                overrides.push(x.to_string());
+            }
+            VarRef {
+                base,
+                overrides,
+                flag,
+                legacy_syntax: false,
+            }
+        };
+        match w {
+            anonmodel::Write::Append(name, text) => self.ds.apply(VarOp {
+                var: var_ref(&name, Some("append"), None),
+                op: AssignOp::Set,
+                value: text,
+                loc: loc.clone(),
+                via: Vec::new(),
+                kind: OpKind::AnonPython,
+            }),
+            anonmodel::Write::Set(name, text) => {
+                self.ds
+                    .rewrite(&name, text, loc.clone(), OpKind::AnonPython)
+            }
+            anonmodel::Write::SetFlag(name, flag, text) => self.ds.apply(VarOp {
+                var: var_ref(&name, None, Some(flag)),
+                op: AssignOp::Set,
+                value: text,
+                loc: loc.clone(),
+                via: Vec::new(),
+                kind: OpKind::AnonPython,
+            }),
+        }
     }
 
     /// The deferred inherits, first in first out (more may be added meanwhile).
@@ -3582,6 +4736,85 @@ impl Replay<'_> {
     /// installs the `PROVIDES` filter), at the point BitBake runs anonymous python: the
     /// filter is set when `PN` starts with `nativesdk-` (or the function has no such guard);
     /// when `PN` is not known statically, `PROVIDES` is flagged.
+    /// OE-core `base.bbclass` anonymous python up to Whinlatter ([`Feature::FeaturesBackfill`]):
+    /// `oe.utils.features_backfill("DISTRO_FEATURES", d)` (and `MACHINE_FEATURES`) appends
+    /// (`d.appendVar`, a `:append`) every word of `<VAR>_BACKFILL` that is in neither `<VAR>`
+    /// nor `<VAR>_BACKFILL_CONSIDERED`. Done for each call found in a recorded anonymous
+    /// function; when one of the three values is not known statically, `<VAR>` is flagged
+    /// instead.
+    fn features_backfill(&mut self) {
+        static CALL: LazyLock<Option<Regex>> = LazyLock::new(|| {
+            Regex::new(r#"\boe\.utils\.features_backfill\(\s*["']([A-Za-z0-9_]+)["']\s*,\s*d\s*\)"#)
+                .ok()
+        });
+        if !self.ws.release.release.has(Feature::FeaturesBackfill) {
+            return;
+        }
+        let Some(call) = CALL.as_ref() else { return };
+        let locs: Vec<Loc> = self
+            .ds
+            .notes
+            .anonymous
+            .iter()
+            .map(|a| a.loc.clone())
+            .collect();
+        for loc in locs {
+            let Some(body) = self.body_text(&loc) else {
+                continue;
+            };
+            let vars: Vec<String> = call
+                .captures_iter(&body)
+                .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+                .collect();
+            for var in vars {
+                self.backfill_one(&var, &loc);
+            }
+        }
+    }
+
+    fn backfill_one(&mut self, var: &str, loc: &Loc) {
+        let known = |name: &str| -> Option<Vec<String>> {
+            match self.ds.value(name) {
+                None => Some(Vec::new()),
+                Some(v) if !v.unevaluated_python && v.unresolved.is_empty() => {
+                    Some(v.text.split_whitespace().map(str::to_string).collect())
+                }
+                Some(_) => None,
+            }
+        };
+        let (Some(features), Some(backfill), Some(considered)) = (
+            known(var),
+            known(&format!("{var}_BACKFILL")),
+            known(&format!("{var}_BACKFILL_CONSIDERED")),
+        ) else {
+            let notes = Arc::make_mut(&mut self.ds.notes);
+            notes.python_vars.insert(var.to_string());
+            notes.fixed_python_vars.insert(var.to_string());
+            return;
+        };
+        let add: Vec<&str> = backfill
+            .iter()
+            .filter(|f| !features.contains(f) && !considered.contains(f))
+            .map(String::as_str)
+            .collect();
+        if add.is_empty() {
+            return;
+        }
+        self.ds.apply(VarOp {
+            var: VarRef {
+                base: var.to_string(),
+                overrides: vec!["append".to_string()],
+                flag: None,
+                legacy_syntax: false,
+            },
+            op: AssignOp::Set,
+            value: format!(" {}", add.join(" ")),
+            loc: loc.clone(),
+            via: Vec::new(),
+            kind: OpKind::EventHandler,
+        });
+    }
+
     fn nativesdk_anonymous_filter(&mut self) {
         if self.ds.notes.nativesdk_anon.is_none() {
             return;
@@ -3597,14 +4830,43 @@ impl Replay<'_> {
         } else {
             Some(true)
         };
+        let verified =
+            std::mem::take(&mut Arc::make_mut(&mut self.ds.notes).nativesdk_anon_verified);
         match applies {
-            Some(true) => self.provides_filter = Some((ProvidesFilter::NativeSdk, loc)),
+            Some(true) => {
+                if verified {
+                    // `ClassExtender("nativesdk", [], d)`: `set_filter("DEPENDS", deps=True)`,
+                    // `set_filter("PACKAGE_WRITE_DEPS", deps=False)`.
+                    let who = "the anonymous python of nativesdk.bbclass (OE-core)";
+                    let (extname, prefixes) = ("nativesdk".to_string(), Vec::new());
+                    let deps = VarFilter::SuffixDeps {
+                        extname: extname.clone(),
+                        prefixes: prefixes.clone(),
+                    };
+                    self.install_filter("DEPENDS", deps, &loc, who);
+                    let pwd = VarFilter::Suffix { extname, prefixes };
+                    self.install_filter("PACKAGE_WRITE_DEPS", pwd, &loc, who);
+                }
+                self.provides_filter = Some((ProvidesFilter::NativeSdk, loc));
+            }
             Some(false) => {}
-            None => self.flag_provides_filter(
-                &ProvidesFilter::NativeSdk,
-                &loc,
-                "PN is not known statically, so whether it applies is not known",
-            ),
+            None => {
+                if verified {
+                    let notes = Arc::make_mut(&mut self.ds.notes);
+                    notes
+                        .python_vars
+                        .extend(NATIVESDK_FILTERED.iter().map(|v| v.to_string()));
+                    notes
+                        .fixed_python_vars
+                        .extend(NATIVESDK_FILTERED.iter().map(|v| v.to_string()));
+                    self.ds.ovr_cache = OnceLock::new();
+                }
+                self.flag_provides_filter(
+                    &ProvidesFilter::NativeSdk,
+                    &loc,
+                    "PN is not known statically, so whether it applies is not known",
+                )
+            }
         }
     }
 
@@ -3623,6 +4885,7 @@ impl Replay<'_> {
         }
         let notes = Arc::make_mut(&mut self.ds.notes);
         notes.python_vars.insert("PROVIDES".into());
+        notes.fixed_python_vars.insert("PROVIDES".into());
         let line = format!(
             "note: {} at {loc}) filters PROVIDES with {} (OE-core lib/oe/classextend.py), which BitBake applies when the value is read; {why}, so the value shown is the one before the filter",
             filter.who(),
@@ -3704,6 +4967,60 @@ impl Replay<'_> {
             }
             Some(Err(why)) => self.flag_provides_filter(&filter, &loc, &why),
         }
+    }
+
+    /// `oe.utils.set_class_filter(var, features_var, filter_var, d)` (OE-core Wrynose
+    /// `lib/oe/utils.py`), run by the handler at `loc`: `defaults = d.getVar(var)`, each word
+    /// holding `}` cut out of it (`defaults.replace(word, "")`, with a warning), then
+    /// `d.setVar(var, '${@oe.utils.class_filter_features("<defaults>", "<features_var>",
+    /// "<filter_var>", d)}')`, which [`super::pyexpr`] evaluates when the two variables it
+    /// reads are certain. `false` (nothing done) when the value is not certain, or holds a
+    /// character the python string literal would read otherwise.
+    fn set_class_filter(
+        &mut self,
+        var: &str,
+        features_var: &str,
+        filter_var: &str,
+        loc: &Loc,
+    ) -> bool {
+        let Some(v) = self.ds.value(var) else {
+            // `"}" in None` raises.
+            return false;
+        };
+        if v.unevaluated_python || !v.unresolved.is_empty() {
+            return false;
+        }
+        let mut defaults = v.text.clone();
+        for issue in super::pyexpr::py_split_ws(&v.text) {
+            if issue.contains('}') {
+                defaults = defaults.replace(&issue, "");
+            }
+        }
+        if defaults.contains(['"', '\\', '\n', '\r']) {
+            return false;
+        }
+        let text = format!(
+            "${{@oe.utils.class_filter_features(\"{defaults}\", \"{features_var}\", \"{filter_var}\", d)}}"
+        );
+        self.ds
+            .rewrite(var, text, loc.clone(), OpKind::EventHandler);
+        true
+    }
+
+    /// Installs `filter` on `var` (`d.setVarFilter`, which replaces an earlier one), with a
+    /// note naming `who` installed it at `loc`.
+    fn install_filter(&mut self, var: &str, filter: VarFilter, loc: &Loc, who: &str) {
+        let notes = Arc::make_mut(&mut self.ds.notes);
+        let line = format!(
+            "note: {who} at {loc} filters {var} with {} (OE-core lib/oe/classextend.py), which BitBake applies to the expanded value on every read; the value shown is filtered when it is certain",
+            filter.describe()
+        );
+        let e = notes.var_notes.entry(var.to_string()).or_default();
+        if !e.contains(&line) {
+            e.push(line);
+        }
+        notes.filters.insert(var.to_string(), (filter, loc.clone()));
+        self.ds.ovr_cache = OnceLock::new();
     }
 
     /// The text of the python function `name` (its pieces, in order), read from disk.
@@ -3926,6 +5243,7 @@ impl Replay<'_> {
         let notes = Arc::make_mut(&mut self.ds.notes);
         for v in vars {
             notes.python_vars.insert(v.clone());
+            notes.fixed_python_vars.insert(v.clone());
             let line = format!(
                 "note: {handler} (an OE-core event handler at {loc}, run before finalisation) {how} {v}; it is not run, so the value shown is the one before it"
             );
@@ -3935,6 +5253,73 @@ impl Replay<'_> {
             }
         }
         self.ds.ovr_cache = OnceLock::new();
+    }
+
+    /// Event handlers registered with `addhandler` that BitBake runs while it parses the
+    /// recipe (`RecipePreFinalise`, `RecipePreDeferredInherits`, `RecipePostKeyExpansion`,
+    /// `RecipeParsed`: `ast.finalize` fires them on the recipe's datastore; a handler
+    /// without `eventmask` gets every event) and that the replay does not emulate: the
+    /// variables they change by name are flagged, like anonymous python's
+    /// (acc-unfollowed; before, such a handler changed values silently).
+    fn other_parse_handlers(&mut self) {
+        const EMULATED: &[&str] = &[
+            "base_eventhandler",
+            "native_virtclass_handler",
+            "nativesdk_virtclass_handler",
+            "multilib_virtclass_handler",
+            "multilib_virtclass_handler_postkeyexp",
+        ];
+        const PARSE_EVENTS: &[&str] = &[
+            "bb.event.RecipePreFinalise",
+            "bb.event.RecipePreDeferredInherits",
+            "bb.event.RecipePostKeyExpansion",
+            "bb.event.RecipeParsed",
+        ];
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        let handlers = self.ds.notes.handlers.clone();
+        for (h, _) in handlers {
+            if EMULATED.contains(&h.as_str()) || !seen.insert(h.clone()) {
+                continue;
+            }
+            let runs = match self.ds.flag(&h, "eventmask") {
+                None => true,
+                Some(m) => {
+                    m.unevaluated_python
+                        || !m.unresolved.is_empty()
+                        || m.text.split_whitespace().any(|w| PARSE_EVENTS.contains(&w))
+                }
+            };
+            if !runs {
+                continue;
+            }
+            let Some(pieces) = self.ds.function(&h) else {
+                continue;
+            };
+            for p in pieces {
+                let Some(body) = self.body_text(&p.loc) else {
+                    continue;
+                };
+                let (sets, _) = python_writes(&body);
+                let vars: Vec<String> = sets
+                    .iter()
+                    .map(|s| base_of(&self.ds.expand(s).text).to_string())
+                    .collect();
+                let notes = Arc::make_mut(&mut self.ds.notes);
+                for v in vars {
+                    notes.python_vars.insert(v.clone());
+                    notes.fixed_python_vars.insert(v.clone());
+                    let line = format!(
+                        "note: {h} (an event handler at {}, run while the recipe is parsed) may change {v}; it is not run, so the value shown is the one before it",
+                        p.loc
+                    );
+                    let e = notes.var_notes.entry(v).or_default();
+                    if !e.contains(&line) {
+                        e.push(line);
+                    }
+                }
+                self.ds.ovr_cache = OnceLock::new();
+            }
+        }
     }
 
     /// The `RecipePreFinalise` handlers of OE-core's class-extension classes (Wrynose
@@ -3951,10 +5336,26 @@ impl Replay<'_> {
         const NATIVE: &str = "native_virtclass_handler";
         if self.handles(NATIVE, "RecipePreFinalise") {
             let loc = self.handler_loc(NATIVE, recipe);
+            // The workspace's handler is OE-core Wrynose's: its read filters and
+            // `set_class_filter` are reproduced (`verified`); any other text is flagged.
+            let verified = self
+                .function_body(NATIVE)
+                .is_some_and(|b| classfn::same_text(&b, classfn::NATIVE_VIRTCLASS_HANDLER));
             match static_value(&self.ds, "PN") {
                 Some(Some(pn)) if !pn.ends_with("-native") => {}
                 pn => {
-                    let mut vars = strings(&["DISTRO_FEATURES"]);
+                    let mut vars = Vec::new();
+                    if !(verified
+                        && pn.is_some()
+                        && self.set_class_filter(
+                            "DISTRO_FEATURES",
+                            "DISTRO_FEATURES_NATIVE",
+                            "DISTRO_FEATURES_FILTER_NATIVE",
+                            &loc,
+                        ))
+                    {
+                        vars.push("DISTRO_FEATURES".to_string());
+                    }
                     let ce = self.ds.value("BBCLASSEXTEND").unwrap_or_default();
                     let unsure = ce.unevaluated_python || !ce.unresolved.is_empty();
                     if ce.text.contains("native") || unsure || pn.is_none() {
@@ -3965,10 +5366,35 @@ impl Replay<'_> {
                         match (&pn, certain) {
                             (Some(Some(p)), true) => {
                                 let bpn = static_value(&self.ds, "BPN").flatten();
+                                // `native_filter` on DEPENDS, PACKAGES, PACKAGES_DYNAMIC;
+                                // the runtime variables are also renamed per package
+                                // (`map_dependencies`), which is not reproduced: flagged.
+                                let mut filtered: Vec<&str> = Vec::new();
+                                if let (true, Some(b)) = (verified, &bpn) {
+                                    for (var, regex, selfref) in [
+                                        ("DEPENDS", false, false),
+                                        ("PACKAGES", false, true),
+                                        ("PACKAGES_DYNAMIC", true, true),
+                                    ] {
+                                        let f = VarFilter::Native {
+                                            pn: p.clone(),
+                                            bpn: b.clone(),
+                                            regex,
+                                            selfref,
+                                        };
+                                        self.install_filter(
+                                            var,
+                                            f,
+                                            &loc,
+                                            "native_virtclass_handler (an OE-core event handler)",
+                                        );
+                                        filtered.push(var);
+                                    }
+                                }
                                 vars.extend(
                                     NATIVE_FILTERED
                                         .iter()
-                                        .filter(|v| **v != "PROVIDES")
+                                        .filter(|v| **v != "PROVIDES" && !filtered.contains(v))
                                         .map(|v| v.to_string()),
                                 );
                                 self.provides_filter = Some((
@@ -3986,9 +5412,26 @@ impl Replay<'_> {
         const NATIVESDK: &str = "nativesdk_virtclass_handler";
         if self.handles(NATIVESDK, "RecipePreFinalise") {
             let loc = self.handler_loc(NATIVESDK, recipe);
+            let verified = self
+                .function_body(NATIVESDK)
+                .is_some_and(|b| classfn::same_text(&b, classfn::NATIVESDK_VIRTCLASS_HANDLER));
             match static_value(&self.ds, "PN") {
                 Some(Some(pn)) if pn.ends_with("-nativesdk") || pn.starts_with("nativesdk-") => {
-                    self.handler_flags(NATIVESDK, &loc, &strings(&["DISTRO_FEATURES"]), "filters");
+                    if !(verified
+                        && self.set_class_filter(
+                            "DISTRO_FEATURES",
+                            "DISTRO_FEATURES_NATIVESDK",
+                            "DISTRO_FEATURES_FILTER_NATIVESDK",
+                            &loc,
+                        ))
+                    {
+                        self.handler_flags(
+                            NATIVESDK,
+                            &loc,
+                            &strings(&["DISTRO_FEATURES"]),
+                            "filters",
+                        );
+                    }
                     self.ds.rewrite(
                         "MLPREFIX",
                         "nativesdk-".into(),
@@ -4372,6 +5815,35 @@ fn multilib_provides_filter(body: &str) -> bool {
         && sets_provides_filter(body, "variant, prefixes, d")
 }
 
+/// The variable a model's write changes.
+fn write_name(w: &anonmodel::Write) -> &str {
+    match w {
+        anonmodel::Write::Append(n, _)
+        | anonmodel::Write::Set(n, _)
+        | anonmodel::Write::SetFlag(n, _, _) => n,
+    }
+}
+
+/// The names `body` calls as plain functions (`f(`, not a method `x.f(`, not a `def f(`).
+fn called_names(body: &str) -> BTreeSet<String> {
+    static CALL: LazyLock<Option<Regex>> =
+        LazyLock::new(|| Regex::new(r"(?m)(^|[^\w.])([A-Za-z_]\w*)\s*\(").ok());
+    let Some(re) = CALL.as_ref() else {
+        return BTreeSet::new();
+    };
+    let mut out = BTreeSet::new();
+    for c in re.captures_iter(body) {
+        let Some(m) = c.get(2) else { continue };
+        // `def f(` defines rather than calls.
+        let line_start = body[..m.start()].rfind('\n').map_or(0, |p| p + 1);
+        if body[line_start..m.start()].trim() == "def" {
+            continue;
+        }
+        out.insert(m.as_str().to_string());
+    }
+    out
+}
+
 /// Variables a python body writes through a function it defines itself that writes `d`
 /// with a computed name (OE-core `base.bbclass`'s anonymous python: `def appendVar(varname,
 /// appends): ... d.appendVar(varname, ...)`, called as `appendVar('PACKAGECONFIG_CONFARGS',
@@ -4406,6 +5878,106 @@ fn wrapper_writes(body: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// The value writes of an anonymous function body whose name is computed: `d.setVar`,
+/// `appendVar`, `prependVar`, `delVar`, `renameVar` or `setVarFilter` with a first
+/// argument that is not a string literal (a literal followed by `+` / `%` is recorded by
+/// [`python_writes`] under the literal). Flag writes change no value and are left out. For
+/// each, the literal prefix of every name it can write: the argument is an identifier
+/// whose every assignment in the body (and there is one at least, and no `for` / `as` /
+/// parameter binds it) starts with a string literal, cut at its first `%` or `{`
+/// (`task = "do_image_%s" % t...`: `do_image_`); `None` otherwise. The first parameter
+/// of a local `def` whose every call passes a string literal there (OE-core
+/// `base.bbclass`'s `appendVar(varname, appends)`, whose calls [`wrapper_writes`] records)
+/// writes no other name and is left out.
+fn computed_value_writes(body: &str) -> Vec<Option<String>> {
+    static WRITE: LazyLock<Option<Regex>> = LazyLock::new(|| {
+        Regex::new(
+            r#"\bd\.(?:setVar|appendVar|prependVar|delVar|renameVar|setVarFilter)\s*\(\s*([^'"\s,)][^,)]*)"#,
+        )
+        .ok()
+    });
+    static IDENT: LazyLock<Option<Regex>> =
+        LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").ok());
+    let (Some(write), Some(ident)) = (WRITE.as_ref(), IDENT.as_ref()) else {
+        return vec![None];
+    };
+    let mut out = Vec::new();
+    for c in write.captures_iter(body) {
+        let arg = c.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+        if !ident.is_match(arg) {
+            out.push(None);
+            continue;
+        }
+        if literal_wrapper_param(body, arg) {
+            continue;
+        }
+        out.push(assigned_prefix(body, arg));
+    }
+    out
+}
+
+/// `name` is the first parameter of a local `def` in `body` and every call of that
+/// function passes a string literal first.
+fn literal_wrapper_param(body: &str, name: &str) -> bool {
+    let Ok(def) = Regex::new(&format!(
+        r"(?m)^\s*def\s+(\w+)\s*\(\s*{}\s*[,)]",
+        regex::escape(name)
+    )) else {
+        return false;
+    };
+    let Some(f) = def.captures(body).and_then(|c| c.get(1)) else {
+        return false;
+    };
+    let f = f.as_str();
+    let (Ok(call), Ok(literal)) = (
+        Regex::new(&format!(r"(?:^|[^\w.]){}\s*\(", regex::escape(f))),
+        Regex::new(&format!(
+            r#"(?:^|[^\w.]){}\s*\(\s*(?:'[^'\\]*'|"[^"\\]*")\s*,"#,
+            regex::escape(f)
+        )),
+    ) else {
+        return false;
+    };
+    // The `def` line itself is one match of `call`.
+    call.find_iter(body).count() == literal.find_iter(body).count() + 1
+}
+
+/// The literal prefix every value of the local `name` starts with (see
+/// [`computed_value_writes`]).
+fn assigned_prefix(body: &str, name: &str) -> Option<String> {
+    let n = regex::escape(name);
+    let other = Regex::new(&format!(
+        r"\bfor\s+(?:[\w, ]*\b)?{n}\b|\bas\s+{n}\b|\bdef\s+\w+\s*\([^)]*\b{n}\b|\b{n}\s*(?:\+|-|\*|/|%|\|)="
+    ))
+    .ok()?;
+    if other.is_match(body) {
+        return None;
+    }
+    let assign = Regex::new(&format!(r"(?m)^\s*{n}\s*=([^=].*)$")).ok()?;
+    let mut prefix: Option<String> = None;
+    let mut any = false;
+    for c in assign.captures_iter(body) {
+        any = true;
+        let rhs = c.get(1)?.as_str().trim();
+        let q = rhs.chars().next().filter(|q| *q == '\'' || *q == '"')?;
+        let lit: String = rhs[1..].chars().take_while(|c| *c != q).collect();
+        let p: String = lit.chars().take_while(|c| *c != '%' && *c != '{').collect();
+        prefix = Some(match prefix {
+            None => p,
+            Some(old) => old
+                .chars()
+                .zip(p.chars())
+                .take_while(|(a, b)| a == b)
+                .map(|(a, _)| a)
+                .collect(),
+        });
+    }
+    if !any {
+        return None;
+    }
+    prefix.filter(|p| !p.is_empty())
 }
 
 fn python_writes(body: &str) -> (Vec<String>, bool) {
@@ -4463,6 +6035,25 @@ fn python_writes(body: &str) -> (Vec<String>, bool) {
         add("PACKAGES");
         add("PACKAGES_DYNAMIC");
     }
+    // The older `ClassExtender` (Scarthgap / Kirkstone `lib/oe/classextend.py`):
+    // `map_variable(v)`, `map_regexp_variable(v)` and `map_depends_variable(v)` set `v`
+    // (`d.setVar`, `renameVar` to `v + "_NONML"`); `rename_packages()` renames `PACKAGES`.
+    static MAP_VAR: LazyLock<Option<Regex>> = LazyLock::new(|| {
+        Regex::new(
+            r#"\.(?:map_variable|map_regexp_variable|map_depends_variable)\s*\(\s*(?:'([^'\\]*)'|"([^"\\]*)")"#,
+        )
+        .ok()
+    });
+    if let Some(re) = MAP_VAR.as_ref() {
+        for c in re.captures_iter(body) {
+            if let Some(m) = c.get(1).or_else(|| c.get(2)) {
+                add(m.as_str());
+            }
+        }
+    }
+    if body.contains(".rename_packages(") {
+        add("PACKAGES");
+    }
     (sets, opaque)
 }
 
@@ -4483,12 +6074,43 @@ mod tests {
         assert_eq!(vars_from_file("/a/app.bb"), (Some("app".into()), None));
         assert_eq!(vars_from_file("/a/hello.inc"), (None, None));
         assert_eq!(vars_from_file("/a/a_b_c_d.bb"), (None, None));
+        assert_eq!(pr_from_file("/a/hello_1.1_r3.bb").as_deref(), Some("r3"));
+        assert_eq!(pr_from_file("/a/hello_1.1.bb"), None);
+        assert_eq!(pr_from_file("/a/hello_1.1_.bb"), None);
+        assert_eq!(pr_from_file("/a/a_b_c_d.bb"), None);
+        assert_eq!(pr_from_file("/a/a_b_c.inc"), None);
     }
 
     #[test]
     fn re_escape_like_python() {
         assert_eq!(re_escape("/a/meta-x.y"), "/a/meta\\-x\\.y");
         assert_eq!(re_escape("a_b/c"), "a_b/c");
+    }
+
+    #[test]
+    fn computed_value_writes_and_their_prefixes() {
+        // OE-core image.bbclass: the task name is built from a literal.
+        let image = "python () {\n    for t in types:\n        task = \"do_image_%s\" % t.replace(\"-\", \"_\")\n        d.setVar(task, cmds)\n        d.setVarFlag(task, 'func', '1')\n}";
+        assert_eq!(computed_value_writes(image), vec![Some("do_image_".into())]);
+        // base.bbclass's local wrapper: every call passes a literal.
+        let wrapper = "python () {\n    def appendVar(varname, appends):\n        if appends:\n            d.appendVar(varname, \" \" + \" \".join(appends))\n    appendVar('DEPENDS', deps)\n    appendVar('RDEPENDS:${PN}', rdeps)\n}";
+        assert!(computed_value_writes(wrapper).is_empty());
+        // A call with a computed first argument: any name.
+        let wrapper2 = format!("{wrapper}\nappendVar(name, x)\n");
+        assert_eq!(computed_value_writes(&wrapper2), vec![None]);
+        // A loop variable, an attribute, a call: any name.
+        assert_eq!(
+            computed_value_writes("for v in vs:\n    d.setVar(v, '1')\n"),
+            vec![None]
+        );
+        assert_eq!(
+            computed_value_writes("d.delVar(self.name)\nd.renameVar(f(x), y)\n"),
+            vec![None, None]
+        );
+        // Flag writes and literal names are not computed value writes.
+        assert!(
+            computed_value_writes("d.setVarFlag(task, 'x', '1')\nd.setVar('A', '1')\n").is_empty()
+        );
     }
 
     #[test]
@@ -4516,6 +6138,29 @@ mod tests {
         for n in ["DEPENDS", "PROVIDES", "RDEPENDS", "PKG", "PACKAGES", "X"] {
             assert!(sets.iter().any(|s| s == n), "{n}: {sets:?}");
         }
+    }
+
+    #[test]
+    fn python_writes_sees_the_older_class_extender() {
+        // nativesdk.bbclass's anonymous python (OE-core Scarthgap / Kirkstone).
+        let (sets, _) = python_writes(
+            "    clsextend = oe.classextend.NativesdkClassExtender(\"nativesdk\", d)\n    clsextend.rename_packages()\n    clsextend.map_depends_variable(\"DEPENDS\")\n    clsextend.map_variable(\"PROVIDES\")\n    clsextend.map_regexp_variable('PACKAGES_DYNAMIC')\n",
+        );
+        for n in ["PACKAGES", "DEPENDS", "PROVIDES", "PACKAGES_DYNAMIC"] {
+            assert!(sets.iter().any(|s| s == n), "{n}: {sets:?}");
+        }
+    }
+
+    #[test]
+    fn called_names_are_calls_not_definitions_or_methods() {
+        let body = "def helper(d):\n    pass\n    helper(d)\n    x.method(d)\n    other (d)\n";
+        let names = called_names(body);
+        assert!(
+            names.contains("helper") && names.contains("other"),
+            "{names:?}"
+        );
+        assert!(!names.contains("method"), "{names:?}");
+        assert!(!called_names("def only(d):\n    return 1\n").contains("only"));
     }
 
     #[test]

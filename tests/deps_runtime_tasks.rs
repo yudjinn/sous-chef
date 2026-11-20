@@ -161,17 +161,18 @@ async fn build_lists_the_recipes_named_by_task_depends_flags() {
 /// A `BBCLASSEXTEND = "native"` recipe: BitBake reads the variant's `DEPENDS` through
 /// `native_filter(..., selfref=False)` (OE-core `native.bbclass`), so `zlib` is
 /// `zlib-native`, a `-native` word stays, a `-cross-` word becomes `-native` and the
-/// recipe's own name is dropped.
+/// recipe's own name is dropped. (acc-helpers: the evaluator installs the filter, only for
+/// OE-core's own handler text, `tests/fixtures/classfn/native-handler.bbclass`; `deps` maps
+/// the words through it.)
 #[tokio::test]
 async fn a_native_variant_reads_depends_through_native_filter() {
     let fx = fixture(|root| {
+        let handler =
+            fs::read_to_string(common::fixture_path("classfn/native-handler.bbclass")).unwrap();
         write(
             root,
             "meta-core/classes-recipe/native.bbclass",
-            "CLASSOVERRIDE = \"class-native\"\nMACHINEOVERRIDES = \"\"\n\
-             python native_virtclass_handler () {\n    pn = d.getVar(\"PN\")\n}\n\
-             addhandler native_virtclass_handler\n\
-             native_virtclass_handler[eventmask] = \"bb.event.RecipePreFinalise\"\n",
+            &format!("CLASSOVERRIDE = \"class-native\"\nMACHINEOVERRIDES = \"\"\n{handler}"),
         );
         write(
             root,
@@ -182,10 +183,13 @@ async fn a_native_variant_reads_depends_through_native_filter() {
         );
     });
     let out = deps_of(&fx, "tool-native", Kind::Build).await;
+    // DEPENDS is certain, so the evaluator's value is already filtered. handleVirtRecipeProviders
+    // stores the filtered words and the next read filters them again, as in BitBake:
+    // binutils-cross-arm, then binutils-native-arm, then binutils-native-arm-native.
     for (dep, source) in [
-        ("zlib-native", "DEPENDS (native_filter)"),
+        ("zlib-native", "DEPENDS"),
         ("pkgconf-native", "DEPENDS"),
-        ("binutils-native-arm", "DEPENDS (native_filter)"),
+        ("binutils-native-arm-native", "DEPENDS"),
     ] {
         assert!(
             out.lines()
@@ -195,7 +199,7 @@ async fn a_native_variant_reads_depends_through_native_filter() {
         );
     }
     assert!(!out.contains("\ttool-native\t"), "{out}");
-    assert!(out.contains("note: native_filter rows"), "{out}");
+    assert!(out.contains("note: native_filter: "), "{out}");
     // The target recipe reads its DEPENDS as written.
     let out = deps_of(&fx, "tool", Kind::Build).await;
     assert!(out.contains("1\tzlib\t"), "{out}");

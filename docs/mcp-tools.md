@@ -64,6 +64,16 @@ Common to every tool:
   kas file kas/board.yaml:5 (kas project without a build directory; ...)`, from
   `tests/eval_w8.rs`). When nothing sets `MACHINE`, every evaluated view ends with
   `note: no MACHINE is set (...)`: machine-specific values are not applied.
+- **The build host** (since build-host) is not an argument: `sous-chef.toml [build_host]`
+  (`arch`, `os`) gives what `os.uname()[4]` and `os.uname()[0].lower()` are on the machine
+  that runs BitBake, for every evaluation. Without it, `BUILD_ARCH`, `BUILD_OS` and every
+  value built from them (native and nativesdk `OVERRIDES`, `WORKDIR`, `S`, ...) are flagged,
+  the cause naming the key (`os.uname()[4] is the build host's, which sous-chef does not
+  read; give [build_host] arch in sous-chef.toml`). With it, `var BUILD_ARCH` carries `note:
+  os.uname()[4] in the := at meta:conf/bitbake.conf:137 is the build host's, taken from
+  sous-chef.toml [build_host] (arch = "x86_64", os = "linux"), not read from any host`, and
+  a value whose own python read it says `os.uname() from sous-chef.toml [build_host]` in
+  its python note.
 - **Multiconfig** (since x5; bitbake-semantics.md "Multiconfig"). `var`, `overrides`, `deps`
   and `recipe` take `mc` (a name in `BBMULTICONFIG`), and also a recipe written
   `mc:<name>:<recipe>` (or the old `multiconfig:<name>:<recipe>`; both forms naming
@@ -182,13 +192,16 @@ changes variables through computed names).
   directory. `FILESPATH` is python in OE-Core (`base_set_filespath`), which is not run: the
   search order is reconstructed (see "Files and patches" in bitbake-semantics.md) and a
   note says so. Files are read through the confinement check.
-- `tasks`: rows `task state after pieces loc`: the tasks of the recipe, dependencies first
+- `tasks`: rows `task state after pieces funcs loc`: the tasks of the recipe, dependencies first
   (ties in the order they were added), from the `addtask` / `deltask` statements of the
   configuration's classes, the recipe, its includes and classes and its bbappends, in parse
   order (read from the index; the replay does not run them). `after` is the task's
   dependencies as `addtask ... after` and `before` leave them; `pieces` the composed
   function as pointers, an `EXPORT_FUNCTIONS` stub followed by the class function it calls
-  and that function's pieces; `state` `noexec` (the flag) or `deleted` (with the `deltask`
+  and that function's pieces; `funcs` (var-taskfuncs) the task's `[prefuncs]` and
+  `[postfuncs]` as names in run order (`pre: a b; post: c d`, `(uncertain)` after a list
+  whose value is, `-` for none; `var name=<task>` gives their pointers and what anonymous
+  python may add); `state` `noexec` (the flag) or `deleted` (with the `deltask`
   as `loc`); `loc` the `addtask`. Not accounted for, and said so in a note: tasks added or
   deleted by anonymous python, `do_x[deps]` set directly (a warning names any such
   assignment) and dependencies on other recipes' tasks.
@@ -278,16 +291,20 @@ file://nowhere.cfg	searched	#3	meta-core:recipes-core/hello/hello-1.1/	missing	-
 `tasks` of `hello`:
 
 ```
-task	state	after	pieces	loc
-do_fetch	-	-	meta-core:classes/base.bbclass:54 -> base_do_fetch (meta-core:classes/base.bbclass:15-20)	meta-core:classes/base.bbclass:13
-do_unpack	-	do_fetch	meta-core:classes/base.bbclass:54 -> base_do_unpack (meta-core:classes/base.bbclass:23-26)	meta-core:classes/base.bbclass:22
-do_patch	-	do_unpack	meta-core:classes/base.bbclass:54 -> base_do_patch (meta-core:classes/base.bbclass:29-31)	meta-core:classes/base.bbclass:28
-do_autoreconf	-	do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_autoreconf (meta-core:classes-recipe/autotoolsish.bbclass:13-15)	meta-core:classes-recipe/autotoolsish.bbclass:16
-do_configure	-	do_autoreconf do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_configure (meta-core:classes-recipe/autotoolsish.bbclass:18-20)	meta-core:classes/base.bbclass:33
-do_compile	-	do_configure	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_compile (meta-core:classes-recipe/autotoolsish.bbclass:22-24)	meta-core:classes/base.bbclass:38
-do_install	-	do_compile	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_install (meta-core:classes-recipe/autotoolsish.bbclass:26-28), meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	meta-core:classes/base.bbclass:45
-do_build	noexec	do_install	-	meta-core:classes/base.bbclass:51
+source: tests/recipe_views.rs
+expression: out
+---
+task	state	after	pieces	funcs	loc
+do_fetch	-	-	meta-core:classes/base.bbclass:54 -> base_do_fetch (meta-core:classes/base.bbclass:15-20)	-	meta-core:classes/base.bbclass:13
+do_unpack	-	do_fetch	meta-core:classes/base.bbclass:54 -> base_do_unpack (meta-core:classes/base.bbclass:23-26)	-	meta-core:classes/base.bbclass:22
+do_patch	-	do_unpack	meta-core:classes/base.bbclass:54 -> base_do_patch (meta-core:classes/base.bbclass:29-31)	-	meta-core:classes/base.bbclass:28
+do_autoreconf	-	do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_autoreconf (meta-core:classes-recipe/autotoolsish.bbclass:13-15)	-	meta-core:classes-recipe/autotoolsish.bbclass:16
+do_configure	-	do_autoreconf do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_configure (meta-core:classes-recipe/autotoolsish.bbclass:18-20)	-	meta-core:classes/base.bbclass:33
+do_compile	-	do_configure	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_compile (meta-core:classes-recipe/autotoolsish.bbclass:22-24)	-	meta-core:classes/base.bbclass:38
+do_install	-	do_compile	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_install (meta-core:classes-recipe/autotoolsish.bbclass:26-28), meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	-	meta-core:classes/base.bbclass:45
+do_build	noexec	do_install	-	-	meta-core:classes/base.bbclass:51
 note: order from the addtask / deltask statements in parse order (the index: configuration classes, recipe, includes and classes, bbappends, deferred inherits; the replay does not run them); dependencies first
+note: funcs: the [prefuncs] (pre) and [postfuncs] (post) BitBake runs before and after the task, as set in the metadata; anonymous python and event handlers may add more (var name=<task> lists those and where each function is defined)
 note: not accounted for: tasks added or deleted by anonymous python (bb.build.addtask / deltask), do_x[deps] set directly, and dependencies on other recipes' tasks ([depends], [deptask], [rdeptask], [recrdeptask])
 note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)
 ```
@@ -352,6 +369,19 @@ Output: one row per operation on the variable and its override variants, in pars
 - A function is a variable too: each definition is a row with snippet `name() { ... }`, and
   `final:` lists its pieces in order as pointers (`layer:path:A-B`, with `-> class_do_x` for
   an `EXPORT_FUNCTIONS` stub).
+- (var-taskfuncs) A function that is a task (`addtask`) or has `[prefuncs]` /
+  `[postfuncs]` also gets, after `final:` and without `flags`, what BitBake runs with it
+  (bitbake-semantics.md, "What a task runs"): `task: do_x (addtask at <loc>) runs its
+  [prefuncs], then do_x, then its [postfuncs]` (or that `[noexec]` means none of it runs;
+  `note: X is not a task` when it only has the flags); one `prefunc:` / `postfunc:` line
+  per function in run order with where it is defined (pointers, or `(not defined: ...)`)
+  and the flag operation that added it (`prefuncs: none set` when there are none;
+  `postfuncs: uncertain: ...` when the flag value has python or unresolved names);
+  `flags:` with `[cleandirs]`, `[dirs]`, `[lockfiles]` as written and where; then up to
+  three `note: not run: <anonymous python | event handler h> at <loc> may prepend X to
+  [prefuncs] ... of the tasks it computes` for code run at the end of parsing whose body
+  writes the lists (a write under an `if` proved false, or in a loop over a certain
+  variable that does not hold the task, is left out). In JSON these are notes too.
 
 Then the notes: `final:` with the value in quotes (`final[flag]:` for flags; `final: X is
 not set`), cut at 600 characters with the full text in a `value` handle; references left
@@ -363,10 +393,15 @@ part of `OVERRIDES` is unknown (a value with no conditional operation in its his
 carries it), or `(may differ: depends on unresolved X)` when a statement the replay could
 not apply may set it (`MACHINE` when the `addfragments` list does not expand); the
 evaluation's notes (see `recipe`: an uncollected file, the machine's source, no `MACHINE`);
-a count of references not followed (python, undefined variables, missing files); a note for
-each reference followed although its value is uncertain (``note: `inherit_defer
+a count of references not followed (python, undefined variables, missing files; every value
+the files they would read may change is flagged, acc-unfollowed); a note for each reference
+followed although its value is uncertain (``note: `inherit_defer
 toolchain/${TOOLCHAIN}` ... was followed as "toolchain/gcc", but it depends on python or on
-overrides that are not all known; values its files set are flagged``); a warning per
+overrides that are not all known; another value would read other files, so every value is
+flagged``); a note for each reference followed only for the words it reads whatever its
+python gives, when the files it did not read write the variable (``note: `inherit_defer ${IMGCLASSES}` at ... was followed for the words it reads
+whatever its python gives; it may also read populate_sdk_ext, which sous-chef did not read: the
+values they change are flagged``); a warning per
 anonymous python function that changes the variable by name, and
 one for each that is opaque (changes variables through computed names or hands `d` to other
 code), since anonymous python is never run; a count of the other anonymous functions;
@@ -378,7 +413,17 @@ shown, `+N more`; `; OVERRIDES, which decides its override variants, needed N mo
 `OVERRIDES` did too), and, for the first expression left unevaluated because of what it
 reads, `note: python not evaluated: `...`: X holds python that is not evaluated` (the
 reason names the variable; `(+N more)`). Python outside the subset gives no such line, only
-the python note. `overrides` gives the same lines for `OVERRIDES` (`note: OVERRIDES:
+the python note. (acc-overflag, `var` only) A flagged value gets up to three
+`note: uncertain: <cause>` lines (`DataStore::flag_causes`, then `note: uncertain: +N more causes`), each naming the
+cause at the variable that carries it: `anonymous python at <loc> may write PACKAGE_ARCH,
+used via UNPACKDIR > WORKDIR > MULTIMACH_TARGET_SYS`, `X holds python that is not
+evaluated: `...``, `which override variant ... of X applies depends on OVERRIDES entries
+that are not known statically (`...`)`, an uncertain reference, an unapplied statement, an
+undefined variable (a by-name write of the variable itself has the warning above instead).
+An anonymous write proved not to happen on this recipe gives `note: anonymous python at
+<loc> does not write X here: <reason>` and no warning; a function proved to return at once
+gets no opaque warning (these two in every tool that shows the anonymous-python warnings).
+`overrides` gives the python lines for `OVERRIDES` (`note: OVERRIDES:
 python ...`), `deps` for `DEPENDS` (`build`), `PACKAGES` (`runtime`) and `PACKAGECONFIG`
 (`packageconfig`).
 
@@ -478,6 +523,24 @@ applied	=	-	meta-core:classes-recipe/autotoolsish.bbclass:30	do_install() { ... 
 applied	=	append	meta-core:recipes-core/hello/hello.inc:15-18	do_install:append() { ... }
 applied	=	append	meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	do_install:append() { ... }
 final: function do_install, 3 pieces in order: meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_install, meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10
+task: do_install (addtask at meta-core:classes/base.bbclass:45) runs its [prefuncs], then do_install, then its [postfuncs]
+prefuncs: none set
+postfuncs: none set
+flags: [dirs] "${B}" at meta-core:classes/base.bbclass:46 (created; it runs in the last)
+```
+
+`do_install` of `busybox` on yocto-kiss (the history rows are cut by the default budget,
+the anonymous-python warnings left out here):
+
+```
+final: function do_install, 1 piece in order: meta:recipes-core/busybox/busybox.inc:225-375
+task: do_install (addtask at meta:classes-global/base.bbclass:407) runs its [prefuncs], then do_install, then its [postfuncs]
+prefuncs: none set
+postfunc: remove_libtool_la meta:classes/remove-libtool.bbclass:11-15 (by [postfuncs] += "remove_libtool_la" at meta:classes/remove-libtool.bbclass:17)
+postfunc: rm_systemd_unitdir meta:classes-recipe/systemd.bbclass:277-282 (by [postfuncs] += "${RMINITDIR}" at meta:classes-recipe/systemd.bbclass:295)
+flags: [cleandirs] "${D}" at meta:classes-global/base.bbclass:410 (removed and recreated first); [dirs] "${B}" at meta:classes-global/base.bbclass:408 (created; it runs in the last)
+note: not run: anonymous python at meta:classes-global/sstate.bbclass:134-160 may prepend sstate_task_prefunc to [prefuncs], set [postfuncs] of the tasks it computes
+note: not run: event handler staging_taskhandler at meta:classes-global/staging.bbclass:654-667 may prepend extend_recipe_sysroot to [prefuncs] of the tasks it computes
 ```
 
 ### `overrides`
@@ -737,11 +800,14 @@ the flags of the selected options, with a note.
   dependencies of the selected `PACKAGECONFIG` options, then (since y3) the recipes the
   `depends` flags of the recipe's tasks name (`do_patch[depends] (do_populate_sysroot)`,
   one row per recipe with the tasks counted; a name already in `DEPENDS` is not repeated;
-  what anonymous python adds is named in a note). In a native variant (`PN` ending in
-  `-native`, `native` in `BBCLASSEXTEND`) the `DEPENDS` words are shown as BitBake reads
-  them through `native.bbclass`'s `native_filter` (`expat` as `expat-native`, source
-  `DEPENDS (native_filter)`, the recipe's own name left out). `depth` follows the selected
-  providers.
+  what anonymous python adds is named in a note). In a class-extended variant whose class
+  filters `DEPENDS` (the evaluator records OE-core's `native_filter` for a native variant,
+  `suffix_filter_deps` for nativesdk, when the class is OE-core's text) the words are shown
+  as BitBake reads them (`expat` as `expat-native`, the recipe's own name left out): the
+  evaluated `DEPENDS` is already filtered when certain; the words of an uncertain one and of
+  the `PACKAGECONFIG` build fields are mapped one by one (source `DEPENDS (native_filter)`,
+  `PACKAGECONFIG[x] (native_filter)`); a note names the filter. `depth` follows the
+  selected providers.
 - `runtime`: rows `package dep relation source loc`: the plain `RDEPENDS` and
   `RRECOMMENDS` (package `(every package)`: BitBake adds them to each), then per package of
   `PACKAGES` the words of `RDEPENDS:<package>` (relation `depends`) and
@@ -1390,6 +1456,11 @@ says to rerun the command. `status` shows the store's size and the limits.
 
 ### `status`
 No arguments. Workspace roots, the release (`release`, e.g. `wrynose (LAYERSERIES_CORENAMES)`),
+the build host (since build-host; `build_host`: `arch = "x86_64", os = "linux" (sous-chef.toml
+[build_host])`, a value not set named as uncertain, or `not set: os.uname() values
+(BUILD_ARCH, BUILD_OS and what is built from them, native and nativesdk OVERRIDES among
+them) stay uncertain; give [build_host] arch and os in sous-chef.toml`; JSON `build_host
+{arch, os}`, each left out when not set),
 layer count, file counts by kind, index path and age, whether a build directory and a usable
 bitbake environment were found, and the running job if any (`job`, e.g.
 `job:1 task hello running 1s`), and the handle store (`handles`: how many handles it holds,
@@ -1813,11 +1884,12 @@ Signature files are zstd-compressed JSON on every supported release (bitbake-sem
 build environment's runner, stores the whole output under a `text` handle and digests it.
 Rows `kind item detail loc`:
 
-- `task`: what re-ran and why in one line: `its own inputs changed (basehash)`, or `its own
-  inputs did not change; a dependency's did, by way of <dep> -> <dep>` (the recursion
-  `bitbake-diffsigs` followed to the root cause);
-- `via`: each dependency on that path, outermost first, with its old and new hash (first
-  10 hex digits);
+- `task`: what re-ran and why in one line: `its own inputs changed (basehash)`, or `a
+  dependency's hash changed, by way of <dep> -> <dep>` (the recursion `bitbake-diffsigs`
+  followed to the root cause), with a note that BitBake then shows the dependency's
+  comparison instead of the task's own, so a change of the task's own inputs would not be
+  listed (real-checks: zlib's `do_compile` had its own `CFLAGS` change and printed only its
+  dependency; bitbake-semantics.md "Task signatures");
 - `cause`: the root-cause changes, deepest first (at most 6, then `+N more (limit=6)`):
   a variable or function value changed (the word diff `"a [-old-] {+new+}"`, or the line
   counts of a unified diff, and, when its lines were changed in place (as many `-` as `+`),
@@ -1832,6 +1904,8 @@ Rows `kind item detail loc`:
   task), a change of the ignore lists, or a dependency whose signature could not be found
   (recursion stopped). A `basehash` row only when nothing else at that level explains it.
   `(pn)` follows the item when the change is in a dependency.
+- `via`: after the causes (so a budget cut drops these first), each dependency on that
+  path, outermost first, with its old and new hash (first 10 hex digits).
 - When there is nothing to compare: `only one signature: nothing to compare` (BitBake's
   `Only one matching sigdata file found`), `no signature found`, `the two signatures do not
   differ`, or the failure's `ERROR:` lines, with a note on how many signature files the
@@ -1847,10 +1921,11 @@ fixture workspace, `recipe: "hello", task: "compile"`):
 
 ```
 kind	item	detail	loc
-task	hello:do_compile	re-ran: its own inputs did not change; a dependency's did, by way of hello:do_configure	-
-via	hello:do_configure	hash 6f1c2e0a9b -> 0a1b2c3d4e	-
+task	hello:do_compile	re-ran: a dependency's hash changed, by way of hello:do_configure	-
 cause	EXTRA_OECONF (hello)	value changed: "--disable-nls {+--with-mine+}"	meta-mine:recipes-core/hello/hello_1.1.bbappend:6
 cause	do_configure (hello)	value changed: 1 line added, 0 removed	meta-core:classes-recipe/autotoolsish.bbclass:30
+via	hello:do_configure	hash 6f1c2e0a9b -> 0a1b2c3d4e	-
+note: bitbake-diffsigs shows a changed dependency's comparison instead of the task's own, so a change of the task's own inputs would not be listed
 note: from `bitbake-diffsigs -c never -t hello do_compile` (BitBake's own comparison; nothing was built); full output h:... (563 bytes): slice handle=h:...
 ```
 

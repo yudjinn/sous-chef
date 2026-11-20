@@ -9,9 +9,11 @@
 //! `LIC_FILES_CHKSUM`, checksum flags of `SRC_URI`). Two versions are duplicates when at
 //! least 60 percent of the statements of the longer one are identical (as a multiset) and
 //! at least three are. Reported once per `PN`, on the newest file of the duplicates (by
-//! `vercmp`), listing the others as pointers.
+//! `vercmp`), listing the others as pointers. A `.bb` BitBake does not collect is left
+//! out, and two files of the same version are never compared (alternatives, such as a
+//! `dynamic-layers/` copy, not versions).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::index::query;
 use crate::lint::helpers;
@@ -82,9 +84,15 @@ impl Rule for OrgDuplicateVersions {
         let Ok(files) = query::files_in_layer(cx.index, layer) else {
             return;
         };
+        // A `.bb` BitBake does not collect is no version of anything (meta-oe's
+        // `dynamic-layers/selinux/` recipes without the selinux layer: lint-precision).
+        let uncollected: HashSet<i64> = query::uncollected_recipe_files(cx.index)
+            .map(|v| v.into_iter().map(|(f, _)| f.id).collect())
+            .unwrap_or_default();
         let mut by_pn: BTreeMap<String, Vec<query::FileRow>> = BTreeMap::new();
         for f in files {
             if f.kind == FileKind::Recipe
+                && !uncollected.contains(&f.id)
                 && let (Some(pn), Some(_)) = (f.pn.clone(), f.pv.as_ref())
             {
                 by_pn.entry(pn).or_default().push(f);
@@ -108,6 +116,12 @@ impl Rule for OrgDuplicateVersions {
                     let (Some(a), Some(b)) = (&bodies[i], &bodies[j]) else {
                         continue;
                     };
+                    // Two files of the same version are alternatives (a `dynamic-layers/`
+                    // copy that replaces the recipe when its collection is present), not
+                    // versions to share an `.inc`.
+                    if versions[i].pv == versions[j].pv {
+                        continue;
+                    }
                     let n = shared(a, b);
                     let longer = a.len().max(b.len());
                     if n >= MIN_SHARED && n * 100 >= PERCENT * longer {

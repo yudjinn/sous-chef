@@ -304,8 +304,14 @@ async fn digest(
     let how = if own {
         format!("{verb}: its own inputs changed (basehash)")
     } else if !path.is_empty() {
+        // Not "its own inputs did not change": once a dependency's hash changed,
+        // `compare_sigfiles` replaces what it had found for the task itself by that
+        // dependency's comparison (`output = [output[-1]] + recout; break`), so a change of
+        // the task's own basehash is not printed. Seen live: zlib's do_compile, whose own
+        // basehash changed with `CFLAGS`, printed only "Hash for task dependency
+        // zlib:do_configure changed".
         format!(
-            "{verb}: its own inputs did not change; a dependency's did, by way of {}",
+            "{verb}: a dependency's hash changed, by way of {}",
             path.iter()
                 .map(|(task, _, _)| *task)
                 .collect::<Vec<_>>()
@@ -315,13 +321,10 @@ async fn digest(
         format!("{verb}: its signature changed")
     };
     t.row(&["task", label, &how, "-"]);
-    for (task, old, new) in &path {
-        t.row(&[
-            "via",
-            task,
-            &format!("hash {} -> {}", short(old), short(new)),
-            "-",
-        ]);
+    if !own && !path.is_empty() {
+        t.note(
+            "note: bitbake-diffsigs shows a changed dependency's comparison instead of the task's own, so a change of the task's own inputs would not be listed",
+        );
     }
 
     let mut index = ctx.index.lock().await;
@@ -380,6 +383,16 @@ async fn digest(
     }
     if causes.len() > shown {
         t.limited(causes.len() - shown, MAX_CAUSES);
+    }
+    // The dependency path after the causes: on the live build curl's do_install went seven
+    // dependencies deep, and with the path first the budget cut the cause.
+    for (task, old, new) in &path {
+        t.row(&[
+            "via",
+            task,
+            &format!("hash {} -> {}", short(old), short(new)),
+            "-",
+        ]);
     }
     Ok(())
 }

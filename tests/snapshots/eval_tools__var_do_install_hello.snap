@@ -8,3 +8,7 @@ applied	=	-	meta-core:classes-recipe/autotoolsish.bbclass:30	do_install() { ... 
 applied	=	append	meta-core:recipes-core/hello/hello.inc:15-18	do_install:append() { ... }
 applied	=	append	meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	do_install:append() { ... }
 final: function do_install, 3 pieces in order: meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_install, meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10
+task: do_install (addtask at meta-core:classes/base.bbclass:45) runs its [prefuncs], then do_install, then its [postfuncs]
+prefuncs: none set
+postfuncs: none set
+flags: [dirs] "${B}" at meta-core:classes/base.bbclass:46 (created; it runs in the last)

@@ -4,6 +4,9 @@
 //! (`datastore.rs`), whose values are finalised by `overrides.rs` and expanded by
 //! `expand.rs`.
 
+mod anon;
+mod anonmodel;
+pub mod classfn;
 pub mod datastore;
 pub mod expand;
 mod license;
@@ -16,6 +19,7 @@ pub mod replay;
 pub mod skips;
 pub mod variant;
 
+pub use anon::NoWrite;
 pub use datastore::{DataStore, OpKind, OpStatus, UnsetRecord, VarOp};
 pub use overlay::Overlay;
 pub use replay::{

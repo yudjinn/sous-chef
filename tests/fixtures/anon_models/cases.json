@@ -1,0 +1,130 @@
+{
+  "comment": "Inputs of tests/eval_anon_models.rs. Each case: the verified function text it runs (src/eval/anonmodel/<text>.txt), the defs that text calls, the recipe's PN, the variables and flags both sides set (sous-chef as recipe statements, the oracle with setVar / setVarFlag), the variables only the oracle sets (inputs of the parts of the function sous-chef does not model), and the outputs compared. oracle.py writes expected.json.",
+  "cases": [
+    {
+      "id": "base-w-plain", "text": "base-wrynose", "release": "wrynose", "defs": [], "pn": "amb1",
+      "vars": {"PACKAGECONFIG": "a c doc", "DEPENDS": "base1", "RDEPENDS:amb1": "r0", "RRECOMMENDS:amb1": "", "PACKAGECONFIG_CONFARGS": "--x", "MLPREFIX": ""},
+      "flags": {"PACKAGECONFIG": {"a": "--en-a,--dis-a,depa,rdepa,rreca", "b": "--en-b,--dis-b,depb,rdepb", "c": ",--dis-c,depc dep2 (>= 1.0),,rrecc", "d": "--en-d", "doc": "Documentation", "e": "--en-e,--dis-e,,,,b"}},
+      "outputs": ["DEPENDS", "RDEPENDS:amb1", "RRECOMMENDS:amb1", "PACKAGECONFIG_CONFARGS"]
+    },
+    {
+      "id": "base-w-mlprefix", "text": "base-wrynose", "release": "wrynose", "defs": [], "pn": "amb2",
+      "vars": {"PACKAGECONFIG": "a c", "DEPENDS": "base1", "RDEPENDS:amb2": "", "RRECOMMENDS:amb2": "", "PACKAGECONFIG_CONFARGS": "", "MLPREFIX": "lib32-"},
+      "flags": {"PACKAGECONFIG": {"a": "--en-a,--dis-a,depa virtual/libx lib32-q,rdepa,rreca", "c": ",--dis-c,zlib-native gcc-cross-arm (>= 1.0),,rrecc"}},
+      "outputs": ["DEPENDS", "RDEPENDS:amb2", "RRECOMMENDS:amb2", "PACKAGECONFIG_CONFARGS"]
+    },
+    {
+      "id": "base-w-noflags", "text": "base-wrynose", "release": "wrynose", "defs": [], "pn": "amb3",
+      "vars": {"PACKAGECONFIG": "a", "DEPENDS": "base1", "PACKAGECONFIG_CONFARGS": "--x", "MLPREFIX": ""},
+      "flags": {},
+      "outputs": ["DEPENDS", "PACKAGECONFIG_CONFARGS"]
+    },
+    {
+      "id": "base-s-mlprefix", "text": "base-scarthgap", "release": "scarthgap", "defs": [], "pn": "amb4",
+      "vars": {"PACKAGECONFIG": "a c", "DEPENDS": "base1", "RDEPENDS:amb4": "", "RRECOMMENDS:amb4": "", "PACKAGECONFIG_CONFARGS": "", "MLPREFIX": "lib32-"},
+      "flags": {"PACKAGECONFIG": {"a": "--en-a,--dis-a,depa virtual/libx lib32-q,rdepa,rreca", "c": ",--dis-c,zlib-native gcc-cross-arm (>= 1.0),,rrecc"}},
+      "outputs": ["DEPENDS", "RDEPENDS:amb4", "RRECOMMENDS:amb4", "PACKAGECONFIG_CONFARGS"]
+    },
+    {
+      "id": "base-k-plain", "text": "base-kirkstone", "release": "kirkstone", "defs": [], "pn": "amb5",
+      "vars": {"PACKAGECONFIG": "a c doc", "DEPENDS": "base1", "RDEPENDS:amb5": "r0", "RRECOMMENDS:amb5": "", "PACKAGECONFIG_CONFARGS": "--x", "MLPREFIX": "lib32-"},
+      "flags": {"PACKAGECONFIG": {"a": "--en-a,--dis-a,depa,rdepa,rreca", "b": "--en-b,--dis-b,depb,rdepb", "c": ",--dis-c,depc dep2 (>= 1.0),,rrecc", "d": "--en-d", "doc": "Documentation"}},
+      "outputs": ["DEPENDS", "RDEPENDS:amb5", "RRECOMMENDS:amb5", "PACKAGECONFIG_CONFARGS"]
+    },
+    {
+      "id": "cmake-ninja", "text": "cmake", "release": "wrynose", "defs": [], "pn": "amc1",
+      "vars": {"OECMAKE_GENERATOR": "Ninja", "DEPENDS": "d0", "MAKE": "make"},
+      "flags": {},
+      "outputs": ["DEPENDS", "OECMAKE_GENERATOR_ARGS", "do_compile[progress]"]
+    },
+    {
+      "id": "cmake-make", "text": "cmake", "release": "wrynose", "defs": [], "pn": "amc2",
+      "vars": {"OECMAKE_GENERATOR": "Unix Makefiles", "DEPENDS": "d0", "MAKE": "gmake"},
+      "flags": {},
+      "outputs": ["DEPENDS", "OECMAKE_GENERATOR_ARGS", "do_compile[progress]"]
+    },
+    {
+      "id": "ua-w", "text": "ua-wrynose", "release": "wrynose", "defs": ["update_alternatives_enabled", "ua_extend_depends"], "pn": "amu1",
+      "vars": {"PROVIDES": "amu1 virtual/other", "TARGET_OS": "linux", "MLPREFIX": "", "DEPENDS": "d0"},
+      "flags": {},
+      "outputs": ["DEPENDS"]
+    },
+    {
+      "id": "ua-s-provided", "text": "ua-scarthgap", "release": "scarthgap", "defs": ["update_alternatives_enabled", "ua_extend_depends", "gen_updatealternativesvardeps"], "pn": "amu2",
+      "vars": {"PROVIDES": "amu2 virtual/update-alternatives-x", "TARGET_OS": "linux", "MLPREFIX": "", "DEPENDS": "d0", "PACKAGES": "amu2", "UPDALTVARS": ""},
+      "flags": {},
+      "outputs": ["DEPENDS"]
+    },
+    {
+      "id": "ua-s-mingw", "text": "ua-scarthgap", "release": "scarthgap", "defs": ["update_alternatives_enabled", "ua_extend_depends", "gen_updatealternativesvardeps"], "pn": "amu3",
+      "vars": {"PROVIDES": "amu3", "TARGET_OS": "mingw32", "MLPREFIX": "", "DEPENDS": "d0", "PACKAGES": "amu3", "UPDALTVARS": ""},
+      "flags": {},
+      "outputs": ["DEPENDS"]
+    },
+    {
+      "id": "ua-s-mlprefix", "text": "ua-scarthgap", "release": "scarthgap", "defs": ["update_alternatives_enabled", "ua_extend_depends", "gen_updatealternativesvardeps"], "pn": "amu4",
+      "vars": {"PROVIDES": "amu4", "TARGET_OS": "linux", "MLPREFIX": "lib32-", "DEPENDS": "d0", "PACKAGES": "amu4", "UPDALTVARS": ""},
+      "flags": {},
+      "outputs": ["DEPENDS"]
+    },
+    {
+      "id": "packagegroup-ptest", "text": "packagegroup", "release": "wrynose", "defs": [], "pn": "amp1",
+      "vars": {"PACKAGES": "amp1 amp1-extra", "DISTRO_FEATURES": "x ptest"},
+      "flags": {},
+      "outputs": ["PACKAGES", "ALLOW_EMPTY:amp1", "ALLOW_EMPTY:amp1-dbg", "ALLOW_EMPTY:amp1-extra-ptest"]
+    },
+    {
+      "id": "packagegroup-disabled", "text": "packagegroup", "release": "wrynose", "defs": [], "pn": "amp2",
+      "vars": {"PACKAGES": "amp2", "DISTRO_FEATURES": "x", "PACKAGEGROUP_DISABLE_COMPLEMENTARY": "1"},
+      "flags": {},
+      "outputs": ["PACKAGES", "ALLOW_EMPTY:amp2"]
+    },
+    {
+      "id": "kernel-w", "text": "kernel-wrynose", "release": "wrynose", "defs": [], "pn": "amk1",
+      "vars": {"KERNEL_PACKAGE_NAME": "kernel", "KERNEL_IMAGETYPE": "zImage", "KERNEL_ALT_IMAGETYPE": "vmlinux.gz", "KERNEL_IMAGETYPES": "Image zImage", "PACKAGES": "kernel kernel-base"},
+      "flags": {},
+      "oracle_only": {"KERNEL_IMAGEDEST": "boot", "KERNEL_SPLIT_MODULES": "1", "INITRAMFS_IMAGE": "", "INITRAMFS_TASK": ""},
+      "outputs": ["PACKAGES", "KERNEL_IMAGETYPES", "KERNEL_IMAGETYPE_FOR_MAKE"]
+    },
+    {
+      "id": "kernel-s-alt", "text": "kernel-scarthgap", "release": "scarthgap", "defs": [], "pn": "amk2",
+      "vars": {"KERNEL_PACKAGE_NAME": "kern2", "WORKDIR": "/w/amk2", "KERNEL_IMAGETYPE": "bzImage", "KERNEL_IMAGETYPES": "", "KERNEL_IMAGETYPE_FOR_MAKE": "bzImage", "PACKAGES": "kern2"},
+      "flags": {},
+      "oracle_only": {"KERNEL_IMAGEDEST": "boot", "KERNEL_SPLIT_MODULES": "1", "INITRAMFS_IMAGE": "", "INITRAMFS_TASK": ""},
+      "outputs": ["PACKAGES", "KERNEL_IMAGETYPES", "KERNEL_IMAGETYPE_FOR_MAKE", "STAGING_KERNEL_DIR", "STAGING_KERNEL_BUILDDIR"]
+    },
+    {
+      "id": "kernel-k", "text": "kernel-kirkstone", "release": "kirkstone", "defs": [], "pn": "amk3",
+      "vars": {"KERNEL_PACKAGE_NAME": "kernel", "KERNEL_IMAGETYPE": "Image", "KERNEL_IMAGETYPES": "Image.gz Image", "PACKAGES": "kernel"},
+      "flags": {},
+      "oracle_only": {"KERNEL_IMAGEDEST": "boot", "KERNEL_SPLIT_MODULES": "1", "INITRAMFS_IMAGE": "", "INITRAMFS_TASK": ""},
+      "outputs": ["PACKAGES", "KERNEL_IMAGETYPES", "KERNEL_IMAGETYPE_FOR_MAKE"]
+    },
+    {
+      "id": "devicetree", "text": "kernel-devicetree", "release": "wrynose", "defs": [], "pn": "amd1",
+      "vars": {"KERNEL_PACKAGE_NAME": "kernel", "PACKAGES": "kernel"},
+      "flags": {},
+      "outputs": ["PACKAGES"]
+    },
+    {
+      "id": "devicetree-bundle", "text": "kernel-devicetree", "release": "wrynose", "defs": [], "pn": "amd2",
+      "vars": {"KERNEL_PACKAGE_NAME": "kernel", "PACKAGES": "kernel", "KERNEL_DEVICETREE_BUNDLE": "1"},
+      "flags": {},
+      "outputs": ["PACKAGES"]
+    },
+    {
+      "id": "python3-w", "text": "python3-wrynose", "release": "wrynose", "defs": [], "pn": "amy1",
+      "vars": {"PACKAGES": "amy1-dev amy1-misc amy1-core", "INCLUDE_PYCS": "1", "RPROVIDES": "x", "PACKAGECONFIG": "readline", "bindir": "/usr/bin", "libdir": "/usr/lib", "PYTHON_MAJMIN": "3.x", "FILES:amy1-core": "/c0", "SUMMARY:amy1-core": "s0", "RDEPENDS:amy1-core": ""},
+      "flags": {},
+      "manifest": true,
+      "outputs": ["PACKAGES", "RPROVIDES:class-native", "FILES:amy1-core", "FILES:amy1-io", "FILES:amy1-misc", "RDEPENDS:amy1-core", "RDEPENDS:amy1-io", "RRECOMMENDS:amy1-io", "SUMMARY:amy1-core", "SUMMARY:amy1-io"]
+    },
+    {
+      "id": "python3-s", "text": "python3-scarthgap", "release": "scarthgap", "defs": [], "pn": "amy2",
+      "vars": {"PACKAGES": "amy2-dev amy2-misc amy2-core", "INCLUDE_PYCS": "0", "PACKAGECONFIG": "readline", "bindir": "/usr/bin", "libdir": "/usr/lib", "PYTHON_MAJMIN": "3.x", "FILES:amy2-core": "/c0", "SUMMARY:amy2-core": "s0", "RDEPENDS:amy2-core": ""},
+      "flags": {},
+      "manifest": true,
+      "outputs": ["PACKAGES", "RPROVIDES:class-native", "FILES:amy2-core", "FILES:amy2-io", "FILES:amy2-misc", "RDEPENDS:amy2-core", "RDEPENDS:amy2-io", "RRECOMMENDS:amy2-io", "SUMMARY:amy2-core", "SUMMARY:amy2-io"]
+    }
+  ]
+}

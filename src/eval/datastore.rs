@@ -83,6 +83,10 @@ pub enum OpKind {
     /// class computed on the static value (`native_filter`, `suffix_filter`; `loc` the
     /// handler or `nativesdk.bbclass`'s anonymous python).
     EventHandler,
+    /// A write of an OE-core anonymous python function whose verified text the replay
+    /// reproduces (`eval::anonmodel`): `d.appendVar` as a `:append`, `d.setVar` as a
+    /// rewrite, `d.setVarFlag` as a flag; `loc` the function.
+    AnonPython,
 }
 
 impl OpKind {
@@ -99,6 +103,7 @@ impl OpKind {
             OpKind::VirtualProviderRewrite => "rewrite".into(),
             OpKind::ClassExtend => "class-extend".into(),
             OpKind::EventHandler => "handler".into(),
+            OpKind::AnonPython => "anon-python".into(),
         }
     }
 }
@@ -267,6 +272,12 @@ impl DataStore {
         let result = match kind {
             AssignOp::WeakDefault => {
                 self.var_mut(key).default = Some(new);
+                // `setVarFlag(var, "_defaultval", ...)`: a name with `:` is registered as
+                // an override variant, as `setVar` does (`_setvar_update_overrides`), so
+                // `VAR:class-target ??= "x"` replaces `VAR` when `class-target` is active.
+                if key.contains(':') {
+                    self.update_overrides(key);
+                }
                 return;
             }
             _ => combine(kind, cur, new, imm),
@@ -413,11 +424,31 @@ impl DataStore {
             v.removes.clear();
             v.default = None;
         }
+        // `setVar` outside parsing deletes the variants whose override is active
+        // (`delVar`), then forgets them all. With unknown `OVERRIDES` entries the active
+        // ones are not known; they are left (they no longer replace `name` either way).
+        let ovr = self.override_state();
+        if !ovr.uncertain()
+            && !ovr.unstable
+            && let Some(list) = self.overridedata.get(name).cloned()
+        {
+            for (variant, o) in list {
+                if o.split(':').all(|e| ovr.has(e)) {
+                    self.del_var(&variant);
+                }
+            }
+        }
         Arc::make_mut(&mut self.overridedata).remove(name);
+        // A name with overrides (`SUMMARY:pkg`) is recorded under its base, like a statement.
+        let base = base_of(name).to_string();
+        let overrides: Vec<String> = match name[base.len()..].strip_prefix(':') {
+            Some(rest) => rest.split(':').map(str::to_string).collect(),
+            None => Vec::new(),
+        };
         self.apply(VarOp {
             var: VarRef {
-                base: name.to_string(),
-                overrides: Vec::new(),
+                base,
+                overrides,
                 flag: None,
                 legacy_syntax: false,
             },

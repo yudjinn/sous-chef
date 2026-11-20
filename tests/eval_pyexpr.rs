@@ -232,7 +232,7 @@ fn overrides_built_from_an_evaluated_expression() {
     let ds = eval(&fx, "ovr");
     let o = ds.overrides();
     for e in ["armv7a", "ti33x", "qemux86", "pn-ovr"] {
-        assert!(o.contains(&e.to_string()), "{e} not in {o:?}");
+        assert!(o.iter().any(|i| i == e), "{e} not in {o:?}");
     }
     assert!(
         ds.override_entries()
@@ -262,14 +262,22 @@ fn inherit_and_include_arguments_from_an_evaluated_expression() {
             r,
             "inh",
             "inherit ${@bb.utils.contains('DISTRO_FEATURES', 'wayland', 'pamsupport', '', d)}\n\
-             require ${@oe.utils.conditional('DISTRO', 'testdistro', 'extra.inc', 'nosuch.inc', d)}\n\
-             inherit ${@oe.utils.read_file('classes')}\n",
+             require ${@oe.utils.conditional('DISTRO', 'testdistro', 'extra.inc', 'nosuch.inc', d)}\n",
+        );
+        recipe(
+            r,
+            "inh2",
+            "MINE = \"x\"\ninherit ${@oe.utils.read_file('classes')}\n",
         );
     });
     let ds = eval(&fx, "inh");
     assert_eq!(certain(&ds, "PAMCLASS"), "yes");
     assert_eq!(certain(&ds, "FROMINC"), "1");
-    // Python outside the subset (it reads a file) is still refused.
+    // Python outside the subset (it reads a file) is still refused, and the class it would
+    // read may change any value (acc-unfollowed).
+    let ds = eval(&fx, "inh2");
+    let v = ds.value("MINE").unwrap();
+    assert!(v.unevaluated_python, "{v:?}");
     let refs = &ds.replay().references;
     assert_eq!(
         refs.iter()

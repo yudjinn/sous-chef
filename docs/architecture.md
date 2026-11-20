@@ -191,6 +191,7 @@ pub struct Workspace {
     pub layers: Vec<Layer>,              // in BBLAYERS order
     pub release: ReleaseInfo,            // T1.6, see "Release contract"
     pub kas: Option<kas::KasProject>,    // M9, see "As implemented in wave 5 and M9"
+    pub build_host: BuildHost,           // build-host: sous-chef.toml [build_host], see "Configuration"
 }
 
 pub struct Layer {
@@ -318,7 +319,7 @@ The index is derived: any schema change bumps `user_version` and rebuilds from s
 the release the edges were resolved for (every edge is recomputed when it changes, as with a
 new `release` in `sous-chef.toml`, by `Index::refresh` and by `Index::refresh_file`;
 `query::indexed_release` reads it), and `edges`, the version of the edge step
-(`schema::EDGES_VERSION`, `inc-context-1` since w9; an index with another value gets its edges and file
+(`schema::EDGES_VERSION`, `recipe-dirs-1` since lint-dynamic-data, `inc-context-1` in w9; an index with another value gets its edges and file
 marks recomputed on the next refresh, without a schema change;
 `query::indexed_edges_version`).
 
@@ -746,7 +747,28 @@ never fail the evaluation: `DataStore::replay() -> &ReplayNotes` has `recipe`, `
 `layer_name` (`FILE_LAYERNAME`), `anonymous: Vec<AnonPython { loc, via, name, sets, opaque
 }>`, `python_vars`, `references: Vec<RefIssue { loc, via, kind, text, problem: RefProblem
 }>` (`Python`, `Undefined`, `NotFound`, `Cycle`) and `incomplete_keys`. A variable in
-`python_vars` has `unevaluated_python` set on its value. **Tools should warn when
+`python_vars` has `unevaluated_python` set on its value. Since `acc-overflag`
+(`eval::anon`, bitbake-semantics.md "Anonymous python writes that cannot happen") a name
+whose every anonymous-python write is proved not to happen on the recipe is taken out of
+`python_vars` at finalisation and listed in `no_writes: Vec<NoWrite { name, why: Vec<(Loc,
+String)> }>`; `AnonPython::returns_early` says why a function writes nothing, and
+`AnonPython::writes()` lists the `python_vars` entries it contributes.
+Since `acc-unfollowed` (bitbake-semantics.md "References that cannot be followed exactly")
+**an unfollowed reference counts**: `ref_effects: Vec<RefEffect { loc, via, kind, text, why,
+not_read, vars: Option<BTreeMap<base, Vec<override conditions>>> }>` says what the files a
+reference did not read may change; `vars: None` (python or undefined variables in an
+argument that cannot be narrowed, a reference followed with an uncertain value) flags every
+value; `Some` (a reference followed for the words certain whatever its python gives,
+`Replay::follow_partial`, the rest read on a copy, `Replay::probe`) flags the values whose
+base is written there under conditions that may hold. A `RefIssue` that stops BitBake
+itself (`NotFound` of a `require` / `inherit`, `Cycle`, `NotInRelease`, `Fatal`) stays a
+note. `DataStore::expand_with_holes` and `pyexpr::candidates` are the two pieces this rests
+on.
+`DataStore::flag_causes(name)` gives one short line per cause of a value's flag (anonymous
+python by function, python left in a text, an override decision on unknown `OVERRIDES`
+entries, an uncertain reference, a statement not applied, an undefined variable), at the
+variable that carries it with the references that lead there; `var` prints at most three
+(`var::uncertain_notes`, `note: uncertain: ...`). **Tools should warn when
 `anonymous` is not empty, and especially for an entry with `opaque: true` (it changes
 variables through a computed name or hands `d` to other code); this is binding on wave 4's
 `var`, `overrides` and `deps`.** Functions are stored like variables, with flags `func`,
@@ -1224,7 +1246,7 @@ is (base configuration only) and the release (`Feature::AddPyLib`, BitBake 2.4 o
 as a directive. `search`'s `kind` filter knows it (`search::KINDS`, public since w8: every
 kind the scanner stores, tested against a file with each).
 
-Index (w6, w7, w9; schema version 4, `EDGES_VERSION` `inc-context-1`):
+Index (w6, w7, w9, lint-dynamic-data; schema version 4, `EDGES_VERSION` `recipe-dirs-1`):
 
 - `files.not_collected`: `bbfiles` (no `BBFILES` glob matches the `.bb` / `.bbappend`),
   `dynamic` (only an inactive `BBFILES_DYNAMIC` glob does), `bbmask` (a static `BBMASK`,
@@ -1497,6 +1519,76 @@ code under `src/`.
   `bitbake::cve::CveRules::for_release` replaces reading `lib/oe/cve_check.py`, which is now
   only a cross-check (`CveRules::from_lib`, `differences`).
 
+### As implemented in acc-helpers
+
+**Class functions (`eval/classfn.rs`, new).** `ClassFn` (`BaseSetFilespath`,
+`GetAutotoolsDep`, `GetBaseDep`, `GettextDependencies`, `GettextOeconf`, `GnomeVerdir`,
+`MapKernelArch`, `MapUbootArch`; `from_name`, `name`, `verified`), `classfn::ALL`,
+`classfn::verify(name, text) -> Option<ClassFn>`, `ClassDef { loc, verified }`,
+`DataStore::class_fn_defined(f) -> Result<(), String>`,
+`DataStore::inherits_class_certain(klass) -> Option<bool>`. The replay's `pydef` statement
+reads the body of an allowlisted name back from the file and records it in
+`ReplayNotes::class_defs` (the last `def` wins, as in BitBake's global method pool).
+`pyexpr::Func::Class(ClassFn)`: a bare call `name(...)` of an allowlisted name parses;
+`pyexpr::Env` gained `class_fn(f)` and `inherits_class(klass)` (default: not known), and
+`expand::Source` the same two (`overrides::Eval` answers from the datastore). The verified
+texts are constants in `classfn.rs`, each with its source; bitbake-semantics.md, "Class
+functions evaluated statically", has the table (file, releases, semantics, why pure). Also
+new in the subset: slices `x[a:b]` of lists and strings, and
+`oe.utils.class_filter_features` (`Func::OeClassFilterFeatures`).
+
+**Class-extension read filters (`eval/variant.rs`).** `VarFilter { Native { pn, bpn, regex,
+selfref }, Suffix { extname, prefixes }, SuffixDeps { extname, prefixes } }` (`apply`,
+`map_word`, `describe`), `variant::native_filter_full`, `explode_dep_versions2`, `join_deps`;
+`ReplayNotes::filters` (base name to filter and location), `DataStore::var_filter(name)`;
+`Eval::finalise` applies it to a certain value (`DataStore::apply_read_filter`), so every
+consumer (`value`, `${VAR}` references, python's `d.getVar`, the tools) reads what BitBake's
+`setVarFilter` makes it read. Installed by `Replay::class_extend_handlers`
+(`native_virtclass_handler`: `DEPENDS`, `PACKAGES`, `PACKAGES_DYNAMIC`; both handlers'
+`set_class_filter` on `DISTRO_FEATURES`, `Replay::set_class_filter`) and
+`Replay::nativesdk_anonymous_filter` (`DEPENDS`, `PACKAGE_WRITE_DEPS`), only when the
+handler / anonymous python is OE-core Wrynose's text (`classfn::same_text` with
+`classfn::NATIVE_VIRTCLASS_HANDLER`, `NATIVESDK_VIRTCLASS_HANDLER`, `NATIVESDK_ANONYMOUS`);
+`ReplayNotes::nativesdk_anon_verified` (new). `virtual_recipe_providers` stores `DEPENDS`
+again whenever a filter is on it, as `handleVirtRecipeProviders` does. The `PROVIDES`
+filters keep their w11/w12 path (`ProvidesFilter`). `deps` (`mcp/tools/deps.rs`) dropped its
+own `NativeDepends`: it lists the evaluated `DEPENDS` and maps the words of an uncertain one
+and of the `PACKAGECONFIG` build fields with `VarFilter::map_word` of the recorded filter.
+bitbake-semantics.md, "Class-extension read filters".
+
+### As implemented in acc-anon-models
+
+**Anonymous python models (`eval/anonmodel.rs`, new; verified texts in
+`eval/anonmodel/*.txt`).** `Model` (`BasePackageconfig(BaseText)`, `Cmake`,
+`UpdateAlternatives(UaText)`, `Packagegroup`, `Kernel`, `KernelDevicetree`,
+`Python3Manifest(PyText)`), `recognise(text) -> Option<Model>` (byte for byte through
+`classfn::same_text`), `Model::covers(Source)` (`Source::{Literal, Wrapper, DefCall}`: which
+of the function's `python_vars` entries the model reproduces), `Model::defs` and
+`anonmodel::DEFS` / `def_verified` (the `def`s a model needs, checked as the last definition
+in `ReplayNotes::model_defs`), `run(model, &Ctx { ds, read_file }) -> Result<Vec<Write>,
+String>`, `Write::{Append, Set, SetFlag}`, `Applied::{Done, Refused(why)}`, and
+`parse_manifest` (ordered JSON through a serde visitor, no new dependency).
+`AnonPython` gained `model: Option<(Model, Vec<usize>)>` (the covered entry indices) and
+`model_applied`; `ReplayNotes` gained `model_defs` and `def_locs` (every `def`, last one
+wins). `Replay::finalize` runs, after `resolve_anonymous_writes`, `apply_anon_models`: per
+modelled function in order, `run` on a fork whose `python_vars` keeps only names an earlier
+function (or a handler / filter: `fixed_python_vars`, which `features_backfill` and the
+nativesdk filter now also fill) may write; the writes go through `apply_model_write`
+(`:append` op, `DataStore::rewrite`, flag op; `OpKind::AnonPython`, label `anon-python`),
+the covered entries are dropped and their names leave `python_vars` when nothing else has
+them; a `var_notes` line names the model. Before the proofs, `def_call_writes` adds to each
+anonymous function's entries the literal writes of the `def`s it calls (transitively,
+`called_names`), so `find_meson_cross_files(d)` and `ua_extend_depends(d)` flag what they
+write. `DataStore::rewrite` records a name with overrides under its base and deletes the
+active override variants (BitBake's non-parsing `setVar`). `flag_causes` adds why a model
+did not apply. Tests: `tests/eval_anon_models.rs` against
+`tests/fixtures/anon_models/expected.json` (the real functions, `oracle.py`).
+`replay::python_writes` also counts the older `ClassExtender`'s `map_variable`,
+`map_regexp_variable`, `map_depends_variable` (their literal argument) and
+`rename_packages` (`PACKAGES`) as writes. The native / nativesdk `OVERRIDES` stay uncertain
+(bitbake-semantics.md, the host's `os.uname()`) unless `sous-chef.toml [build_host]` gives
+the build host's values (build-host, "Configuration").
+
 ## Errors
 
 `error::Error` (thiserror) with variants `Io(io::Error)`, `Sqlite(rusqlite::Error)`,
@@ -1520,6 +1612,10 @@ writable_layers = ["meta-mycompany"]      # scaffold may write only here
 init_script = "poky/oe-init-build-env"    # sourced before any bitbake command
 release = "scarthgap"                     # optional; overrides detection
 kas = ["kas/base.yaml", "kas/board.yaml"] # optional; a kas project's files, in kas order
+
+[build_host]                              # optional; the host that runs BitBake, never read from the server's host
+arch = "x86_64"                           # os.uname()[4], what `uname -m` prints there (BUILD_ARCH)
+os = "linux"                              # os.uname()[0].lower(), `uname -s` lowered (BUILD_OS); "Linux" is lowered
 
 [bitbake]
 enabled = true
@@ -1546,7 +1642,7 @@ max_age_days = 14                         # handles last stored longer ago are d
 ```
 
 In code (`src/config.rs`): `Config { build_dir, layers, writable_layers, init_script,
-release, kas, bitbake: BitbakeConfig { enabled, allow_destructive, pass_env }, lint: LintConfig {
+release, kas, build_host: BuildHost { arch, os }, bitbake: BitbakeConfig { enabled, allow_destructive, pass_env }, lint: LintConfig {
 disable, severity }, output: OutputConfig { budget_tokens }, hooks: HooksConfig { grep_read,
 bash, edit }, handles: HandlesConfig { max_total_mb, max_age_days }, work_dir, config_dir }`
 (`work_dir` and `config_dir`, the directory of the file read, w12, are not read from the
@@ -1559,7 +1655,23 @@ of its range, `HANDLES_MAX_TOTAL_MB` / `HANDLES_MAX_AGE_DAYS`, is an `Error::Con
 `handles::Retention::default()`). `BitbakeConfig::check` (z1-env): a `pass_env` name that is not in
 `bitbake::env::STRIPPED_ENV` is an `Error::Config` from `Config::from_toml` too
 (`bitbake.pass_env names "MACHINE", which sous-chef never removes from BitBake's
-environment: it already passes; list only TMPDIR`), so a typo is caught. `CliOverrides { build_dir, config, layers, work_dir }` carries
+environment: it already passes; list only TMPDIR`), so a typo is caught.
+`BuildHost { arch, os }` (build-host; `[build_host]`, both `Option<String>`, default unset):
+`BuildHost::check` makes a value that is not one word of ASCII letters, digits and
+`_ . + -` an `Error::Config` from `Config::from_toml` (`build_host.arch = "Power Macintosh"
+is not one word: give what `uname -m` prints on the host that runs BitBake ...`), and
+`os` is lowered on load (`normalise`), as `os.uname()[0].lower()` is;
+`BuildHost::{is_empty, describe}`. `Workspace::discover` copies it to
+`Workspace::build_host`; the replay copies that to `ReplayNotes::build_host`, and
+`expand::Source::host` (answered by `overrides::Eval`) gives it to `pyexpr::Env::host`:
+the subset parses exactly `os.uname()[4]` and `os.uname()[0].lower()`
+(`pyexpr::HostRead::{Arch, OsLower}`) and evaluates them from it, or stops with
+`Stop::Uncertain` naming the key (`pyexpr::host_unknown`). `ConfigCache`'s key includes
+it. A `:=` that evaluated a host read gets a `var_notes` line naming `[build_host]`
+(`Replay::host_note`); `var`'s python note adds `os.uname() from sous-chef.toml
+[build_host]`. `status` has a `build_host` row and JSON field. It lives on `Workspace`, not
+`Target`, because it is a property of the workspace's build host like the release, and no
+tool takes it per call. `CliOverrides { build_dir, config, layers, work_dir }` carries
 the global flags `--build-dir`, `--config`, `--layer` (repeatable).
 
 With no config and no `--build-dir`, discovery walks up from the working directory looking

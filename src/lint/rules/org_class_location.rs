@@ -13,7 +13,8 @@
 //!   inherited by a class in `classes-global/`;
 //! - recipe: inherited (index `inherit` edges) by any other file;
 //! - both: `classes/` is right, no finding;
-//! - neither: the message names both directories.
+//! - neither: the message says classes/ is right for a class meant for both contexts
+//!   (OE-core keeps such classes there) and names both directories for the others.
 
 use crate::index::query;
 use crate::lint::helpers;
@@ -104,8 +105,14 @@ impl Rule for OrgClassLocation {
                 (false, true) => {
                     "move it to classes-recipe/ (recipes inherit it) and keep the name".to_string()
                 }
-                (false, false) => "move it to classes-recipe/ if recipes inherit it, or to \
-                                   classes-global/ if it is used through INHERIT"
+                // Nothing in the workspace uses it: classes/ is where a class meant for both
+                // contexts belongs (OE-core keeps `archiver`, `externalsrc` there; BitBake
+                // searches classes/ after classes-<type>/, BBHandler.py), so only a class
+                // meant for one context should move (lint-precision).
+                (false, false) => "nothing in the workspace inherits it, so keep it in classes/ \
+                                   if it is meant for both INHERIT and recipes; otherwise move it \
+                                   to classes-recipe/ (inherited by recipes) or classes-global/ \
+                                   (used through INHERIT)"
                     .to_string(),
             };
             out.push(Finding {

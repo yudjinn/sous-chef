@@ -4,6 +4,8 @@
     bench/score.py blind      # write <run dir>/scoring/blind.md: every answer, shuffled,
                               # condition hidden, with its task's reference facts; and
                               # key.json (label -> run) and a marks.json template
+    bench/score.py compute-repeats   # the same for a run with -rN repeats (the rerun):
+                              # bench/results/rerun-runs.tsv and rerun-tables.md
     bench/score.py compute    # join marks.json with runs.jsonl and the raw transcripts;
                               # write bench/results/*.tsv and bench/results/tables.md
 
@@ -26,7 +28,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import run as harness  # noqa: E402
 
 REPO = harness.REPO
-RUN_DIR = os.path.join(harness.LIVE, "runs", "x6-benchmark")
+# BENCH_RUN_DIR selects another run (the rerun: $SOUS_CHEF_LIVE/runs/bench-rerun).
+RUN_DIR = os.environ.get("BENCH_RUN_DIR", os.path.join(harness.LIVE, "runs", "x6-benchmark"))
+PROBES = ("overhead", "containment", "ignore-probe")
 SCORING = os.path.join(RUN_DIR, "scoring")
 RESULTS = os.path.join(REPO, "bench", "results")
 SC = harness.SC
@@ -37,7 +41,7 @@ def tasks():
 
 
 def blind():
-    runs = [s for s in harness.stored(RUN_DIR).values() if s["task"] not in ("overhead", "containment")]
+    runs = [s for s in harness.stored(RUN_DIR).values() if s["task"] not in PROBES]
     rng = random.Random(20261118)
     rng.shuffle(runs)
     os.makedirs(SCORING, exist_ok=True)
@@ -207,5 +211,140 @@ def compute():
     print(text)
 
 
+def fmt(x):
+    return f"{x:,.0f}" if abs(x) >= 1000 else f"{x:.3g}"
+
+
+def spread(vals, digits=None):
+    """mean (min-max) of a list of numbers."""
+    m = statistics.mean(vals)
+    if digits is None:
+        return f"{fmt(m)} ({fmt(min(vals))}-{fmt(max(vals))})"
+    return f"{m:.{digits}f} ({min(vals):.{digits}f}-{max(vals):.{digits}f})"
+
+
+def compute_repeats():
+    """Tables for a run with several sessions per task and condition (run ids -rN).
+
+    Writes bench/results/<prefix>runs.tsv and <prefix>tables.md, prefix from
+    BENCH_PREFIX (default "rerun-")."""
+    prefix = os.environ.get("BENCH_PREFIX", "rerun-")
+    with open(os.path.join(SCORING, "marks.json")) as f:
+        marks = json.load(f)
+    with open(os.path.join(SCORING, "key.json")) as f:
+        key = json.load(f)
+    runs = {k: v for k, v in harness.stored(RUN_DIR).items() if v["task"] not in PROBES}
+    probes = {k: v for k, v in harness.stored(RUN_DIR).items() if v["task"] in PROBES}
+    ts = tasks()
+    by_run = {}
+    for label, run_id in key.items():
+        m = marks[label]
+        if "?" in m["facts"]:
+            sys.exit(f"{label} is not fully marked")
+        by_run[run_id] = dict(m, label=label, score=score_of(m))
+    missing = [r for r in runs if r not in by_run]
+    if missing:
+        sys.exit(f"runs without marks: {missing}")
+    os.makedirs(RESULTS, exist_ok=True)
+    cols = ["run_id", "task", "cond", "model", "total", "input", "output", "cache_creation",
+            "cache_read", "cost_usd", "num_turns", "tool_calls", "sous_chef_calls",
+            "builtin_calls", "builtin_after_sc", "tool_errors", "permission_denials", "wall_s",
+            "score", "facts", "wrong", "overconfident", "calls"]
+    rows = []
+    for s in sorted(runs.values(), key=lambda s: (s["task"], s["cond"], s["run_id"])):
+        r = {c: s.get(c) for c in cols}
+        r["model"] = s.get("init_model")
+        after, seq = call_pattern(s["run_id"])
+        r["builtin_after_sc"] = after if s["cond"] == "B" else ""
+        r["calls"] = " ".join(seq)
+        m = by_run[s["run_id"]]
+        r["score"] = round(m["score"], 2)
+        r["facts"] = "".join(m["facts"])
+        r["wrong"] = len(m["wrong"])
+        r["overconfident"] = m["overconfident"]
+        rows.append(r)
+    with open(os.path.join(RESULTS, prefix + "runs.tsv"), "w") as f:
+        f.write("\t".join(cols) + "\n")
+        for r in rows:
+            f.write("\t".join("" if r[c] is None else str(r[c]) for c in cols) + "\n")
+
+    cell = collections.defaultdict(list)
+    for r in rows:
+        cell[(r["task"], r["cond"])].append(r)
+    reps = sorted({r["run_id"].rsplit("-", 1)[1] for r in rows})
+    lines = ["Each cell: mean over the runs of that task and condition, (min-max) in brackets.",
+             "",
+             "| Task | Total A | Total B | A/B (means) | Turns A | Turns B | Calls A | Calls B | "
+             "Wall A s | Wall B s | Cost A $ | Cost B $ | Score A | Score B |",
+             "|" + "---|" * 14]
+    for tid in sorted(ts):
+        a, b = cell.get((tid, "A")), cell.get((tid, "B"))
+        if not a or not b:
+            continue
+        g = lambda xs, k: [x[k] for x in xs]  # noqa: E731
+        lines.append(
+            f"| {tid} | {spread(g(a, 'total'))} | {spread(g(b, 'total'))} | "
+            f"{statistics.mean(g(a, 'total')) / statistics.mean(g(b, 'total')):.2f} | "
+            f"{spread(g(a, 'num_turns'))} | {spread(g(b, 'num_turns'))} | "
+            f"{spread(g(a, 'tool_calls'))} | {spread(g(b, 'tool_calls'))} | "
+            f"{spread(g(a, 'wall_s'), 1)} | {spread(g(b, 'wall_s'), 1)} | "
+            f"{spread(g(a, 'cost_usd'), 3)} | {spread(g(b, 'cost_usd'), 3)} | "
+            f"{spread(g(a, 'score'), 2)} | {spread(g(b, 'score'), 2)} |")
+    lines.append("")
+    lines.append("Per repeat, sums over the 14 tasks (score: mean):")
+    lines.append("")
+    lines.append("| Measure | " + " | ".join(f"A {r} | B {r}" for r in reps) +
+                 " | A mean | B mean | A/B of means |")
+    lines.append("|" + "---|" * (2 * len(reps) + 4))
+    for k in ("total", "output", "cache_read", "cache_creation", "num_turns", "tool_calls",
+              "wall_s", "cost_usd", "score"):
+        vals = {}
+        for c in "AB":
+            for rp in reps:
+                xs = [r[k] for r in rows if r["cond"] == c and r["run_id"].endswith("-" + rp)]
+                vals[(c, rp)] = statistics.mean(xs) if k == "score" else sum(xs)
+        ma = statistics.mean(vals[("A", rp)] for rp in reps)
+        mb = statistics.mean(vals[("B", rp)] for rp in reps)
+        f2 = (lambda x: f"{x:.2f}") if k in ("score", "cost_usd") else fmt
+        lines.append(f"| {k} | " + " | ".join(f"{f2(vals[('A', rp)])} | {f2(vals[('B', rp)])}"
+                                             for rp in reps) +
+                     f" | {f2(ma)} | {f2(mb)} | {ma / mb:.2f} |")
+    lines.append("")
+    for c in "AB":
+        rs = [r for r in rows if r["cond"] == c]
+        lines.append(f"Condition {c}: {len(rs)} sessions; answers with a wrong claim "
+                     f"{sum(1 for r in rs if r['wrong'])}; flagged overconfident "
+                     f"{sum(1 for r in rs if r['overconfident'] is True)}; tool errors "
+                     f"{sum(r['tool_errors'] for r in rs)}; permission denials "
+                     f"{sum(r['permission_denials'] or 0 for r in rs)}.")
+    per = collections.defaultdict(list)
+    for (tid, c), xs in cell.items():
+        per[c].append(statistics.mean(x["total"] for x in xs))
+    ratios = [statistics.mean(x["total"] for x in cell[(t, "A")]) /
+              statistics.mean(x["total"] for x in cell[(t, "B")])
+              for t in sorted(ts) if cell.get((t, "A")) and cell.get((t, "B"))]
+    lines.append("")
+    lines.append(f"Per-task A/B ratio of mean totals: median {statistics.median(ratios):.2f}, "
+                 f"min {min(ratios):.2f}, max {max(ratios):.2f}; B used fewer tokens on "
+                 f"{sum(1 for x in ratios if x > 1)} of {len(ratios)} tasks.")
+    for c in "AB":
+        tools = collections.Counter()
+        for s in runs.values():
+            if s["cond"] == c:
+                for n, k in s["tools"].items():
+                    tools[n[len(SC):] if n.startswith(SC) else n] += k
+        lines.append(f"Tool calls in condition {c}, all sessions: " +
+                     ", ".join(f"{n} {k}" for n, k in tools.most_common()) + ".")
+    allr = list(runs.values()) + list(probes.values())
+    lines.append("")
+    lines.append(f"Sessions in the run directory: {len(runs)} task sessions + {len(probes)} probes; "
+                 f"total tokens {sum(s['total'] for s in allr):,}; reported cost USD "
+                 f"{sum(s['cost_usd'] or 0 for s in allr):.2f}.")
+    text = "\n".join(lines) + "\n"
+    with open(os.path.join(RESULTS, prefix + "tables.md"), "w") as f:
+        f.write(text.replace(harness.LIVE, "{{LIVE}}"))
+    print(text)
+
+
 if __name__ == "__main__":
-    {"blind": blind, "compute": compute}[sys.argv[1] if len(sys.argv) > 1 else "compute"]()
+    {"blind": blind, "compute": compute, "compute-repeats": compute_repeats}[sys.argv[1] if len(sys.argv) > 1 else "compute"]()

@@ -1,0 +1,69 @@
+# Differential report: static evaluation vs bitbake -e
+
+workspace kirkstone: release kirkstone (LAYERSERIES_CORENAMES), MACHINE qemux86-64, DISTRO poky
+
+[build_host]: arch = "x86_64", os = "linux"
+
+recipe	compared	equal	equal-ws	flagged	gap	bug	unset-both	not-printed	note
+curl	36	36	0	0	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 0; partly followed 0
+zlib	32	32	0	0	0	0	4	0	anonymous python 10 (5 opaque); unfollowed references 0; partly followed 0
+openssl	45	45	0	0	0	0	5	0	anonymous python 13 (8 opaque); unfollowed references 0; partly followed 0
+ncurses	55	55	0	0	0	0	5	0	anonymous python 11 (6 opaque); unfollowed references 0; partly followed 0
+bash	41	41	0	0	0	0	3	0	anonymous python 12 (7 opaque); unfollowed references 0; partly followed 0
+util-linux	69	69	0	0	0	0	3	0	anonymous python 13 (8 opaque); unfollowed references 0; partly followed 0
+glib-2.0	50	47	0	3	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 0; partly followed 0
+dbus	47	47	0	0	0	0	3	0	anonymous python 14 (9 opaque); unfollowed references 0; partly followed 0
+expat	34	34	0	0	0	0	3	0	anonymous python 11 (5 opaque); unfollowed references 0; partly followed 0
+python3	67	66	0	1	0	0	7	0	anonymous python 13 (8 opaque); unfollowed references 0; partly followed 0
+python3-jinja2	32	31	0	1	0	0	3	0	anonymous python 10 (5 opaque); unfollowed references 0; partly followed 0
+python3-packaging	28	25	0	3	0	0	3	0	anonymous python 9 (4 opaque); unfollowed references 0; partly followed 0
+linux-yocto	46	38	0	8	0	0	6	0	anonymous python 15 (9 opaque); unfollowed references 0; partly followed 0
+u-boot	41	41	0	0	0	0	2	0	anonymous python 12 (4 opaque); unfollowed references 0; partly followed 0
+core-image-minimal	28	27	0	1	0	0	4	0	anonymous python 20 (12 opaque); unfollowed references 0; partly followed 0
+packagegroup-core-boot	32	32	0	0	0	0	3	0	anonymous python 11 (6 opaque); unfollowed references 0; partly followed 0
+virtual/kernel	46	38	0	8	0	0	6	0	provider linux-yocto (PreferredProvider); anonymous python 15 (9 opaque); unfollowed references 0; partly followed 0
+busybox	64	61	0	3	0	0	3	0	anonymous python 14 (8 opaque); unfollowed references 0; partly followed 0
+base-files	44	42	0	2	0	0	4	0	anonymous python 9 (4 opaque); unfollowed references 0; partly followed 0
+psplash	39	31	0	7	1	0	2	0	anonymous python 14 (9 opaque); unfollowed references 0; partly followed 0
+quilt-native	37	37	0	0	0	0	3	0	anonymous python 11 (6 opaque); unfollowed references 0; partly followed 0
+gmp-native	35	32	1	2	0	0	4	0	anonymous python 10 (5 opaque); unfollowed references 0; partly followed 0
+nativesdk-zlib	32	28	2	2	0	0	4	0	anonymous python 11 (6 opaque); unfollowed references 0; partly followed 0
+htop	30	30	0	0	0	0	2	0	anonymous python 10 (5 opaque); unfollowed references 0; partly followed 0
+nano	31	31	0	0	0	0	3	0	anonymous python 10 (5 opaque); unfollowed references 0; partly followed 0
+jq	32	26	0	6	0	0	3	0	anonymous python 10 (5 opaque); unfollowed references 0; partly followed 0
+fmt	30	30	0	0	0	0	3	0	anonymous python 11 (5 opaque); unfollowed references 0; partly followed 0
+protobuf	42	42	0	0	0	0	3	0	anonymous python 11 (6 opaque); unfollowed references 0; partly followed 0
+curl@default	36	36	0	0	0	0	4	0	anonymous python 12 (7 opaque); unfollowed references 0; partly followed 0
+virtual/kernel@default	46	38	0	8	0	0	6	0	provider linux-yocto (PreferredProvider); anonymous python 15 (9 opaque); unfollowed references 0; partly followed 0
+
+## Totals (1145 values compared, explicit machine and distro; `unset` = unset on both sides, `not-printed` = BitBake printed no value; neither counted)
+(equal, but flagged)	16
+equal	1094
+equal-ws	3
+flagged	42
+flagged-literal-differs	5
+gap:python-at-parse	1
+unset	102
+
+## Variables by number of differences (any class but equal)
+B	5
+CFLAGS	4
+DEPENDS	4
+FILESPATH	4
+PV	4
+WORKDIR	4
+S	3
+SRC_URI	3
+FILES	2
+KERNEL_CC	2
+KERNEL_EXTRA_ARGS	2
+PACKAGES	2
+EXTRA_OEMESON	1
+OE_DEL	1
+OE_FEATURES	1
+RDEPENDS	1
+SHRT_VER	1
+SSTATE_HASHEQUIV_FILEMAP	1
+configmangle	1
+dirs755	1
+volatiles	1

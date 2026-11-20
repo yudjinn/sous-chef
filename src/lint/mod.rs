@@ -15,7 +15,8 @@
 //!    recipe-scope rules are skipped. A `.bb` / `.bbappend` BitBake does not collect
 //!    (`files.not_collected`: no `BBFILES` glob, an inactive `BBFILES_DYNAMIC` entry,
 //!    `BBMASK`) is no unit at all: layer-scope rules report it once (`org/recipe-path`,
-//!    `org/layer-conf`). A test seam may report no evaluator at all, which skips
+//!    `org/layer-conf`); one only an inactive `BBFILES_DYNAMIC` entry collects gets
+//!    `hygiene/parse-error` alone (BitBake parses it wherever the collection is present). A test seam may report no evaluator at all, which skips
 //!    every recipe-scope rule with one note. Layer scope: every layer
 //!    of the target (for a recipe or file target, the layers the files are in, and only the
 //!    findings located in those files are kept).
@@ -195,6 +196,10 @@ pub fn all_rules() -> &'static [&'static dyn Rule] {
 
 /// The rule groups.
 pub const GROUPS: [&str; 3] = ["override", "org", "hygiene"];
+
+/// The one file rule that also runs on a `.bb` / `.bbappend` only an inactive
+/// `BBFILES_DYNAMIC` entry collects (see [`run_with`]).
+const SYNTAX_RULE: &str = "hygiene/parse-error";
 
 /// Alternative names accepted wherever a rule id is (`[lint] disable`, `[lint.severity]`,
 /// selections, suppression comments): `(alias, id)`. An alias group (`style`) stands for
@@ -610,10 +615,12 @@ pub fn run_with_progress(
     // `.bb` / `.bbappend` files BitBake does not collect (no `BBFILES` glob, an inactive
     // `BBFILES_DYNAMIC` entry, `BBMASK`): never evaluated, no file rule runs on them. They
     // are told about once, by a layer-scope rule (`org/recipe-path` for a `.bb`,
-    // `org/layer-conf` for a `.bbappend`).
-    let uncollected: HashSet<(String, PathBuf)> = query::uncollected_recipe_files(index)?
+    // `org/layer-conf` for a `.bbappend`). Except `hygiene/parse-error` on one only an
+    // inactive `BBFILES_DYNAMIC` entry matches: BitBake parses it in every workspace that
+    // has the collection, so its syntax errors are real.
+    let uncollected: HashMap<(String, PathBuf), String> = query::uncollected_recipe_files(index)?
         .into_iter()
-        .map(|(f, _)| (f.layer, f.path))
+        .map(|(f, reason)| ((f.layer, f.path), reason))
         .collect();
 
     let total = plan.files.len();
@@ -634,7 +641,12 @@ pub fn run_with_progress(
             continue;
         };
         let key = (loc0.layer.clone(), loc0.path.clone());
-        if uncollected.contains(&key) {
+        let dynamic = match uncollected.get(&key).map(String::as_str) {
+            None => false,
+            Some(crate::index::schema::NOT_COLLECTED_DYNAMIC) => true,
+            Some(_) => continue,
+        };
+        if dynamic && !selected.iter().any(|r| r.id() == SYNTAX_RULE) {
             continue;
         }
         let entry = match sources.load(ws, &key, Some(abs)) {
@@ -663,12 +675,15 @@ pub fn run_with_progress(
             loc: loc.clone(),
             releases: &releases,
         };
-        for r in selected.iter().filter(|r| r.scope() == Scope::File) {
+        for r in selected
+            .iter()
+            .filter(|r| r.scope() == Scope::File && (!dynamic || r.id() == SYNTAX_RULE))
+        {
             if applies(*r, &releases) {
                 r.check(&cx, &mut raw);
             }
         }
-        if kind != Some(FileKind::Recipe) || recipe_rules.is_empty() {
+        if dynamic || kind != Some(FileKind::Recipe) || recipe_rules.is_empty() {
             continue;
         }
         let rules_here: Vec<&dyn Rule> = recipe_rules

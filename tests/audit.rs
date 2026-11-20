@@ -309,8 +309,8 @@ async fn layer_not_enabled_gitmodules_and_git_facts() {
     assert_eq!(top.revision.as_ref().map(String::len), Some(40));
     assert_eq!(top.branch.as_deref(), Some("main"));
     assert!(top.dirty.unwrap() >= 1, "{top:?}");
-    assert!(top.layers.contains(&"meta-mine".to_string()));
-    assert!(top.layers.contains(&"meta-extra".to_string()));
+    assert!(top.layers.iter().any(|i: &String| i == "meta-mine"));
+    assert!(top.layers.iter().any(|i: &String| i == "meta-extra"));
     let s = repo("layers/meta-sub");
     assert_eq!(s.submodule.as_deref(), Some(".: meta-sub"));
     assert_eq!(
@@ -596,7 +596,8 @@ fn queries_unknown_statements_unresolved_inherits_and_anonymous_python() {
         .map(|f| format!("{}:{}", f.layer, f.path.display()))
         .collect();
     assert!(
-        anon.contains(&"meta-mine:recipes-app/odd/odd_1.0.bb".to_string()),
+        anon.iter()
+            .any(|i| i == "meta-mine:recipes-app/odd/odd_1.0.bb"),
         "{anon:?}"
     );
     // The fixture's own anonymous python is still there, and nothing else is listed.
