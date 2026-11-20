@@ -1,0 +1,3 @@
+def ua_extend_depends(d):
+    if not 'virtual/update-alternatives' in d.getVar('PROVIDES'):
+        d.appendVar('DEPENDS', ' virtual/${MLPREFIX}update-alternatives')

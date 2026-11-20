@@ -83,7 +83,7 @@ impl OverrideState {
         s
     }
 
-    fn has(&self, element: &str) -> bool {
+    pub(crate) fn has(&self, element: &str) -> bool {
         if element.is_empty() {
             self.has_empty
         } else {
@@ -104,7 +104,7 @@ impl OverrideState {
     }
 
     /// Some entries are unknown (python or undefined variables).
-    fn uncertain(&self) -> bool {
+    pub(crate) fn uncertain(&self) -> bool {
         self.python || !self.unresolved.is_empty() || !self.unevaluated.is_empty()
     }
 }
@@ -390,9 +390,18 @@ impl Eval<'_> {
             for a in &notes.anonymous {
                 if a.entries.iter().any(|(e, _)| e == base || e == name) {
                     any = true;
+                    let why = match &a.model_applied {
+                        Some(super::anonmodel::Applied::Refused(why)) => {
+                            format!(" (its verified text is modelled, but not here: {why})")
+                        }
+                        _ => String::new(),
+                    };
                     push(
                         out,
-                        used(format!("anonymous python at {} may write {name}", a.loc)),
+                        used(format!(
+                            "anonymous python at {} may write {name}{why}",
+                            a.loc
+                        )),
                     );
                 }
             }

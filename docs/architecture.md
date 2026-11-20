@@ -1555,6 +1555,34 @@ own `NativeDepends`: it lists the evaluated `DEPENDS` and maps the words of an u
 and of the `PACKAGECONFIG` build fields with `VarFilter::map_word` of the recorded filter.
 bitbake-semantics.md, "Class-extension read filters".
 
+### As implemented in acc-anon-models
+
+**Anonymous python models (`eval/anonmodel.rs`, new; verified texts in
+`eval/anonmodel/*.txt`).** `Model` (`BasePackageconfig(BaseText)`, `Cmake`,
+`UpdateAlternatives(UaText)`, `Packagegroup`, `Kernel`, `KernelDevicetree`,
+`Python3Manifest(PyText)`), `recognise(text) -> Option<Model>` (byte for byte through
+`classfn::same_text`), `Model::covers(Source)` (`Source::{Literal, Wrapper, DefCall}`: which
+of the function's `python_vars` entries the model reproduces), `Model::defs` and
+`anonmodel::DEFS` / `def_verified` (the `def`s a model needs, checked as the last definition
+in `ReplayNotes::model_defs`), `run(model, &Ctx { ds, read_file }) -> Result<Vec<Write>,
+String>`, `Write::{Append, Set, SetFlag}`, `Applied::{Done, Refused(why)}`, and
+`parse_manifest` (ordered JSON through a serde visitor, no new dependency).
+`AnonPython` gained `model: Option<(Model, Vec<usize>)>` (the covered entry indices) and
+`model_applied`; `ReplayNotes` gained `model_defs` and `def_locs` (every `def`, last one
+wins). `Replay::finalize` runs, after `resolve_anonymous_writes`, `apply_anon_models`: per
+modelled function in order, `run` on a fork whose `python_vars` keeps only names an earlier
+function (or a handler / filter: `fixed_python_vars`, which `features_backfill` and the
+nativesdk filter now also fill) may write; the writes go through `apply_model_write`
+(`:append` op, `DataStore::rewrite`, flag op; `OpKind::AnonPython`, label `anon-python`),
+the covered entries are dropped and their names leave `python_vars` when nothing else has
+them; a `var_notes` line names the model. Before the proofs, `def_call_writes` adds to each
+anonymous function's entries the literal writes of the `def`s it calls (transitively,
+`called_names`), so `find_meson_cross_files(d)` and `ua_extend_depends(d)` flag what they
+write. `DataStore::rewrite` records a name with overrides under its base and deletes the
+active override variants (BitBake's non-parsing `setVar`). `flag_causes` adds why a model
+did not apply. Tests: `tests/eval_anon_models.rs` against
+`tests/fixtures/anon_models/expected.json` (the real functions, `oracle.py`).
+
 ## Errors
 
 `error::Error` (thiserror) with variants `Io(io::Error)`, `Sqlite(rusqlite::Error)`,
