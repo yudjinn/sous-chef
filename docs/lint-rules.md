@@ -240,7 +240,10 @@ Notes:
 - **`class-location`.** Global use: `base`, a word of a static `INHERIT`, `USER_CLASSES`,
   `PACKAGE_CLASSES` or `INHERIT_DISTRO` value, or an inherit by a class in
   `classes-global/`. Recipe use: an index `inherit` edge from any other file. Neither: the
-  message names both directories.
+  message (since lint-precision) says to keep the class in `classes/` if it is meant for
+  both contexts, where OE-core keeps `archiver`, `externalsrc` and the like (BitBake
+  searches `classes/` after `classes-<type>/`, `BBHandler.py`), and names both directories
+  otherwise.
 - **`inherit-defer`.** The rule's release range starts at Scarthgap, so it runs for a layer
   checked against Scarthgap or later; it then stays silent when any of the layer's releases
   lacks `inherit_defer`, since the suggestion would not parse there.

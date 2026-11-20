@@ -342,6 +342,16 @@ fn class_location() {
         m.contains("move it to classes-recipe/ (recipes inherit it)"),
         "{m}"
     );
+    // lint-precision (tests/fixtures/lint-precision/labels.tsv): a class nothing uses may be
+    // meant for both contexts, as OE-core's archiver and externalsrc are; the message keeps
+    // classes/ open instead of saying "move it".
+    assert!(
+        found[2]
+            .message
+            .contains("nothing in the workspace inherits it, so keep it in classes/ if it is meant for both INHERIT and recipes"),
+        "{}",
+        found[2].message
+    );
 
     // A layer that also claims kirkstone keeps classes/: kirkstone searches nothing else.
     let k = env("class-location", &["kirkstone-layer"]);
