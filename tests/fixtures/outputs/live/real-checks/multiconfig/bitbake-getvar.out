@@ -1,0 +1,30 @@
+$ bitbake-getvar --value BBMULTICONFIG
+musl
+[exit 0]
+$ bitbake-getvar --value -f mcdepends -r curl do_install
+mc::musl:zlib:do_populate_sysroot
+[exit 0]
+$ bitbake-getvar --value -u -f mcdepends -r curl do_install
+${MCDEP_REALCHECKS}
+[exit 0]
+$ bitbake-getvar --value -f mcdepends -r zlib do_install
+
+[exit 0]
+$ bitbake-getvar --value -r mc:musl:curl TCLIBC
+musl
+[exit 0]
+$ bitbake-getvar --value -r mc:musl:curl FILE_LAYERNAME
+core
+[exit 0]
+$ bitbake-getvar --value -r curl FILE_LAYERNAME
+core
+[exit 0]
+$ bitbake-getvar --value -f mcdepends -r mc:musl:curl do_install
+mc::musl:zlib:do_populate_sysroot
+[exit 0]
+$ bitbake-getvar --value -r mc:musl:zlib PREFERRED_PROVIDER_virtual/libc
+musl
+[exit 0]
+$ bitbake-getvar --value -r mc:musl:zlib WORKDIR
+{{LIVE}}/releases/scarthgap/build/tmp-musl/work/core2-64-poky-linux-musl/zlib/1.3.1
+[exit 0]

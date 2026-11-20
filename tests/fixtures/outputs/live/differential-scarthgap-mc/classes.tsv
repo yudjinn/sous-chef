@@ -1,0 +1,700 @@
+recipe	variable	class	cause
+zlib	PN	equal	
+zlib	PV	equal	
+zlib	PR	equal	
+zlib	FILE	equal	
+zlib	FILE_LAYERNAME	equal	
+zlib	SRC_URI	equal	
+zlib	DEPENDS	equal	
+zlib	RDEPENDS:zlib	unset	
+zlib	PACKAGECONFIG	unset	
+zlib	PACKAGES	equal	
+zlib	FILES:zlib	equal	
+zlib	OVERRIDES	equal	
+zlib	MACHINEOVERRIDES	equal	
+zlib	DISTROOVERRIDES	equal	
+zlib	S	equal	
+zlib	B	equal	
+zlib	WORKDIR	equal	
+zlib	LICENSE	equal	
+zlib	INHERIT	equal	
+zlib	PROVIDES	equal	
+zlib	EXTRA_OECONF	equal	
+zlib	EXTRA_OECMAKE	unset	
+zlib	CFLAGS	equal	
+zlib	FILESPATH	equal	
+zlib	MACHINE	equal	
+zlib	DISTRO	equal	
+zlib	TMPDIR	equal	
+zlib	BB_CURRENT_MC	equal	
+zlib	TCLIBC	equal	
+zlib	TCLIBCAPPEND	equal	
+zlib	TARGET_SYS	equal	
+zlib	MULTIMACH_TARGET_SYS	equal	
+zlib	PREFERRED_PROVIDER_virtual/libc	equal	
+zlib	STAGING_DIR_TARGET	equal	
+zlib	SSTATE_DIR	equal	
+zlib	DEPLOY_DIR	equal	
+zlib	BBCLASSEXTEND	equal	
+zlib	CVE_PRODUCT	equal	
+zlib	DESCRIPTION	equal	
+zlib	HOMEPAGE	equal	
+zlib	LIC_FILES_CHKSUM	equal	
+zlib	PREMIRRORS	equal	
+zlib	RDEPENDS:zlib-ptest	equal	
+zlib	SECTION	equal	
+zlib	SUMMARY	equal	
+zlib	UPSTREAM_CHECK_URI	equal	
+curl	PN	equal	
+curl	PV	equal	
+curl	PR	equal	
+curl	FILE	equal	
+curl	FILE_LAYERNAME	equal	
+curl	SRC_URI	equal	
+curl	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:478 [appendVar]; append update-alternatives.bbclass:96 [ua_extend_depends]
+curl	RDEPENDS:curl	unset	
+curl	PACKAGECONFIG	equal	
+curl	PACKAGES	equal	
+curl	FILES:curl	equal	
+curl	OVERRIDES	equal	
+curl	MACHINEOVERRIDES	equal	
+curl	DISTROOVERRIDES	equal	
+curl	S	equal	
+curl	B	equal	
+curl	WORKDIR	equal	
+curl	LICENSE	equal	
+curl	INHERIT	equal	
+curl	PROVIDES	equal	
+curl	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+curl	EXTRA_OECMAKE	unset	
+curl	CFLAGS	equal	
+curl	FILESPATH	equal	
+curl	MACHINE	equal	
+curl	DISTRO	equal	
+curl	TMPDIR	equal	
+curl	BB_CURRENT_MC	equal	
+curl	TCLIBC	equal	
+curl	TCLIBCAPPEND	equal	
+curl	TARGET_SYS	equal	
+curl	MULTIMACH_TARGET_SYS	equal	
+curl	PREFERRED_PROVIDER_virtual/libc	equal	
+curl	STAGING_DIR_TARGET	equal	
+curl	SSTATE_DIR	equal	
+curl	DEPLOY_DIR	equal	
+curl	BBCLASSEXTEND	equal	
+curl	BUGTRACKER	equal	
+curl	CURL_CA_BUNDLE_BASE_DIR	equal	
+curl	CVE_PRODUCT	equal	
+curl	DESCRIPTION	equal	
+curl	FILES	equal	
+curl	HOMEPAGE	equal	
+curl	LIC_FILES_CHKSUM	equal	
+curl	MULTILIB_SCRIPTS	equal	
+curl	RANDOM	equal	
+curl	RDEPENDS:curl-ptest	equal	
+curl	RRECOMMENDS	unset	
+curl	SECTION	equal	
+curl	SUMMARY	equal	
+busybox	PN	equal	
+busybox	PV	equal	
+busybox	PR	equal	
+busybox	FILE	equal	
+busybox	FILE_LAYERNAME	equal	
+busybox	SRC_URI	equal	
+busybox	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:96 [ua_extend_depends]
+busybox	RDEPENDS:busybox	equal	
+busybox	PACKAGECONFIG	unset	
+busybox	PACKAGES	equal	
+busybox	FILES:busybox	equal	
+busybox	OVERRIDES	equal	
+busybox	MACHINEOVERRIDES	equal	
+busybox	DISTROOVERRIDES	equal	
+busybox	S	equal	
+busybox	B	equal	
+busybox	WORKDIR	equal	
+busybox	LICENSE	equal	
+busybox	INHERIT	equal	
+busybox	PROVIDES	equal	
+busybox	EXTRA_OECONF	equal	
+busybox	EXTRA_OECMAKE	unset	
+busybox	CFLAGS	equal	
+busybox	FILESPATH	equal	
+busybox	MACHINE	equal	
+busybox	DISTRO	equal	
+busybox	TMPDIR	equal	
+busybox	BB_CURRENT_MC	equal	
+busybox	TCLIBC	equal	
+busybox	TCLIBCAPPEND	equal	
+busybox	TARGET_SYS	equal	
+busybox	MULTIMACH_TARGET_SYS	equal	
+busybox	PREFERRED_PROVIDER_virtual/libc	equal	
+busybox	STAGING_DIR_TARGET	equal	
+busybox	SSTATE_DIR	equal	
+busybox	DEPLOY_DIR	equal	
+busybox	ALTERNATIVE_PRIORITY	equal	
+busybox	BUGTRACKER	equal	
+busybox	BUSYBOX_SPLIT_SUID	equal	
+busybox	CONFFILES:busybox-mdev	equal	
+busybox	CONFFILES:busybox-syslog	equal	
+busybox	DESCRIPTION	equal	
+busybox	DO_IPv4	equal	
+busybox	DO_IPv6	equal	
+busybox	EXTRA_CFLAGS	equal	
+busybox	EXTRA_LDFLAGS	equal	
+busybox	EXTRA_OEMAKE	equal	
+busybox	FILES:busybox-httpd	equal	
+busybox	FILES:busybox-syslog	equal	
+busybox	FILES:busybox-mdev	equal	
+busybox	FILES:busybox-udhcpd	equal	
+busybox	FILES:busybox-udhcpc	equal	
+busybox	FILES:busybox-hwclock	equal	
+busybox	FILESEXTRAPATHS	equal	
+busybox	HOMEPAGE	equal	
+busybox	INITSCRIPT_NAME:busybox-httpd	equal	
+busybox	INITSCRIPT_NAME:busybox-hwclock	equal	
+busybox	INITSCRIPT_NAME:busybox-mdev	equal	
+busybox	INITSCRIPT_NAME:busybox-syslog	equal	
+busybox	INITSCRIPT_NAME:busybox-udhcpd	equal	
+busybox	INITSCRIPT_PACKAGES	equal	
+busybox	INITSCRIPT_PARAMS:busybox-hwclock	equal	
+busybox	INITSCRIPT_PARAMS:busybox-mdev	equal	
+busybox	LIC_FILES_CHKSUM	equal	
+busybox	OE_DEL	flagged	unevaluated_python
+busybox	OE_FEATURES	flagged	unevaluated_python
+busybox	PTEST_BINDIR	equal	
+busybox	RCONFLICTS:busybox-syslog	equal	
+busybox	RDEPENDS:busybox-ptest	equal	
+busybox	RDEPENDS:busybox-syslog	equal	
+busybox	RPROVIDES:busybox	equal	
+busybox	RRECOMMENDS:busybox	equal	
+busybox	SECTION	equal	
+busybox	SUMMARY	equal	
+busybox	SYSTEMD_PACKAGES	equal	
+busybox	SYSTEMD_SERVICE:busybox-syslog	equal	
+busybox	configmangle	flagged-literal-differs	unevaluated_python; bitbake python ops: :append busybox.inc:101 [__anon_111]; :append busybox.inc:103 [__anon_111]; :append busybox.inc:106 [__anon_111]
+quilt-native	PN	equal	
+quilt-native	PV	equal	
+quilt-native	PR	equal	
+quilt-native	FILE	equal	
+quilt-native	FILE_LAYERNAME	equal	
+quilt-native	SRC_URI	equal	flagged: which override variant or conditional :append/:prepend/:remove of SRC_URI applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	DEPENDS	equal	flagged: which override variant or conditional :append/:prepend/:remove of DEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:rem...
+quilt-native	RDEPENDS:quilt-native	equal	
+quilt-native	PACKAGECONFIG	unset	
+quilt-native	PACKAGES	flagged	unevaluated_python
+quilt-native	FILES:quilt-native	flagged	unevaluated_python
+quilt-native	OVERRIDES	flagged	unevaluated_python
+quilt-native	MACHINEOVERRIDES	equal	
+quilt-native	DISTROOVERRIDES	equal	
+quilt-native	S	flagged	unevaluated_python
+quilt-native	B	flagged	unevaluated_python
+quilt-native	WORKDIR	flagged	unevaluated_python
+quilt-native	LICENSE	equal	
+quilt-native	INHERIT	equal	
+quilt-native	PROVIDES	equal	
+quilt-native	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of USRBINPATH applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:...
+quilt-native	EXTRA_OECMAKE	unset	
+quilt-native	CFLAGS	flagged	unevaluated_python
+quilt-native	FILESPATH	flagged	unevaluated_python
+quilt-native	MACHINE	equal	
+quilt-native	DISTRO	equal	
+quilt-native	TMPDIR	equal	
+quilt-native	BB_CURRENT_MC	equal	
+quilt-native	TCLIBC	equal	
+quilt-native	TCLIBCAPPEND	equal	
+quilt-native	TARGET_SYS	flagged	unevaluated_python
+quilt-native	MULTIMACH_TARGET_SYS	flagged	unevaluated_python
+quilt-native	PREFERRED_PROVIDER_virtual/libc	equal	
+quilt-native	STAGING_DIR_TARGET	equal	
+quilt-native	SSTATE_DIR	equal	
+quilt-native	DEPLOY_DIR	equal	
+quilt-native	CACHED_CONFIGUREVARS	equal	
+quilt-native	CLEANBROKEN	equal	
+quilt-native	DESCRIPTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	EXTRA_AUTORECONF	equal	
+quilt-native	FILES	equal	flagged: which override variant or conditional :append/:prepend/:remove of FILES applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	FILES:quilt-native-doc	flagged	unevaluated_python
+quilt-native	HOMEPAGE	equal	
+quilt-native	INHIBIT_AUTOTOOLS_DEPS	equal	
+quilt-native	LIC_FILES_CHKSUM	equal	
+quilt-native	PACKAGE_WRITE_DEPS	equal	
+quilt-native	PATCHTOOL	equal	
+quilt-native	RDEPENDS:quilt-native-ptest	equal	flagged: which override variant or conditional :append/:prepend/:remove of RDEPENDS:quilt-native-ptest applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	SECTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+quilt-native	SUMMARY	equal	flagged: which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+core-image-minimal	PN	equal	
+core-image-minimal	PV	equal	
+core-image-minimal	PR	equal	
+core-image-minimal	FILE	equal	
+core-image-minimal	FILE_LAYERNAME	equal	
+core-image-minimal	SRC_URI	equal	
+core-image-minimal	DEPENDS	flagged	unevaluated_python
+core-image-minimal	RDEPENDS:core-image-minimal	unset	
+core-image-minimal	PACKAGECONFIG	unset	
+core-image-minimal	PACKAGES	equal	
+core-image-minimal	FILES:core-image-minimal	equal	
+core-image-minimal	OVERRIDES	equal	
+core-image-minimal	MACHINEOVERRIDES	equal	
+core-image-minimal	DISTROOVERRIDES	equal	
+core-image-minimal	S	equal	
+core-image-minimal	B	equal	
+core-image-minimal	WORKDIR	equal	
+core-image-minimal	LICENSE	equal	
+core-image-minimal	INHERIT	equal	
+core-image-minimal	PROVIDES	equal	
+core-image-minimal	EXTRA_OECONF	equal	
+core-image-minimal	EXTRA_OECMAKE	unset	
+core-image-minimal	CFLAGS	equal	
+core-image-minimal	FILESPATH	equal	
+core-image-minimal	MACHINE	equal	
+core-image-minimal	DISTRO	equal	
+core-image-minimal	TMPDIR	equal	
+core-image-minimal	BB_CURRENT_MC	equal	
+core-image-minimal	TCLIBC	equal	
+core-image-minimal	TCLIBCAPPEND	equal	
+core-image-minimal	TARGET_SYS	equal	
+core-image-minimal	MULTIMACH_TARGET_SYS	equal	
+core-image-minimal	PREFERRED_PROVIDER_virtual/libc	equal	
+core-image-minimal	STAGING_DIR_TARGET	equal	
+core-image-minimal	SSTATE_DIR	equal	
+core-image-minimal	DEPLOY_DIR	equal	
+core-image-minimal	IMAGE_INSTALL	equal	
+core-image-minimal	IMAGE_LINGUAS	equal	
+core-image-minimal	IMAGE_ROOTFS_EXTRA_SPACE	flagged	unevaluated_python
+core-image-minimal	IMAGE_ROOTFS_SIZE	equal	
+core-image-minimal	SUMMARY	equal	
+virtual/libc	PN	equal	
+virtual/libc	PV	equal	
+virtual/libc	PR	equal	
+virtual/libc	FILE	equal	
+virtual/libc	FILE_LAYERNAME	equal	
+virtual/libc	SRC_URI	equal	
+virtual/libc	DEPENDS	equal	
+virtual/libc	RDEPENDS:glibc	unset	
+virtual/libc	PACKAGECONFIG	equal	
+virtual/libc	PACKAGES	equal	
+virtual/libc	FILES:glibc	equal	
+virtual/libc	OVERRIDES	equal	
+virtual/libc	MACHINEOVERRIDES	equal	
+virtual/libc	DISTROOVERRIDES	equal	
+virtual/libc	S	equal	
+virtual/libc	B	equal	
+virtual/libc	WORKDIR	equal	
+virtual/libc	LICENSE	equal	
+virtual/libc	INHERIT	equal	
+virtual/libc	PROVIDES	equal	
+virtual/libc	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+virtual/libc	EXTRA_OECMAKE	unset	
+virtual/libc	CFLAGS	equal	
+virtual/libc	FILESPATH	equal	
+virtual/libc	MACHINE	equal	
+virtual/libc	DISTRO	equal	
+virtual/libc	TMPDIR	equal	
+virtual/libc	BB_CURRENT_MC	equal	
+virtual/libc	TCLIBC	equal	
+virtual/libc	TCLIBCAPPEND	equal	
+virtual/libc	TARGET_SYS	equal	
+virtual/libc	MULTIMACH_TARGET_SYS	equal	
+virtual/libc	PREFERRED_PROVIDER_virtual/libc	equal	
+virtual/libc	STAGING_DIR_TARGET	equal	
+virtual/libc	SSTATE_DIR	equal	
+virtual/libc	DEPLOY_DIR	equal	
+virtual/libc	ARCH_DYNAMIC_LOADER	equal	
+virtual/libc	ARM_INSTRUCTION_SET	unset	
+virtual/libc	BBCLASSEXTEND	equal	
+virtual/libc	BUILD_CPPFLAGS	equal	
+virtual/libc	CACHED_CONFIGUREVARS	equal	
+virtual/libc	CC	equal	
+virtual/libc	COMPATIBLE_HOST	unset	
+virtual/libc	CONFFILES	unset	
+virtual/libc	CVE_PRODUCT	equal	
+virtual/libc	CVE_STATUS_GROUPS	equal	
+virtual/libc	CVE_STATUS_RECIPE	equal	
+virtual/libc	CVE_STATUS_STABLE_BACKPORTS	equal	
+virtual/libc	DESCRIPTION	equal	
+virtual/libc	DESCRIPTION:glibc-utils	equal	
+virtual/libc	EGLIBCPARALLELISM	flagged	unevaluated_python
+virtual/libc	EGLIBC_KNOWN_INTERPRETER_NAMES	flagged	unevaluated_python
+virtual/libc	EXTRA_OEMAKE	flagged	unevaluated_python
+virtual/libc	FILES	equal	
+virtual/libc	FILES:glibc-pic	equal	
+virtual/libc	FILES:glibc-dev	equal	
+virtual/libc	FILES:glibc-staticdev	equal	
+virtual/libc	FILES:glibc-mtrace	equal	
+virtual/libc	FILES:glibc-utils	equal	
+virtual/libc	FILES:glibc-pcprofile	equal	
+virtual/libc	FILES_SOLIBSDEV	equal	
+virtual/libc	GLIBCPIE	equal	
+virtual/libc	GLIBC_BROKEN_LOCALES	equal	
+virtual/libc	GLIBC_EXTRA_OECONF	equal	
+virtual/libc	GLIBC_GETLOADER	flagged	unevaluated_python
+virtual/libc	GLIBC_GIT_URI	equal	
+virtual/libc	HASHEQUIV_HASH_VERSION	equal	
+virtual/libc	HOMEPAGE	equal	
+virtual/libc	INHIBIT_DEFAULT_DEPS	equal	
+virtual/libc	INHIBIT_SYSROOT_STRIP	equal	
+virtual/libc	INSANE_SKIP:glibc	unset	
+virtual/libc	INSANE_SKIP:glibc-dev	equal	
+virtual/libc	INSANE_SKIP	equal	
+virtual/libc	LDFLAGS	equal	
+virtual/libc	LEAD_SONAME	equal	
+virtual/libc	LIC_FILES_CHKSUM	equal	
+virtual/libc	LOCALESTASH	equal	
+virtual/libc	NATIVESDKFIXES	equal	
+virtual/libc	PACKAGES_DYNAMIC	equal	
+virtual/libc	PACKAGE_PREPROCESS_FUNCS	equal	
+virtual/libc	PARALLEL_MAKE	equal	
+virtual/libc	RDEPENDS:glibc-dev	equal	
+virtual/libc	RDEPENDS	unset	
+virtual/libc	RPROVIDES:glibc	equal	
+virtual/libc	RPROVIDES:glibc-dbg	equal	
+virtual/libc	RPROVIDES:glibc-dev	equal	
+virtual/libc	RPROVIDES:glibc-doc	equal	
+virtual/libc	RPROVIDES	unset	
+virtual/libc	RPROVIDES:glibc-mtrace	equal	
+virtual/libc	RPROVIDES:glibc-pcprofile	equal	
+virtual/libc	RPROVIDES:glibc-pic	equal	
+virtual/libc	RPROVIDES:glibc-staticdev	equal	
+virtual/libc	RPROVIDES:glibc-utils	equal	
+virtual/libc	RRECOMMENDS:glibc	equal	
+virtual/libc	RTLDLIST	flagged	unevaluated_python
+virtual/libc	SECTION	equal	
+virtual/libc	SRCBRANCH	equal	
+virtual/libc	SRCREV_glibc	equal	
+virtual/libc	SRCREV_localedef	equal	
+virtual/libc	SSTATETASKS	flagged-literal-differs	unevaluated_python; bitbake python ops: set sstate.bbclass:161 [__anon_170]
+virtual/libc	SUMMARY	equal	
+virtual/libc	SUMMARY:glibc-utils	equal	
+virtual/libc	SYSROOT_PREPROCESS_FUNCS	equal	
+virtual/libc	SYSTEMD_PACKAGES	equal	
+virtual/libc	SYSTEMD_SERVICE	unset	
+virtual/libc	TARGET_CPPFLAGS	equal	
+virtual/libc	UPSTREAM_CHECK_GITTAGREGEX	equal	
+virtual/libc	bashscripts	equal	
+virtual/libc	libc_baselibs	equal	
+mc:musl:zlib	PN	equal	
+mc:musl:zlib	PV	equal	
+mc:musl:zlib	PR	equal	
+mc:musl:zlib	FILE	equal	
+mc:musl:zlib	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:zlib	SRC_URI	equal	
+mc:musl:zlib	DEPENDS	equal	
+mc:musl:zlib	RDEPENDS:zlib	unset	
+mc:musl:zlib	PACKAGECONFIG	unset	
+mc:musl:zlib	PACKAGES	equal	
+mc:musl:zlib	FILES:zlib	equal	
+mc:musl:zlib	OVERRIDES	gap:variant-layername	via ${FILE_LAYERNAME}: bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:zlib	MACHINEOVERRIDES	equal	
+mc:musl:zlib	DISTROOVERRIDES	equal	
+mc:musl:zlib	S	equal	
+mc:musl:zlib	B	equal	
+mc:musl:zlib	WORKDIR	equal	
+mc:musl:zlib	LICENSE	equal	
+mc:musl:zlib	INHERIT	equal	
+mc:musl:zlib	PROVIDES	equal	
+mc:musl:zlib	EXTRA_OECONF	equal	
+mc:musl:zlib	EXTRA_OECMAKE	unset	
+mc:musl:zlib	CFLAGS	equal	
+mc:musl:zlib	FILESPATH	equal	
+mc:musl:zlib	MACHINE	equal	
+mc:musl:zlib	DISTRO	equal	
+mc:musl:zlib	TMPDIR	equal	
+mc:musl:zlib	BB_CURRENT_MC	equal	
+mc:musl:zlib	TCLIBC	equal	
+mc:musl:zlib	TCLIBCAPPEND	equal	
+mc:musl:zlib	TARGET_SYS	equal	
+mc:musl:zlib	MULTIMACH_TARGET_SYS	equal	
+mc:musl:zlib	PREFERRED_PROVIDER_virtual/libc	equal	
+mc:musl:zlib	STAGING_DIR_TARGET	equal	
+mc:musl:zlib	SSTATE_DIR	equal	
+mc:musl:zlib	DEPLOY_DIR	equal	
+mc:musl:zlib	BBCLASSEXTEND	equal	
+mc:musl:zlib	CVE_PRODUCT	equal	
+mc:musl:zlib	DESCRIPTION	equal	
+mc:musl:zlib	HOMEPAGE	equal	
+mc:musl:zlib	LIC_FILES_CHKSUM	equal	
+mc:musl:zlib	PREMIRRORS	equal	
+mc:musl:zlib	RDEPENDS:zlib-ptest	equal	
+mc:musl:zlib	SECTION	equal	
+mc:musl:zlib	SUMMARY	equal	
+mc:musl:zlib	UPSTREAM_CHECK_URI	equal	
+mc:musl:curl	PN	equal	
+mc:musl:curl	PV	equal	
+mc:musl:curl	PR	equal	
+mc:musl:curl	FILE	equal	
+mc:musl:curl	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:curl	SRC_URI	equal	
+mc:musl:curl	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: append base.bbclass:478 [appendVar]; append update-alternatives.bbclass:96 [ua_extend_depends]
+mc:musl:curl	RDEPENDS:curl	unset	
+mc:musl:curl	PACKAGECONFIG	equal	
+mc:musl:curl	PACKAGES	equal	
+mc:musl:curl	FILES:curl	equal	
+mc:musl:curl	OVERRIDES	gap:variant-layername	via ${FILE_LAYERNAME}: bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:curl	MACHINEOVERRIDES	equal	
+mc:musl:curl	DISTROOVERRIDES	equal	
+mc:musl:curl	S	equal	
+mc:musl:curl	B	equal	
+mc:musl:curl	WORKDIR	equal	
+mc:musl:curl	LICENSE	equal	
+mc:musl:curl	INHERIT	equal	
+mc:musl:curl	PROVIDES	equal	
+mc:musl:curl	EXTRA_OECONF	flagged-literal-differs	unevaluated_python
+mc:musl:curl	EXTRA_OECMAKE	unset	
+mc:musl:curl	CFLAGS	equal	
+mc:musl:curl	FILESPATH	equal	
+mc:musl:curl	MACHINE	equal	
+mc:musl:curl	DISTRO	equal	
+mc:musl:curl	TMPDIR	equal	
+mc:musl:curl	BB_CURRENT_MC	equal	
+mc:musl:curl	TCLIBC	equal	
+mc:musl:curl	TCLIBCAPPEND	equal	
+mc:musl:curl	TARGET_SYS	equal	
+mc:musl:curl	MULTIMACH_TARGET_SYS	equal	
+mc:musl:curl	PREFERRED_PROVIDER_virtual/libc	equal	
+mc:musl:curl	STAGING_DIR_TARGET	equal	
+mc:musl:curl	SSTATE_DIR	equal	
+mc:musl:curl	DEPLOY_DIR	equal	
+mc:musl:curl	BBCLASSEXTEND	equal	
+mc:musl:curl	BUGTRACKER	equal	
+mc:musl:curl	CURL_CA_BUNDLE_BASE_DIR	equal	
+mc:musl:curl	CVE_PRODUCT	equal	
+mc:musl:curl	DESCRIPTION	equal	
+mc:musl:curl	FILES	equal	
+mc:musl:curl	HOMEPAGE	equal	
+mc:musl:curl	LIC_FILES_CHKSUM	equal	
+mc:musl:curl	MULTILIB_SCRIPTS	equal	
+mc:musl:curl	RANDOM	equal	
+mc:musl:curl	RDEPENDS:curl-ptest	equal	
+mc:musl:curl	RRECOMMENDS	unset	
+mc:musl:curl	SECTION	equal	
+mc:musl:curl	SUMMARY	equal	
+mc:musl:busybox	PN	equal	
+mc:musl:busybox	PV	equal	
+mc:musl:busybox	PR	equal	
+mc:musl:busybox	FILE	equal	
+mc:musl:busybox	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:busybox	SRC_URI	equal	
+mc:musl:busybox	DEPENDS	gap:python-at-parse	append update-alternatives.bbclass:96 [ua_extend_depends]
+mc:musl:busybox	RDEPENDS:busybox	equal	
+mc:musl:busybox	PACKAGECONFIG	unset	
+mc:musl:busybox	PACKAGES	equal	
+mc:musl:busybox	FILES:busybox	equal	
+mc:musl:busybox	OVERRIDES	gap:variant-layername	via ${FILE_LAYERNAME}: bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:busybox	MACHINEOVERRIDES	equal	
+mc:musl:busybox	DISTROOVERRIDES	equal	
+mc:musl:busybox	S	equal	
+mc:musl:busybox	B	equal	
+mc:musl:busybox	WORKDIR	equal	
+mc:musl:busybox	LICENSE	equal	
+mc:musl:busybox	INHERIT	equal	
+mc:musl:busybox	PROVIDES	equal	
+mc:musl:busybox	EXTRA_OECONF	equal	
+mc:musl:busybox	EXTRA_OECMAKE	unset	
+mc:musl:busybox	CFLAGS	equal	
+mc:musl:busybox	FILESPATH	equal	
+mc:musl:busybox	MACHINE	equal	
+mc:musl:busybox	DISTRO	equal	
+mc:musl:busybox	TMPDIR	equal	
+mc:musl:busybox	BB_CURRENT_MC	equal	
+mc:musl:busybox	TCLIBC	equal	
+mc:musl:busybox	TCLIBCAPPEND	equal	
+mc:musl:busybox	TARGET_SYS	equal	
+mc:musl:busybox	MULTIMACH_TARGET_SYS	equal	
+mc:musl:busybox	PREFERRED_PROVIDER_virtual/libc	equal	
+mc:musl:busybox	STAGING_DIR_TARGET	equal	
+mc:musl:busybox	SSTATE_DIR	equal	
+mc:musl:busybox	DEPLOY_DIR	equal	
+mc:musl:busybox	ALTERNATIVE_PRIORITY	equal	
+mc:musl:busybox	BUGTRACKER	equal	
+mc:musl:busybox	BUSYBOX_SPLIT_SUID	equal	
+mc:musl:busybox	CONFFILES:busybox-mdev	equal	
+mc:musl:busybox	CONFFILES:busybox-syslog	equal	
+mc:musl:busybox	DESCRIPTION	equal	
+mc:musl:busybox	DO_IPv4	equal	
+mc:musl:busybox	DO_IPv6	equal	
+mc:musl:busybox	EXTRA_CFLAGS	equal	
+mc:musl:busybox	EXTRA_LDFLAGS	equal	
+mc:musl:busybox	EXTRA_OEMAKE	equal	
+mc:musl:busybox	FILES:busybox-httpd	equal	
+mc:musl:busybox	FILES:busybox-syslog	equal	
+mc:musl:busybox	FILES:busybox-mdev	equal	
+mc:musl:busybox	FILES:busybox-udhcpd	equal	
+mc:musl:busybox	FILES:busybox-udhcpc	equal	
+mc:musl:busybox	FILES:busybox-hwclock	equal	
+mc:musl:busybox	FILESEXTRAPATHS	equal	
+mc:musl:busybox	HOMEPAGE	equal	
+mc:musl:busybox	INITSCRIPT_NAME:busybox-httpd	equal	
+mc:musl:busybox	INITSCRIPT_NAME:busybox-hwclock	equal	
+mc:musl:busybox	INITSCRIPT_NAME:busybox-mdev	equal	
+mc:musl:busybox	INITSCRIPT_NAME:busybox-syslog	equal	
+mc:musl:busybox	INITSCRIPT_NAME:busybox-udhcpd	equal	
+mc:musl:busybox	INITSCRIPT_PACKAGES	equal	
+mc:musl:busybox	INITSCRIPT_PARAMS:busybox-hwclock	equal	
+mc:musl:busybox	INITSCRIPT_PARAMS:busybox-mdev	equal	
+mc:musl:busybox	LIC_FILES_CHKSUM	equal	
+mc:musl:busybox	OE_DEL	flagged	unevaluated_python
+mc:musl:busybox	OE_FEATURES	flagged	unevaluated_python
+mc:musl:busybox	PTEST_BINDIR	equal	
+mc:musl:busybox	RCONFLICTS:busybox-syslog	equal	
+mc:musl:busybox	RDEPENDS:busybox-ptest	equal	
+mc:musl:busybox	RDEPENDS:busybox-syslog	equal	
+mc:musl:busybox	RPROVIDES:busybox	equal	
+mc:musl:busybox	RRECOMMENDS:busybox	equal	
+mc:musl:busybox	SECTION	equal	
+mc:musl:busybox	SUMMARY	equal	
+mc:musl:busybox	SYSTEMD_PACKAGES	equal	
+mc:musl:busybox	SYSTEMD_SERVICE:busybox-syslog	equal	
+mc:musl:busybox	configmangle	flagged-literal-differs	unevaluated_python; bitbake python ops: :append busybox.inc:101 [__anon_111]; :append busybox.inc:103 [__anon_111]; :append busybox.inc:106 [__anon_111]
+mc:musl:quilt-native	PN	equal	
+mc:musl:quilt-native	PV	equal	
+mc:musl:quilt-native	PR	equal	
+mc:musl:quilt-native	FILE	equal	
+mc:musl:quilt-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:quilt-native	SRC_URI	equal	flagged: which override variant or conditional :append/:prepend/:remove of SRC_URI applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+mc:musl:quilt-native	DEPENDS	equal	flagged: which override variant or conditional :append/:prepend/:remove of DEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:rem...
+mc:musl:quilt-native	RDEPENDS:quilt-native	equal	
+mc:musl:quilt-native	PACKAGECONFIG	unset	
+mc:musl:quilt-native	PACKAGES	flagged	unevaluated_python
+mc:musl:quilt-native	FILES:quilt-native	flagged	unevaluated_python
+mc:musl:quilt-native	OVERRIDES	flagged-literal-differs	unevaluated_python
+mc:musl:quilt-native	MACHINEOVERRIDES	equal	
+mc:musl:quilt-native	DISTROOVERRIDES	equal	
+mc:musl:quilt-native	S	flagged	unevaluated_python
+mc:musl:quilt-native	B	flagged	unevaluated_python
+mc:musl:quilt-native	WORKDIR	flagged	unevaluated_python
+mc:musl:quilt-native	LICENSE	equal	
+mc:musl:quilt-native	INHERIT	equal	
+mc:musl:quilt-native	PROVIDES	equal	
+mc:musl:quilt-native	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of USRBINPATH applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/:...
+mc:musl:quilt-native	EXTRA_OECMAKE	unset	
+mc:musl:quilt-native	CFLAGS	flagged	unevaluated_python
+mc:musl:quilt-native	FILESPATH	flagged	unevaluated_python
+mc:musl:quilt-native	MACHINE	equal	
+mc:musl:quilt-native	DISTRO	equal	
+mc:musl:quilt-native	TMPDIR	equal	
+mc:musl:quilt-native	BB_CURRENT_MC	equal	
+mc:musl:quilt-native	TCLIBC	equal	
+mc:musl:quilt-native	TCLIBCAPPEND	equal	
+mc:musl:quilt-native	TARGET_SYS	flagged	unevaluated_python
+mc:musl:quilt-native	MULTIMACH_TARGET_SYS	flagged	unevaluated_python
+mc:musl:quilt-native	PREFERRED_PROVIDER_virtual/libc	equal	
+mc:musl:quilt-native	STAGING_DIR_TARGET	equal	
+mc:musl:quilt-native	SSTATE_DIR	equal	
+mc:musl:quilt-native	DEPLOY_DIR	equal	
+mc:musl:quilt-native	CACHED_CONFIGUREVARS	equal	
+mc:musl:quilt-native	CLEANBROKEN	equal	
+mc:musl:quilt-native	DESCRIPTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of DESCRIPTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+mc:musl:quilt-native	EXTRA_AUTORECONF	equal	
+mc:musl:quilt-native	FILES	equal	flagged: which override variant or conditional :append/:prepend/:remove of FILES applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+mc:musl:quilt-native	FILES:quilt-native-doc	flagged	unevaluated_python
+mc:musl:quilt-native	HOMEPAGE	equal	
+mc:musl:quilt-native	INHIBIT_AUTOTOOLS_DEPS	equal	
+mc:musl:quilt-native	LIC_FILES_CHKSUM	equal	
+mc:musl:quilt-native	PACKAGE_WRITE_DEPS	equal	
+mc:musl:quilt-native	PATCHTOOL	equal	
+mc:musl:quilt-native	RDEPENDS:quilt-native-ptest	equal	flagged: which override variant or conditional :append/:prepend/:remove of RDEPENDS:quilt-native-ptest applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+mc:musl:quilt-native	SECTION	equal	flagged: which override variant or conditional :append/:prepend/:remove of SECTION applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+mc:musl:quilt-native	SUMMARY	equal	flagged: which override variant or conditional :append/:prepend/:remove of SUMMARY applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
+mc:musl:core-image-minimal	PN	equal	
+mc:musl:core-image-minimal	PV	equal	
+mc:musl:core-image-minimal	PR	equal	
+mc:musl:core-image-minimal	FILE	equal	
+mc:musl:core-image-minimal	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:core-image-minimal	SRC_URI	equal	
+mc:musl:core-image-minimal	DEPENDS	flagged	unevaluated_python
+mc:musl:core-image-minimal	RDEPENDS:core-image-minimal	unset	
+mc:musl:core-image-minimal	PACKAGECONFIG	unset	
+mc:musl:core-image-minimal	PACKAGES	equal	
+mc:musl:core-image-minimal	FILES:core-image-minimal	equal	
+mc:musl:core-image-minimal	OVERRIDES	gap:variant-layername	via ${FILE_LAYERNAME}: bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:core-image-minimal	MACHINEOVERRIDES	equal	
+mc:musl:core-image-minimal	DISTROOVERRIDES	equal	
+mc:musl:core-image-minimal	S	equal	
+mc:musl:core-image-minimal	B	equal	
+mc:musl:core-image-minimal	WORKDIR	equal	
+mc:musl:core-image-minimal	LICENSE	equal	
+mc:musl:core-image-minimal	INHERIT	equal	
+mc:musl:core-image-minimal	PROVIDES	equal	
+mc:musl:core-image-minimal	EXTRA_OECONF	equal	
+mc:musl:core-image-minimal	EXTRA_OECMAKE	unset	
+mc:musl:core-image-minimal	CFLAGS	equal	
+mc:musl:core-image-minimal	FILESPATH	equal	
+mc:musl:core-image-minimal	MACHINE	equal	
+mc:musl:core-image-minimal	DISTRO	equal	
+mc:musl:core-image-minimal	TMPDIR	equal	
+mc:musl:core-image-minimal	BB_CURRENT_MC	equal	
+mc:musl:core-image-minimal	TCLIBC	equal	
+mc:musl:core-image-minimal	TCLIBCAPPEND	equal	
+mc:musl:core-image-minimal	TARGET_SYS	equal	
+mc:musl:core-image-minimal	MULTIMACH_TARGET_SYS	equal	
+mc:musl:core-image-minimal	PREFERRED_PROVIDER_virtual/libc	equal	
+mc:musl:core-image-minimal	STAGING_DIR_TARGET	equal	
+mc:musl:core-image-minimal	SSTATE_DIR	equal	
+mc:musl:core-image-minimal	DEPLOY_DIR	equal	
+mc:musl:core-image-minimal	IMAGE_INSTALL	equal	
+mc:musl:core-image-minimal	IMAGE_LINGUAS	equal	
+mc:musl:core-image-minimal	IMAGE_ROOTFS_EXTRA_SPACE	flagged	unevaluated_python
+mc:musl:core-image-minimal	IMAGE_ROOTFS_SIZE	equal	
+mc:musl:core-image-minimal	SUMMARY	equal	
+mc:musl:virtual/libc	PN	equal	
+mc:musl:virtual/libc	PV	equal	
+mc:musl:virtual/libc	PR	equal	
+mc:musl:virtual/libc	FILE	equal	
+mc:musl:virtual/libc	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:virtual/libc	SRC_URI	equal	
+mc:musl:virtual/libc	DEPENDS	equal	
+mc:musl:virtual/libc	RDEPENDS:musl	unset	
+mc:musl:virtual/libc	PACKAGECONFIG	unset	
+mc:musl:virtual/libc	PACKAGES	equal	
+mc:musl:virtual/libc	FILES:musl	flagged	unevaluated_python
+mc:musl:virtual/libc	OVERRIDES	gap:variant-layername	via ${FILE_LAYERNAME}: bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+mc:musl:virtual/libc	MACHINEOVERRIDES	equal	
+mc:musl:virtual/libc	DISTROOVERRIDES	equal	
+mc:musl:virtual/libc	S	equal	
+mc:musl:virtual/libc	B	equal	
+mc:musl:virtual/libc	WORKDIR	equal	
+mc:musl:virtual/libc	LICENSE	equal	
+mc:musl:virtual/libc	INHERIT	equal	
+mc:musl:virtual/libc	PROVIDES	equal	
+mc:musl:virtual/libc	EXTRA_OECONF	equal	
+mc:musl:virtual/libc	EXTRA_OECMAKE	unset	
+mc:musl:virtual/libc	CFLAGS	equal	
+mc:musl:virtual/libc	FILESPATH	equal	
+mc:musl:virtual/libc	MACHINE	equal	
+mc:musl:virtual/libc	DISTRO	equal	
+mc:musl:virtual/libc	TMPDIR	equal	
+mc:musl:virtual/libc	BB_CURRENT_MC	equal	
+mc:musl:virtual/libc	TCLIBC	equal	
+mc:musl:virtual/libc	TCLIBCAPPEND	equal	
+mc:musl:virtual/libc	TARGET_SYS	equal	
+mc:musl:virtual/libc	MULTIMACH_TARGET_SYS	equal	
+mc:musl:virtual/libc	PREFERRED_PROVIDER_virtual/libc	equal	
+mc:musl:virtual/libc	STAGING_DIR_TARGET	equal	
+mc:musl:virtual/libc	SSTATE_DIR	equal	
+mc:musl:virtual/libc	DEPLOY_DIR	equal	
+mc:musl:virtual/libc	ARM_INSTRUCTION_SET	unset	
+mc:musl:virtual/libc	BASEVER	equal	
+mc:musl:virtual/libc	COMPATIBLE_HOST	unset	
+mc:musl:virtual/libc	CONFIGUREOPTS	equal	
+mc:musl:virtual/libc	CROSS_COMPILE	equal	
+mc:musl:virtual/libc	DESCRIPTION	equal	
+mc:musl:virtual/libc	FILES:musl-staticdev	equal	
+mc:musl:virtual/libc	FILES:musl-dev	equal	
+mc:musl:virtual/libc	FILES_SOLIBSDEV	equal	
+mc:musl:virtual/libc	GLIBC_LDSO	flagged	unevaluated_python
+mc:musl:virtual/libc	HOMEPAGE	equal	
+mc:musl:virtual/libc	INHIBIT_DEFAULT_DEPS	equal	
+mc:musl:virtual/libc	INSANE_SKIP:musl	equal	
+mc:musl:virtual/libc	INSANE_SKIP:musl-dev	equal	
+mc:musl:virtual/libc	LDFLAGS	equal	
+mc:musl:virtual/libc	LEAD_SONAME	equal	
+mc:musl:virtual/libc	LIC_FILES_CHKSUM	equal	
+mc:musl:virtual/libc	MIPS_INSTRUCTION_SET	equal	
+mc:musl:virtual/libc	MUSL_LDSO_ARCH	flagged	unevaluated_python
+mc:musl:virtual/libc	RDEPENDS:musl-dev	equal	
+mc:musl:virtual/libc	RPROVIDES:musl	equal	
+mc:musl:virtual/libc	RPROVIDES:musl-dev	equal	
+mc:musl:virtual/libc	SECTION	equal	
+mc:musl:virtual/libc	SRCREV	equal	
+mc:musl:virtual/libc	SUMMARY	equal	
+mc:musl:virtual/libc	UPSTREAM_CHECK_COMMITS	equal	

@@ -1236,6 +1236,195 @@ only target, the only recipe cleaned.
 | `bitbake-getvar -r curl --value T`, twice (`log recipe=curl task=compile`) | sous-chef init-script mode | read-only |
 | `bitbake curl` (bbappend removed) | kas, yocto-kiss files | succeeded, 918 of 919 not rerun (curl from sstate) |
 
+## Three features never run for real (real-checks, 2026-11-20)
+
+`sigs` through a dependency's hash, multiconfig against a real BitBake, and the Bash and
+Edit hooks in a live Claude Code session. sous-chef: the release build of branch
+`real-checks`; configurations, cache (`XDG_CACHE_HOME`), `TMPDIR`, helper scripts
+(`tools/`) and raw outputs in `{{LIVE}}/runs/real-checks/`; recorded copies in
+`tests/fixtures/outputs/live/real-checks/` (README there).
+
+### sigs through a dependency's hash: confirmed, two fixes
+
+The user allowed building `curl` and `zlib` for this item. In the kas build, one BitBake
+client at a time (`tools/bbcheck.sh` before each), `build/conf/bblayers.conf` and
+`local.conf` copied before (`conf-before/`) and after (`conf-after/`): identical.
+
+**The change.** `scratch/meta-scratch/recipes-test/zlib/zlib_%.bbappend` through
+`kas-scratch.yaml`. The first version, `CFLAGS:append = " -O1"`, was dropped after its dry
+run: the bbappend applies to `zlib-native` too, a dependency of most native recipes, and
+`bitbake -n curl` wanted 83 sstate objects and found none (glibc, openssl, python3-native,
+... would have rebuilt). That dry run was not free: it "removed 83 stale sstate objects"
+from `build/tmp` (bitbake-semantics.md "Task signatures": `StaleSetSceneTasks` fires in a
+dry run too); the next build restored them from the sstate cache. The second,
+`CFLAGS:append:class-target = " -O1"` (`-O1` changes the object code, so zlib's output
+hash and with it curl's dependency hashes change despite hash equivalence): dry run 899
+of 919 not rerun, only zlib (8) and curl (12) tasks. `bitbake curl`: 76 s, succeeded;
+the tasks that ran (not `_setscene`) were zlib's `do_configure` to `do_packagedata` and
+curl's `do_prepare_recipe_sysroot` to `do_package_write_ipk`; the 71 native objects the
+first dry run had removed came back as `_setscene`.
+
+**BitBake against sous-chef** (`bitbake-diffsigs -c never -t <pn> <task>` through
+`kas-scratch.yaml`; `sigs` through the init-script runner, the scratch layer in
+`bblayers.conf` at the time):
+
+| Task | `bitbake-diffsigs` | sous-chef `sigs` |
+|---|---|---|
+| `curl do_configure` | 5 nested `Hash for task dependency` lines: `curl:do_prepare_recipe_sysroot`, `zlib:do_populate_sysroot`, `zlib:do_install`, `zlib:do_compile`, `zlib:do_configure`; then `basehash changed` and `Variable CFLAGS value changed:` `"${TARGET_CFLAGS} -D_REENTRANT -fPIE {+-O1+}"` | the same five `via` rows with the same hashes, `cause CFLAGS (zlib)` with the word diff at `meta-scratch:recipes-test/zlib/zlib_%.bbappend:3` (the `:append:class-target` line); 8.9 s |
+| `curl do_compile` / `do_install` | one / two more levels (`curl:do_configure`, `curl:do_compile`) | the same chain, the same cause and pointer |
+| `zlib do_configure` | `basehash changed`, the `CFLAGS` word diff | `its own inputs changed (basehash)`, the same cause and pointer |
+| `zlib do_compile` | only `Hash for task dependency zlib:do_configure changed` and that comparison | (before the fix) `its own inputs did not change; a dependency's did` |
+
+Chain, root cause, the owner recipe (zlib, from the innermost dependency) and the pointer
+to the assignment in the bbappend: **right**. Two things were wrong, both fixed in
+`src/mcp/tools/sigs.rs`:
+
+- **"its own inputs did not change" was a guess.** zlib's `do_compile`, `do_install` and
+  `do_populate_sysroot` each had their own basehash changed (the two sigdata files of each
+  task decoded with Python's `compression.zstd`, `tools/sigbase.py`:
+  `sigdata-basehashes.out`; `CFLAGS` is in each task's `varvals`), but `bitbake-diffsigs`
+  printed only the dependency: `compare_sigfiles` replaces the task's own lines by the
+  dependency's comparison (bitbake-semantics.md "Task signatures"). The row now says
+  `re-ran: a dependency's hash changed, by way of ...` and a note says a change of the
+  task's own inputs would not be listed. (For curl's tasks the old claim happened to be
+  true: their basehashes were unchanged.)
+- **The cause was cut by the budget on a deep chain.** `sigs curl install` (seven
+  dependencies) at the default 250 tokens showed the seven `via` rows and dropped the one
+  `cause` row (`+2 more over budget_tokens`). The `via` rows now come after the causes.
+
+Tests: `tests/live_build.rs` `real_diffsigs_through_a_dependency_hash`,
+`real_diffsigs_hide_a_tasks_own_change_behind_a_dependency` (the recorded outputs and
+sigdata summary); `tests/sigs.rs`
+`real_change_through_a_dependency_points_at_the_dependencys_bbappend` (the real
+`do_configure` and `do_install` outputs replayed through the tool on a fixture copy with a
+zlib recipe and the same bbappend: chain, pointer, wording, cause before the path at the
+default budget); the two hand-written snapshots updated for the wording and order.
+
+**Restored.** The bbappend removed, `bitbake curl` through yocto-kiss's own kas files:
+`Sstate summary: Wanted 40 Local 40 ... 100% match`, "918 of 919 didn't need to be
+rerun" (no task but `_setscene` ones; two "Removing N stale sstate objects" lines for the
+`-O1` outputs), then `bitbake -n curl`: "919 didn't need to be rerun". `bblayers.conf`
+and `local.conf` byte-identical to `conf-before/`. `scratch/meta-scratch/recipes-test/`
+holds only `broken-fetch`.
+
+BitBake commands of this item, all in `{{LIVE}}/yocto-kiss/build`, one client at a time:
+
+| Command | Through | Result |
+|---|---|---|
+| `bitbake -n curl` with `CFLAGS:append = " -O1"` | kas-scratch | dry run; 83 sstate misses; removed 83 stale objects from `tmp` |
+| `bitbake -n curl` with `CFLAGS:append:class-target = " -O1"` | kas-scratch | dry run; only zlib and curl tasks |
+| `bitbake curl` with that bbappend | kas-scratch | succeeded, 76 s; zlib's and curl's tasks ran, the rest from sstate |
+| `bitbake-diffsigs -c never -t curl do_configure / curl do_compile / zlib do_configure / zlib do_compile` | kas-scratch | the comparisons above |
+| `bitbake-diffsigs -c never -t ...` (sous-chef `sigs`: curl configure, compile, install; zlib configure, compile; three runs of the server) | sous-chef init-script mode | read-only |
+| `bitbake curl` (bbappend removed) | kas, yocto-kiss files | succeeded, 918 of 919 not rerun |
+| `bitbake -n curl` | kas, yocto-kiss files | 919 not rerun |
+
+### Multiconfig against a real BitBake (Scarthgap, parse only): confirmed, one BitBake quirk
+
+In the Scarthgap release workspace (`{{LIVE}}/releases/scarthgap/build`, BitBake 2.8.1),
+its `conf/` copied first (`runs/real-checks/scarthgap-conf-before/`): `BBMULTICONFIG =
+"musl"` and an `mcdepends` on curl alone appended to `local.conf`
+(`MCDEP_REALCHECKS:pn-curl = "mc::musl:zlib:do_populate_sysroot"`, `do_install[mcdepends]
+= "${MCDEP_REALCHECKS}"`), and `conf/multiconfig/musl.conf` with `TCLIBC = "musl"` and
+`TMPDIR = "${TOPDIR}/tmp-musl"` (recorded in
+`tests/fixtures/outputs/live/real-checks/multiconfig/`). Afterwards the file and directory
+were removed and `local.conf` copied back: `diff -r` against the copy is empty, the five
+files' sha256 as before. BitBake left `build/tmp-musl/` (904 KB).
+
+**The differential with a multiconfig.** `tests/differential.rs` takes a recipe written
+`mc:<name>:<recipe>` (BitBake side: `bitbake -e mc:<name>:<recipe>` through
+`scripts/differential.sh`, unchanged; static side: `Target::mc`, provider selection with
+`Providers::new_in(.., mc)`), extra variables per workspace (`vars =`) and files a run
+needs (`requires =`, so `differential_scarthgap_mc` returns at once now that the
+multiconfig is gone). Workspace `tests/fixtures/differential/scarthgap-mc.ws`: zlib, curl,
+busybox, quilt-native, core-image-minimal and virtual/libc in both configurations (12
+`bitbake -e`, 5.8 to 78 s, the first parsing both configurations), plus `BB_CURRENT_MC`,
+`TCLIBC`, `TCLIBCAPPEND`, `TARGET_SYS`, `MULTIMACH_TARGET_SYS`,
+`PREFERRED_PROVIDER_virtual/libc`, `STAGING_DIR_TARGET`, `SSTATE_DIR`, `DEPLOY_DIR`.
+`show-layers.out` and `show-appends.out` were copied from the acc-releases run (same
+layers) so that no `bitbake-layers` ran. Result
+(`tests/fixtures/outputs/live/differential-scarthgap-mc/`): **659 values, 600 equal, 46
+flagged, 2 `gap:python-at-parse`, 11 `gap:variant-layername`, 0 bugs**. Every variable the
+second configuration changes is equal in all 12 targets (the two `flagged` are
+quilt-native's `TARGET_SYS` / `MULTIMACH_TARGET_SYS`, flagged in both configurations); in
+the musl configuration every other difference is flagged or the same one its default
+counterpart has (busybox's `DEPENDS`, `ua_extend_depends`), except the 11 below.
+
+**BitBake's `-e` of a multiconfig recipe has `FILE_LAYERNAME` `None`** (and so
+`layer-${FILE_LAYERNAME}` in `OVERRIDES`) in all six musl dumps; the static side says
+`core`. `bitbake-getvar -r mc:musl:curl FILE_LAYERNAME` (a real parse) prints `core`: the
+`-e` path looks the layer up by the virtual file name `mc:musl:<file>`, as it does for a
+`virtual:native:` variant (bitbake-semantics.md "Multiconfig"). The harness's
+`gap:variant-layername` now covers both (`Ctx::in_mc`); nothing to fix in sous-chef. Also
+seen: the include history of `bitbake -e mc:musl:zlib` is the default configuration's
+(`multiconfig/default.conf`, not `musl.conf`).
+
+**The tools** (`sous-chef-scarthgap.toml`, static; `tools/calls-mc.json`) against
+`bitbake-getvar` (`tools/getvar-scarthgap.sh`):
+
+| Question | sous-chef | BitBake |
+|---|---|---|
+| `status` | `multiconfigs BBMULTICONFIG = "musl" (build:conf/local.conf:11)`, `multiconfig musl build:conf/multiconfig/musl.conf:1`, `multiconfig_present default meta:conf/multiconfig/default.conf:1 (not in BBMULTICONFIG)` | `bitbake-getvar --value BBMULTICONFIG`: `musl` |
+| `var TCLIBC recipe=curl mc=musl` and `recipe=mc:musl:curl` | `shadowed ??= bitbake.conf:394`, `applied = build:conf/multiconfig/musl.conf:2`, `final: "musl"`, the multiconfig note | `musl`; the dump's history the same two operations |
+| `var TCLIBC recipe=curl` | `glibc` | `glibc` (dump) |
+| `var WORKDIR recipe=mc:musl:zlib` | `<build>/tmp-musl/work/core2-64-poky-linux-musl/zlib/1.3.1` | the same |
+| `var FILE_LAYERNAME recipe=mc:musl:curl` | `core` | `core` (getvar; the `-e` dump: `None`, above) |
+| `var PREFERRED_PROVIDER_virtual/libc mc=musl` | `musl`, `tclibc-musl.inc:9` | `musl` |
+| `deps virtual/libc kind=providers` with and without `mc=musl` | `musl` selected / `glibc` selected | `bitbake -e mc:musl:virtual/libc` parsed `musl_git.bb`, `bitbake -e virtual/libc` `glibc_2.39.bb` |
+| `var do_install[mcdepends] recipe=curl` | `final[mcdepends]: "mc::musl:zlib:do_populate_sysroot"` from `build:conf/local.conf:14` | `bitbake-getvar --value -f mcdepends -r curl do_install`: the same (`-u`: `${MCDEP_REALCHECKS}`) |
+| `deps curl kind=mcdepends` | `do_install (default) musl zlib do_populate_sysroot applies here build:conf/local.conf:14` | the flag above |
+| `deps mc:musl:curl kind=mcdepends` | the same row, `not in this configuration (BitBake adds it only when building in (default))` | `-r mc:musl:curl`: the flag is set there too; `add_mcdepends` adds it only `if mc == frommc` (source) |
+| `deps zlib kind=mcdepends` | `no task of this recipe has an mcdepends flag` | `-r zlib`: the flag is set, expanding to `""` |
+| `var nope mc=nope` | error `multiconfig nope; known: musl` | (not run) |
+
+All agree. Two small things not fixed: `deps zlib kind=mcdepends` says no task "has an
+mcdepends flag" where BitBake has the flag with an empty value (no entry either way); and
+the `kind=mcdepends` answers end with `none changes DEPENDS by name` (the anonymous-python
+note names `DEPENDS` for every kind but runtime and packageconfig, `deps_var` in
+`src/mcp/tools/deps.rs`). Not run: a `bitbake -g` that would show the mc dependency in the
+task graph (only `-e` and `bitbake-getvar` were allowed). Test on the recorded files:
+`tests/differential.rs` `recorded_scarthgap_multiconfig` (normal gate).
+
+BitBake commands of this item, all in `{{LIVE}}/releases/scarthgap/build`, one client at
+a time, parse only: `bitbake -e` of the 12 targets (`scripts/differential.sh`,
+`SOUS_CHEF_DIFF_WS=scarthgap-mc`), and ten `bitbake-getvar` (`--value BBMULTICONFIG`; `-f
+mcdepends` for curl, `-u` for curl, zlib, `mc:musl:curl`; `TCLIBC` and `FILE_LAYERNAME` for
+`mc:musl:curl`, `FILE_LAYERNAME` for curl; `PREFERRED_PROVIDER_virtual/libc` and `WORKDIR`
+for `mc:musl:zlib`).
+
+### The Bash and Edit hooks in a live session: confirmed, one fix
+
+Three isolated `claude -p` sessions (Claude Code 2.1.328, `--model haiku`, US$0.0067 in
+all; flags and setup in plugin/README.md, "Checked with Claude Code 2.1.328") in a scratch
+copy of the fixture workspace (`{{LIVE}}/runs/real-checks/hooks/ws`). The model ran
+`./bitbake curl`, a script that `cat`s the recorded real console of y1's configure failure
+(so the hook saw a bitbake command line and real output, and nothing ran BitBake), and
+edited `meta-core/recipes-core/hello/hello_1.1.bb`. A first attempt to start session one
+failed before any request (`claude` not on the reduced `PATH`, exit 127).
+
+- **The Bash hook ran and replaced the output in every session**, but Claude Code handed
+  it only the first 29 999 of 33 946 bytes, with `persistedOutputPath` and
+  `persistedOutputSize` (not in the hooks reference). The digest of the cut text named the
+  wrong first error (`configure failed`; the `configure: error: libpsl ...` line is past the
+  cut) and, because the reply kept those fields, the model saw the digest wrapped as the
+  2 KB preview of an "Output too large (33.2KB)" saved file. **Fixed** in
+  `src/hook/bash.rs`: the hook reads the whole output from `persistedOutputPath` and drops
+  both fields from its reply. After the fix the model was shown exactly the 525-byte digest
+  (recipe, version, task, exit 1, the `configure: error`, context, function, handle, slice
+  hint) in place of 33 946 bytes, and answered from it.
+- **The Edit follow-up appeared**: `meta-core is not a writable layer: ... (scaffold
+  kind=where name=hello says where)` as `additionalContext`; the model quoted it.
+- No permission refusal of the sessions themselves. Inside them: session two's Edit was
+  denied by its own allow rule (`Edit(/<abs>)` is not absolute; `Edit(//<abs>)` is), and
+  one sous-chef MCP call (`item`) in session three was denied by `dontAsk` (not in the allow
+  list), as configured.
+
+Recorded: `tests/fixtures/outputs/live/hooks/live_*`; tests `tests/hook_live_session.rs`
+(the captured events replayed: the digest from the persisted file equals the live reply
+and the tool result the model saw; without the file, the reply of the session before the
+fix; the Edit follow-up equals the live one) and a unit test of `persisted_output` in
+`src/hook/bash.rs`. Not captured: Write, MultiEdit, a grep through Bash (`bash_grep`).
+
 ## Left in the environment
 
 `{{LIVE}}/scratch/` (all created by T9.2): `sous-chef.toml`, `sous-chef-big.toml`,

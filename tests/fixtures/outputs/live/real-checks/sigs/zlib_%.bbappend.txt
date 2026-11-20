@@ -1,0 +1,3 @@
+# real-checks: one changed input of the target zlib's do_configure and do_compile (removed
+# at the end). class-target only: zlib-native is a dependency of most native recipes.
+CFLAGS:append:class-target = " -O1"

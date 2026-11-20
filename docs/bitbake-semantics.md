@@ -1732,9 +1732,36 @@ variant only by the evaluated `PN`. Only the words `native`, `nativesdk` and
 
 Read for x5 in BitBake **2.18.0** (`yocto-kiss/bitbake`, branch `2.18`) and, read-only from
 the same repository, the `2.0` (Kirkstone) and `2.8` (Scarthgap) branches; OE-core
-`wrynose`, `scarthgap` and `kirkstone`; kas **5.5**. Not checked against a running BitBake:
-the live workspace has no multiconfig and no BitBake was run for this (see "Not yet
-verified").
+`wrynose`, `scarthgap` and `kirkstone`; kas **5.5**. **Checked against a running BitBake
+on Scarthgap** (real-checks, 2026-11-20; BitBake 2.8.1, parse only): the release workspace
+with `BBMULTICONFIG = "musl"` and `<build>/conf/multiconfig/musl.conf` (`TCLIBC = "musl"`,
+`TMPDIR = "${TOPDIR}/tmp-musl"`), `bitbake -e` of zlib, curl, busybox, quilt-native,
+core-image-minimal and virtual/libc in both configurations, and `bitbake-getvar`
+(`tests/fixtures/outputs/live/differential-scarthgap-mc/`,
+`tests/fixtures/outputs/live/real-checks/multiconfig/`). Confirmed: `BB_CURRENT_MC` is
+`default` in the default configuration and `musl` in the other; the default
+configuration's include history has OE-core's empty `meta/conf/multiconfig/default.conf`
+right after `local.conf` and before the machine conf (the Scarthgap `require`); the
+multiconfig file is found in `<build>/conf/multiconfig/` through `BBPATH` (`TCLIBC`'s
+history in the musl dump: `set <build>/conf/multiconfig/musl.conf:2`, after
+`bitbake.conf:394`'s `??=`, as the static history has it); `TCLIBC`, `TMPDIR`, `WORKDIR`
+(`tmp-musl/work/core2-64-poky-linux-musl/...`), `TARGET_SYS`, `PREFERRED_PROVIDER_virtual/libc`
+(`musl`, from `tclibc-musl.inc`) and the provider `bitbake -e mc:musl:virtual/libc` chose
+(`musl_git.bb`) per configuration; the flag `do_install[mcdepends] = "${MCDEP}"` (with
+`MCDEP:pn-curl` set) is expanded per recipe (`bitbake-getvar -f mcdepends`: the entry for
+curl, empty for zlib) and is set in both configurations' curl alike (BitBake adds the
+dependency only in the one it names first). **New, seen**: `bitbake -e mc:<name>:<recipe>`
+prints `FILE_LAYERNAME` as `None`, so `OVERRIDES` holds a literal `layer-${FILE_LAYERNAME}`:
+`showEnvironment` (2.8 and 2.18 `cooker.py`) takes the recipe's file name from
+`buildTaskData`, which in a multiconfig is the virtual name `mc:<name>:<file>`, and
+`calc_bbfile_priority` matches no `BBFILE_PATTERN` against it (the same as for a
+`virtual:native:` variant). A build parses the real file name (`CookerParser`), and
+`bitbake-getvar -r mc:musl:curl FILE_LAYERNAME` (tinfoil) printed `core`. **Also seen**:
+the include history `bitbake -e mc:<name>:<recipe>` prints is the default
+configuration's (`showEnvironment` emits `self.data.inchistory`, not the multiconfig
+datastore's): it lists `multiconfig/default.conf`, not `musl.conf`, so the place of the
+multiconfig file cannot be read from it (the variable histories do show the file). Not
+checked: the rest of "Not yet verified".
 
 **Reading `BBMULTICONFIG`, and one parse per configuration** (`lib/bb/cookerdata.py`
 `CookerDataBuilder.parseBaseConfiguration`, the same on 2.0, 2.8 and 2.18):
@@ -2485,7 +2512,39 @@ branches, and OE-core Wrynose `meta/lib/oe/sstatesig.py` `find_siginfo`.
   stamp has the `stamp-extra-info` suffix (`.<taskhash>.dogbonedark`, `MACHINE`) but its
   sigdata file has none; the noexec `do_build` has a stamp and no sigdata file. No change
   reached curl through a dependency's hash in this round (none of curl's dependencies
-  changed), so that case is still checked only on hand-written output.
+  changed); real-checks did that (next item).
+- **A change through a dependency's hash, confirmed on a real build** (real-checks,
+  2026-11-20; `tests/fixtures/outputs/live/real-checks/sigs/`): `CFLAGS:append:class-target
+  = " -O1"` in a scratch `zlib_%.bbappend`, curl rebuilt (only zlib's 8 and curl's 11 tasks
+  ran). `bitbake-diffsigs -c never -t curl do_configure` printed five nested `Hash for task
+  dependency` lines, `curl:do_prepare_recipe_sysroot` (the task that depends on
+  `zlib:do_populate_sysroot`: `do_prepare_recipe_sysroot[deptask] = "do_populate_sysroot"`,
+  OE-core `staging.bbclass`),
+  `zlib:do_populate_sysroot`, `zlib:do_install`, `zlib:do_compile`, `zlib:do_configure`,
+  then at 20 spaces `basehash changed` and `Variable CFLAGS value changed:` with the word
+  diff `"${TARGET_CFLAGS} -D_REENTRANT -fPIE {+-O1+}"` (the value with the `:append`
+  applied, unexpanded). `do_compile` one level more, `do_install` two. **The recursion hides
+  a task's own change**: `compare_sigfiles` (2.18 `siggen.py`, at the `recursecb` call)
+  does `output = [output[-1]] + recout; break` when a dependency's comparison is found, so
+  what it had found for the task itself (its `basehash`, its variables) is dropped. Seen:
+  `-t zlib do_compile` printed only `Hash for task dependency zlib:do_configure changed` and
+  that comparison, although zlib's `do_compile`, `do_install` and `do_populate_sysroot`
+  each had their own basehash changed (the sigdata files read with Python's
+  `compression.zstd`: `basehash c5321af4c3` -> `6fa9a314e7` for `do_compile`, `CFLAGS` in
+  each task's `varvals`, `sigdata-basehashes.out`); curl's tasks' basehashes were
+  unchanged. So the output says whether the task's own inputs changed only when no
+  dependency's hash changed. A `Taint ... changed` line is appended after that loop, so it
+  can follow a recursion at depth 0. Side observations: a `zlib_%.bbappend` applies to
+  `zlib-native` and `nativesdk-zlib` too (the bbappend matches the recipe file, and
+  `BBCLASSEXTEND` variants are parsed from it), so an unconditional `CFLAGS:append` changed
+  the signatures of most native recipes (a dry run wanted 83 sstate objects, 0 found); and
+  **a dry run (`bitbake -n`) is not free of side effects**: `RunQueueExecute.__init__` (2.18
+  `runqueue.py`) fires `StaleSetSceneTasks` for every setscene task whose stamps do not
+  match its current hash, with no `dry_run` check, and OE-core's
+  `sstate_eventhandler_stalesstate` (`sstate.bbclass`) uninstalls those tasks' outputs from
+  `TMPDIR` (`sstate_clean_manifest`, stamps removed: "Removing 11 stale sstate objects for
+  arch dogbonedark..."); the sstate cache is not touched, and the next real build restored
+  them from it.
 
 ### Package data
 
@@ -3507,15 +3566,13 @@ These are reported, never silently guessed. Authoritative mode (M5) covers them.
 Statements above that rest on documentation, memory or the source alone, not on a check
 against BitBake's behaviour or output:
 
-- Multiconfig (x5, "Multiconfig"): all of it, from the BitBake 2.0 / 2.8 / 2.18, OE-core and
-  kas 5.5 source and fixture tests (`tests/multiconfig.rs`); the live workspace has no
-  multiconfig and BitBake was not run. A parse-only run on a workspace with two
-  multiconfigs (`bitbake -e mc:<name>:<recipe>` and `bitbake -e mc:<name>`, no task) would
-  confirm: the multiconfig file's place in the include history (after `conf/local.conf`,
-  before the machine conf); `BB_CURRENT_MC`; which `?=` wins between `local.conf`, the
-  multiconfig file and the machine conf; `MACHINE`, `TMPDIR`, a `PREFERRED_PROVIDER_*` and a
-  machine-overridden recipe variable per configuration; a task's expanded `mcdepends`; and
-  BitBake's errors for an unknown name and for a listed name without a file.
+- Multiconfig (x5, "Multiconfig"): checked on Scarthgap only (real-checks, one
+  multiconfig `musl` with `TCLIBC` and `TMPDIR`; see that section). Still from the source
+  alone: Kirkstone and Wrynose (the Wrynose python `require`, `BB_CURRENT_MC = ""`), two
+  or more multiconfigs, a multiconfig that sets `MACHINE` (so another machine conf), which
+  `?=` wins between `local.conf`, the multiconfig file and the machine conf, `bitbake -e
+  mc:<name>` (configuration only), and BitBake's errors for an unknown name and for a
+  listed name without a file.
 - kas: `layers` null and `{}`, the `KAS_*` overrides, what `kas shell -k` does (before the
   first checkout and with `{repo, file}` includes), the YAML 1.1 rules and `kas-container`
   were settled from the kas 5.5 and PyYAML 6.0.3 source (see "kas"), not by running kas

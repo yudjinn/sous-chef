@@ -1,0 +1,9 @@
+NOTE: Starting bitbake server...
+Hash for task dependency curl:do_prepare_recipe_sysroot changed from 46c19df123b10c27528bc46619de1630a8797a86bbef40972e17dbed935eaf5d to 2b76b1e51ee848f17f3e8f47adb5f737fed661aaa7c46f36b511ed91bc0fbcc0
+    Hash for task dependency zlib:do_populate_sysroot changed from 1f919bcb1e5c37c9fdaa69c51eff8897a0ab9b6e08f1c3ad6c87287ffd4fdfbf to 089502422c2b8eda9f600136e0a3ea79cf0b58b9f51c80a3d86ea01af1b32de6
+        Hash for task dependency zlib:do_install changed from 1ca983e25f33879d3db4104dda4f0d1a064f803fce70316ace4297a3eb301427 to 490ad5c5b7bd45c8565cc62f045f8ba44a229bb0602caa5015b99e6dd68d128a
+            Hash for task dependency zlib:do_compile changed from e12d57e8fcd0c222b43f7c80c193a24a49bbb772d039eb0c82009882a6b8db11 to 9166c7489cf5e6c377550409707c42e6c85d3854a4e2062544068c258dd7b323
+                Hash for task dependency zlib:do_configure changed from 5df8f861e819daaf0a56cd3eeba1adbc1745686247079c6a4b0e16e18f4484c6 to c54a2de5c5e0e7f7665e66820cb45c001e4f29bd1d8e17b277c7a12109f240ca
+                    basehash changed from befafd053abc82c589033591f0e7ddae77544f3281513755bbcea3569cef8568 to cd2687dfa4bd126c99e8e80084014fcbcbf1db20f218ae040b1d7e43aa1418b9
+                    Variable CFLAGS value changed:
+                    "${TARGET_CFLAGS} -D_REENTRANT -fPIE {+-O1+}"

@@ -1831,11 +1831,12 @@ Signature files are zstd-compressed JSON on every supported release (bitbake-sem
 build environment's runner, stores the whole output under a `text` handle and digests it.
 Rows `kind item detail loc`:
 
-- `task`: what re-ran and why in one line: `its own inputs changed (basehash)`, or `its own
-  inputs did not change; a dependency's did, by way of <dep> -> <dep>` (the recursion
-  `bitbake-diffsigs` followed to the root cause);
-- `via`: each dependency on that path, outermost first, with its old and new hash (first
-  10 hex digits);
+- `task`: what re-ran and why in one line: `its own inputs changed (basehash)`, or `a
+  dependency's hash changed, by way of <dep> -> <dep>` (the recursion `bitbake-diffsigs`
+  followed to the root cause), with a note that BitBake then shows the dependency's
+  comparison instead of the task's own, so a change of the task's own inputs would not be
+  listed (real-checks: zlib's `do_compile` had its own `CFLAGS` change and printed only its
+  dependency; bitbake-semantics.md "Task signatures");
 - `cause`: the root-cause changes, deepest first (at most 6, then `+N more (limit=6)`):
   a variable or function value changed (the word diff `"a [-old-] {+new+}"`, or the line
   counts of a unified diff, and, when its lines were changed in place (as many `-` as `+`),
@@ -1850,6 +1851,8 @@ Rows `kind item detail loc`:
   task), a change of the ignore lists, or a dependency whose signature could not be found
   (recursion stopped). A `basehash` row only when nothing else at that level explains it.
   `(pn)` follows the item when the change is in a dependency.
+- `via`: after the causes (so a budget cut drops these first), each dependency on that
+  path, outermost first, with its old and new hash (first 10 hex digits).
 - When there is nothing to compare: `only one signature: nothing to compare` (BitBake's
   `Only one matching sigdata file found`), `no signature found`, `the two signatures do not
   differ`, or the failure's `ERROR:` lines, with a note on how many signature files the
@@ -1865,10 +1868,11 @@ fixture workspace, `recipe: "hello", task: "compile"`):
 
 ```
 kind	item	detail	loc
-task	hello:do_compile	re-ran: its own inputs did not change; a dependency's did, by way of hello:do_configure	-
-via	hello:do_configure	hash 6f1c2e0a9b -> 0a1b2c3d4e	-
+task	hello:do_compile	re-ran: a dependency's hash changed, by way of hello:do_configure	-
 cause	EXTRA_OECONF (hello)	value changed: "--disable-nls {+--with-mine+}"	meta-mine:recipes-core/hello/hello_1.1.bbappend:6
 cause	do_configure (hello)	value changed: 1 line added, 0 removed	meta-core:classes-recipe/autotoolsish.bbclass:30
+via	hello:do_configure	hash 6f1c2e0a9b -> 0a1b2c3d4e	-
+note: bitbake-diffsigs shows a changed dependency's comparison instead of the task's own, so a change of the task's own inputs would not be listed
 note: from `bitbake-diffsigs -c never -t hello do_compile` (BitBake's own comparison; nothing was built); full output h:... (563 bytes): slice handle=h:...
 ```
 
