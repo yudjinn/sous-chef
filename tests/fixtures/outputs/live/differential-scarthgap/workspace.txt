@@ -1,8 +1,7 @@
 
-## Files in the history (1017 variables without overrides; same set of files: 1016)
+## Files in the history (1017 variables without overrides; same set of files: 1017)
 
 ### Files only in BitBake's history (file, count, first uses)
-{{LIVE}}/releases/scarthgap/openembedded-core/meta/classes-recipe/populate_sdk_ext.bbclass	1	core-image-minimal:B
 ### Files only in the static history (file, count, first uses)
 
 ## Layers (bitbake-layers show-layers vs Workspace::discover)
