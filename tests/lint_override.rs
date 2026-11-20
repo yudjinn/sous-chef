@@ -368,11 +368,13 @@ fn plus_equals_with_override_ignores_the_fixture_workspace_idiom() {
 fn remove_in_recipe() {
     let env = Env::new();
     let r = &OverrideRemoveInRecipe;
-    assert_eq!(lines(&env, r, "bad.bb"), [(3, W), (4, W)]);
+    // Info everywhere since 2026-11-20 (user decision; warning in recipes, includes and
+    // classes before): docs/lint-rules.md, "Measured precision".
+    assert_eq!(lines(&env, r, "bad.bb"), [(3, I), (4, I)]);
     assert_eq!(lines(&env, r, "bad.bbappend"), [(2, I)]);
     assert_eq!(lines(&env, r, "good.bb"), []);
     // A class is like a recipe; configuration (a .conf, or an .inc under conf/) is like a
-    // bbappend.
+    // bbappend (the message says so).
     let text = fixture("remove-in-recipe", "bad.bb");
     let sev = |path: &str| -> Vec<Severity> {
         check_at(&env, r, &text, path)
@@ -380,10 +382,26 @@ fn remove_in_recipe() {
             .map(|f| f.severity)
             .collect()
     };
-    assert_eq!(sev("classes-recipe/x.bbclass"), [W, W]);
-    assert_eq!(sev("recipes-x/x/x.inc"), [W, W]);
-    assert_eq!(sev("conf/machine/include/x.inc"), [I, I]);
-    assert_eq!(sev("conf/distro/x.conf"), [I, I]);
+    let msg = |path: &str| -> Vec<String> {
+        check_at(&env, r, &text, path)
+            .into_iter()
+            .map(|f| f.message)
+            .collect()
+    };
+    for path in ["classes-recipe/x.bbclass", "recipes-x/x/x.inc"] {
+        assert_eq!(sev(path), [I, I], "{path}");
+        assert!(
+            msg(path).iter().all(|m| m.contains("cannot be undone")),
+            "{path}"
+        );
+    }
+    for path in ["conf/machine/include/x.inc", "conf/distro/x.conf"] {
+        assert_eq!(sev(path), [I, I], "{path}");
+        assert!(
+            msg(path).iter().all(|m| m.contains("acceptable here")),
+            "{path}"
+        );
+    }
 }
 
 #[test]
@@ -392,7 +410,7 @@ fn remove_in_recipe_advice_depends_on_where_the_value_is_set() {
     // "leave the item out of the value" is impossible for CFLAGS, which configuration sets.
     let env = Env::new();
     let r = &OverrideRemoveInRecipe;
-    assert_eq!(lines(&env, r, "precision.bb"), [(4, W), (7, W)]);
+    assert_eq!(lines(&env, r, "precision.bb"), [(4, I), (7, I)]);
     let m = messages(&env, r, "precision.bb");
     assert!(
         m[0].ends_with(
@@ -406,6 +424,67 @@ fn remove_in_recipe_advice_depends_on_where_the_value_is_set() {
         m[1].contains("leave the item out of the value instead"),
         "{}",
         m[1]
+    );
+}
+
+#[test]
+fn remove_in_recipe_is_info_and_lint_severity_in_sous_chef_toml_raises_it() {
+    // Lowered to info on 2026-11-20 (user decision); a project that wants the old warning
+    // writes `[lint.severity]` in sous-chef.toml, which then applies to every finding of
+    // the rule, bbappends included.
+    let (_tmp, root) = temp_ws();
+    let bad = fixture("remove-in-recipe", "bad.bb");
+    let dir = root.join("meta-mine/recipes-app/rm");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("rm_1.0.bb"), &bad).unwrap();
+    fs::write(
+        dir.join("rm_%.bbappend"),
+        fixture("remove-in-recipe", "bad.bbappend"),
+    )
+    .unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let run = |fail_on: &str| -> (Option<i32>, Vec<String>) {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_sous-chef"))
+            .args(["lint", "meta-mine", "--rule", "override/remove-in-recipe"])
+            .args(["--fail-on", fail_on])
+            .current_dir(&root)
+            .env("XDG_CACHE_HOME", cache.path())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+        let rows = stdout
+            .lines()
+            .filter(|l| l.contains("\toverride/remove-in-recipe\t"))
+            .map(|l| l.split('\t').take(3).collect::<Vec<_>>().join(" "))
+            .collect();
+        (out.status.code(), rows)
+    };
+    let (code, rows) = run("warning");
+    assert_eq!(code, Some(0), "{rows:?}");
+    assert_eq!(
+        rows,
+        [
+            "info override/remove-in-recipe meta-mine:recipes-app/rm/rm_%.bbappend:2",
+            "info override/remove-in-recipe meta-mine:recipes-app/rm/rm_1.0.bb:3",
+            "info override/remove-in-recipe meta-mine:recipes-app/rm/rm_1.0.bb:4",
+        ]
+    );
+    let toml = root.join("sous-chef.toml");
+    let text = fs::read_to_string(&toml).unwrap();
+    fs::write(
+        &toml,
+        format!("{text}\n[lint.severity]\n\"override/remove-in-recipe\" = \"warning\"\n"),
+    )
+    .unwrap();
+    let (code, rows) = run("warning");
+    assert_eq!(code, Some(1), "{rows:?}");
+    assert_eq!(
+        rows,
+        [
+            "warning override/remove-in-recipe meta-mine:recipes-app/rm/rm_%.bbappend:2",
+            "warning override/remove-in-recipe meta-mine:recipes-app/rm/rm_1.0.bb:3",
+            "warning override/remove-in-recipe meta-mine:recipes-app/rm/rm_1.0.bb:4",
+        ]
     );
 }
 

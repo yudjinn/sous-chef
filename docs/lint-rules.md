@@ -114,7 +114,7 @@ summary line and notes go to stderr.
 | `override/legacy-syntax` | E | file | Underscore override syntax: a name the parser marks legacy (`VAR_append`, `VAR_remove`, `RDEPENDS_${PN}`, a package variable followed by `_<lowercase package>`), or `VAR_<o>` whose trailing `_` elements are all machine or distro names of the workspace, known `class-*` overrides or `pn-<name>`. (Since x7) also the package variables of OE-core's `scripts/contrib/convert-overrides.py` that the parser's list lacks (`SYSTEMD_SERVICE_${PN}`, `INITSCRIPT_PARAMS_${PN}`, `INITSCRIPT_NAME`, `ALTERNATIVE`, `USERADD_PARAM`, `GROUPADD_PARAM`, `PKGV`, `IMAGE_CMD_<type>`, ...), but not `ALTERNATIVE_TARGET_<pkg>` / `ALTERNATIVE_PRIORITY_<pkg>`, which `update-alternatives.bbclass` still reads with `_`. Never flags `do_install`, the per-collection `layer.conf` names, a `PREFERRED_*` name itself (`PREFERRED_PROVIDER_virtual/kernel`, `PREFERRED_VERSION_<pn>`, `PREFERRED_PROVIDER_<machine>`), `SRCREV_<name>` or a suffix that is a collection name; a machine or distro suffix after the name a `PREFERRED_*` variable is keyed by is reported (`PREFERRED_PROVIDER_virtual/kernel_qemux86`, which the old syntax read as an override: write `PREFERRED_PROVIDER_virtual/kernel:qemux86`). The message names what the fix writes (`VAR_qemux86_append`: `VAR:qemux86:append`). Misses `VAR_<machine>` when that machine has no `.conf` in the workspace. |
 | `override/append-no-space` | W | file | `:append` value without a leading space, or `:prepend` without a trailing space, on a variable known to be a space-separated list. Not flagged: colon lists (`FILESEXTRAPATHS`), scalars, flags and unknown variables; values starting with `${@`, and a `:prepend` value ending in python; a value starting (`:append`) or ending (`:prepend`) with `${NAME}`, unless the file itself gives `NAME` a non-empty literal value without the space; `+=` / `=+` on an `:append` / `:prepend` name (they add the space); function bodies. |
 | `override/plus-equals-with-override` | W | file | `VAR:foo += "x"` (and `=+`, `.=`, `=.`): this builds the variable `VAR:foo`, which replaces `VAR` when `foo` is active, rather than appending to `VAR`. Suggests `VAR:append:foo`. Not flagged: the package override of a package-scoped variable (`FILES:${PN} +=`, `RDEPENDS:libfoo +=`), overrides containing `${` or not starting with `[a-z0-9]`, names with `:append` / `:prepend` / `:remove`. A condition after the package is flagged (`RDEPENDS:${PN}:qemux86 +=`). |
-| `override/remove-in-recipe` | W/I | file | `:remove` (not on a flag). Warning in a `.bb`, `.inc` or `.bbclass`: it is applied last, so no bbappend or conf can add the item back. Info in a `.bbappend`, a `.conf`, or an `.inc` under a `conf/` directory (configuration), where it is the usual tool. (Since lint-precision) The advice depends on where the value is set: when the file itself assigns the name before `:remove`, leave the item out there; otherwise (`CFLAGS:remove`, `DEBUG_OPTIMIZATION:remove`: configuration sets them) remove it through a variable a bbappend can change. |
+| `override/remove-in-recipe` | I | file | `:remove` (not on a flag). In a `.bb`, `.inc` or `.bbclass` the message says it is applied last, so no bbappend or conf can add the item back; in a `.bbappend`, a `.conf`, or an `.inc` under a `conf/` directory (configuration) it says `:remove` is acceptable there, the usual tool. Info in every case since 2026-11-20 (user decision; until then warning in a `.bb`, `.inc` or `.bbclass`): all 17 sampled findings were true but unhelpful on upstream layers ("Measured precision"); `"override/remove-in-recipe" = "warning"` under `[lint.severity]` raises every finding of the rule, bbappends and configuration included. (Since lint-precision) The advice depends on where the value is set: when the file itself assigns the name before `:remove`, leave the item out there; otherwise (`CFLAGS:remove`, `DEBUG_OPTIMIZATION:remove`: configuration sets them) remove it through a variable a bbappend can change. |
 | `override/dead` | W/I | recipe | An override element of an inactive operation in the recipe's own files (the `.bb`, its `.inc` files, its bbappends) that is no entry of the recipe's `OVERRIDES` (an entry that holds python is never a name), no machine, distro, class or declared override of the workspace, and no word of any `*OVERRIDES` assignment. Suggests the closest known name; (since lint-precision) an element within edit distance 2 of `append`, `prepend` or `remove` is named as that operation misspelt (`do_install_ptest:aapend` in OE-core Wrynose's `python3-wcwidth`). Info instead of warning when the override list is only partly known, and then the message says the name may be set by a machine, distro or architecture outside the workspace (on OE-core these are mostly real architecture and OS overrides: `arc`, `sh4`, `darwin`, `mingw32`). Never checks package names, `${...}` elements or legacy names. |
 | `override/shadowed` | I | recipe | A `NAME =` / `NAME :=` in the recipe's own files that the evaluation marks shadowed, when a later `=` / `:=` of exactly the same name follows. BitBake's rewrite of virtual providers in `DEPENDS` (a `rewrite` row of the history) is no assignment and replaces nothing. Not flagged: functions; a later assignment in a bbappend other than the earlier one's; any `NAME` that something in the tree could read first (a `:=` mentioning it, an `inherit` / `include` / `require` with `${NAME}`); an earlier assignment in a file that more than one recipe (or a class, `.conf` or bbappend) reaches through `require` / `include`, unless the later one is in that same file. |
 | `override/weak-after-default` | I | file | `??=` after a `=`, `:=` or `?=` of exactly the same name (overrides and flag included) earlier in the same file; an `unset` in between starts over. |
@@ -760,6 +760,24 @@ rule that makes an unreachable file that does not parse data marked no file on a
 three workspaces: the 15 `.inc` files left as metadata with no reference and no metadata
 place all parse (bitbake-semantics.md, "Data files").
 
+Re-measured for branch `remove-in-recipe-info` (2026-11-20, from `05d1084`; the release
+binary, `sous-chef lint --all --severity info --format json --build-dir <build>` on the
+three workspaces and the default run from `runs/remove-in-recipe-info/` with its
+`sous-chef.toml` (the two kas files, `[bitbake] enabled = false`), cache and `TMPDIR` under
+`runs/remove-in-recipe-info/`, no BitBake run). `override/remove-in-recipe` is info by
+default from this branch on (user decision, "Measured precision" below); before, it was a
+warning in recipes, includes and classes:
+
+| Workspace | Before (`05d1084`) | After | `remove-in-recipe` warnings before |
+|---|---|---|---|
+| Wrynose, `--all` | 612 findings in 1718 files (0 E, 147 W, 465 I) | 612 (0 E, 61 W, 551 I) | 86 of 114 |
+| Scarthgap, `--all` | 1145 findings in 2545 files (0 E, 421 W, 724 I) | 1145 (0 E, 229 W, 916 I) | 192 of 222 |
+| Kirkstone, `--all` | 1071 findings in 2372 files (1 E, 452 W, 618 I) | 1071 (1 E, 290 W, 780 I) | 162 of 174 |
+| Wrynose, default (13 files) | 5 findings (0 E, 1 W, 4 I) | the same | none (no `:remove` in the writable layers) |
+
+Every finding is the same before and after, message included; only the severity of the
+440 `remove-in-recipe` warnings changed.
+
 ## Measured precision
 
 Measured 2026-11-20 on branch `lint-precision` (from `2bd568c`), the release binary, no
@@ -865,6 +883,24 @@ false positives are no longer reported, so 137 are left, labelled as before):
 | warning | 56 | 35 | 19 | 2 | 62 % | 96 % |
 | info | 80 | 40 | 40 | 0 | 50 % | 100 % |
 
+The tables above use the severities reported at measurement (the `severity` column of
+the labels file, which is kept as it was). On 2026-11-20 the user decided to lower
+`override/remove-in-recipe` from warning to info (branch `remove-in-recipe-info`): all 17
+sampled findings were true but unhelpful, and the rule had 510 findings on the three
+workspaces. Its 11 sampled warnings (6 of the 17 were already info, in configuration)
+become info; recomputed from the labels file with that severity:
+
+| Same sample | n | TP | TBU | FP | TP / n | not FP / n |
+|---|---|---|---|---|---|---|
+| before the fixes: warning | 54 | 35 | 8 | 11 | 65 % | 80 % |
+| before the fixes: info | 95 | 40 | 51 | 4 | 42 % | 96 % |
+| after the fixes: warning | 45 | 35 | 8 | 2 | 78 % | 96 % |
+| after the fixes: info | 91 | 40 | 51 | 0 | 44 % | 100 % |
+
+The `all` and `error` rows are unchanged. `"override/remove-in-recipe" = "warning"` under
+`[lint.severity]` in `sous-chef.toml` gives the old warning back (for every finding of the
+rule, bbappends and configuration included).
+
 Fixed, each with a fixture trimmed from the real file and a test that the rule's true
 positives still fire (`tests/lint_hygiene.rs`, `lint_org.rs`, `lint_override.rs`, the
 `precision*` fixtures): `host-path` (a string compared with `=`, `==`, `!=` in `[` / `[[`
@@ -885,7 +921,7 @@ same path with `maturin` for `${PYPI_PACKAGE}`: equal only after expansion, whic
 does not do). The other row left, `pypi.bbclass:29` on Scarthgap, now names
 `sip_6.8.6.bb:8` (`SECTION = "devel"`), which the class does replace: true. Not changed,
 and true but unhelpful on these layers: `remove-in-recipe` (510 findings, all 17 sampled
-TBU), `recipe-path`'s directory and local-recipe checks, `override/dead` on real
+TBU; its default severity was lowered to info on 2026-11-20, below), `recipe-path`'s directory and local-recipe checks, `override/dead` on real
 architecture overrides, `insane-skip`, `autorev` in `poky-floating-revisions.inc`.
 
 `lint --all` (the same commands, release binary at the branch's end), per rule where the
