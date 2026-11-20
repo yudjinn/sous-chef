@@ -212,6 +212,21 @@ fn recipe_path() {
 }
 
 #[test]
+fn recipe_path_no_version_when_a_required_file_sets_pv() {
+    // lint-precision false positive (tests/fixtures/lint-precision/labels.tsv): "PV defaults
+    // to 1.0" for colord-native.bb, whose colord.inc sets PV; a recipe that does not set PV
+    // is still reported.
+    let found = env("recipe-path", &["precision-layer"]).lint(&OrgRecipePath, "precision-layer");
+    assert_eq!(
+        rows(&found),
+        ["info precision-layer:recipes-support/colord/colord-utils.bb:1"],
+        "{}",
+        messages(&found)
+    );
+    assert!(found[0].message.contains("has no version"), "{}", found[0].message);
+}
+
+#[test]
 fn duplicate_versions() {
     let found = bad_and_good(&OrgDuplicateVersions, "duplicate-versions", &[]);
     assert_eq!(

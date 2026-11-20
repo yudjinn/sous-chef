@@ -15,7 +15,8 @@
 //!   `PR`, `bb.parse.vars_from_file`); no `_<pv>` at all (info, `PV` then defaults to `1.0`),
 //!   except for `packagegroup-*` recipes and recipes whose static tree inherits an image class
 //!   ([`helpers::image_class`]: `image`, `core-image`, `*-image`) or `packagegroup`, which
-//!   are conventionally unversioned.
+//!   are conventionally unversioned, and recipes whose static tree (their own lines and the
+//!   files they require or include) sets `PV` itself.
 //! - **PN** (warning): upper-case letters (OE-core's `uppercase-pn` QA check).
 //!
 //! A `.bb` BitBake does not collect because no `BBFILES` glob of any layer matches it
@@ -84,6 +85,36 @@ fn recipe_kind(cx: &LintContext<'_>, file: &query::FileRow, pn: &str) -> Kind {
     } else {
         Kind::Other
     }
+}
+
+/// Whether the recipe's own lines or a file it requires or includes (its static tree, not
+/// classes) set `PV` with a plain assignment: the file name's version is then not where
+/// `PV` comes from (meta-oe's `colord-native.bb` requires `colord.inc`, which sets
+/// `PV = "1.4.7"`: lint-precision).
+fn tree_sets_pv(cx: &LintContext<'_>, file: &query::FileRow) -> bool {
+    let scope = query::StatementFilter {
+        kinds: vec!["assign".into()],
+        ..query::StatementFilter::default()
+    };
+    let Ok(nodes) = query::tree(cx.index, file.id) else {
+        return false;
+    };
+    nodes
+        .iter()
+        .filter_map(|n| n.file.as_ref())
+        .filter(|f| matches!(f.kind, FileKind::Recipe | FileKind::Include))
+        .any(|f| {
+            query::statements_in(cx.index, f.id, &scope)
+                .unwrap_or_default()
+                .iter()
+                .any(|st| {
+                    st.base.as_deref() == Some("PV")
+                        && st.overrides.is_empty()
+                        && st.flag.is_none()
+                        && !st.legacy
+                        && matches!(st.op.as_deref(), Some("=" | ":=" | "?=" | "??="))
+                })
+        })
 }
 
 /// Directory names under which a `.bb` is clearly not a recipe meant to be built.
@@ -275,7 +306,7 @@ impl Rule for OrgRecipePath {
                         parts[0], parts[1]
                     ),
                 );
-            } else if parts.len() == 1 && kind == Kind::Other {
+            } else if parts.len() == 1 && kind == Kind::Other && !tree_sets_pv(cx, f) {
                 push(
                     Severity::Info,
                     format!(
