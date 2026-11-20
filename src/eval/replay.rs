@@ -5988,6 +5988,25 @@ fn python_writes(body: &str) -> (Vec<String>, bool) {
         add("PACKAGES");
         add("PACKAGES_DYNAMIC");
     }
+    // The older `ClassExtender` (Scarthgap / Kirkstone `lib/oe/classextend.py`):
+    // `map_variable(v)`, `map_regexp_variable(v)` and `map_depends_variable(v)` set `v`
+    // (`d.setVar`, `renameVar` to `v + "_NONML"`); `rename_packages()` renames `PACKAGES`.
+    static MAP_VAR: LazyLock<Option<Regex>> = LazyLock::new(|| {
+        Regex::new(
+            r#"\.(?:map_variable|map_regexp_variable|map_depends_variable)\s*\(\s*(?:'([^'\\]*)'|"([^"\\]*)")"#,
+        )
+        .ok()
+    });
+    if let Some(re) = MAP_VAR.as_ref() {
+        for c in re.captures_iter(body) {
+            if let Some(m) = c.get(1).or_else(|| c.get(2)) {
+                add(m.as_str());
+            }
+        }
+    }
+    if body.contains(".rename_packages(") {
+        add("PACKAGES");
+    }
     (sets, opaque)
 }
 
@@ -6072,6 +6091,29 @@ mod tests {
         for n in ["DEPENDS", "PROVIDES", "RDEPENDS", "PKG", "PACKAGES", "X"] {
             assert!(sets.iter().any(|s| s == n), "{n}: {sets:?}");
         }
+    }
+
+    #[test]
+    fn python_writes_sees_the_older_class_extender() {
+        // nativesdk.bbclass's anonymous python (OE-core Scarthgap / Kirkstone).
+        let (sets, _) = python_writes(
+            "    clsextend = oe.classextend.NativesdkClassExtender(\"nativesdk\", d)\n    clsextend.rename_packages()\n    clsextend.map_depends_variable(\"DEPENDS\")\n    clsextend.map_variable(\"PROVIDES\")\n    clsextend.map_regexp_variable('PACKAGES_DYNAMIC')\n",
+        );
+        for n in ["PACKAGES", "DEPENDS", "PROVIDES", "PACKAGES_DYNAMIC"] {
+            assert!(sets.iter().any(|s| s == n), "{n}: {sets:?}");
+        }
+    }
+
+    #[test]
+    fn called_names_are_calls_not_definitions_or_methods() {
+        let body = "def helper(d):\n    pass\n    helper(d)\n    x.method(d)\n    other (d)\n";
+        let names = called_names(body);
+        assert!(
+            names.contains("helper") && names.contains("other"),
+            "{names:?}"
+        );
+        assert!(!names.contains("method"), "{names:?}");
+        assert!(!called_names("def only(d):\n    return 1\n").contains("only"));
     }
 
     #[test]

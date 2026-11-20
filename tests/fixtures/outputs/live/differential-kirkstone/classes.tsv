@@ -1050,7 +1050,7 @@ nativesdk-zlib	B	flagged	unevaluated_python
 nativesdk-zlib	WORKDIR	flagged	unevaluated_python
 nativesdk-zlib	LICENSE	equal	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write LICENSE
 nativesdk-zlib	INHERIT	equal	
-nativesdk-zlib	PROVIDES	equal-ws	
+nativesdk-zlib	PROVIDES	equal-ws	flagged: anonymous python at meta:classes/nativesdk.bbclass:91-108 may write PROVIDES
 nativesdk-zlib	EXTRA_OECONF	equal	flagged: which override variant or conditional :append/:prepend/:remove of DISABLE_STATIC applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`)
 nativesdk-zlib	EXTRA_OECMAKE	unset	
 nativesdk-zlib	CFLAGS	flagged	unevaluated_python

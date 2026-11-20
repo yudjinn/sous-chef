@@ -735,6 +735,46 @@ in all three, for acc-unfollowed (`kiss-image` `DEPENDS` was wrong and unflagged
   replay can read is read on a copy, as above (OE-core's `conf/machine-sdk/*.conf`: plain
   `SDK_ARCH`, `SDK_CC_ARCH`, `SDK_MACHINE_FEATURES`, `ABIEXTENSION:class-nativesdk`).
 
+  **The native and nativesdk `OVERRIDES` (acc-anon-models): kept uncertain.** There the
+  first two entries are `${@os.uname()[0].lower()}` (`TARGET_OS` = `BUILD_OS`) and
+  `${@d.getVar('TARGET_ARCH').replace("_", "-")}` (`TARGET_ARCH` = `BUILD_ARCH` =
+  `os.uname()[4]`), and `WORKDIR`, `S`, `B`, `T`, `FILESPATH` (`FILESOVERRIDES`) and every
+  path under them hold those values in their text. Three ways out were weighed:
+  - *Narrowing the override decisions* (no host value assumed). Not provable: BitBake's
+    selection loop (`getVarFlag`, `for o in self.overrides: ... elif a == o: match =
+    active[a]; del active[a]`) keeps, for each active variant, the **first** position its
+    override has in `OVERRIDES`, and the latest of those wins. An unknown entry before the
+    known ones that repeats a known name (`class-native`) moves that variant to the front,
+    so a second unknown entry naming another variant (`class-nativesdk`) would win. With
+    entries that may be any text, no decision that an unknown entry could touch is
+    certain; and a `:append:<o>` / `:remove:<o>` whose `<o>` is not a known entry applies
+    exactly when an unknown entry is `<o>`. A narrowing needs an assumption about the
+    host's values (that `os.uname()` gives no name the metadata uses as an override), which
+    is not BitBake behaviour; it was not made.
+  - *The server's own `os.uname()`*. The server may run on another host than the build (a
+    workspace read over the network, a container): a wrong value would be certain and
+    wrong. Not done.
+  - *Values set by the user* (`sous-chef.toml`). Exact when set, unchanged when not; it
+    needs a configuration field and an evaluation input outside `src/eval` (`Config`,
+    `Target`, the tools that build a `Target`), so it was left for a change that owns them.
+    Measured on the recorded dumps with `BUILD_ARCH = x86_64`, `BUILD_OS = linux` pinned
+    (a local experiment, not kept): flagged values Wrynose 30 to 7 (literal differs 5 to
+    2), Scarthgap 37 to 17 (7 to 5), Kirkstone 64 to 42 (5 to 5), and no new unflagged
+    difference once the class-extension writes below are flagged (before that fix the
+    Scarthgap / Kirkstone `nativesdk-zlib` `DEPENDS` came out unflagged and short of the
+    `nativesdk-` mapping).
+
+  **Class-extension writes of the older `ClassExtender`** (Scarthgap / Kirkstone
+  `lib/oe/classextend.py`, called from `nativesdk.bbclass`'s anonymous python and
+  `multilib.bbclass`): `map_variable(v)` and `map_regexp_variable(v)` `d.setVar(v, ...)`,
+  `map_depends_variable(v)` renames `v` to `v + "_NONML"` and sets `v` to
+  `${@oe.classextend.get_depends('<v>', d)}`, `rename_packages()` does the same for
+  `PACKAGES`. Since acc-anon-models the replay counts these as writes of `v` (and
+  `PACKAGES`), so they are flagged; before, only Wrynose's `set_filter` / `map_packagevars`
+  / `rename_package_variables` were seen: on the samples `nativesdk-zlib` `DEPENDS` was
+  flagged only through the host entries of `OVERRIDES`, and its `PROVIDES` (equal after
+  whitespace) not at all; it is flagged now.
+
 - **A file the index does not hold**: the replay reads statements from the index, so an
   `include` / `require` / `inherit` of a file that exists on disk (inside the workspace)
   but is not indexed (a `.cfg`, any kind the index does not take) was a silent no-op for

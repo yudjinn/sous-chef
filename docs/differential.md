@@ -283,8 +283,10 @@ it.
 | Wrynose, anonymous python models | 1090 | 1002 | 32 | 30 | 5 | 53 | **0** |
 | Scarthgap, before | 1186 | 1100 | 40 | 39 | 38 | 9 | **0** |
 | Scarthgap, anonymous python models | 1186 | 1139 | 29 | 37 | 7 | 3 | **0** |
+| Scarthgap, + older `ClassExtender` writes flagged | 1186 | 1139 | 30 | 37 | 7 | 3 | **0** |
 | Kirkstone, before | 1145 | 1039 | 36 | 64 | 35 | 7 | **0** |
 | Kirkstone, anonymous python models | 1145 | 1075 | 29 | 64 | 5 | 1 | **0** |
+| Kirkstone, + older `ClassExtender` writes flagged | 1145 | 1075 | 30 | 64 | 5 | 1 | **0** |
 
 What became equal to BitBake's text (some of these values still carry a flag from another
 function that is not modelled, `systemd.bbclass`'s or `uboot-sign.bbclass`'s `DEPENDS`
@@ -308,6 +310,17 @@ Left, literal differs: `busybox` `configmangle` (all three), the native and nati
 extension's dependency mapping), `gmp-native` `PACKAGES` (Scarthgap, Kirkstone:
 `native.bbclass` `map_dependencies`), `psplash` `PACKAGES` (fetcher), `glib-2.0`
 `EXTRA_OEMESON`. Known gap: `psplash` `RDEPENDS:psplash` (static unset).
+
+**Native and nativesdk `OVERRIDES`: kept uncertain** (bitbake-semantics.md, "References that
+cannot be followed exactly", the host's `os.uname()`). No narrowing of the override
+decisions is provable without assuming the host's values, and the server's own
+`os.uname()` may not be the build host's. With `BUILD_ARCH` / `BUILD_OS` pinned to the
+dumps' `x86_64` / `linux` (an experiment, `runs/acc-anon-models/diffexp2`, not kept) the
+flagged values would drop to Wrynose 7 (literal differs 2), Scarthgap 17 (5), Kirkstone 42
+(5); that experiment first showed Scarthgap / Kirkstone `nativesdk-zlib` `DEPENDS` turning
+unflagged and wrong (the older `ClassExtender.map_depends_variable` was not seen as a
+write), now fixed: those `map_*` calls flag what they write, which flags one more equal
+value on Scarthgap and on Kirkstone (`nativesdk-zlib` `PROVIDES`).
 
 ## After acc-unfollowed
 
