@@ -23,7 +23,9 @@
 //! When the override list cannot be known completely (`OVERRIDES` needs python or has
 //! unresolved references, or anonymous python changes an `*OVERRIDES` variable or is
 //! opaque), the finding is info instead of a warning: the evidence is only that the name is
-//! nowhere in the workspace.
+//! nowhere in the workspace, and the message says the name may come from outside it. An
+//! element within edit distance 2 of `append`, `prepend` or `remove` is named as a
+//! misspelt operation.
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
@@ -35,6 +37,9 @@ use crate::lint::{Finding, LintContext, Rule, Scope, Severity};
 use crate::types::{Loc, VarRef};
 
 pub struct OverrideDead;
+
+/// Operation keywords: an element close to one is a misspelling of it.
+const OPERATIONS: &[&str] = &["append", "prepend", "remove"];
 
 /// Variables whose values feed `OVERRIDES` in OE-core.
 const OVERRIDE_VARS: &[&str] = &[
@@ -85,20 +90,22 @@ impl Rule for OverrideDead {
                     continue;
                 };
                 let name = helpers::colon_name(&op.var);
-                let hint = known
-                    .closest(dead)
-                    .map(|c| format!(" (`{c}`?)"))
-                    .unwrap_or_default();
-                let mut f = helpers::finding(
-                    self,
-                    cx,
-                    op.loc.lines,
-                    format!(
-                        "override `{dead}` in `{name}` is no machine, distro, class, package or \
-                         OVERRIDES entry in the workspace, so this never applies; fix the \
-                         name{hint} or remove the line"
+                let message = match known.closest(dead) {
+                    // A misspelt operation (`do_install_ptest:aapend` in OE-core wrynose's
+                    // python3-wcwidth: lint-precision).
+                    Some(c) if OPERATIONS.contains(&c) => format!(
+                        "override `{dead}` in `{name}` looks like a misspelt `:{c}`: as written                          it is an override nothing sets, so this never applies; write `:{c}`"
                     ),
-                );
+                    hint if known.partial => format!(
+                        "override `{dead}` in `{name}` is no machine, distro, class, package or                          OVERRIDES entry in this workspace, so it does not apply here; unless a                          machine, distro or architecture outside this workspace sets it, fix the                          name{} or remove the line",
+                        hint.map(|c| format!(" (`{c}`?)")).unwrap_or_default()
+                    ),
+                    hint => format!(
+                        "override `{dead}` in `{name}` is no machine, distro, class, package or                          OVERRIDES entry in the workspace, so this never applies; fix the                          name{} or remove the line",
+                        hint.map(|c| format!(" (`{c}`?)")).unwrap_or_default()
+                    ),
+                };
+                let mut f = helpers::finding(self, cx, op.loc.lines, message);
                 f.loc = Loc {
                     lines: crate::types::LineSpan::line(op.loc.lines.start),
                     ..op.loc.clone()
@@ -187,11 +194,13 @@ impl Known {
             || self.words.contains(o)
     }
 
-    /// A known machine, distro or override at edit distance 1 or 2 (names of 4+ characters).
+    /// A known machine, distro or override, or an operation (`append`, `prepend`,
+    /// `remove`), at edit distance 1 or 2 (names of 4+ characters).
     fn closest(&self, o: &str) -> Option<&str> {
         if o.chars().count() < 4 {
             return None;
         }
+        let ops = OPERATIONS.iter().map(|c| (distance(o, c), *c));
         self.index
             .machines
             .iter()
@@ -199,6 +208,7 @@ impl Known {
             .chain(&self.index.declared)
             .chain(&self.active)
             .map(|c| (distance(o, c), c.as_str()))
+            .chain(ops)
             .filter(|(d, _)| *d > 0 && *d <= 2)
             .min()
             .map(|(_, c)| c)

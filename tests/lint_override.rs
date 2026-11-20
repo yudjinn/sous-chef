@@ -791,6 +791,28 @@ fn dead_on_the_real_datastore() {
 }
 
 #[test]
+fn dead_names_a_misspelt_operation() {
+    // lint-precision true positive (tests/fixtures/lint-precision/labels.tsv): `aapend` is
+    // `append` misspelt; the message says so instead of "fix the name or remove the line".
+    let env = recipe_env("dead", "precision", "deadtypo");
+    let got = recipe_findings(&env, "deadtypo", &OverrideDead);
+    assert_eq!(
+        rows(&got),
+        [
+            "warning meta-mine:recipes-app/deadtypo/deadtypo_1.0.bb:4",
+            "warning meta-mine:recipes-app/deadtypo/deadtypo_1.0.bb:7",
+        ]
+    );
+    assert!(
+        got[0].message.contains("looks like a misspelt `:append`")
+            && got[0].message.ends_with("write `:append`"),
+        "{}",
+        got[0].message
+    );
+    assert!(got[1].message.contains("(`boardx`?)"), "{}", got[1].message);
+}
+
+#[test]
 fn shadowed_on_the_real_datastore() {
     let env = recipe_env("shadowed", "bad", "shadowbad");
     let got = recipe_findings(&env, "shadowbad", &OverrideShadowed);
