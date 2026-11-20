@@ -526,6 +526,16 @@ fn append_vs_plus_equals() {
 }
 
 #[test]
+fn append_vs_plus_equals_keeps_append_when_a_variant_replaces_the_variable() {
+    // lint-precision false positive (tests/fixtures/lint-precision/labels.tsv): lttng-modules
+    // keeps `SRC_URI:append` for its devupstream variant; DEPENDS beside it still fires.
+    let env = Env::new();
+    let r = &OverrideAppendVsPlusEquals;
+    assert_eq!(lines(&env, r, "precision-devupstream.bb"), [(16, I)]);
+    assert_eq!(lines(&env, r, "bad.bb"), [(3, I), (5, I)]);
+}
+
+#[test]
 fn plus_equals_on_default() {
     let env = Env::new();
     let r = &OverridePlusEqualsOnDefault;
