@@ -841,7 +841,15 @@ State (`worktree-w2-integration`, CI green): 1,347 tests. Differential, equal / 
 flagged / gap / bug: Wrynose 1,002 / 35 / 53 / 0; Scarthgap 1,139 / 44 / 3 / 0; Kirkstone
 1,075 / 69 / 1 / 0; Scarthgap multiconfig 600 / 46 / 13 / 0.
 
+The user then decided yes on all three open questions, done on the same branch:
+release-profile `strip = true` (binary 20 MB to 16.8 MB); `override/remove-in-recipe` info
+by default (remove-in-recipe-info; `lint --all` warnings 147 / 421 / 452 to 61 / 229 / 290);
+`[build_host] arch / os` in `sous-chef.toml` (build-host): `os.uname()[4]` and
+`os.uname()[0].lower()` evaluate to the configured values, unset keeps them uncertain.
+With it set, differential equal / differ and flagged / gap / bug: Wrynose 1,023 / 9 / 58 /
+0; Scarthgap 1,159 / 22 / 5 / 0; Kirkstone 1,097 / 47 / 1 / 0 (the multiconfig differential
+was not re-run: its `musl.conf` was removed from the Scarthgap build directory after
+real-checks). 1,356 tests.
+
 Waiting on the user: merge PR #2 (closing #1 and #3, which it contains); tag v0.1.0 per
-docs/releasing.md; three decisions (release-profile `strip = true`; lower
-`override/remove-in-recipe` to info; a `sous-chef.toml` setting for the build host's
-architecture so native `OVERRIDES` can be exact).
+docs/releasing.md.
