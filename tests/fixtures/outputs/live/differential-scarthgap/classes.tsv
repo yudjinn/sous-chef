@@ -1005,7 +1005,7 @@ gmp-native	PN	equal
 gmp-native	PV	equal	
 gmp-native	PR	equal	
 gmp-native	FILE	equal	
-gmp-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+gmp-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 gmp-native	SRC_URI	equal	
 gmp-native	DEPENDS	equal-ws	flagged: python that is not run (an event handler or class filter) may change DEPENDS; which override variant or conditional :append/:prepend/:remove of BASEDEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os....
 gmp-native	RDEPENDS:gmp-native	unset	
@@ -1044,7 +1044,7 @@ nativesdk-zlib	PN	equal
 nativesdk-zlib	PV	equal	
 nativesdk-zlib	PR	equal	
 nativesdk-zlib	FILE	equal	
-nativesdk-zlib	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+nativesdk-zlib	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 nativesdk-zlib	SRC_URI	equal	
 nativesdk-zlib	DEPENDS	flagged-literal-differs	unevaluated_python; bitbake python ops: rename (to) classextend.py:108 [map_depends_variable]; set classextend.py:109 [map_depends_variable]; append classextend.py:110 [map_depends_variable]
 nativesdk-zlib	RDEPENDS:nativesdk-zlib	unset	

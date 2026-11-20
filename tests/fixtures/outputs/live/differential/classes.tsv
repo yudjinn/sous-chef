@@ -670,7 +670,7 @@ gmp-native	PN	equal
 gmp-native	PV	equal	
 gmp-native	PR	equal	
 gmp-native	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
-gmp-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+gmp-native	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 gmp-native	SRC_URI	equal	
 gmp-native	DEPENDS	equal-ws	flagged: which override variant or conditional :append/:prepend/:remove of BASEDEPENDS applies depends on OVERRIDES entries that are not known statically (`${@os.uname()[0].lower()}`); which override variant or conditional :append/:prepend/...
 gmp-native	RDEPENDS:gmp-native	unset	
@@ -708,7 +708,7 @@ nativesdk-zlib	PN	equal
 nativesdk-zlib	PV	equal	
 nativesdk-zlib	PR	equal	
 nativesdk-zlib	FILE	gap:layerdir-canonical	same after mapping layers/ symlinks to canonical roots
-nativesdk-zlib	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
+nativesdk-zlib	FILE_LAYERNAME	gap:variant-layername	bitbake -e of a variant or of mc:<name>:<recipe> parses the virtual file name: FILE_LAYERNAME is None there, the layer's name in a build
 nativesdk-zlib	SRC_URI	equal	
 nativesdk-zlib	DEPENDS	flagged-literal-differs	unevaluated_python; also: a BB_RECIPE_VIRTUAL_PROVIDERS word is left in the static DEPENDS (ast.handleVirtRecipeProviders)
 nativesdk-zlib	RDEPENDS:nativesdk-zlib	unset	
