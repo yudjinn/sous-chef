@@ -182,13 +182,16 @@ changes variables through computed names).
   directory. `FILESPATH` is python in OE-Core (`base_set_filespath`), which is not run: the
   search order is reconstructed (see "Files and patches" in bitbake-semantics.md) and a
   note says so. Files are read through the confinement check.
-- `tasks`: rows `task state after pieces loc`: the tasks of the recipe, dependencies first
+- `tasks`: rows `task state after pieces funcs loc`: the tasks of the recipe, dependencies first
   (ties in the order they were added), from the `addtask` / `deltask` statements of the
   configuration's classes, the recipe, its includes and classes and its bbappends, in parse
   order (read from the index; the replay does not run them). `after` is the task's
   dependencies as `addtask ... after` and `before` leave them; `pieces` the composed
   function as pointers, an `EXPORT_FUNCTIONS` stub followed by the class function it calls
-  and that function's pieces; `state` `noexec` (the flag) or `deleted` (with the `deltask`
+  and that function's pieces; `funcs` (var-taskfuncs) the task's `[prefuncs]` and
+  `[postfuncs]` as names in run order (`pre: a b; post: c d`, `(uncertain)` after a list
+  whose value is, `-` for none; `var name=<task>` gives their pointers and what anonymous
+  python may add); `state` `noexec` (the flag) or `deleted` (with the `deltask`
   as `loc`); `loc` the `addtask`. Not accounted for, and said so in a note: tasks added or
   deleted by anonymous python, `do_x[deps]` set directly (a warning names any such
   assignment) and dependencies on other recipes' tasks.
@@ -278,16 +281,20 @@ file://nowhere.cfg	searched	#3	meta-core:recipes-core/hello/hello-1.1/	missing	-
 `tasks` of `hello`:
 
 ```
-task	state	after	pieces	loc
-do_fetch	-	-	meta-core:classes/base.bbclass:54 -> base_do_fetch (meta-core:classes/base.bbclass:15-20)	meta-core:classes/base.bbclass:13
-do_unpack	-	do_fetch	meta-core:classes/base.bbclass:54 -> base_do_unpack (meta-core:classes/base.bbclass:23-26)	meta-core:classes/base.bbclass:22
-do_patch	-	do_unpack	meta-core:classes/base.bbclass:54 -> base_do_patch (meta-core:classes/base.bbclass:29-31)	meta-core:classes/base.bbclass:28
-do_autoreconf	-	do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_autoreconf (meta-core:classes-recipe/autotoolsish.bbclass:13-15)	meta-core:classes-recipe/autotoolsish.bbclass:16
-do_configure	-	do_autoreconf do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_configure (meta-core:classes-recipe/autotoolsish.bbclass:18-20)	meta-core:classes/base.bbclass:33
-do_compile	-	do_configure	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_compile (meta-core:classes-recipe/autotoolsish.bbclass:22-24)	meta-core:classes/base.bbclass:38
-do_install	-	do_compile	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_install (meta-core:classes-recipe/autotoolsish.bbclass:26-28), meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	meta-core:classes/base.bbclass:45
-do_build	noexec	do_install	-	meta-core:classes/base.bbclass:51
+source: tests/recipe_views.rs
+expression: out
+---
+task	state	after	pieces	funcs	loc
+do_fetch	-	-	meta-core:classes/base.bbclass:54 -> base_do_fetch (meta-core:classes/base.bbclass:15-20)	-	meta-core:classes/base.bbclass:13
+do_unpack	-	do_fetch	meta-core:classes/base.bbclass:54 -> base_do_unpack (meta-core:classes/base.bbclass:23-26)	-	meta-core:classes/base.bbclass:22
+do_patch	-	do_unpack	meta-core:classes/base.bbclass:54 -> base_do_patch (meta-core:classes/base.bbclass:29-31)	-	meta-core:classes/base.bbclass:28
+do_autoreconf	-	do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_autoreconf (meta-core:classes-recipe/autotoolsish.bbclass:13-15)	-	meta-core:classes-recipe/autotoolsish.bbclass:16
+do_configure	-	do_autoreconf do_patch	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_configure (meta-core:classes-recipe/autotoolsish.bbclass:18-20)	-	meta-core:classes/base.bbclass:33
+do_compile	-	do_configure	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_compile (meta-core:classes-recipe/autotoolsish.bbclass:22-24)	-	meta-core:classes/base.bbclass:38
+do_install	-	do_compile	meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_install (meta-core:classes-recipe/autotoolsish.bbclass:26-28), meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	-	meta-core:classes/base.bbclass:45
+do_build	noexec	do_install	-	-	meta-core:classes/base.bbclass:51
 note: order from the addtask / deltask statements in parse order (the index: configuration classes, recipe, includes and classes, bbappends, deferred inherits; the replay does not run them); dependencies first
+note: funcs: the [prefuncs] (pre) and [postfuncs] (post) BitBake runs before and after the task, as set in the metadata; anonymous python and event handlers may add more (var name=<task> lists those and where each function is defined)
 note: not accounted for: tasks added or deleted by anonymous python (bb.build.addtask / deltask), do_x[deps] set directly, and dependencies on other recipes' tasks ([depends], [deptask], [rdeptask], [recrdeptask])
 note: evaluated for MACHINE=qemux86 DISTRO=testdistro (static replay of the configuration, classes, recipe and bbappends; only allowlisted python helpers evaluated)
 ```
@@ -352,6 +359,19 @@ Output: one row per operation on the variable and its override variants, in pars
 - A function is a variable too: each definition is a row with snippet `name() { ... }`, and
   `final:` lists its pieces in order as pointers (`layer:path:A-B`, with `-> class_do_x` for
   an `EXPORT_FUNCTIONS` stub).
+- (var-taskfuncs) A function that is a task (`addtask`) or has `[prefuncs]` /
+  `[postfuncs]` also gets, after `final:` and without `flags`, what BitBake runs with it
+  (bitbake-semantics.md, "What a task runs"): `task: do_x (addtask at <loc>) runs its
+  [prefuncs], then do_x, then its [postfuncs]` (or that `[noexec]` means none of it runs;
+  `note: X is not a task` when it only has the flags); one `prefunc:` / `postfunc:` line
+  per function in run order with where it is defined (pointers, or `(not defined: ...)`)
+  and the flag operation that added it (`prefuncs: none set` when there are none;
+  `postfuncs: uncertain: ...` when the flag value has python or unresolved names);
+  `flags:` with `[cleandirs]`, `[dirs]`, `[lockfiles]` as written and where; then up to
+  three `note: not run: <anonymous python | event handler h> at <loc> may prepend X to
+  [prefuncs] ... of the tasks it computes` for code run at the end of parsing whose body
+  writes the lists (a write under an `if` proved false, or in a loop over a certain
+  variable that does not hold the task, is left out). In JSON these are notes too.
 
 Then the notes: `final:` with the value in quotes (`final[flag]:` for flags; `final: X is
 not set`), cut at 600 characters with the full text in a `value` handle; references left
@@ -493,6 +513,24 @@ applied	=	-	meta-core:classes-recipe/autotoolsish.bbclass:30	do_install() { ... 
 applied	=	append	meta-core:recipes-core/hello/hello.inc:15-18	do_install:append() { ... }
 applied	=	append	meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10	do_install:append() { ... }
 final: function do_install, 3 pieces in order: meta-core:classes-recipe/autotoolsish.bbclass:30 -> autotoolsish_do_install, meta-core:recipes-core/hello/hello.inc:15-18, meta-mine:recipes-core/hello/hello_1.1.bbappend:8-10
+task: do_install (addtask at meta-core:classes/base.bbclass:45) runs its [prefuncs], then do_install, then its [postfuncs]
+prefuncs: none set
+postfuncs: none set
+flags: [dirs] "${B}" at meta-core:classes/base.bbclass:46 (created; it runs in the last)
+```
+
+`do_install` of `busybox` on yocto-kiss (the history rows are cut by the default budget,
+the anonymous-python warnings left out here):
+
+```
+final: function do_install, 1 piece in order: meta:recipes-core/busybox/busybox.inc:225-375
+task: do_install (addtask at meta:classes-global/base.bbclass:407) runs its [prefuncs], then do_install, then its [postfuncs]
+prefuncs: none set
+postfunc: remove_libtool_la meta:classes/remove-libtool.bbclass:11-15 (by [postfuncs] += "remove_libtool_la" at meta:classes/remove-libtool.bbclass:17)
+postfunc: rm_systemd_unitdir meta:classes-recipe/systemd.bbclass:277-282 (by [postfuncs] += "${RMINITDIR}" at meta:classes-recipe/systemd.bbclass:295)
+flags: [cleandirs] "${D}" at meta:classes-global/base.bbclass:410 (removed and recreated first); [dirs] "${B}" at meta:classes-global/base.bbclass:408 (created; it runs in the last)
+note: not run: anonymous python at meta:classes-global/sstate.bbclass:134-160 may prepend sstate_task_prefunc to [prefuncs], set [postfuncs] of the tasks it computes
+note: not run: event handler staging_taskhandler at meta:classes-global/staging.bbclass:654-667 may prepend extend_recipe_sysroot to [prefuncs] of the tasks it computes
 ```
 
 ### `overrides`

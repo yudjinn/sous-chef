@@ -2239,6 +2239,47 @@ reproduces it from the indexed statements:
   `add_tasks` and can call `bb.build.addtask` / `deltask`; `do_x[deps]` can also be set as a
   flag directly; neither is seen statically.
 
+### What a task runs
+
+Checked against BitBake 2.18 on yocto-kiss (`bitbake/lib/bb/build.py` `_exec_task`,
+`exec_func`, `exec_func_shell`, `_task_data`; `lib/bb/runqueue.py`), and against real task
+logs (var-taskfuncs, 2026-11):
+
+- `_exec_task(fn, task, d)` refuses a name without the `task` flag (`No such task`). It
+  copies the data (`_task_data`: `OVERRIDES` gets `task-<name>` in front, `_` in the name
+  becoming `-`, then `expandKeys`), reads `getVarFlag(task, 'prefuncs', expand=True)` and
+  `postfuncs` the same way, and runs `exec_func` on each prefunc (the expanded value split
+  on whitespace), then on the task, then on each postfunc. A failure stops the rest.
+- `[prefuncs]` / `[postfuncs]` are read only there: `exec_func(f)` called for a helper
+  (another task's prefunc, `bb.build.exec_func` from python) does not run `f`'s own lists.
+- `exec_func(func)`: every `[cleandirs]` entry (expanded) is removed and recreated first;
+  every `[dirs]` entry is created and the function runs in the last one; `[lockfiles]` are
+  held while it runs. A function with no value logs the warning `Function <f> doesn't
+  exist` and returns (the task goes on); an empty one returns silently. These flags are
+  read for each function separately, so a prefunc's own `[dirs]` apply to it.
+- `[noexec]` tasks: the runqueue does not call `_exec_task` at all, it fires the started
+  event and writes the stamp (`runqueue.py`, `noexec=True`): no prefuncs or postfuncs.
+- `[fakeroot]`: `exec_func_shell` reads it on the function being run, not on the task.
+- The lists are flags of the task, so the classes write them as `do_x[postfuncs] +=`
+  (`remove-libtool.bbclass`: `remove_libtool_la`; `systemd.bbclass`: `${RMINITDIR}`, which
+  is `rm_sysvinit_initddir` or `rm_systemd_unitdir` by `DISTRO_FEATURES`). Code that runs
+  at the end of parsing also writes them through computed task names: `sstate.bbclass`'s
+  anonymous python prepends `sstate_task_prefunc` and reorders `postfuncs` for each task in
+  `SSTATETASKS`; `staging.bbclass`'s `staging_taskhandler` (`RecipeTaskPreProcess`)
+  prepends `extend_recipe_sysroot` to `do_configure` and to every task whose `[depends]`
+  names `populate_sysroot` (on a target recipe `base.bbclass`'s anonymous python adds
+  `virtual/fakeroot-native:do_populate_sysroot` to `do_install[depends]`, so
+  `do_install` gets it); `patch.bbclass` adds `patch_task_postfunc` when
+  `PATCHTOOL = "git"` and `PATCH_COMMIT_FUNCTIONS = "1"`. None of these is run statically.
+- Observed: zlib's `log.do_install.1630924` (target, yocto-kiss) runs
+  `extend_recipe_sysroot`, then `do_install`, then `remove_libtool_la`, in that order, and
+  `temp/` holds a `run.<function>.<pid>` script for each.
+
+`var` on a task function (and `recipe show=tasks`, `funcs` column) lists the lists as the
+metadata sets them, and names the anonymous python and event handlers whose bodies may
+change them (`mcp/tools/taskfuncs.rs`); a write is dropped only when an enclosing `if` is
+proved false or its loop runs over a certain variable that does not hold the task.
+
 ### Runtime dependencies and recommendations
 
 What makes BitBake build a recipe for another one, read (y3-leftovers, 2026-11-19) in
