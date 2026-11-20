@@ -806,10 +806,11 @@ fn inc_has_version_data() {
 }
 
 #[test]
-fn inc_has_version_data_needs_two_versions_of_one_recipe() {
+fn inc_has_version_data_an_inc_that_sets_pv_needs_two_versions_of_one_recipe() {
     // lint-precision false positive (tests/fixtures/lint-precision/labels.tsv): OE-core's
     // common-clang.inc sets the PV of clang, lld, llvm-project-source, one version each
-    // (file-name versions git and none); v.inc of v 1.0 and 2.0 still fires.
+    // (file-name versions git and none); v.inc of v 1.0 and 2.0 still fires, and so does
+    // links.inc, which sets no PV and is shared by links 2.25 and links-x11 2.22.
     let found = env("inc-has-version-data", &["precision-layer"])
         .lint(&OrgIncHasVersionData, "precision-layer");
     assert_eq!(
@@ -819,9 +820,17 @@ fn inc_has_version_data_needs_two_versions_of_one_recipe() {
             "warning precision-layer:recipes-app/v/v.inc:4",
             "warning precision-layer:recipes-app/v/v.inc:5",
             "info precision-layer:recipes-app/v/v.inc:6",
+            "info precision-layer:recipes-support/links/links.inc:5",
         ],
         "{}",
         messages(&found)
+    );
+    assert!(
+        found[4]
+            .message
+            .contains("shared by links, links-x11 2.22 and 2.25"),
+        "{}",
+        found[4].message
     );
 }
 

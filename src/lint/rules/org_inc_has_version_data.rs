@@ -1,8 +1,8 @@
 //! `org/inc-has-version-data`: A `.inc` shared by several versions sets version data.
 //!
 //! See docs/lint-rules.md. Applies to an `.inc` that `.bb` files of at least two different
-//! `PV`s of the same recipe (`PN`) `require` or `include` directly (index edges; a file that is not indexed is
-//! skipped). Reported assignments (no overrides):
+//! `PV`s `require` or `include` directly (index edges; a file that is not indexed is
+//! skipped); when the `.inc` sets `PV` itself, two `PV`s of the same recipe (`PN`). Reported assignments (no overrides):
 //!
 //! - `PV` set with `=`, `?=`, `??=` or `:=` (appending, e.g. `PV .= "+git"`, is generic);
 //! - `SRCREV` or `SRCREV_<name>` (not `SRCREV_FORMAT`), unless the value uses `AUTOREV`;
@@ -31,11 +31,14 @@ fn sets(op: AssignOp) -> bool {
     )
 }
 
-/// The recipes (`PN`s) of which `.bb` files of two or more versions pull `file` in, and the
-/// sorted distinct versions of those files. Files of different recipes, one version each,
-/// do not count: OE-core's `common-clang.inc` sets the one `PV` of `clang`, `llvm`,
-/// `lld`, ... (lint-precision); a shared `PV` there is the point of the `.inc`.
-fn users(cx: &LintContext<'_>) -> Option<(String, Vec<String>)> {
+/// The recipes and the sorted distinct versions of the `.bb` files that pull `file` in,
+/// when they are of two or more versions. When the `.inc` sets `PV` itself, every recipe
+/// that requires it gets that one version, so only a recipe (`PN`) with files of two or
+/// more versions counts: OE-core's `common-clang.inc` sets the one `PV` of `clang`, `llvm`,
+/// `lld`, ..., whose file names say `git` or nothing (lint-precision). Otherwise the
+/// versions of all its recipes count (meta-oe's `links.inc`: `links` 2.25, `links-x11`
+/// 2.22).
+fn users(cx: &LintContext<'_>, sets_pv: bool) -> Option<(String, Vec<String>)> {
     let row = query::file_for_loc(cx.index, &cx.loc).ok()??;
     let mut by_pn: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for e in query::edges_to(cx.index, row.id).ok()? {
@@ -54,7 +57,7 @@ fn users(cx: &LintContext<'_>) -> Option<(String, Vec<String>)> {
     let mut pns: Vec<String> = Vec::new();
     let mut pvs: Vec<String> = Vec::new();
     for (pn, versions) in by_pn {
-        if versions.len() < 2 {
+        if sets_pv && versions.len() < 2 {
             continue;
         }
         pns.push(pn);
@@ -64,7 +67,7 @@ fn users(cx: &LintContext<'_>) -> Option<(String, Vec<String>)> {
             }
         }
     }
-    if pns.is_empty() {
+    if pns.is_empty() || pvs.len() < 2 {
         return None;
     }
     pvs.sort_by(|a, b| query::vercmp(a, b));
@@ -90,6 +93,11 @@ impl Rule for OrgIncHasVersionData {
         }
         let Some(file) = cx.file else { return };
         let mut shared: Option<Option<(String, Vec<String>)>> = None;
+        let sets_pv = file.statements.iter().any(|st| {
+            matches!(&st.kind, StatementKind::Assign { var, op, .. }
+                if var.base == "PV" && var.overrides.is_empty() && var.flag.is_none()
+                    && !var.legacy_syntax && sets(*op))
+        });
         for st in &file.statements {
             let StatementKind::Assign { var, op, value, .. } = &st.kind else {
                 continue;
@@ -113,7 +121,8 @@ impl Rule for OrgIncHasVersionData {
                 }
                 _ => continue,
             };
-            let Some((pn, versions)) = shared.get_or_insert_with(|| users(cx)).clone() else {
+            let Some((pn, versions)) = shared.get_or_insert_with(|| users(cx, sets_pv)).clone()
+            else {
                 return;
             };
             let mut name = written_name(var, helpers::statement_text(cx, st));
