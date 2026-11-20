@@ -793,6 +793,28 @@ fn class_recipe_specific() {
 }
 
 #[test]
+fn class_recipe_specific_same_value_is_not_lost() {
+    // lint-precision false positives (tests/fixtures/lint-precision/labels.tsv): the recipe
+    // sets what the class sets (pypi's SECTION, cross-canadian's EXCLUDE_FROM_WORLD); a
+    // recipe's own S is still reported.
+    let found = env("class-recipe-specific", &["precision-layer"])
+        .lint(&OrgClassRecipeSpecific, "precision-layer");
+    assert_eq!(
+        rows(&found),
+        ["warning precision-layer:classes/pypiish.bbclass:5"],
+        "{}",
+        messages(&found)
+    );
+    assert!(
+        found[0]
+            .message
+            .contains("precision-layer:recipes-app/other/other_1.0.bb:4"),
+        "{}",
+        found[0].message
+    );
+}
+
+#[test]
 fn inherit_defer() {
     let found = bad_and_good(&OrgInheritDefer, "inherit-defer", &[]);
     assert_eq!(

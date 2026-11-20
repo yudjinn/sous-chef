@@ -10,7 +10,8 @@
 //!   (index `inherit` edges) sets with `=`, `?=`, `??=` or `:=` (no overrides, no flag)
 //!   **before** its `inherit` line: the class silently replaces the recipe's value. The rule
 //!   reports only this proven case, not every `=` in a class, since most of a class's
-//!   variables are its own. Needs the index; a file that is not indexed gets only the first
+//!   variables are its own. A recipe value written exactly as the class's (whitespace
+//!   aside) is not lost and does not count. Needs the index; a file that is not indexed gets only the first
 //!   check.
 
 use crate::index::query;
@@ -23,11 +24,20 @@ pub struct OrgClassRecipeSpecific;
 
 const PER_RECIPE: &[&str] = &["SRC_URI", "PV", "LICENSE"];
 
-/// A user that sets `base` before inheriting the class: its pointer.
+/// Words of a value with whitespace collapsed, to compare two values as written.
+fn normalised(value: &str) -> Vec<&str> {
+    value.split_whitespace().collect()
+}
+
+/// A user that sets `base` before inheriting the class to something other than the class's
+/// own `value` (as written, whitespace aside): its pointer. A recipe that sets the same text
+/// loses nothing when the class sets it again (OE-core's `python-async.inc` and
+/// `pypi.bbclass` both write `SECTION = "devel/python"`: lint-precision).
 fn set_before_inherit(
     users: &[query::UserRow],
     cx: &LintContext<'_>,
     base: &str,
+    value: &str,
 ) -> Option<String> {
     let scope = query::StatementFilter {
         kinds: vec!["assign".into()],
@@ -49,6 +59,7 @@ fn set_before_inherit(
                 && s.flag.is_none()
                 && matches!(s.op.as_deref(), Some("=" | "?=" | "??=" | ":="))
                 && s.loc.lines.start < u.via.lines.start
+                && s.value.as_deref().map(normalised) != Some(normalised(value))
         });
         if let Some(s) = hit {
             let at = Loc {
@@ -84,7 +95,7 @@ impl Rule for OrgClassRecipeSpecific {
         };
         let mut users: Option<Vec<query::UserRow>> = None;
         for st in &file.statements {
-            let StatementKind::Assign { var, op, .. } = &st.kind else {
+            let StatementKind::Assign { var, op, value, .. } = &st.kind else {
                 continue;
             };
             if !var.overrides.is_empty() || var.flag.is_some() || var.legacy_syntax {
@@ -110,7 +121,7 @@ impl Rule for OrgClassRecipeSpecific {
             let users = users.get_or_insert_with(|| {
                 query::inheritors(cx.index, class, false).unwrap_or_default()
             });
-            if let Some(at) = set_before_inherit(users, cx, base) {
+            if let Some(at) = set_before_inherit(users, cx, base, value) {
                 out.push(helpers::finding(
                     self,
                     cx,
